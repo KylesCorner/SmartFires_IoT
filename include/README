@@ -35,3 +35,55 @@ Read more about using header files in official GCC documentation:
 * Computed Includes
 
 https://gcc.gnu.org/onlinedocs/cpp/Header-Files.html
+
+---
+
+# Sensor Interface (C++ / Arduino)
+
+This project uses a small C++ interface (`ISensor`) to keep sensor code consistent and easy to extend. Each sensor (DHT, flame, etc.) implements the same lifecycle and sampling API, so the main loop can treat all sensors uniformly.
+
+## Interface: `ISensor`
+
+File: `include/ISensor.h`
+
+Each sensor must implement:
+
+* `const char* name() const`
+  Human-readable identifier for logs and debugging.
+
+* `bool begin()`
+  Initialize hardware/library state. Return `true` if initialization succeeds.
+
+* `bool ready() const`
+  Indicates whether the sensor is currently able to provide data (useful for warmup-time sensors).
+
+* `bool sample()`
+  Capture/update a reading. Return `true` if a new reading was produced.
+  Sensors should self-throttle internally if they require minimum read intervals (example: DHT).
+
+* `uint32_t ageMs() const`
+  Age of the last valid reading in milliseconds. Use `UINT32_MAX` if no reading has been captured yet.
+
+* `bool healthy() const`
+  `true` if the sensor is functioning normally; `false` after repeated read failures or detected faults.
+
+## Folder placement
+
+* `include/`
+  Shared headers and interfaces (`ISensor.h`, packet structs, pin maps)
+
+* `src/`
+  Application logic (state machine, scheduling, LoRa comms)
+
+* `lib/` (optional)
+  Reusable modules if we later want to share code across multiple firmware projects (drone node, base station)
+
+## Usage pattern
+
+Sensors are registered as `ISensor*` and sampled in a loop:
+
+* Call `begin()` once in `setup()`
+* Call `sample()` frequently in `loop()`
+* Print/log/transmit values at a slower cadence
+
+This keeps the main program simple while allowing each sensor implementation to manage its own timing and failure handling.
