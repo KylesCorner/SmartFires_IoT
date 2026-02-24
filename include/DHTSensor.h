@@ -57,6 +57,7 @@ public:
   // Sensor-specific getters
   bool hasReading() const { return _hasReading; }
   float tempC() const { return _tempC; }
+  float tempF() const { return _tempC * 9.0 / 5.0 + 32.0; }  
   float humidity() const { return _humidity; }
 
 private:
