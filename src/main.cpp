@@ -4,21 +4,17 @@
 #include "FlameSensor.h"
 #include "DhtSensor.h"
 #include "PassiveBuzzer.h"
+#include "Icm20948Imu.h"
+#include "PinMapping.h"
 
-PassiveBuzzer buzzer(5); // choose a PWM-capable pin (not required for tone())
-
-// Pins (adjust to your wiring)
-static constexpr uint8_t PIN_FLAME_AO = A0;
-static constexpr uint8_t PIN_FLAME_DO = 3;
-
-static constexpr uint8_t PIN_DHT = 2;
-static constexpr uint8_t DHT_TYPE = DHT11; // or DHT22
-
+// Sensors
+Icm20948Imu imu(1);
+PassiveBuzzer buzzer(PIN_BUZZER); // choose a PWM-capable pin (not required for tone())
 FlameSensor flame(PIN_FLAME_AO, PIN_FLAME_DO);
 DhtSensor   dht(PIN_DHT, DHT_TYPE);
 
 // Polymorphic registry
-ISensor* sensors[] = { &flame, &dht };
+ISensor* sensors[] = { &flame, &dht, &imu };
 constexpr size_t kNumSensors = sizeof(sensors) / sizeof(sensors[0]);
 
 IActuator* actuators[] = { &buzzer };
@@ -66,18 +62,26 @@ void loop() {
   if (now - lastPrintMs >= 1000) {
     lastPrintMs = now;
 
-    Serial.print("[Flame] detected=");
-    Serial.print(flame.detected() ? "YES" : "NO");
-    Serial.print(" AO=");
-    Serial.print(flame.analogRaw());
-    Serial.print(" DO=");
-    Serial.print(flame.digitalRaw() ? "HIGH" : "LOW");
+    Serial.println("\n=== Sensor Readings ===");
 
-    if(flame.detected()) {
-      buzzer.beep(1000, 500); // alert!
+    if(!flame.hasReading()) {
+      Serial.print("[Flame] no reading yet");
+    } else {
+
+      Serial.print("[Flame] detected=");
+      Serial.print(flame.detected() ? "YES" : "NO");
+      Serial.print(" AO=");
+      Serial.print(flame.analogRaw());
+      Serial.print(" DO=");
+      Serial.println(flame.digitalRaw() ? "HIGH" : "LOW");
+
+      if(flame.detected()) {
+        buzzer.beep(1000, 500); // alert!
+      }
     }
 
-    Serial.print(" | [DHT] ");
+
+    Serial.print("[DHT] ");
     if (!dht.hasReading()) {
       Serial.println("no reading yet");
     } else {
@@ -87,6 +91,40 @@ void loop() {
       Serial.print(dht.humidity(), 1);
       Serial.println("%");
     }
+
+
+    Serial.print("[IMU] ");
+    if(!imu.hasReading()) {
+      Serial.println("no reading yet");
+    } else {
+      Serial.print("A=(mg) ");
+      Serial.print(imu.ax_mg(), 1);
+      Serial.print(",");
+      Serial.print(imu.ay_mg(), 1);
+      Serial.print(",");
+      Serial.print(imu.az_mg(), 1);
+
+      Serial.print(" G=(dps) ");
+      Serial.print(imu.gx_dps(), 1);
+      Serial.print(",");
+      Serial.print(imu.gy_dps(), 1);
+      Serial.print(",");
+      Serial.print(imu.gz_dps(), 1);
+
+      Serial.print(" M=(uT) ");
+      Serial.print(imu.mx_uT(), 1);
+      Serial.print(",");
+      Serial.print(imu.my_uT(), 1);
+      Serial.print(",");
+      Serial.print(imu.mz_uT(), 1);
+
+      Serial.print(" T=");
+      Serial.print(imu.temp_C(), 1);
+      Serial.println("C");
+    } 
+
+    Serial.println("====================\n");
+
   }
 
   //delay(50);
