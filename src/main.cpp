@@ -6,18 +6,22 @@
 #include "PassiveBuzzer.h"
 #include "Icm20948Imu.h"
 #include "PinMapping.h"
+#include "MicroServo.h"
 
 // Sensors
 Icm20948Imu imu(1);
-PassiveBuzzer buzzer(PIN_BUZZER); // choose a PWM-capable pin (not required for tone())
 FlameSensor flame(PIN_FLAME_AO, PIN_FLAME_DO);
 DhtSensor   dht(PIN_DHT, DHT_TYPE);
+
+//Actuators
+PassiveBuzzer buzzer(PIN_BUZZER); // choose a PWM-capable pin (not required for tone())
+MicroServo servo(PIN_SERVO); // choose a PWM-capable pin
 
 // Polymorphic registry
 ISensor* sensors[] = { &flame, &dht, &imu };
 constexpr size_t kNumSensors = sizeof(sensors) / sizeof(sensors[0]);
 
-IActuator* actuators[] = { &buzzer };
+IActuator* actuators[] = { &buzzer, &servo };
 constexpr size_t kNumActuators = sizeof(actuators) / sizeof(actuators[0]);
 
 // Basic scheduling
@@ -55,6 +59,16 @@ void loop() {
   // Update actuators (e.g. buzzer timing)
   for (size_t i = 0; i < kNumActuators; i++) {
     actuators[i]->update();
+  }
+
+  // demo sweep
+  static uint32_t t0 = 0;
+  static bool dir = true;
+
+  if (millis() - t0 > 2000) {
+    t0 = millis();
+    servo.setAngle(dir ? 90 : 0);
+    dir = !dir;
   }
 
   // Print at a slower cadence (don’t spam serial)

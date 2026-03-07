@@ -8,3 +8,5 @@ static constexpr uint8_t DHT_TYPE = DHT11; // or DHT22
 
 static constexpr uint8_t PIN_BUZZER = 5; // choose a PWM-capable pin (not required for tone())
 
+static constexpr uint8_t PIN_SERVO = 6; // choose a PWM-capable pin
+
