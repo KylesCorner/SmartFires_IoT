@@ -2,34 +2,56 @@
 
 #include "ISensor.h"
 #include "FlameSensor.h"
-#include "DhtSensor.h"
 #include "PassiveBuzzer.h"
 #include "Icm20948Imu.h"
 #include "PinMapping.h"
 #include "MicroServo.h"
+#include "Sht31Sensor.h"
+#include "Pa1010dGpsSensor.h"
+#include "OledDisplay.h"
 
 // Sensors
 Icm20948Imu imu(1);
 FlameSensor flame(PIN_FLAME_AO, PIN_FLAME_DO);
-DhtSensor   dht(PIN_DHT, DHT_TYPE);
+Sht31Sensor sht31(Sht31Sensor::kAlternateAddress);
+Pa1010dGpsSensor gps(Wire);
 
 //Actuators
-PassiveBuzzer buzzer(PIN_BUZZER); // choose a PWM-capable pin (not required for tone())
-MicroServo servo(PIN_SERVO); // choose a PWM-capable pin
+//PassiveBuzzer buzzer(PIN_BUZZER); // choose a PWM-capable pin (not required for tone())
+//MicroServo servo(PIN_SERVO); // choose a PWM-capable pin
+OledDisplay oled(OledDisplay::Controller::SH1106, 0x3C, "OLED Display");
 
 // Polymorphic registry
-ISensor* sensors[] = { &flame, &dht, &imu };
+ISensor* sensors[] = { &flame, &imu , &sht31, &gps };
 constexpr size_t kNumSensors = sizeof(sensors) / sizeof(sensors[0]);
 
-IActuator* actuators[] = { &buzzer, &servo };
+IActuator* actuators[] = { &oled };
 constexpr size_t kNumActuators = sizeof(actuators) / sizeof(actuators[0]);
 
 // Basic scheduling
 uint32_t lastPrintMs = 0;
 
+// oled page state and button debouncing state
+enum OledPage : uint8_t {
+  PAGE_ENV = 0,
+  PAGE_GPS,
+  PAGE_IMU,
+  PAGE_COUNT
+};
+
+uint8_t currentPage = PAGE_ENV;
+
+bool lastButtonReading = HIGH;
+bool stableButtonState = HIGH;
+uint32_t lastDebounceMs = 0;
+constexpr uint32_t kDebounceMs = 40;
+void updateButton();
+
+
 void setup() {
   Serial.begin(9600);
   delay(200);
+  Wire.begin();
 
   for (size_t i = 0; i < kNumSensors; i++) {
     bool ok = sensors[i]->begin();
@@ -46,8 +68,10 @@ void setup() {
     Serial.println(ok ? "OK" : "FAIL");
   }
 
+  pinMode(PIN_BUTTON, INPUT_PULLUP);
+
   // Quick startup chirp
-  buzzer.beep(2000, 20);
+  //buzzer.beep(2000, 20);
 }
 
 void loop() {
@@ -61,15 +85,7 @@ void loop() {
     actuators[i]->update();
   }
 
-  // demo sweep
-  static uint32_t t0 = 0;
-  static bool dir = true;
-
-  if (millis() - t0 > 2000) {
-    t0 = millis();
-    servo.setAngle(dir ? 90 : 0);
-    dir = !dir;
-  }
+  updateButton();
 
   // Print at a slower cadence (don’t spam serial)
   const uint32_t now = millis();
@@ -90,21 +106,44 @@ void loop() {
       Serial.println(flame.digitalRaw() ? "HIGH" : "LOW");
 
       if(flame.detected()) {
-        buzzer.beep(1000, 500); // alert!
+        //buzzer.beep(1000, 500); // alert!
       }
     }
 
-
-    Serial.print("[DHT] ");
-    if (!dht.hasReading()) {
+    Serial.print("[GPS] ");
+    if(!gps.hasReading()) {
       Serial.println("no reading yet");
+    } else if (!gps.hasFix()) {
+      Serial.println("no fix yet");
     } else {
-      Serial.print("T=");
-      Serial.print(dht.tempF(), 1);
-      Serial.print("F H=");
-      Serial.print(dht.humidity(), 1);
-      Serial.println("%");
+      Serial.print("Lat: ");
+      Serial.print(gps.latitudeDegrees(), 6);
+      Serial.print(" Lon: ");
+      Serial.print(gps.longitudeDegrees(), 6);
+      Serial.print(" Alt(m): ");
+      Serial.print(gps.altitudeMeters(), 1);
+      Serial.print(" Sats: ");
+      Serial.print(gps.satellites());
+      Serial.print(" Age(ms): ");
+      Serial.println(gps.ageMs());
     }
+
+    Serial.print("[SHT31] ");
+    if (sht31.hasReading()) {
+    Serial.print("Temp F: ");
+    Serial.print(sht31.temperatureF(), 2);
+    Serial.print(" | Humidity %: ");
+    Serial.print(sht31.humidityPct(), 2);
+    Serial.print(" | Age ms: ");
+    Serial.println(sht31.ageMs());
+  } else {
+    Serial.print("Sample failed. healthy=");
+    Serial.print(sht31.healthy() ? "true" : "false");
+    Serial.print(" ping=");
+    Serial.print(sht31.ping() ? "true" : "false");
+    Serial.print(" i2cStatus=");
+    Serial.println(static_cast<uint8_t>(sht31.lastI2CStatus()));
+  }
 
 
     Serial.print("[IMU] ");
@@ -139,7 +178,95 @@ void loop() {
 
     Serial.println("====================\n");
 
+  if (oled.healthy()) {
+    switch (currentPage) {
+      case PAGE_ENV:
+        oled.printLine(0, "Environment");
+        if (flame.hasReading()) {
+          oled.printfLine(1, "Flame:%s AO:%d",
+                          flame.detected() ? "YES" : "NO",
+                          flame.analogRaw());
+        } else {
+          oled.printLine(1, "Flame:no reading");
+        }
+
+        if (sht31.hasReading()) {
+          oled.printfLine(2, "Temperature:%.1fF", sht31.temperatureF());
+          oled.printfLine(3, "Humidity:%.1f%%", sht31.humidityPct());
+        } else {
+          oled.printLine(2, "T/H:no reading");
+          oled.printLine(3, "");
+        }
+
+        break;
+
+      case PAGE_GPS:
+        oled.printLine(0, "GPS");
+
+        if (!gps.hasReading()) {
+          oled.printLine(1, "No data");
+          oled.printLine(2, "");
+          oled.printLine(3, "");
+        } else if (!gps.hasFix()) {
+          oled.printfLine(1, "No fix S:%u", gps.satellites());
+          oled.printfLine(2, "Age:%lu ms", (unsigned long)gps.sentenceAgeMs());
+          oled.printLine(3, "Go outside");
+        } else {
+          oled.printfLine(1, "S:%u Alt:%.0fm",
+                          gps.satellites(),
+                          gps.altitudeMeters());
+          oled.printfLine(2, "Lat:%.4f", gps.latitudeDegrees());
+          oled.printfLine(3, "Lon:%.4f", gps.longitudeDegrees());
+        }
+        break;
+
+      case PAGE_IMU:
+        oled.printLine(0, "IMU");
+
+        if (imu.hasReading()) {
+          oled.printfLine(1, "A:%d %d %d",
+                          (int)imu.ax_mg(),
+                          (int)imu.ay_mg(),
+                          (int)imu.az_mg());
+
+          oled.printfLine(2, "G:%d %d %d",
+                          (int)imu.gx_dps(),
+                          (int)imu.gy_dps(),
+                          (int)imu.gz_dps());
+          oled.printfLine(3, "M %.0f %.1f %.1f",
+                          (int)imu.mx_uT(),
+                          (int)imu.my_uT(),
+                          (int)imu.mz_uT());
+        } else {
+          oled.printLine(1, "No IMU reading");
+          oled.printLine(2, "");
+          oled.printLine(3, "");
+        }
+        break;
+    }
+  }
+
   }
 
   //delay(50);
+}
+void updateButton() {
+  const bool reading = digitalRead(PIN_BUTTON);
+
+  if (reading != lastButtonReading) {
+    lastDebounceMs = millis();
+  }
+
+  if ((millis() - lastDebounceMs) > kDebounceMs) {
+    if (reading != stableButtonState) {
+      stableButtonState = reading;
+
+      // Detect button press edge: HIGH -> LOW
+      if (stableButtonState == LOW) {
+        currentPage = (currentPage + 1) % PAGE_COUNT;
+      }
+    }
+  }
+
+  lastButtonReading = reading;
 }

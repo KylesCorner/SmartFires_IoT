@@ -28,6 +28,9 @@ public:
   // Return true if a new reading was captured/updated.
   virtual bool sample() = 0;
 
+  // Whether we have a valid reading to report (e.g. not just started up, no errors, etc.)
+  virtual bool hasReading() const = 0;
+
   // Age of last reading in milliseconds. If no reading yet, return UINT32_MAX.
   virtual uint32_t ageMs() const = 0;
 
