@@ -112,19 +112,32 @@ void loop() {
     lastTxMs = now;
 
     // Static stack buffer for ASCII payload.
-    // Keep this short for now during bring-up.
-    char packet[96];
+    // Increased slightly to fit fake telemetry fields for testing.
+    char packet[128];
 
-    // Format payload with node id, sequence number, and timestamp.
-    // Sequence number increments per send and is crucial for PDR/loss analysis.
+    // Build deterministic fake telemetry values for end-to-end parser tests.
+    const uint32_t seq = txSeq++;
+    const int tempCx10 = 220 + static_cast<int>((seq * 13UL + now / 1000UL) % 90UL);  // 22.0C to 30.9C
+    const int humPct = 35 + static_cast<int>((seq * 11UL + now / 2000UL) % 41UL);      // 35% to 75%
+    const int smokePpm = 8 + static_cast<int>((seq * 17UL + now / 1500UL) % 90UL);      // 8 to 97 ppm
+    const int battMv = 4020 - static_cast<int>((seq * 3UL) % 220UL);                    // 3800 to 4020 mV
+    const uint8_t fireFlag = (tempCx10 >= 285 || smokePpm >= 70) ? 1 : 0;
+
+    // Format payload with base metadata plus fake telemetry.
     const int len = snprintf(packet, sizeof(packet),
-                             "node=%u,seq=%lu,ts=%lu",
+                             "node=%u,seq=%lu,ts=%lu,temp_c=%d.%d,hum_pct=%d,smoke_ppm=%d,batt_mv=%d,fire=%u",
                              NODE_ID,
-                             static_cast<unsigned long>(txSeq++),
-                             static_cast<unsigned long>(now));
+                             static_cast<unsigned long>(seq),
+                             static_cast<unsigned long>(now),
+                             tempCx10 / 10,
+                             tempCx10 % 10,
+                             humPct,
+                             smokePpm,
+                             battMv,
+                             fireFlag);
 
-    // Only send if formatting succeeded.
-    if (len > 0) {
+    // Only send if formatting succeeded without truncation.
+    if (len > 0 && len < static_cast<int>(sizeof(packet))) {
       // Cast text buffer to byte buffer for radio send API.
       rf95.send(reinterpret_cast<const uint8_t*>(packet), static_cast<uint8_t>(len));
 
