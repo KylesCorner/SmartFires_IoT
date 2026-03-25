@@ -10,6 +10,33 @@
 #include "Pa1010dGpsSensor.h"
 #include "OledDisplay.h"
 
+// Optional UART telemetry stream for the Feather LoRa bridge.
+// Set DEMO_TEST_SENSOR_DATA=1 via build_flags to enable.
+#ifndef DEMO_TEST_SENSOR_DATA
+#define DEMO_TEST_SENSOR_DATA 0
+#endif
+
+#if DEMO_TEST_SENSOR_DATA
+static constexpr uint32_t kTelemetryIntervalMs = 1000;
+static constexpr uint8_t kInterboardI2CAddr = 0x42;
+static constexpr uint8_t kInterboardI2CMaxPayload = 63;
+uint32_t lastTelemetryMs = 0;
+uint32_t telemetrySeq = 0;
+
+const char* i2cStatusToText(uint8_t status) {
+  switch (status) {
+    case 0: return "ok";
+    case 1: return "data-too-long";
+    case 2: return "nack-on-address";
+    case 3: return "nack-on-data";
+    case 4: return "other-error";
+    default: return "unknown";
+  }
+}
+
+void sendDemoTestSensorData(uint32_t now);
+#endif
+
 // Sensors
 Icm20948Imu imu(1);
 FlameSensor flame(PIN_FLAME_AO, PIN_FLAME_DO);
@@ -27,6 +54,55 @@ constexpr size_t kNumSensors = sizeof(sensors) / sizeof(sensors[0]);
 
 IActuator* actuators[] = { &oled };
 constexpr size_t kNumActuators = sizeof(actuators) / sizeof(actuators[0]);
+
+#if DEMO_TEST_SENSOR_DATA
+void sendDemoTestSensorData(uint32_t now) {
+  char line[kInterboardI2CMaxPayload + 1];
+
+  const bool gpsFix = gps.hasFix();
+  const bool flameDetected = flame.hasReading() ? flame.detected() : false;
+  const int flameAo = flame.hasReading() ? flame.analogRaw() : -1;
+
+  const float tempC = sht31.hasReading() ? sht31.temperatureC() : NAN;
+  const float humPct = sht31.hasReading() ? sht31.humidityPct() : NAN;
+
+      // Compact frame with improved numeric precision that fits I2C payload limits.
+  const unsigned long seqMod = static_cast<unsigned long>(telemetrySeq++ % 100000UL);
+  const int len = snprintf(
+      line,
+      sizeof(line),
+        "s=%lu,t=%.2f,h=%.2f,f=%u,a=%d,g=%u,n=%u",
+      seqMod,
+      tempC,
+      humPct,
+      static_cast<unsigned>(flameDetected ? 1 : 0),
+      flameAo,
+      static_cast<unsigned>(gpsFix ? 1 : 0),
+      static_cast<unsigned>(gps.satellites()));
+
+  if (len <= 0) {
+    Serial.println("TO_FEATHER: format-failed");
+    return;
+  }
+
+  if (len >= static_cast<int>(sizeof(line))) {
+    Serial.println("TO_FEATHER: payload-truncated, dropped");
+    return;
+  }
+
+  Wire.beginTransmission(kInterboardI2CAddr);
+  Wire.write(reinterpret_cast<const uint8_t*>(line), static_cast<size_t>(len));
+  const uint8_t txStatus = Wire.endTransmission();
+
+  Serial.print("TO_FEATHER: ");
+  Serial.print(line);
+  Serial.print(" | i2c_status=");
+  Serial.print(txStatus);
+  Serial.print(" (");
+  Serial.print(i2cStatusToText(txStatus));
+  Serial.println(")");
+}
+#endif
 
 // Basic scheduling
 uint32_t lastPrintMs = 0;
@@ -52,6 +128,10 @@ void setup() {
   Serial.begin(9600);
   delay(200);
   Wire.begin();
+
+#if DEMO_TEST_SENSOR_DATA
+  Serial.println("DEMO_TEST_SENSOR_DATA enabled: streaming I2C telemetry to addr 0x42");
+#endif
 
   for (size_t i = 0; i < kNumSensors; i++) {
     bool ok = sensors[i]->begin();
@@ -247,6 +327,13 @@ void loop() {
   }
 
   }
+
+#if DEMO_TEST_SENSOR_DATA
+  if (now - lastTelemetryMs >= kTelemetryIntervalMs) {
+    lastTelemetryMs = now;
+    sendDemoTestSensorData(now);
+  }
+#endif
 
   //delay(50);
 }
