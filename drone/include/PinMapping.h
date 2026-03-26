@@ -15,3 +15,5 @@ static constexpr uint8_t PIN_SERVO = 6; // choose a PWM-capable pin
 
 static constexpr uint8_t PIN_BUTTON = D11;
 
+static constexpr uint8_t PIN_WIND_RV = A1;
+static constexpr uint8_t PIN_WIND_TMP = A0;
