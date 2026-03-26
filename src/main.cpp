@@ -9,8 +9,10 @@
 #include "Sht31Sensor.h"
 #include "Pa1010dGpsSensor.h"
 #include "OledDisplay.h"
+#include "WindSensorRevC.h"
 
 // Sensors
+WindSensorRevC wind(A1, A0);
 Icm20948Imu imu(1);
 FlameSensor flame(PIN_FLAME_AO, PIN_FLAME_DO);
 Sht31Sensor sht31(Sht31Sensor::kAlternateAddress);
@@ -22,7 +24,7 @@ Pa1010dGpsSensor gps(Wire);
 OledDisplay oled(OledDisplay::Controller::SH1106, 0x3C, "OLED Display");
 
 // Polymorphic registry
-ISensor* sensors[] = { &flame, &imu , &sht31, &gps };
+ISensor* sensors[] = { &flame, &imu , &sht31, &gps, &wind };
 constexpr size_t kNumSensors = sizeof(sensors) / sizeof(sensors[0]);
 
 IActuator* actuators[] = { &oled };
@@ -109,6 +111,18 @@ void loop() {
         //buzzer.beep(1000, 500); // alert!
       }
     }
+    
+    Serial.print("[Wind] ");
+    if(!wind.hasReading()){
+      Serial.println("No reading");
+    }else{
+      Serial.print("Wind: ");
+      Serial.print(wind.windMps(), 3);
+      Serial.print(" m/s  Temp: ");
+      Serial.println(wind.temperatureC(), 2);
+    }
+
+
 
     Serial.print("[GPS] ");
     if(!gps.hasReading()) {
@@ -182,12 +196,13 @@ void loop() {
     switch (currentPage) {
       case PAGE_ENV:
         oled.printLine(0, "Environment");
-        if (flame.hasReading()) {
-          oled.printfLine(1, "Flame:%s AO:%d",
+        if (wind.hasReading()) {
+          oled.printfLine(1, "Wind:%s AO:%d",
                           flame.detected() ? "YES" : "NO",
                           flame.analogRaw());
+          oled.printfLine(1,"Wind Speed:%.3f", wind.windMps());
         } else {
-          oled.printLine(1, "Flame:no reading");
+          oled.printLine(1, "Wind: No Reading");
         }
 
         if (sht31.hasReading()) {
