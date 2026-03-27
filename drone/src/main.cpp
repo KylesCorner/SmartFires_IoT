@@ -197,7 +197,7 @@ void loop() {
       Serial.println("No reading");
     }else{
       Serial.print("Wind: ");
-      Serial.print(wind.windMps(), 3);
+      Serial.print(wind.windMph(), 3);
       Serial.print(" m/s  Temp: ");
       Serial.println(wind.temperatureC(), 2);
     }
@@ -224,8 +224,8 @@ void loop() {
 
     Serial.print("[SHT31] ");
     if (sht31.hasReading()) {
-    Serial.print("Temp F: ");
-    Serial.print(sht31.temperatureF(), 2);
+    Serial.print("Temp C: ");
+    Serial.print(sht31.temperatureC(), 2);
     Serial.print(" | Humidity %: ");
     Serial.print(sht31.humidityPct(), 2);
     Serial.print(" | Age ms: ");
@@ -286,11 +286,16 @@ void loop() {
         }
 
         if (sht31.hasReading()) {
-          oled.printfLine(2, "Temperature:%.1fF", sht31.temperatureF());
-          oled.printfLine(3, "Humidity:%.1f%%", sht31.humidityPct());
+          oled.printfLine(2, "T:%.1fF %.1fC, H:%1.f%%", sht31.temperatureF(),sht31.temperatureC(),sht31.humidityPct());
         } else {
           oled.printLine(2, "T/H:no reading");
-          oled.printLine(3, "");
+        }
+
+        if(flame.hasReading()){
+          oled.printfLine(3,"Flame:%d", flame.analogRaw());
+        }
+        else{
+          oled.printLine(3,"No flame reading");
         }
 
         break;

@@ -3,7 +3,7 @@
 // Pin definitions for the project. Adjust as needed for your specific board and wiring.
 // Refers to the gpio pin numbers, not physical pin numbers. Check your board's documentation for details.
 
-static constexpr uint8_t PIN_FLAME_AO = A0;
+static constexpr uint8_t PIN_FLAME_AO = A2;
 static constexpr uint8_t PIN_FLAME_DO = D12; // choose a digital pin (not all pins support interrupts, but that's optional for this sensor)
 
 //static constexpr uint8_t PIN_DHT = 2;
