@@ -2,10 +2,10 @@
 
 #include "ISensor.h"
 #include "FlameSensor.h"
-#include "PassiveBuzzer.h"
+//#include "PassiveBuzzer.h"
 #include "Icm20948Imu.h"
 #include "PinMapping.h"
-#include "MicroServo.h"
+//#include "MicroServo.h"
 #include "Sht31Sensor.h"
 #include "Pa1010dGpsSensor.h"
 #include "OledDisplay.h"
