@@ -9,7 +9,10 @@
 #include "Sht31Sensor.h"
 #include "Pa1010dGpsSensor.h"
 #include "OledDisplay.h"
+#include "USBCDC.h"
 #include "WindSensorRevC.h"
+#include "LidarLiteV3.h"
+
 
 // Optional UART telemetry stream for the Feather LoRa bridge.
 // Set DEMO_TEST_SENSOR_DATA=1 via build_flags to enable.
@@ -44,6 +47,7 @@ Icm20948Imu imu(1);
 FlameSensor flame(PIN_FLAME_AO, PIN_FLAME_DO);
 Sht31Sensor sht31(Sht31Sensor::kAlternateAddress);
 Pa1010dGpsSensor gps(Wire);
+LidarLiteV3 lidar;
 
 //Actuators
 //PassiveBuzzer buzzer(PIN_BUZZER); // choose a PWM-capable pin (not required for tone())
@@ -51,7 +55,7 @@ Pa1010dGpsSensor gps(Wire);
 OledDisplay oled(OledDisplay::Controller::SH1106, 0x3C, "OLED Display");
 
 // Polymorphic registry
-ISensor* sensors[] = { &flame, &imu , &sht31, &gps, &wind };
+ISensor* sensors[] = { &flame, &imu , &sht31, &gps, &wind, &lidar };
 constexpr size_t kNumSensors = sizeof(sensors) / sizeof(sensors[0]);
 
 IActuator* actuators[] = { &oled };
@@ -114,6 +118,8 @@ enum OledPage : uint8_t {
   PAGE_ENV = 0,
   PAGE_GPS,
   PAGE_IMU,
+  PAGE_NETWORK,
+  PAGE_LIDAR,
   PAGE_COUNT
 };
 
@@ -122,7 +128,7 @@ uint8_t currentPage = PAGE_ENV;
 bool lastButtonReading = HIGH;
 bool stableButtonState = HIGH;
 uint32_t lastDebounceMs = 0;
-constexpr uint32_t kDebounceMs = 40;
+constexpr uint32_t kDebounceMs = 15;
 void updateButton();
 
 
@@ -171,7 +177,7 @@ void loop() {
 
   // Print at a slower cadence (don’t spam serial)
   const uint32_t now = millis();
-  if (now - lastPrintMs >= 1000) {
+  if (now - lastPrintMs >= 250) {
     lastPrintMs = now;
 
     Serial.println("\n=== Sensor Readings ===");
@@ -270,6 +276,15 @@ void loop() {
       Serial.println("C");
     } 
 
+    Serial.print("[LIDAR] ");
+    if(!lidar.hasReading()){
+      Serial.println("No reading");
+    }else{
+      Serial.print("Distance: ");
+      Serial.print(lidar.distanceCm());
+      Serial.println(" cm");
+    }
+
     Serial.println("====================\n");
 
   if (oled.healthy()) {
@@ -282,7 +297,7 @@ void loop() {
                           flame.analogRaw());
           oled.printfLine(1,"Wind Speed:%.3f", wind.windMps());
         } else {
-          oled.printLine(1, "Wind: No Reading");
+          oled.printLine(1, "Wind: Warming up");
         }
 
         if (sht31.hasReading()) {
@@ -324,25 +339,45 @@ void loop() {
         oled.printLine(0, "IMU");
 
         if (imu.hasReading()) {
-          oled.printfLine(1, "A:%d %d %d",
-                          (int)imu.ax_mg(),
-                          (int)imu.ay_mg(),
-                          (int)imu.az_mg());
+          oled.printfLine(1, "A:%.1f %.1f %.1f",
+                          imu.ax_mg(),
+                          imu.ay_mg(),
+                          imu.az_mg());
 
-          oled.printfLine(2, "G:%d %d %d",
-                          (int)imu.gx_dps(),
-                          (int)imu.gy_dps(),
-                          (int)imu.gz_dps());
-          oled.printfLine(3, "M %.0f %.1f %.1f",
-                          (int)imu.mx_uT(),
-                          (int)imu.my_uT(),
-                          (int)imu.mz_uT());
+          oled.printfLine(2, "G:%.1f %.1f %.1f",
+                          imu.gx_dps(),
+                          imu.gy_dps(),
+                          imu.gz_dps());
+          oled.printfLine(3, "M:%.1f %.1f %.1f",
+                          imu.mx_uT(),
+                          imu.my_uT(),
+                          imu.mz_uT());
         } else {
           oled.printLine(1, "No IMU reading");
           oled.printLine(2, "");
           oled.printLine(3, "");
         }
         break;
+
+        case PAGE_NETWORK:
+          oled.printLine(0, "LoRa");
+          oled.printLine(1, "Not Implemented");
+          oled.printLine(2, "");
+          oled.printLine(3, "");
+        break;
+
+        case PAGE_LIDAR:
+          oled.printLine(0, "LIDAR");
+          oled.printLine(2, "");
+          oled.printLine(3, "");
+          if(lidar.hasReading()){
+            oled.printfLine(1, "Dist: %d cm", lidar.distanceCm());
+          }else{
+            oled.printLine(1, "No readings");
+          }
+        break;
+
+
     }
   }
 
