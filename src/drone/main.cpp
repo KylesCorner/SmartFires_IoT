@@ -12,34 +12,12 @@
 #include "USBCDC.h"
 #include "WindSensorRevC.h"
 #include "LidarLiteV3.h"
+#include "shared/UartBridge.h"
+#include "shared/TelemetryPacket.h"
+#include "shared/TelemetryCodec.h"
 
 
-// Optional UART telemetry stream for the Feather LoRa bridge.
-// Set DEMO_TEST_SENSOR_DATA=1 via build_flags to enable.
-#ifndef DEMO_TEST_SENSOR_DATA
-#define DEMO_TEST_SENSOR_DATA 0
-#endif
 
-#if DEMO_TEST_SENSOR_DATA
-static constexpr uint32_t kTelemetryIntervalMs = 1000;
-static constexpr uint8_t kInterboardI2CAddr = 0x42;
-static constexpr uint8_t kInterboardI2CMaxPayload = 63;
-uint32_t lastTelemetryMs = 0;
-uint32_t telemetrySeq = 0;
-
-const char* i2cStatusToText(uint8_t status) {
-  switch (status) {
-    case 0: return "ok";
-    case 1: return "data-too-long";
-    case 2: return "nack-on-address";
-    case 3: return "nack-on-data";
-    case 4: return "other-error";
-    default: return "unknown";
-  }
-}
-
-void sendDemoTestSensorData(uint32_t now);
-#endif
 
 // Sensors
 WindSensorRevC wind(PIN_WIND_RV, PIN_WIND_TMP);
@@ -61,55 +39,6 @@ constexpr size_t kNumSensors = sizeof(sensors) / sizeof(sensors[0]);
 IActuator* actuators[] = { &oled };
 constexpr size_t kNumActuators = sizeof(actuators) / sizeof(actuators[0]);
 
-#if DEMO_TEST_SENSOR_DATA
-void sendDemoTestSensorData(uint32_t now) {
-  char line[kInterboardI2CMaxPayload + 1];
-
-  const bool gpsFix = gps.hasFix();
-  const bool flameDetected = flame.hasReading() ? flame.detected() : false;
-  const int flameAo = flame.hasReading() ? flame.analogRaw() : -1;
-
-  const float tempC = sht31.hasReading() ? sht31.temperatureC() : NAN;
-  const float humPct = sht31.hasReading() ? sht31.humidityPct() : NAN;
-
-      // Compact frame with improved numeric precision that fits I2C payload limits.
-  const unsigned long seqMod = static_cast<unsigned long>(telemetrySeq++ % 100000UL);
-  const int len = snprintf(
-      line,
-      sizeof(line),
-        "s=%lu,t=%.2f,h=%.2f,f=%u,a=%d,g=%u,n=%u",
-      seqMod,
-      tempC,
-      humPct,
-      static_cast<unsigned>(flameDetected ? 1 : 0),
-      flameAo,
-      static_cast<unsigned>(gpsFix ? 1 : 0),
-      static_cast<unsigned>(gps.satellites()));
-
-  if (len <= 0) {
-    Serial.println("TO_FEATHER: format-failed");
-    return;
-  }
-
-  if (len >= static_cast<int>(sizeof(line))) {
-    Serial.println("TO_FEATHER: payload-truncated, dropped");
-    return;
-  }
-
-  Wire.beginTransmission(kInterboardI2CAddr);
-  Wire.write(reinterpret_cast<const uint8_t*>(line), static_cast<size_t>(len));
-  const uint8_t txStatus = Wire.endTransmission();
-
-  Serial.print("TO_FEATHER: ");
-  Serial.print(line);
-  Serial.print(" | i2c_status=");
-  Serial.print(txStatus);
-  Serial.print(" (");
-  Serial.print(i2cStatusToText(txStatus));
-  Serial.println(")");
-}
-#endif
-
 // Basic scheduling
 uint32_t lastPrintMs = 0;
 
@@ -118,7 +47,7 @@ enum OledPage : uint8_t {
   PAGE_ENV = 0,
   PAGE_GPS,
   PAGE_IMU,
-  PAGE_NETWORK,
+  PAGE_UART,
   PAGE_LIDAR,
   PAGE_COUNT
 };
@@ -131,15 +60,36 @@ uint32_t lastDebounceMs = 0;
 constexpr uint32_t kDebounceMs = 15;
 void updateButton();
 
+// Networking Setup
+HardwareSerial LoRaSerial(1);
+UartLoRaBridge loraBridge(LoRaSerial, PIN_LORA_RX, PIN_LORA_TX, 115200);
+
+uint32_t lastSendMs = 0;
+uint32_t seq = 0;
+uint32_t lastSentSeq = 0;
+uint32_t lastAckedSeq = 0;
+bool waitingForAck = false;
+uint32_t lastSendTimeMs = 0;
+enum TelemetryFlags : uint8_t {
+  TF_FLAME = 1 << 0,
+  TF_WIND  = 1 << 1,
+  TF_SHT31 = 1 << 2,
+  TF_LIDAR = 1 << 3,
+  TF_GPS   = 1 << 4,
+  TF_IMU   = 1 << 5
+};
+
+void sendTelemetry(uint32_t seq);
+TelemetryPacket buildTelemetryPacket(uint32_t seq);
+void handleBridgeLine(const char* line);
+void serviceBridge();
 
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
+  //Serial1.begin(115200);
   delay(200);
   Wire.begin();
 
-#if DEMO_TEST_SENSOR_DATA
-  Serial.println("DEMO_TEST_SENSOR_DATA enabled: streaming I2C telemetry to addr 0x42");
-#endif
 
   for (size_t i = 0; i < kNumSensors; i++) {
     bool ok = sensors[i]->begin();
@@ -158,161 +108,78 @@ void setup() {
 
   pinMode(PIN_BUTTON, INPUT_PULLUP);
 
+  loraBridge.begin();
+
+
   // Quick startup chirp
   //buzzer.beep(2000, 20);
 }
-
 void loop() {
+  // Pull in any UART bytes and process complete lines
+  loraBridge.update();
+  serviceBridge();
+
   // Sample everything frequently (each sensor can self-throttle internally)
   for (size_t i = 0; i < kNumSensors; i++) {
     sensors[i]->sample();
   }
 
-  // Update actuators (e.g. buzzer timing)
+  // Update actuators
   for (size_t i = 0; i < kNumActuators; i++) {
     actuators[i]->update();
   }
 
   updateButton();
 
-  // Print at a slower cadence (don’t spam serial)
   const uint32_t now = millis();
-  if (now - lastPrintMs >= 250) {
-    lastPrintMs = now;
 
-    Serial.println("\n=== Sensor Readings ===");
+  // Send telemetry at a controlled cadence
+  if (now - lastSendMs >= UartLoRaBridge::kTelemetryPeriodMs) {
+    lastSendMs = now;
 
-    if(!flame.hasReading()) {
-      Serial.print("[Flame] no reading yet");
+    // Optional: only allow one in-flight packet at a time
+    if (!waitingForAck) {
+      ++seq;
+      sendTelemetry(seq);
+      lastSentSeq = seq;
+      lastSendTimeMs = now;
+      waitingForAck = true;
     } else {
-
-      Serial.print("[Flame] detected=");
-      Serial.print(flame.detected() ? "YES" : "NO");
-      Serial.print(" AO=");
-      Serial.print(flame.analogRaw());
-      Serial.print(" DO=");
-      Serial.println(flame.digitalRaw() ? "HIGH" : "LOW");
-
-      if(flame.detected()) {
-        //buzzer.beep(1000, 500); // alert!
-      }
+      Serial.println("[UART] still waiting for ACK, skipping send");
     }
-    
-    Serial.print("[Wind] ");
-    if(!wind.hasReading()){
-      Serial.println("No reading");
-    }else{
-      Serial.print("Wind: ");
-      Serial.print(wind.windMph(), 3);
-      Serial.print(" m/s  Temp: ");
-      Serial.println(wind.temperatureC(), 2);
-    }
-
-
-
-    Serial.print("[GPS] ");
-    if(!gps.hasReading()) {
-      Serial.println("no reading yet");
-    } else if (!gps.hasFix()) {
-      Serial.println("no fix yet");
-    } else {
-      Serial.print("Lat: ");
-      Serial.print(gps.latitudeDegrees(), 6);
-      Serial.print(" Lon: ");
-      Serial.print(gps.longitudeDegrees(), 6);
-      Serial.print(" Alt(m): ");
-      Serial.print(gps.altitudeMeters(), 1);
-      Serial.print(" Sats: ");
-      Serial.print(gps.satellites());
-      Serial.print(" Age(ms): ");
-      Serial.println(gps.ageMs());
-    }
-
-    Serial.print("[SHT31] ");
-    if (sht31.hasReading()) {
-    Serial.print("Temp C: ");
-    Serial.print(sht31.temperatureC(), 2);
-    Serial.print(" | Humidity %: ");
-    Serial.print(sht31.humidityPct(), 2);
-    Serial.print(" | Age ms: ");
-    Serial.println(sht31.ageMs());
-  } else {
-    Serial.print("Sample failed. healthy=");
-    Serial.print(sht31.healthy() ? "true" : "false");
-    Serial.print(" ping=");
-    Serial.print(sht31.ping() ? "true" : "false");
-    Serial.print(" i2cStatus=");
-    Serial.println(static_cast<uint8_t>(sht31.lastI2CStatus()));
   }
 
-
-    Serial.print("[IMU] ");
-    if(!imu.hasReading()) {
-      Serial.println("no reading yet");
-    } else {
-      Serial.print("A=(mg) ");
-      Serial.print(imu.ax_mg(), 1);
-      Serial.print(",");
-      Serial.print(imu.ay_mg(), 1);
-      Serial.print(",");
-      Serial.print(imu.az_mg(), 1);
-
-      Serial.print(" G=(dps) ");
-      Serial.print(imu.gx_dps(), 1);
-      Serial.print(",");
-      Serial.print(imu.gy_dps(), 1);
-      Serial.print(",");
-      Serial.print(imu.gz_dps(), 1);
-
-      Serial.print(" M=(uT) ");
-      Serial.print(imu.mx_uT(), 1);
-      Serial.print(",");
-      Serial.print(imu.my_uT(), 1);
-      Serial.print(",");
-      Serial.print(imu.mz_uT(), 1);
-
-      Serial.print(" T=");
-      Serial.print(imu.temp_C(), 1);
-      Serial.println("C");
-    } 
-
-    Serial.print("[LIDAR] ");
-    if(!lidar.hasReading()){
-      Serial.println("No reading");
-    }else{
-      Serial.print("Distance: ");
-      Serial.print(lidar.distanceCm());
-      Serial.println(" cm");
-    }
-
-    Serial.println("====================\n");
+  // ACK timeout handling
+  if (waitingForAck && (now - lastSendTimeMs >= UartLoRaBridge::kAckTimeoutMs)) {
+    Serial.print("[UART] ACK timeout for seq ");
+    Serial.println(lastSentSeq);
+    waitingForAck = false;
+  }
 
   if (oled.healthy()) {
     switch (currentPage) {
       case PAGE_ENV:
         oled.printLine(0, "Environment");
         if (wind.hasReading()) {
-          oled.printfLine(1, "Wind:%s AO:%d",
-                          flame.detected() ? "YES" : "NO",
-                          flame.analogRaw());
-          oled.printfLine(1,"Wind Speed:%.3f", wind.windMps());
+          oled.printfLine(1, "Wind Speed:%.3f", wind.windMps());
         } else {
           oled.printLine(1, "Wind: Warming up");
         }
 
         if (sht31.hasReading()) {
-          oled.printfLine(2, "T:%.1fF %.1fC, H:%1.f%%", sht31.temperatureF(),sht31.temperatureC(),sht31.humidityPct());
+          oled.printfLine(2, "T:%.1fF %.1fC H:%1.f%%",
+                          sht31.temperatureF(),
+                          sht31.temperatureC(),
+                          sht31.humidityPct());
         } else {
           oled.printLine(2, "T/H:no reading");
         }
 
-        if(flame.hasReading()){
-          oled.printfLine(3,"Flame:%d", flame.analogRaw());
+        if (flame.hasReading()) {
+          oled.printfLine(3, "Flame:%d", flame.analogRaw());
+        } else {
+          oled.printLine(3, "No flame reading");
         }
-        else{
-          oled.printLine(3,"No flame reading");
-        }
-
         break;
 
       case PAGE_GPS:
@@ -340,18 +207,11 @@ void loop() {
 
         if (imu.hasReading()) {
           oled.printfLine(1, "A:%.1f %.1f %.1f",
-                          imu.ax_mg(),
-                          imu.ay_mg(),
-                          imu.az_mg());
-
+                          imu.ax_mg(), imu.ay_mg(), imu.az_mg());
           oled.printfLine(2, "G:%.1f %.1f %.1f",
-                          imu.gx_dps(),
-                          imu.gy_dps(),
-                          imu.gz_dps());
+                          imu.gx_dps(), imu.gy_dps(), imu.gz_dps());
           oled.printfLine(3, "M:%.1f %.1f %.1f",
-                          imu.mx_uT(),
-                          imu.my_uT(),
-                          imu.mz_uT());
+                          imu.mx_uT(), imu.my_uT(), imu.mz_uT());
         } else {
           oled.printLine(1, "No IMU reading");
           oled.printLine(2, "");
@@ -359,39 +219,30 @@ void loop() {
         }
         break;
 
-        case PAGE_NETWORK:
-          oled.printLine(0, "LoRa");
-          oled.printLine(1, "Not Implemented");
-          oled.printLine(2, "");
-          oled.printLine(3, "");
+      case PAGE_UART:
+        oled.printLine(0, "UART Connection");
+        oled.printfLine(1, "Sent:%lu Ack:%lu",
+                        (unsigned long)lastSentSeq,
+                        (unsigned long)lastAckedSeq);
+        oled.printfLine(2, "WaitAck:%s", waitingForAck ? "YES" : "NO");
+        oled.printfLine(3, "UART:%s",
+                        loraBridge.hasError() ? loraBridge.lastError() : "OK");
         break;
 
-        case PAGE_LIDAR:
-          oled.printLine(0, "LIDAR");
-          oled.printLine(2, "");
-          oled.printLine(3, "");
-          if(lidar.hasReading()){
-            oled.printfLine(1, "Dist: %d cm", lidar.distanceCm());
-          }else{
-            oled.printLine(1, "No readings");
-          }
+      case PAGE_LIDAR:
+        oled.printLine(0, "LIDAR");
+        oled.printLine(2, "");
+        oled.printLine(3, "");
+        if (lidar.hasReading()) {
+          oled.printfLine(1, "Dist: %d cm", lidar.distanceCm());
+        } else {
+          oled.printLine(1, "No readings");
+        }
         break;
-
-
     }
   }
-
-  }
-
-#if DEMO_TEST_SENSOR_DATA
-  if (now - lastTelemetryMs >= kTelemetryIntervalMs) {
-    lastTelemetryMs = now;
-    sendDemoTestSensorData(now);
-  }
-#endif
-
-  //delay(50);
 }
+
 void updateButton() {
   const bool reading = digitalRead(PIN_BUTTON);
 
@@ -411,4 +262,93 @@ void updateButton() {
   }
 
   lastButtonReading = reading;
+}
+
+TelemetryPacket buildTelemetryPacket(uint32_t seq) {
+  TelemetryPacket p{};
+  p.seq = seq;
+  p.uptimeMs = millis();
+
+  if (flame.hasReading()) {
+    p.sensorFlags |= TF_FLAME;
+    p.flameDetected = flame.detected();
+  }
+
+  if (wind.hasReading()) {
+    p.sensorFlags |= TF_WIND;
+    p.windMps = wind.windMps();
+  }
+
+  if (sht31.hasReading()) {
+    p.sensorFlags |= TF_SHT31;
+    p.tempC = sht31.temperatureC();
+    p.humidityPct = sht31.humidityPct();
+  }
+
+  if (lidar.hasReading()) {
+    p.sensorFlags |= TF_LIDAR;
+    p.lidarCm = lidar.distanceCm();
+  }
+
+  if (gps.hasReading() && gps.hasFix()) {
+    p.sensorFlags |= TF_GPS;
+    p.lat = gps.latitudeDegrees();
+    p.lon = gps.longitudeDegrees();
+  }
+
+  return p;
+}
+
+void sendTelemetry(uint32_t seq) {
+  TelemetryPacket pkt = buildTelemetryPacket(seq);
+
+  char line[192];
+  if (TelemetryCodec::encode(pkt, line, sizeof(line))) {
+    loraBridge.sendLine(line);
+    Serial.print("[UART TX] ");
+    Serial.println(line);
+  } else {
+    Serial.println("[UART TX] encode failed");
+  }
+}
+void serviceBridge() {
+  if (loraBridge.hasError()) {
+    Serial.print("[UART ERR] ");
+    Serial.println(loraBridge.lastError());
+  }
+
+  if (loraBridge.bootSeen()) {
+    static bool printedBoot = false;
+    if (!printedBoot) {
+      Serial.println("[UART] Feather boot seen");
+      printedBoot = true;
+    }
+  }
+
+  static uint32_t lastPrintedAck = 0;
+  if (loraBridge.hasAck()) {
+    const uint32_t ackSeq = loraBridge.lastAckSeq();
+
+    if (ackSeq != lastPrintedAck) {
+      Serial.print("[UART ACK] seq=");
+      Serial.println(ackSeq);
+      lastPrintedAck = ackSeq;
+    }
+
+    lastAckedSeq = ackSeq;
+
+    if (waitingForAck && ackSeq == lastSentSeq) {
+      waitingForAck = false;
+    }
+  }
+
+  if (loraBridge.hasRx()) {
+    static char lastRxPrinted[96] = {0};
+    if (strcmp(lastRxPrinted, loraBridge.lastRx()) != 0) {
+      Serial.print("[UART RX PAYLOAD] ");
+      Serial.println(loraBridge.lastRx());
+      strncpy(lastRxPrinted, loraBridge.lastRx(), sizeof(lastRxPrinted) - 1);
+      lastRxPrinted[sizeof(lastRxPrinted) - 1] = '\0';
+    }
+  }
 }

@@ -17,3 +17,7 @@ static constexpr uint8_t PIN_BUTTON = D11;
 
 static constexpr uint8_t PIN_WIND_RV = A1;
 static constexpr uint8_t PIN_WIND_TMP = A0;
+
+static constexpr uint8_t PIN_LORA_TX= TX;
+static constexpr uint8_t PIN_LORA_RX= RX;
+
