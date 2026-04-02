@@ -1,0 +1,12 @@
+CompileFlags:
+  Remove:
+    - -mlongcalls
+    - -mtext-section-literals
+    - -fno-tree-switch-conversion
+    - -fstrict-volatile-bitfields
+
+Diagnostics:
+  Suppress:
+    - anon_bitfield_qualifiers
+    - fatal_too_many_errors
+    - pp_file_not_found
