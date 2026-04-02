@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <RH_RF95.h>
 #include "shared/TelemetryPacket.h"
 #include "shared/TelemetryCodec.h"
 
@@ -7,19 +8,45 @@ static size_t uartLineLen = 0;
 
 TelemetryPacket lastTelemetry{};
 bool hasTelemetry = false;
-uint32_t lastAckedSeq = 0;
 uint32_t lastRxMs = 0;
+
+static constexpr int RFM95_CS  = 8;
+static constexpr int RFM95_INT = 3;
+static constexpr int RFM95_RST = 4;
+static constexpr float RFM95_FREQ = 915.0;
+
+RH_RF95 rf95(RFM95_CS, RFM95_INT);
 
 void handleUartLine(const char* line);
 void sendAck(uint32_t seq);
 void sendErr(const char* reason);
 void printTelemetryToUsb(const TelemetryPacket& pkt);
 void forwardTelemetryOverLoRa(const TelemetryPacket& pkt);
+void resetRadio();
+void serviceLoRaRx();
 
 void setup() {
   Serial.begin(115200);
   Serial1.begin(115200);
   delay(1000);
+
+  resetRadio();
+  if (!rf95.init()) {
+    Serial.println("RH_RF95 init failed");
+    while (1) { delay(100); }
+  }
+
+  Serial.println("RH_RF95 init OK");
+
+  if (!rf95.setFrequency(RFM95_FREQ)) {
+    Serial.println("setFrequency failed");
+    while (1) { delay(100); }
+  }
+
+  Serial.println("Frequency set OK");
+
+  rf95.setTxPower(13, false);   // safe starting point for Feather M0 RFM95
+  Serial.println("LoRa peer test ready");
 
   Serial.println("Feather UART bridge alive");
 
@@ -37,6 +64,7 @@ void loop() {
       uartLine[uartLineLen] = '\0';
 
       if (uartLineLen > 0) {
+        // all sensor data is sent over uart
         handleUartLine(uartLine);
       }
 
@@ -51,11 +79,10 @@ void loop() {
       sendErr("overflow");
     }
   }
-
-  // Future radio servicing can go here
-  // Example:
-  // radio.update();
+  serviceLoRaRx();
 }
+
+// uart helper functions
 void handleUartLine(const char* line) {
   lastRxMs = millis();
 
@@ -72,12 +99,12 @@ void handleUartLine(const char* line) {
   if (TelemetryCodec::parse(line, pkt)) {
     hasTelemetry = true;
     lastTelemetry = pkt;
-    lastAckedSeq = pkt.seq;
 
-    printTelemetryToUsb(pkt);
+    //printTelemetryToUsb(pkt);
     sendAck(pkt.seq);
 
-    // Placeholder for actual radio forwarding
+    // send uart data over lora
+    // FIX: lora is much slower than uart. Need to cache or shrink packets somehow.
     forwardTelemetryOverLoRa(pkt);
     return;
   }
@@ -146,12 +173,65 @@ void printTelemetryToUsb(const TelemetryPacket& pkt) {
 
   Serial.println();
 }
-void forwardTelemetryOverLoRa(const TelemetryPacket& pkt) {
-  // For now, just show that this is where radio send would happen.
-  Serial.print("[LORA] Forwarding telemetry seq ");
-  Serial.println(pkt.seq);
 
-  // Later, you can either:
-  // 1. re-encode the same TEL line and send it over radio, or
-  // 2. pack into a smaller binary frame for radio efficiency.
+// lora helper methods
+void forwardTelemetryOverLoRa(const TelemetryPacket& pkt) {
+  char line[192];
+  if (!TelemetryCodec::encode(pkt, line, sizeof(line))) {
+    Serial.println("[LORA] encode failed");
+    return;
+  }
+
+  const uint8_t len = (uint8_t)strlen(line);
+  if (!rf95.send((const uint8_t*)line, len)) {
+    Serial.println("[LORA] send failed");
+    return;
+  }
+
+  rf95.waitPacketSent();
+
+  Serial.print("[LORA TX] ");
+  Serial.println(line);
 }
+
+void resetRadio() {
+  pinMode(RFM95_RST, OUTPUT);
+  digitalWrite(RFM95_RST, HIGH);
+  delay(10);
+  digitalWrite(RFM95_RST, LOW);
+  delay(10);
+  digitalWrite(RFM95_RST, HIGH);
+  delay(10);
+}
+
+void serviceLoRaRx() {
+  //FIX: no proper lora ack quite yet. would like to implement a lite-TCP using heartbeats and a checksum.
+  if (!rf95.available()) {
+    return;
+  }
+
+  uint8_t buf[RH_RF95_MAX_MESSAGE_LEN + 1];
+  uint8_t len = RH_RF95_MAX_MESSAGE_LEN;
+
+  if (!rf95.recv(buf, &len)) {
+    Serial.println("[LORA RX] recv failed");
+    return;
+  }
+
+  buf[len] = '\0';
+
+  Serial.print("[LORA RX] ");
+  Serial.println((char*)buf);
+
+  Serial.print("[LORA RSSI] ");
+  Serial.println(rf95.lastRssi());
+
+  TelemetryPacket pkt{};
+  if (TelemetryCodec::parse((const char*)buf, pkt)) {
+    Serial.println("[LORA RX] parsed packet:");
+    printTelemetryToUsb(pkt);
+  } else {
+    Serial.println("[LORA RX] parse failed");
+  }
+}
+

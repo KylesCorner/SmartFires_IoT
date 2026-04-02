@@ -12,7 +12,7 @@
 #include "USBCDC.h"
 #include "WindSensorRevC.h"
 #include "LidarLiteV3.h"
-#include "shared/UartBridge.h"
+#include "shared/UartLoRaBridge.h"
 #include "shared/TelemetryPacket.h"
 #include "shared/TelemetryCodec.h"
 
@@ -47,8 +47,9 @@ enum OledPage : uint8_t {
   PAGE_ENV = 0,
   PAGE_GPS,
   PAGE_IMU,
-  PAGE_UART,
   PAGE_LIDAR,
+  PAGE_UART,
+  PAGE_LORA,
   PAGE_COUNT
 };
 
@@ -67,8 +68,8 @@ UartLoRaBridge loraBridge(LoRaSerial, PIN_LORA_RX, PIN_LORA_TX, 115200);
 uint32_t lastSendMs = 0;
 uint32_t seq = 0;
 uint32_t lastSentSeq = 0;
-uint32_t lastAckedSeq = 0;
-bool waitingForAck = false;
+uint32_t lastUARTAckedSeq = 0;
+bool waitingForUARTAck = false;
 uint32_t lastSendTimeMs = 0;
 enum TelemetryFlags : uint8_t {
   TF_FLAME = 1 << 0,
@@ -138,22 +139,22 @@ void loop() {
     lastSendMs = now;
 
     // Optional: only allow one in-flight packet at a time
-    if (!waitingForAck) {
+    if (!waitingForUARTAck) {
       ++seq;
       sendTelemetry(seq);
       lastSentSeq = seq;
       lastSendTimeMs = now;
-      waitingForAck = true;
+      waitingForUARTAck = true;
     } else {
       Serial.println("[UART] still waiting for ACK, skipping send");
     }
   }
 
   // ACK timeout handling
-  if (waitingForAck && (now - lastSendTimeMs >= UartLoRaBridge::kAckTimeoutMs)) {
+  if (waitingForUARTAck && (now - lastSendTimeMs >= UartLoRaBridge::kAckTimeoutMs)) {
     Serial.print("[UART] ACK timeout for seq ");
     Serial.println(lastSentSeq);
-    waitingForAck = false;
+    waitingForUARTAck = false;
   }
 
   if (oled.healthy()) {
@@ -223,8 +224,8 @@ void loop() {
         oled.printLine(0, "UART Connection");
         oled.printfLine(1, "Sent:%lu Ack:%lu",
                         (unsigned long)lastSentSeq,
-                        (unsigned long)lastAckedSeq);
-        oled.printfLine(2, "WaitAck:%s", waitingForAck ? "YES" : "NO");
+                        (unsigned long)lastUARTAckedSeq);
+        oled.printfLine(2, "WaitAck:%s", waitingForUARTAck ? "YES" : "NO");
         oled.printfLine(3, "UART:%s",
                         loraBridge.hasError() ? loraBridge.lastError() : "OK");
         break;
@@ -239,6 +240,44 @@ void loop() {
           oled.printLine(1, "No readings");
         }
         break;
+      case PAGE_LORA: {
+        oled.printLine(0, "LoRa Link");
+
+        const bool bootSeen = loraBridge.bootSeen();
+        const bool linkAlive =loraBridge.bootSeen() && ((millis() - lastSendTimeMs) < 3000 || waitingForUARTAck == false);
+
+        oled.printfLine(1, "B:%s L:%s",
+                        bootSeen ? "Y" : "N",
+                        linkAlive ? "OK" : "WAIT");
+
+        oled.printfLine(2, "S:%lu A:%lu",
+                        (unsigned long)lastSentSeq,
+                        (unsigned long)lastUARTAckedSeq);
+
+        if (loraBridge.hasRx()) {
+          char rxPreview[22];
+          strncpy(rxPreview, loraBridge.lastRx(), sizeof(rxPreview) - 1);
+          rxPreview[sizeof(rxPreview) - 1] = '\0';
+          oled.printfLine(3, "RX:%s", rxPreview);
+        } else if (waitingForUARTAck) {
+          oled.printLine(3, "RX: waiting ack");
+        } else {
+          oled.printLine(3, "RX: none");
+        }
+        break;
+      }
+
+      default:
+        oled.printLine(0, "Empty Page");
+        oled.printLine(1, "");
+        oled.printLine(2, "");
+        oled.printLine(3, "");
+
+      break;
+
+
+
+        
     }
   }
 }
@@ -335,10 +374,10 @@ void serviceBridge() {
       lastPrintedAck = ackSeq;
     }
 
-    lastAckedSeq = ackSeq;
+    lastUARTAckedSeq = ackSeq;
 
-    if (waitingForAck && ackSeq == lastSentSeq) {
-      waitingForAck = false;
+    if (waitingForUARTAck && ackSeq == lastSentSeq) {
+      waitingForUARTAck = false;
     }
   }
 

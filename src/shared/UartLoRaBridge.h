@@ -60,6 +60,8 @@ public:
 
   bool bootSeen() const { return _bootSeen; }
 
+  bool hasLoraAck() const { return _hasLoraAck; }
+
 private:
   void handleLine(const char* line) {
     Serial.print("[Feather->ESP32] ");
@@ -107,4 +109,5 @@ private:
   uint32_t _lastAckSeq = 0;
   char _lastRx[96] = {0};
   char _lastError[64] = {0};
+  bool _hasLoraAck = false;
 };
