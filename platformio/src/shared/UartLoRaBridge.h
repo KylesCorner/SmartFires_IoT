@@ -49,6 +49,11 @@ public:
     _port.print('\n');
   }
 
+  // Send a pre-built binary frame (no framing added — caller owns the full frame bytes).
+  void sendBinaryFrame(const uint8_t* data, size_t len) {
+    _port.write(data, len);
+  }
+
   bool hasAck() const { return _hasAck; }
   uint32_t lastAckSeq() const { return _lastAckSeq; }
 

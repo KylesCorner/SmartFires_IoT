@@ -14,7 +14,11 @@
 #include "LidarLiteV3.h"
 #include "shared/UartLoRaBridge.h"
 #include "shared/TelemetryPacket.h"
-#include "shared/TelemetryCodec.h"
+#include "shared/BinaryPacket.h"
+
+#ifndef NODE_ID
+  #error "NODE_ID must be set in platformio.ini build_flags (e.g. -D NODE_ID=1)"
+#endif
 
 
 
@@ -341,11 +345,28 @@ TelemetryPacket buildTelemetryPacket(uint32_t seq) {
 void sendTelemetry(uint32_t seq) {
   TelemetryPacket pkt = buildTelemetryPacket(seq);
 
-  char line[192];
-  if (TelemetryCodec::encode(pkt, line, sizeof(line))) {
-    loraBridge.sendLine(line);
-    Serial.print("[UART TX] ");
-    Serial.println(line);
+  BinaryPacket::FullStatePayload payload{};
+  payload.session_time   = pkt.uptimeMs;  // local millis until TIME_SYNC is live
+  payload.uptime_ms      = pkt.uptimeMs;
+  payload.sensor_flags   = pkt.sensorFlags;
+  payload.flame          = pkt.flameDetected ? 1u : 0u;
+  payload.wind_cms       = static_cast<uint16_t>(pkt.windMps * 100.0f + 0.5f);
+  payload.temp_cdegc     = static_cast<int16_t>(pkt.tempC * 100.0f);
+  payload.humidity_cpct  = static_cast<uint16_t>(pkt.humidityPct * 100.0f + 0.5f);
+  payload.lidar_cm       = static_cast<uint16_t>(pkt.lidarCm > 0 ? pkt.lidarCm : 0);
+  payload.lat_e7         = static_cast<int32_t>(pkt.lat * 1e7);
+  payload.lon_e7         = static_cast<int32_t>(pkt.lon * 1e7);
+
+  uint8_t frame[40];
+  const size_t len = BinaryPacket::encodeFullStateFrame(
+      NODE_ID, static_cast<uint8_t>(seq & 0xFF), payload, frame, sizeof(frame));
+
+  if (len > 0) {
+    loraBridge.sendBinaryFrame(frame, len);
+    Serial.print("[UART TX] binary seq=");
+    Serial.print(seq & 0xFF);
+    Serial.print(" node=");
+    Serial.println(NODE_ID);
   } else {
     Serial.println("[UART TX] encode failed");
   }
@@ -376,7 +397,8 @@ void serviceBridge() {
 
     lastUARTAckedSeq = ackSeq;
 
-    if (waitingForUARTAck && ackSeq == lastSentSeq) {
+    // Wire seq is 8-bit rolling (0-255); compare low byte only
+    if (waitingForUARTAck && (ackSeq & 0xFF) == (lastSentSeq & 0xFF)) {
       waitingForUARTAck = false;
     }
   }
