@@ -78,7 +78,7 @@ _ST_CHECK_CRC = 4
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="SmartFires telemetry receiver")
-    p.add_argument("--port",   default="/dev/ttyTHS0", help="Serial port (default: /dev/ttyTHS0)")
+    p.add_argument("--port",   default="/dev/ttyTHS1", help="Serial port (default: /dev/ttyTHS1)")
     p.add_argument("--baud",   type=int, default=115200, help="Baud rate (default: 115200)")
     p.add_argument("--output", default="telemetry.csv", help="Output CSV file (default: telemetry.csv)")
     return p.parse_args()
