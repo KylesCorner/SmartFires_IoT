@@ -140,17 +140,39 @@ void processFrame(const uint8_t* data, uint8_t len) {
     // ACK immediately so ESP32 can send the next packet
     sendAck(hdr.seq);
 
+    // Dump raw bytes about to be sent
+    Serial.print("[LORA TX] raw(");
+    Serial.print(BinaryPacket::kLoRaPayloadSize);
+    Serial.print("):");
+    for (size_t i = 0; i < BinaryPacket::kLoRaPayloadSize; i++) {
+        Serial.print(' ');
+        if (data[i] < 0x10) Serial.print('0');
+        Serial.print(data[i], HEX);
+    }
+    Serial.println();
+
+    // Dump decoded fields
+    Serial.print("[LORA TX] hdr magic=0x"); Serial.print(hdr.magic, HEX);
+    Serial.print(" type=0x");  Serial.print(hdr.pkt_type, HEX);
+    Serial.print(" node=");    Serial.print(hdr.node_id);
+    Serial.print(" seq=");     Serial.println(hdr.seq);
+    Serial.print("[LORA TX] payload session_ms="); Serial.print(payload.session_time);
+    Serial.print(" uptime_ms="); Serial.print(payload.uptime_ms);
+    Serial.print(" flags=0x");   Serial.print(payload.sensor_flags, HEX);
+    Serial.print(" flame=");     Serial.println(payload.flame);
+    Serial.print("[LORA TX]   wind_cms="); Serial.print(payload.wind_cms);
+    Serial.print(" temp_cdegc="); Serial.print(payload.temp_cdegc);
+    Serial.print(" hum_cpct=");   Serial.print(payload.humidity_cpct);
+    Serial.print(" lidar_cm=");   Serial.println(payload.lidar_cm);
+    Serial.print("[LORA TX]   lat_e7="); Serial.print(payload.lat_e7);
+    Serial.print(" lon_e7=");     Serial.println(payload.lon_e7);
+
     // Forward raw LoRa payload (header + sensor data, no UART framing overhead)
     if (!rf95.send(data, static_cast<uint8_t>(BinaryPacket::kLoRaPayloadSize))) {
         Serial.println("[LORA] send failed");
         return;
     }
     rf95.waitPacketSent();
-
-    Serial.print("[LORA TX] node=");
-    Serial.print(hdr.node_id);
-    Serial.print(" seq=");
-    Serial.println(hdr.seq);
 }
 
 void sendAck(uint8_t seq) {
