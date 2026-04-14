@@ -179,8 +179,8 @@ void sendAck(uint8_t seq) {
     char line[16];
     snprintf(line, sizeof(line), "ACK,%u", static_cast<unsigned>(seq));
     Serial1.println(line);
-    Serial.print("[UART TX] ");
-    Serial.println(line);
+    // Serial.print("[UART TX] ");
+    // Serial.println(line);
 }
 
 // ---------------------------------------------------------------------------

@@ -13,11 +13,29 @@ static constexpr uint8_t PIN_BUZZER = 5; // choose a PWM-capable pin (not requir
 
 static constexpr uint8_t PIN_SERVO = 6; // choose a PWM-capable pin
 
-static constexpr uint8_t PIN_BUTTON = D11;
 
 static constexpr uint8_t PIN_WIND_RV = A1;
 static constexpr uint8_t PIN_WIND_TMP = A0;
 
 static constexpr uint8_t PIN_LORA_TX= TX;
 static constexpr uint8_t PIN_LORA_RX= RX;
+
+
+// keypad setup
+static const uint8_t KEYPAD_ROWS[4] = {D3, D4, D5, D6};
+static const uint8_t KEYPAD_COLS[4] = {D7, D8, D9, D10};
+
+static const char KEYPAD_MAP[4][4] = {
+  {'1', '2', '3', 'A'},
+  {'4', '5', '6', 'B'},
+  {'7', '8', '9', 'C'},
+  {'*', '0', '#', 'D'}
+};
+
+// keypad actions
+static const char KEYPAD_PREV_PAGE = '1';
+static const char KEYPAD_NEXT_PAGE= '2';
+static const char KEYPAD_TOGGLE_SENSING = '*';
+static const char KEYPAD_HOMEPAGE = '#';
+
 

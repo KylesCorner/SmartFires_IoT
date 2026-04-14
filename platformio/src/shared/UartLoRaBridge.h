@@ -26,8 +26,8 @@ public:
       if (c == '\n') {
         _line[_lineLen] = '\0';
         if (_lineLen > 0) {
-          Serial.print("[UART LINE RX] ");
-          Serial.println(_line);
+          // Serial.print("[UART LINE RX] ");
+          // Serial.println(_line);
           handleLine(_line);
         }
         _lineLen = 0;
@@ -69,8 +69,8 @@ public:
 
 private:
   void handleLine(const char* line) {
-    Serial.print("[Feather->ESP32] ");
-    Serial.println(line);
+    // Serial.print("[Feather->ESP32] ");
+    // Serial.println(line);
 
     if (strncmp(line, "ACK,BOOT", 8) == 0) {
       _bootSeen = true;
