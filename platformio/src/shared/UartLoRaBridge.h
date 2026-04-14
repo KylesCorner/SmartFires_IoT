@@ -1,3 +1,4 @@
+#pragma once
 class UartLoRaBridge {
 public:
   static constexpr uint32_t kTelemetryPeriodMs = 250;
