@@ -92,13 +92,26 @@ pio device monitor -e drone                      # serial monitor ESP32
 [0xAA][0x55][len=31: u8][PktHeader: 4 bytes][FullStatePayload: 27 bytes][crc8]
 ```
 
-### LoRa payload — feather node → feather base (31 bytes, no extra framing)
+### LoRa payload — feather node → feather base (31 bytes)
 
 ```
 [PktHeader: 4 bytes][FullStatePayload: 27 bytes]
 ```
 
-RadioHead handles LoRa framing. The raw payload is forwarded as-is.
+RadioHead `RHReliableDatagram` handles LoRa framing, ACK, and retry. The node calls
+`sendtoWait()` (up to 5 retries, 300 ms timeout per attempt); the base calls `recvfromAck()`
+which auto-sends the ACK. The raw sensor payload is forwarded as-is — no re-encode.
+
+**RHReliableDatagram address scheme:**
+
+| Device | Address |
+|---|---|
+| Base station | `0x01` (`BASE_ADDR`) |
+| Node 1 | `0x01` (= `NODE_ID`) |
+| Node N | `NODE_ID` |
+
+Note: with the current single-node setup NODE_ID=1 and BASE_ADDR=0x01 share the same
+value. When adding node 2, set `NODE_ID=2` for that Feather — its address becomes 0x02.
 
 ### UART frame — feather base → Jetson (36 bytes)
 
@@ -140,10 +153,11 @@ Defined in full at `platformio/TELEMETRY_REWORK_PLAN.md`.
 
 | Phase | Status | Description |
 |---|---|---|
-| 1 — Binary full-state | **Done** (branch `feature/binary-telemetry`) | Replace text CSV with packed binary frames. `session_time` uses local `millis()` as a placeholder. |
+| 1 — Binary full-state | **Done** | Replace text CSV with packed binary frames. `session_time` uses local `millis()` as a placeholder. |
+| 1b — LoRa ACK/retry | **Done** | Switched from raw `RH_RF95` to `RHReliableDatagram`. Node retries up to 5× (300 ms/attempt) before dropping. Base auto-ACKs via `recvfromAck()`. UART ACK to ESP32 is unchanged. |
 | 2 — TIME_SYNC | Not started | Base station broadcasts authoritative session clock. Nodes maintain a `millis()` offset. `PKT_TIME_SYNC = 0x03` type already reserved in `BinaryPacket.h`. |
 | 3 — Delta packets | Not started | Changed-field bitmask, threshold suppression, periodic full refresh. |
-| 4 — Feather TX queue | Not started | Ring buffer on Feather node; priority classes; stale delta replacement. |
+| 4 — Feather TX queue + duty cycle | Not started | Ring buffer on Feather node; priority classes; stale delta replacement. ESP32 batches packets, Feather wakes LoRa TX, sends batch with per-packet ACK/retry, sleeps radio to save power. Batch size is dynamic (sensing interval may vary); ESP32 may send metadata packets to Feather to signal batch start/size. |
 | 5 — Receiver recovery | Not started | Sequence gap handling, SYNC_REQUEST, debug counters. |
 
 ---
@@ -172,7 +186,8 @@ CSV columns: `timestamp, node_id, seq, session_time_ms, uptime_ms, sensor_flags,
 - **Binary not text:** text CSV was ~90 bytes/packet; binary full-state is 31 bytes over LoRa.
 - **Fixed-point integers:** no floats on the wire — deterministic size, no locale/printf issues on MCUs.
 - **8-bit rolling seq in header:** sufficient for drop detection; full `uint32_t` seq lives only in ESP32 RAM. ACK comparison uses `& 0xFF` on both sides.
-- **Raw LoRa forwarding:** Feather node sends the payload bytes verbatim; no re-encode. Jetson owns parsing.
+- **LoRa ACK/retry via RHReliableDatagram:** Node uses `sendtoWait()` (5 retries, 300 ms timeout each). Base uses `recvfromAck()` which auto-ACKs. Eliminates the ~40% fire-and-forget packet loss of the original raw `RH_RF95` approach.
+- **Raw LoRa payload forwarding:** Feather node sends the sensor payload bytes verbatim; no re-encode. Jetson owns parsing.
 - **RSSI in base frame:** prepended as `int8_t` before the LoRa payload. Logged to CSV for link quality analysis.
 - **CRC-8/MAXIM (0x31):** standard single-byte CRC, good for short frames, same algorithm on both C++ and Python sides.
 - **Two-node collision strategy (Phase 1):** staggered fixed TX intervals + random jitter. TDMA requires TIME_SYNC (Phase 2).

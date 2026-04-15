@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <RH_RF95.h>
+#include <RHReliableDatagram.h>
 #include "shared/BinaryPacket.h"
 
 // LoRa radio pins (Adafruit Feather M0 RFM95)
@@ -7,6 +8,13 @@ static constexpr int   RFM95_CS   = 8;
 static constexpr int   RFM95_INT  = 3;
 static constexpr int   RFM95_RST  = 4;
 static constexpr float RFM95_FREQ = 915.0f;
+
+// RHReliableDatagram address scheme:
+//   base station = BASE_ADDR (0x01)
+//   each node    = its compile-time NODE_ID
+static constexpr uint8_t  BASE_ADDR       = 0x01;
+static constexpr uint8_t  LORA_RETRIES    = 5;
+static constexpr uint16_t LORA_TIMEOUT_MS = 300;
 
 RH_RF95 rf95(RFM95_CS, RFM95_INT);
 
@@ -22,8 +30,10 @@ void resetRadio() {
 // ---------------------------------------------------------------------------
 // NODE MODE
 //   - Receives binary telemetry frames from ESP32 over UART (Serial1)
-//   - Validates CRC, sends text ACK back to ESP32
-//   - Forwards raw LoRa payload (PktHeader + FullStatePayload) over radio
+//   - Validates CRC, sends text ACK back to ESP32 immediately
+//   - Forwards raw LoRa payload (PktHeader + FullStatePayload) to base station
+//   - Uses RHReliableDatagram: up to LORA_RETRIES attempts, LORA_TIMEOUT_MS per attempt
+//   - UART ACK to ESP32 is sent before LoRa TX; ESP32 does not see LoRa outcome
 //
 // Build flags required: -D LORA_NODE=1  -D NODE_ID=<n>
 // ---------------------------------------------------------------------------
@@ -31,6 +41,8 @@ void resetRadio() {
 #ifndef NODE_ID
   #error "NODE_ID must be defined in platformio.ini when using LORA_NODE"
 #endif
+
+RHReliableDatagram manager(rf95, static_cast<uint8_t>(NODE_ID));
 
 // Binary frame receiver state machine
 enum FrameState : uint8_t {
@@ -41,14 +53,14 @@ enum FrameState : uint8_t {
     FS_CHECK_CRC,
 };
 
-static FrameState frameState = FS_WAIT_M0;
+static FrameState frameState      = FS_WAIT_M0;
 
 // buf layout: [len_byte, data[0..len-1]]
 // CRC is computed over this entire buffer (len byte + data).
 // Sized for the largest expected UART frame (drone sends 35 bytes; data = 31).
-static uint8_t  frameBuf[64];
-static uint8_t  frameExpectedLen = 0;
-static uint8_t  framePos         = 0;  // position in frameBuf (0 = len byte)
+static uint8_t frameBuf[64];
+static uint8_t frameExpectedLen = 0;
+static uint8_t framePos         = 0;  // position in frameBuf (0 = len byte)
 
 void processFrame(const uint8_t* data, uint8_t len);
 void sendAck(uint8_t seq);
@@ -59,8 +71,8 @@ void setup() {
     delay(1000);
 
     resetRadio();
-    if (!rf95.init()) {
-        Serial.println("[LORA] RH_RF95 init failed");
+    if (!manager.init()) {
+        Serial.println("[LORA] RHReliableDatagram init failed");
         while (1) { delay(100); }
     }
     if (!rf95.setFrequency(RFM95_FREQ)) {
@@ -68,9 +80,16 @@ void setup() {
         while (1) { delay(100); }
     }
     rf95.setTxPower(13, false);
+    manager.setRetries(LORA_RETRIES);
+    manager.setTimeout(LORA_TIMEOUT_MS);
 
     Serial.print("[LORA] Node ready, id=");
-    Serial.println(NODE_ID);
+    Serial.print(NODE_ID);
+    Serial.print(", retries=");
+    Serial.print(LORA_RETRIES);
+    Serial.print(", timeout=");
+    Serial.print(LORA_TIMEOUT_MS);
+    Serial.println("ms");
 }
 
 void loop() {
@@ -128,7 +147,7 @@ void loop() {
 }
 
 void processFrame(const uint8_t* data, uint8_t len) {
-    BinaryPacket::PktHeader      hdr{};
+    BinaryPacket::PktHeader       hdr{};
     BinaryPacket::FullStatePayload payload{};
 
     if (!BinaryPacket::decodeFullState(data, len, hdr, payload)) {
@@ -137,57 +156,55 @@ void processFrame(const uint8_t* data, uint8_t len) {
         return;
     }
 
-    // ACK immediately so ESP32 can send the next packet
+    // ACK immediately — ESP32 does not need to wait for LoRa outcome
     sendAck(hdr.seq);
 
-    // Dump raw bytes about to be sent
-    Serial.print("[LORA TX] raw(");
-    Serial.print(BinaryPacket::kLoRaPayloadSize);
-    Serial.print("):");
-    for (size_t i = 0; i < BinaryPacket::kLoRaPayloadSize; i++) {
-        Serial.print(' ');
-        if (data[i] < 0x10) Serial.print('0');
-        Serial.print(data[i], HEX);
-    }
-    Serial.println();
+    Serial.print("[LORA TX] seq=");
+    Serial.print(hdr.seq);
+    Serial.print(" node=");
+    Serial.print(hdr.node_id);
+    Serial.println(" sending...");
 
-    // Dump decoded fields
-    Serial.print("[LORA TX] hdr magic=0x"); Serial.print(hdr.magic, HEX);
-    Serial.print(" type=0x");  Serial.print(hdr.pkt_type, HEX);
-    Serial.print(" node=");    Serial.print(hdr.node_id);
-    Serial.print(" seq=");     Serial.println(hdr.seq);
-    Serial.print("[LORA TX] payload session_ms="); Serial.print(payload.session_time);
-    Serial.print(" uptime_ms="); Serial.print(payload.uptime_ms);
-    Serial.print(" flags=0x");   Serial.print(payload.sensor_flags, HEX);
-    Serial.print(" flame=");     Serial.println(payload.flame);
-    Serial.print("[LORA TX]   wind_cms="); Serial.print(payload.wind_cms);
-    Serial.print(" temp_cdegc="); Serial.print(payload.temp_cdegc);
-    Serial.print(" hum_cpct=");   Serial.print(payload.humidity_cpct);
-    Serial.print(" lidar_cm=");   Serial.println(payload.lidar_cm);
-    Serial.print("[LORA TX]   lat_e7="); Serial.print(payload.lat_e7);
-    Serial.print(" lon_e7=");     Serial.println(payload.lon_e7);
+    // sendtoWait blocks until ACK received or all retries exhausted.
+    // retransmissions() is a running total; delta gives retries for this packet.
+    const uint32_t retxBefore = manager.retransmissions();
+    const bool ok = manager.sendtoWait(
+        const_cast<uint8_t*>(data),
+        static_cast<uint8_t>(BinaryPacket::kLoRaPayloadSize),
+        BASE_ADDR);
+    const uint32_t retries = manager.retransmissions() - retxBefore;
 
-    // Forward raw LoRa payload (header + sensor data, no UART framing overhead)
-    if (!rf95.send(data, static_cast<uint8_t>(BinaryPacket::kLoRaPayloadSize))) {
-        Serial.println("[LORA] send failed");
-        return;
+    if (ok) {
+        Serial.print("[LORA TX] seq=");
+        Serial.print(hdr.seq);
+        Serial.print(" ACKed");
+        if (retries > 0) {
+            Serial.print(" after ");
+            Serial.print(retries);
+            Serial.print(retries == 1 ? " retry" : " retries");
+        }
+        Serial.println();
+    } else {
+        Serial.print("[LORA TX] seq=");
+        Serial.print(hdr.seq);
+        Serial.print(" FAILED after ");
+        Serial.print(LORA_RETRIES);
+        Serial.println(" retries — packet dropped");
     }
-    rf95.waitPacketSent();
 }
 
 void sendAck(uint8_t seq) {
     char line[16];
     snprintf(line, sizeof(line), "ACK,%u", static_cast<unsigned>(seq));
     Serial1.println(line);
-    // Serial.print("[UART TX] ");
-    // Serial.println(line);
 }
 
 // ---------------------------------------------------------------------------
 #elif defined(LORA_BASE_STATION)
 // ---------------------------------------------------------------------------
 // BASE STATION MODE
-//   - Listens for LoRa packets from any node
+//   - Listens for LoRa packets from any node via RHReliableDatagram
+//   - recvfromAck() auto-ACKs each received packet back to the sender
 //   - Validates packet magic / type before forwarding
 //   - Forwards to Jetson over UART (Serial1) with RSSI prepended:
 //       [0xAA][0x55][len:32][rssi:i8][PktHeader:4][FullStatePayload:27][crc8]
@@ -196,15 +213,16 @@ void sendAck(uint8_t seq) {
 // No NODE_ID needed — the base station is not a sensor node.
 // ---------------------------------------------------------------------------
 
+RHReliableDatagram manager(rf95, BASE_ADDR);
+
 void setup() {
     Serial.begin(115200);   // USB — debug output
     Serial1.begin(115200);  // UART — Jetson link
-
     delay(1000);
 
     resetRadio();
-    if (!rf95.init()) {
-        Serial.println("[LORA] RH_RF95 init failed");
+    if (!manager.init()) {
+        Serial.println("[LORA] RHReliableDatagram init failed");
         while (1) { delay(100); }
     }
     if (!rf95.setFrequency(RFM95_FREQ)) {
@@ -212,34 +230,37 @@ void setup() {
         while (1) { delay(100); }
     }
     rf95.setTxPower(13, false);
+    manager.setRetries(LORA_RETRIES);
+    manager.setTimeout(LORA_TIMEOUT_MS);
 
-    Serial.println("[LORA] Base station ready");
+    Serial.println("[LORA] Base station ready (RHReliableDatagram, auto-ACK)");
 }
 
 void loop() {
-    if (!rf95.available()) return;
-
     uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
-    uint8_t len = RH_RF95_MAX_MESSAGE_LEN;
+    uint8_t len  = sizeof(buf);
+    uint8_t from = 0;
 
-    if (!rf95.recv(buf, &len)) {
-        Serial.println("[LORA] recv failed");
-        return;
-    }
+    // recvfromAck() returns true when a packet is available and ACK has been sent
+    if (!manager.recvfromAck(buf, &len, &from)) return;
 
     const int8_t rssi = static_cast<int8_t>(rf95.lastRssi());
 
     // Validate before forwarding — drop malformed packets silently
-    BinaryPacket::PktHeader       hdr{};
+    BinaryPacket::PktHeader        hdr{};
     BinaryPacket::FullStatePayload payload{};
     if (!BinaryPacket::decodeFullState(buf, len, hdr, payload)) {
-        Serial.print("[LORA] invalid packet, len=");
+        Serial.print("[LORA] invalid packet from=0x");
+        Serial.print(from, HEX);
+        Serial.print(" len=");
         Serial.println(len);
         return;
     }
 
     Serial.print("[LORA RX] node=");
     Serial.print(hdr.node_id);
+    Serial.print(" from=0x");
+    Serial.print(from, HEX);
     Serial.print(" seq=");
     Serial.print(hdr.seq);
     Serial.print(" rssi=");
