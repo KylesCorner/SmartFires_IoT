@@ -32,6 +32,7 @@ void SensorManager::sleepAllSensors() {
 }
 
 void SensorManager::wakeAllSensors() {
+
   for (size_t i = 0; i < _ctx.numSensors; ++i) {
     const bool ok = _ctx.sensors[i]->wake();
     Serial.print("Wake ");

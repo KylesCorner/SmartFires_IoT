@@ -5,10 +5,11 @@ enum class OledPage : uint8_t {
   Env = 0,
   Gps,
   Imu,
-  Lidar,
   Uart,
+  Count, // pages end here
+  Lidar,
   Lora,
-  Count
+  Empty
 };
 
 struct LinkState {
@@ -31,6 +32,7 @@ struct UiState {
 struct AppState {
   bool sensingEnabled = true;
   bool sensorsSleeping = false;
+  bool lastSensorsSleeping = false;
   LinkState link;
   UiState ui;
 };

@@ -6,7 +6,7 @@
 // OledPageController::OledPageController(DroneContext& ctx, AppState& state,
 // IClock& clock)
 //     : _ctx(ctx), _state(state), _clock(clock) {}
-    namespace {
+namespace {
 constexpr uint32_t kOledRenderIntervalMs = 250;
 }
 
@@ -46,7 +46,7 @@ void OledPageController::render() {
     break;
 
   default:
-    _ctx.oled.printLine(0, "Empty Page");
+    _ctx.oled.printLine(0, "");
     _ctx.oled.printLine(1, "");
     _ctx.oled.printLine(2, "");
     _ctx.oled.printLine(3, "");
@@ -57,8 +57,13 @@ void OledPageController::render() {
 }
 
 void OledPageController::renderEnv() {
-  _ctx.oled.printLine(0, _state.sensingEnabled ? "Environment"
-                                               : "Environment [PAUSED]");
+  if (_state.sensorsSleeping) {
+    _ctx.oled.printLine(0, "Environment [SLEEP]");
+  } else if (!_state.sensingEnabled) {
+    _ctx.oled.printLine(0, "Environment [PAUSED]");
+  } else {
+    _ctx.oled.printLine(0, "Environment");
+  }
 
   if (_ctx.wind.hasReading()) {
     _ctx.oled.printfLine(1, "Wind Speed:%.3f", _ctx.wind.windMps());
@@ -84,7 +89,13 @@ void OledPageController::renderEnv() {
 }
 
 void OledPageController::renderGps() {
-  _ctx.oled.printLine(0, _state.sensingEnabled ? "GPS" : "GPS [PAUSED]");
+  if (_state.sensorsSleeping) {
+    _ctx.oled.printLine(0, "GPS [SLEEP]");
+  } else if (!_state.sensingEnabled) {
+    _ctx.oled.printLine(0, "GPS [PAUSED]");
+  } else {
+    _ctx.oled.printLine(0, "GPS");
+  }
 
   if (!_ctx.gps.hasReading()) {
     _ctx.oled.printLine(1, _state.sensingEnabled ? "No data" : "Paused");
@@ -104,8 +115,13 @@ void OledPageController::renderGps() {
 }
 
 void OledPageController::renderImu() {
-  _ctx.oled.printLine(0, _state.sensingEnabled ? "IMU" : "IMU [PAUSED]");
-  _ctx.oled.printLine(0, _state.sensorsSleeping? "IMU" : "IMU [SLEEP]");
+  if (_state.sensorsSleeping) {
+    _ctx.oled.printLine(0, "IMU [SLEEP]");
+  } else if (!_state.sensingEnabled) {
+    _ctx.oled.printLine(0, "IMU [PAUSED]");
+  } else {
+    _ctx.oled.printLine(0, "IMU");
+  }
 
   if (_ctx.imu.hasReading()) {
     _ctx.oled.printfLine(1, "A:%.1f %.1f %.1f", _ctx.imu.ax_mg(),
@@ -122,8 +138,13 @@ void OledPageController::renderImu() {
 }
 
 void OledPageController::renderLidar() {
-  _ctx.oled.printLine(0, _state.sensingEnabled ? "LIDAR" : "LIDAR [PAUSED]");
-
+  if (_state.sensorsSleeping) {
+    _ctx.oled.printLine(0, "Lidar [SLEEP]");
+  } else if (!_state.sensingEnabled) {
+    _ctx.oled.printLine(0, "Lidar [PAUSED]");
+  } else {
+    _ctx.oled.printLine(0, "Lidar");
+  }
   if (_ctx.lidar.hasReading()) {
     _ctx.oled.printfLine(1, "Dist: %d cm", _ctx.lidar.distanceCm());
   } else {

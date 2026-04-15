@@ -35,13 +35,12 @@ void KeypadController::update() {
       break;
 
     case KEYPAD_HOMEPAGE:
-      _state.ui.currentPage = OledPage::Env;
+      _state.ui.currentPage = OledPage::Empty;
       _state.ui.oledNeedsRefresh = true;
       break;
 
     case KEYPAD_TOGGLE_SLEEP:
       _state.sensorsSleeping = !_state.sensorsSleeping;
-      _state.sensingEnabled = !_state.sensingEnabled;
       _state.ui.oledNeedsRefresh = true;
       break;
 

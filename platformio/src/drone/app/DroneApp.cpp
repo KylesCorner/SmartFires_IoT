@@ -24,28 +24,27 @@ void DroneApp::setup() {
 void DroneApp::loop() {
   _link.update();
 
+  // Only perform sleep/wake action when the state changes.
+  if (_state.sensorsSleeping != _state.lastSensorsSleeping) {
+    if (_state.sensorsSleeping) {
+      _sensors.sleepAllSensors();
+    } else {
+      _sensors.wakeAllSensors();
+    }
+
+    _state.lastSensorsSleeping = _state.sensorsSleeping;
+  }
+
+  // Do not sample sensors while they are sleeping.
   if (_state.sensorsSleeping) {
-    _sensors.sleepAllSensors();
-  } else {
-    _sensors.wakeAllSensors();
-  }
-
-  if (_state.sensingEnabled) {
-
-    _sensors.sampleAll();
-  } else {
     _sensors.sampleKeypadOnly();
+  } else {
+    if (_state.sensingEnabled) {
+      _sensors.sampleAll();
+    } else {
+      _sensors.sampleKeypadOnly();
+    }
   }
-
-  // if (_state.sensorsSleeping) {
-  //   _sensors.sampleKeypadOnly();
-  // } else {
-  //   if (_state.sensingEnabled) {
-  //     _sensors.sampleAll();
-  //   } else {
-  //     _sensors.sampleKeypadOnly();
-  //   }
-  // }
 
   _actuators.updateAll();
   _keypad.update();
