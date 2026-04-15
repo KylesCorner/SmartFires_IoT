@@ -64,24 +64,6 @@ public:
   bool sample() override {
     if (!_healthy)
       return false;
-    if (_powerMode == PowerMode::Sleep) {
-      // Duty-cycled accel-only mode:
-      _ax_mg = NAN;
-      _ay_mg = NAN;
-      _az_mg = NAN;
-      // gyro and mag are intentionally not being maintained
-      _gx_dps = NAN;
-      _gy_dps = NAN;
-      _gz_dps = NAN;
-
-      _mx_uT = NAN;
-      _my_uT = NAN;
-      _mz_uT = NAN;
-
-      // temp may not be meaningful / needed here
-      _temp_C = NAN;
-      return false;
-    };
 
     const uint32_t now = millis();
     const uint32_t interval = (_powerMode == PowerMode::DutyCycledAccel)
@@ -156,9 +138,6 @@ public:
   bool sleep() override {
     if (!_healthy)
       return false;
-    if (_powerMode == PowerMode::Sleep) {
-      return false;
-    }
 
     if (_icm.sleep(true) != ICM_20948_Stat_Ok) {
       _healthy = false;

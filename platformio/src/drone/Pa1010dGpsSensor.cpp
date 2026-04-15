@@ -86,8 +86,8 @@ bool Pa1010dGpsSensor::ready() const {
 bool Pa1010dGpsSensor::sleep() {
   if (!_begun || !_healthy)
     return false;
-  if (_powerMode != PowerMode::FullPower)
-    return false;
+  // if (_powerMode != PowerMode::FullPower)
+  //   return false;
 
   // Standby mode: wakes via interface activity.
   _gps.sendCommand(kCmdStandby);
@@ -102,9 +102,9 @@ bool Pa1010dGpsSensor::wake() {
   if (!_begun)
     return false;
 
-  if (_powerMode == PowerMode::FullPower) {
-    return false;
-  }
+  // if (_powerMode == PowerMode::FullPower) {
+  //   return false;
+  // }
 
   if (_powerMode == PowerMode::Standby) {
     // Datasheet: any byte wakes from standby.
