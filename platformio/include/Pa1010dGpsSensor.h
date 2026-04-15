@@ -30,13 +30,23 @@ public:
 
     uint8_t day = 0;
     uint8_t month = 0;
-    uint8_t year = 0;   // 0..99 from GPS library
+    uint8_t year = 0;
   };
 
-  static constexpr uint8_t kDefaultAddress = GPS_DEFAULT_I2C_ADDR; // 0x10
-  static constexpr uint8_t kDefaultCharsPerSample = 64;
+  enum class PowerMode : uint8_t {
+    FullPower = 0,
+    Standby,
+    Backup
+  };
 
-  explicit Pa1010dGpsSensor(TwoWire& wire = Wire, uint8_t address = kDefaultAddress);
+  static constexpr uint8_t kDefaultAddress = GPS_DEFAULT_I2C_ADDR;
+  static constexpr uint8_t kDefaultCharsPerSample = 64;
+  static constexpr uint32_t kWakeSettleMs = 250;
+  static constexpr uint32_t kQuietTimeoutMs = 5000UL;
+
+  explicit Pa1010dGpsSensor(TwoWire& wire = Wire,
+                            uint8_t address = kDefaultAddress,
+                            int8_t wakePin = -1);
 
   // II2CDevice
   const char* name() const override { return "PA1010D Mini GPS"; }
@@ -47,14 +57,13 @@ public:
 
   // ISensor
   bool begin() override { return begin(*_wire); }
-  bool ready() const override { return _hasReading && _reading.fix; } // ready == currently has a fix
+  bool ready() const override;
   bool sample() override;
-  uint32_t ageMs() const override; // age of last valid fix, or UINT32_MAX if none yet
-  bool hasReading() const override { return _hasReading;}
+  uint32_t ageMs() const override;
+  bool hasReading() const override { return _hasReading; }
 
   // GPS-specific accessors
   bool hasFix() const { return _hasReading && _reading.fix; }
-
   const Reading& reading() const { return _reading; }
 
   float latitudeDegrees() const { return _reading.latitudeDeg; }
@@ -66,13 +75,23 @@ public:
   uint8_t satellites() const { return _reading.satellites; }
 
   uint32_t sentenceAgeMs() const;
+  PowerMode powerMode() const { return _powerMode; }
+
+  // Power control
+  bool wake();
+  bool sleep();              // software-controlled standby
+  bool enterBackupMode();    // requires wake pin
+  bool wakeFromBackup();     // requires wake pin
 
 private:
   bool configureGps_();
   void copyReading_();
+  void clearReading_();
 
+private:
   TwoWire* _wire;
   uint8_t _address;
+  int8_t _wakePin;
   Adafruit_GPS _gps;
 
   Reading _reading;
@@ -86,4 +105,7 @@ private:
   uint32_t _lastByteMs = 0;
   uint32_t _lastSentenceMs = 0;
   uint32_t _lastFixMs = 0;
+  uint32_t _lastWakeMs = 0;
+
+  PowerMode _powerMode = PowerMode::FullPower;
 };

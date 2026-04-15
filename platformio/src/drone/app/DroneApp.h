@@ -38,4 +38,6 @@ private:
   LinkService& _link;
   KeypadController& _keypad;
   OledPageController& _oled;
+
+  bool _sensorsSleeping = false;
 };

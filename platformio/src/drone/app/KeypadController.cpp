@@ -27,15 +27,21 @@ void KeypadController::update() {
       break;
     }
 
-    case '#':
+    case KEYPAD_TOGGLE_SENSING:
       _state.sensingEnabled = !_state.sensingEnabled;
       Serial.print("[KEYPAD] sensing ");
       Serial.println(_state.sensingEnabled ? "ENABLED" : "DISABLED");
       _state.ui.oledNeedsRefresh = true;
       break;
 
-    case '*':
+    case KEYPAD_HOMEPAGE:
       _state.ui.currentPage = OledPage::Env;
+      _state.ui.oledNeedsRefresh = true;
+      break;
+
+    case KEYPAD_TOGGLE_SLEEP:
+      _state.sensorsSleeping = !_state.sensorsSleeping;
+      _state.sensingEnabled = !_state.sensingEnabled;
       _state.ui.oledNeedsRefresh = true;
       break;
 

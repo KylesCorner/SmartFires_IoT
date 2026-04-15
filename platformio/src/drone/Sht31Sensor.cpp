@@ -36,6 +36,7 @@ bool Sht31Sensor::begin(TwoWire& wire) {
     constructDriver(wire);
   }
 
+
   _wire = &wire;
 
   if (!driver()->begin(_address)) {
@@ -57,13 +58,30 @@ bool Sht31Sensor::begin(TwoWire& wire) {
 
   return true;
 }
+bool Sht31Sensor::sleep() {
+  if (!_begun) {
+    return false;
+  }
+
+  _sleeping = true;
+  return true;
+}
+
+bool Sht31Sensor::wake() {
+  if (!_begun) {
+    return false;
+  }
+
+  _sleeping = false;
+  return true;
+}
 
 bool Sht31Sensor::ready() const {
   return _begun;
 }
 
 bool Sht31Sensor::sample() {
-  if (!_begun) {
+  if (!_begun || _sleeping) {
     return false;
   }
 

@@ -37,5 +37,6 @@ static const char KEYPAD_PREV_PAGE = '1';
 static const char KEYPAD_NEXT_PAGE= '2';
 static const char KEYPAD_TOGGLE_SENSING = '*';
 static const char KEYPAD_HOMEPAGE = '#';
+static const char KEYPAD_TOGGLE_SLEEP = '0';
 
 

@@ -3,26 +3,14 @@
 #include <Arduino.h>
 #include <Wire.h>
 
-DroneApp::DroneApp(uint8_t nodeId,
-                   DroneContext& ctx,
-                   AppState& state,
-                   IClock& clock,
-                   SensorManager& sensors,
-                   ActuatorManager& actuators,
-                   TelemetryService& telemetry,
-                   LinkService& link,
-                   KeypadController& keypad,
-                   OledPageController& oled)
-    : _nodeId(nodeId),
-      _ctx(ctx),
-      _state(state),
-      _clock(clock),
-      _sensors(sensors),
-      _actuators(actuators),
-      _telemetry(telemetry),
-      _link(link),
-      _keypad(keypad),
-      _oled(oled) {}
+DroneApp::DroneApp(uint8_t nodeId, DroneContext &ctx, AppState &state,
+                   IClock &clock, SensorManager &sensors,
+                   ActuatorManager &actuators, TelemetryService &telemetry,
+                   LinkService &link, KeypadController &keypad,
+                   OledPageController &oled)
+    : _nodeId(nodeId), _ctx(ctx), _state(state), _clock(clock),
+      _sensors(sensors), _actuators(actuators), _telemetry(telemetry),
+      _link(link), _keypad(keypad), _oled(oled) {}
 
 void DroneApp::setup() {
   Serial.begin(115200);
@@ -33,15 +21,31 @@ void DroneApp::setup() {
   _actuators.beginAll();
   _ctx.bridge.begin();
 }
-
 void DroneApp::loop() {
   _link.update();
 
+  if (_state.sensorsSleeping) {
+    _sensors.sleepAllSensors();
+  } else {
+    _sensors.wakeAllSensors();
+  }
+
   if (_state.sensingEnabled) {
+
     _sensors.sampleAll();
   } else {
     _sensors.sampleKeypadOnly();
   }
+
+  // if (_state.sensorsSleeping) {
+  //   _sensors.sampleKeypadOnly();
+  // } else {
+  //   if (_state.sensingEnabled) {
+  //     _sensors.sampleAll();
+  //   } else {
+  //     _sensors.sampleKeypadOnly();
+  //   }
+  // }
 
   _actuators.updateAll();
   _keypad.update();

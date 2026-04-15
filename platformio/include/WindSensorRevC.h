@@ -1,7 +1,7 @@
 #pragma once
+#include "ISensor.h"
 #include <Arduino.h>
 #include <math.h>
-#include "ISensor.h"
 
 class WindSensorRevC : public ISensor {
 public:
@@ -23,19 +23,14 @@ public:
   };
 
   // Full config constructor
-  explicit WindSensorRevC(const Config& cfg)
-    : cfg_(cfg) {}
+  explicit WindSensorRevC(const Config &cfg) : cfg_(cfg) {}
 
   // Simple global-friendly constructor
-  WindSensorRevC(uint8_t pinRv,
-                 uint8_t pinTmp,
-                 float adcRefVolts = 3.3f,
-                 uint16_t adcMax = 4095,
-                 float rvDividerRatio = 1.0f,
+  WindSensorRevC(uint8_t pinRv, uint8_t pinTmp, float adcRefVolts = 3.3f,
+                 uint16_t adcMax = 4095, float rvDividerRatio = 1.0f,
                  float tmpDividerRatio = 1.0f,
                  float zeroWindAdjustmentVolts = 0.2f,
-                 uint32_t warmupMs = 10000,
-                 uint32_t minSamplePeriodMs = 200,
+                 uint32_t warmupMs = 10000, uint32_t minSamplePeriodMs = 200,
                  uint8_t samplesToAverage = 8) {
     cfg_.pinRv = pinRv;
     cfg_.pinTmp = pinTmp;
@@ -49,9 +44,7 @@ public:
     cfg_.samplesToAverage = samplesToAverage;
   }
 
-  const char* name() const override {
-    return "Wind Sensor Rev C";
-  }
+  const char *name() const override { return "Wind Sensor Rev C"; }
 
   bool begin() override {
     pinMode(cfg_.pinRv, INPUT);
@@ -70,6 +63,9 @@ public:
   }
 
   bool sample() override {
+    if (_sleeping) {
+      return false;
+    }
     const uint32_t now = millis();
 
     if ((now - lastSampleMs_) < cfg_.minSamplePeriodMs) {
@@ -95,16 +91,12 @@ public:
     rvVolts_ = rvAdcVolts * cfg_.rvDividerRatio;
     tmpVolts_ = tmpAdcVolts * cfg_.tmpDividerRatio;
 
-    temperatureC_ =
-        (2.097152f * tmpVolts_ * tmpVolts_) -
-        (34.533376f * tmpVolts_) +
-        90.754f;
+    temperatureC_ = (2.097152f * tmpVolts_ * tmpVolts_) -
+                    (34.533376f * tmpVolts_) + 90.754f;
 
-    zeroWindVolts_ =
-        (-0.12288f * tmpVolts_ * tmpVolts_) +
-        (1.0727f * tmpVolts_) +
-        0.23033203125f -
-        cfg_.zeroWindAdjustmentVolts;
+    zeroWindVolts_ = (-0.12288f * tmpVolts_ * tmpVolts_) +
+                     (1.0727f * tmpVolts_) + 0.23033203125f -
+                     cfg_.zeroWindAdjustmentVolts;
 
     float normalized = (rvVolts_ - zeroWindVolts_) / 0.2300f;
     if (normalized < 0.0f) {
@@ -125,18 +117,15 @@ public:
     return true;
   }
 
-  bool hasReading() const override {
-    return hasReading_;
-  }
+  bool hasReading() const override { return hasReading_; }
 
   uint32_t ageMs() const override {
-    if (!hasReading_) return UINT32_MAX;
+    if (!hasReading_)
+      return UINT32_MAX;
     return millis() - lastGoodSampleMs_;
   }
 
-  bool healthy() const override {
-    return healthy_;
-  }
+  bool healthy() const override { return healthy_; }
 
   float windMph() const { return windMph_; }
   float windMps() const { return windMps_; }
@@ -147,8 +136,16 @@ public:
   float tmpVolts() const { return tmpVolts_; }
   float zeroWindVolts() const { return zeroWindVolts_; }
 
-  void setZeroWindAdjustmentVolts(float v) {
-    cfg_.zeroWindAdjustmentVolts = v;
+  void setZeroWindAdjustmentVolts(float v) { cfg_.zeroWindAdjustmentVolts = v; }
+
+  bool sleep() override {
+    _sleeping = true;
+    return true;
+  }
+
+  bool wake() override {
+    _sleeping = false;
+    return true;
   }
 
 private:
@@ -169,8 +166,11 @@ private:
   float tmpVolts_ = NAN;
   float zeroWindVolts_ = NAN;
 
+  bool _sleeping = false;
+
   uint16_t readAveraged(uint8_t pin, uint8_t n) {
-    if (n == 0) n = 1;
+    if (n == 0)
+      n = 1;
     uint32_t sum = 0;
     for (uint8_t i = 0; i < n; ++i) {
       sum += analogRead(pin);
@@ -179,7 +179,8 @@ private:
   }
 
   float countsToVolts(uint16_t counts) const {
-    return (static_cast<float>(counts) * cfg_.adcRefVolts) / static_cast<float>(cfg_.adcMax);
+    return (static_cast<float>(counts) * cfg_.adcRefVolts) /
+           static_cast<float>(cfg_.adcMax);
   }
 
   void markFailure() {

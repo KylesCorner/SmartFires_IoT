@@ -25,10 +25,12 @@ struct LinkState {
 struct UiState {
   OledPage currentPage = OledPage::Env;
   bool oledNeedsRefresh = true;
+  uint32_t lastRenderMs = 0;
 };
 
 struct AppState {
   bool sensingEnabled = true;
+  bool sensorsSleeping = false;
   LinkState link;
   UiState ui;
 };

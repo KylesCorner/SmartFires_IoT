@@ -33,6 +33,15 @@ bool LidarLiteV3::ping() {
   recordFailure();
   return false;
 }
+bool LidarLiteV3::sleep() {
+  _sleeping = true;
+  return true;
+}
+
+bool LidarLiteV3::wake() {
+  _sleeping = false;
+  return true;
+}
 
 bool LidarLiteV3::ready() const {
   // Datasheet says measurements can begin roughly 22 ms after power-up.

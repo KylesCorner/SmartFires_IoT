@@ -1,12 +1,17 @@
 // Pa1010dGpsSensor.cpp
 #include "Pa1010dGpsSensor.h"
 
-Pa1010dGpsSensor::Pa1010dGpsSensor(TwoWire& wire, uint8_t address)
-  : _wire(&wire), _address(address), _gps(&wire) {}
+namespace {
+constexpr char kCmdStandby[] = "$PMTK161,0*28";
+constexpr char kCmdFullPower[] = "$PMTK225,0*2B";
+constexpr char kCmdBackup[] = "$PMTK225,4*2F";
+} // namespace
 
-bool Pa1010dGpsSensor::begin(TwoWire& wire) {
-  // This wrapper binds the transport in the constructor.
-  // For a normal Nano setup, just construct with Wire and call begin().
+Pa1010dGpsSensor::Pa1010dGpsSensor(TwoWire &wire, uint8_t address,
+                                   int8_t wakePin)
+    : _wire(&wire), _address(address), _wakePin(wakePin), _gps(&wire) {}
+
+bool Pa1010dGpsSensor::begin(TwoWire &wire) {
   if (&wire != _wire) {
     _healthy = false;
     _begun = false;
@@ -14,6 +19,11 @@ bool Pa1010dGpsSensor::begin(TwoWire& wire) {
   }
 
   _wire->begin();
+
+  if (_wakePin >= 0) {
+    pinMode(_wakePin, OUTPUT);
+    digitalWrite(_wakePin, HIGH); // inactive/high by default
+  }
 
   if (!ping()) {
     _healthy = false;
@@ -34,11 +44,16 @@ bool Pa1010dGpsSensor::begin(TwoWire& wire) {
   _lastByteMs = millis();
   _lastSentenceMs = 0;
   _lastFixMs = 0;
+  _lastWakeMs = millis();
+  _powerMode = PowerMode::FullPower;
 
   return configureGps_();
 }
 
 bool Pa1010dGpsSensor::ping() {
+  if (_wire == nullptr)
+    return false;
+
   _wire->beginTransmission(_address);
   const uint8_t err = _wire->endTransmission();
 
@@ -50,10 +65,7 @@ bool Pa1010dGpsSensor::ping() {
 }
 
 bool Pa1010dGpsSensor::configureGps_() {
-  // Match Adafruit's recommended parsing setup:
-  // - RMC + GGA sentences
-  // - 1 Hz update rate
-  // - 1 Hz fix rate
+  // Default operating mode after wake / boot
   _gps.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCGGA);
   _gps.sendCommand(PMTK_SET_NMEA_UPDATE_1HZ);
   _gps.sendCommand(PMTK_API_SET_FIX_CTL_1HZ);
@@ -61,14 +73,109 @@ bool Pa1010dGpsSensor::configureGps_() {
   return true;
 }
 
+bool Pa1010dGpsSensor::ready() const {
+  if (!_begun || !_healthy)
+    return false;
+  if (_powerMode != PowerMode::FullPower)
+    return false;
+  if ((millis() - _lastWakeMs) < kWakeSettleMs)
+    return false;
+  return _hasReading && _reading.fix;
+}
+
+bool Pa1010dGpsSensor::sleep() {
+  if (!_begun || !_healthy)
+    return false;
+  if (_powerMode != PowerMode::FullPower)
+    return false;
+
+  // Standby mode: wakes via interface activity.
+  _gps.sendCommand(kCmdStandby);
+
+  _powerMode = PowerMode::Standby;
+  _hasReading = false;
+  clearReading_();
+  return true;
+}
+
+bool Pa1010dGpsSensor::wake() {
+  if (!_begun)
+    return false;
+
+  if (_powerMode == PowerMode::FullPower) {
+    return false;
+  }
+
+  if (_powerMode == PowerMode::Standby) {
+    // Datasheet: any byte wakes from standby.
+    // Sending the full-power PMTK is a reasonable wake stimulus on I2C.
+    _gps.sendCommand(kCmdFullPower);
+  } else if (_powerMode == PowerMode::Backup) {
+    return wakeFromBackup();
+  } else {
+    return true;
+  }
+
+  delay(10);
+  _powerMode = PowerMode::FullPower;
+  _lastWakeMs = millis();
+  _healthy = true;
+  _consecutiveParseFailures = 0;
+
+  return configureGps_();
+}
+
+bool Pa1010dGpsSensor::enterBackupMode() {
+  if (!_begun || !_healthy)
+    return false;
+  if (_wakePin < 0)
+    return false; // no hardware wake control available
+  if (_powerMode != PowerMode::FullPower)
+    return false;
+
+  // Datasheet: WAKE-UP pin must be tied low before entering backup.
+  digitalWrite(_wakePin, LOW);
+  delay(2);
+
+  _gps.sendCommand(kCmdBackup);
+
+  _powerMode = PowerMode::Backup;
+  _hasReading = false;
+  clearReading_();
+  return true;
+}
+
+bool Pa1010dGpsSensor::wakeFromBackup() {
+  if (!_begun)
+    return false;
+  if (_wakePin < 0)
+    return false;
+  if (_powerMode != PowerMode::Backup)
+    return false;
+
+  // Datasheet: WAKE-UP high wakes from backup.
+  digitalWrite(_wakePin, HIGH);
+  delay(10);
+
+  _powerMode = PowerMode::FullPower;
+  _lastWakeMs = millis();
+  _healthy = true;
+  _consecutiveParseFailures = 0;
+
+  return configureGps_();
+}
+
 bool Pa1010dGpsSensor::sample() {
   if (!_begun) {
     return false;
   }
 
+  if (_powerMode != PowerMode::FullPower) {
+    return false;
+  }
+
   bool updated = false;
 
-  // Drain a bounded number of chars so this stays non-blocking.
   uint8_t charsRead = 0;
   while (_gps.available() && charsRead < kDefaultCharsPerSample) {
     (void)_gps.read();
@@ -76,9 +183,8 @@ bool Pa1010dGpsSensor::sample() {
     ++charsRead;
   }
 
-  // Parse any completed NMEA sentence(s).
   while (_gps.newNMEAreceived()) {
-    char* nmea = _gps.lastNMEA();
+    char *nmea = _gps.lastNMEA();
 
     if (_gps.parse(nmea)) {
       const uint32_t now = millis();
@@ -106,8 +212,7 @@ bool Pa1010dGpsSensor::sample() {
     }
   }
 
-  // If the bus goes quiet for a long time, flag unhealthy.
-  if (_lastByteMs != 0 && (millis() - _lastByteMs) > 5000UL) {
+  if (_lastByteMs != 0 && (millis() - _lastByteMs) > kQuietTimeoutMs) {
     _healthy = false;
   }
 
@@ -149,3 +254,5 @@ void Pa1010dGpsSensor::copyReading_() {
   _reading.month = _gps.month;
   _reading.year = _gps.year;
 }
+
+void Pa1010dGpsSensor::clearReading_() { _reading = Reading{}; }

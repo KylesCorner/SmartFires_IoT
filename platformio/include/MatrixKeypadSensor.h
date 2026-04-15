@@ -125,6 +125,17 @@ public:
   bool keyAvailable() const {
     return _hasPending;
   }
+  // bool sleep() override;
+  // bool wake() override;
+bool sleep() override {
+  _sleeping = true;
+  return true;
+}
+
+bool wake() override {
+  _sleeping = false;
+  return true;
+}
 
 private:
   char scanRawKey() {
@@ -171,4 +182,5 @@ private:
 
   char _pendingKey = '\0';
   bool _hasPending = false;
+  bool _sleeping = false;
 };

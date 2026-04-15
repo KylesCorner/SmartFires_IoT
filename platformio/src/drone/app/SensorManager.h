@@ -9,6 +9,9 @@ public:
   void sampleAll();
   void sampleKeypadOnly();
 
+  void sleepAllSensors();
+  void wakeAllSensors();
+
 private:
   DroneContext& _ctx;
 };

@@ -1,19 +1,19 @@
 #pragma once
 
 #include <Arduino.h>
-#include <Wire.h>
-#include <new>
-#include <math.h>
 #include <SPI.h>
+#include <Wire.h>
+#include <math.h>
+#include <new>
 
 #include <Adafruit_SHT31.h>
 
+#include "II2CDevice.h" // rename if your file has a different name
 #include "ISensor.h"
-#include "II2CDevice.h"   // rename if your file has a different name
 
 class Sht31Sensor final : public ISensor, public II2CDevice {
 public:
-  static constexpr uint8_t kDefaultAddress   = 0x44;
+  static constexpr uint8_t kDefaultAddress = 0x44;
   static constexpr uint8_t kAlternateAddress = 0x45;
   static constexpr uint8_t kFailureThreshold = 3;
 
@@ -22,7 +22,7 @@ public:
   ~Sht31Sensor() override;
 
   // ISensor
-  const char* name() const override;
+  const char *name() const override;
   bool begin() override;
   bool ready() const override;
   bool sample() override;
@@ -31,7 +31,7 @@ public:
 
   // II2CDevice
   uint8_t address() const override;
-  bool begin(TwoWire& wire) override;
+  bool begin(TwoWire &wire) override;
   bool ping() override;
 
   // SHT31-specific accessors
@@ -45,20 +45,22 @@ public:
   void reset();
 
   I2CStatus lastI2CStatus() const;
+  bool sleep() override;
+  bool wake() override;
 
 private:
-  void constructDriver(TwoWire& wire);
+  void constructDriver(TwoWire &wire);
   void destroyDriver();
 
-  Adafruit_SHT31* driver();
-  const Adafruit_SHT31* driver() const;
+  Adafruit_SHT31 *driver();
+  const Adafruit_SHT31 *driver() const;
 
   static I2CStatus decodeWireStatus(uint8_t wireStatus);
   bool markFailure(I2CStatus status);
 
 private:
   uint8_t _address;
-  TwoWire* _wire;
+  TwoWire *_wire;
 
   alignas(Adafruit_SHT31) uint8_t _driverStorage[sizeof(Adafruit_SHT31)];
   bool _driverConstructed;
@@ -74,4 +76,5 @@ private:
   float _humidityPct;
 
   I2CStatus _lastI2CStatus;
+  bool _sleeping = false;
 };

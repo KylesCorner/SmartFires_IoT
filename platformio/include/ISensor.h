@@ -13,8 +13,9 @@ class ISensor {
 public:
   virtual ~ISensor() = default;
 
-  // Human-readable name (stored in flash if you want later; keep simple for now)
-  virtual const char* name() const = 0;
+  // Human-readable name (stored in flash if you want later; keep simple for
+  // now)
+  virtual const char *name() const = 0;
 
   // Initialize hardware / library state.
   // Return true on success.
@@ -24,11 +25,12 @@ public:
   // (useful for warmup-time devices).
   virtual bool ready() const = 0;
 
-  // Request an update (kick off a read). For simple sensors this can do the read immediately.
-  // Return true if a new reading was captured/updated.
+  // Request an update (kick off a read). For simple sensors this can do the
+  // read immediately. Return true if a new reading was captured/updated.
   virtual bool sample() = 0;
 
-  // Whether we have a valid reading to report (e.g. not just started up, no errors, etc.)
+  // Whether we have a valid reading to report (e.g. not just started up, no
+  // errors, etc.)
   virtual bool hasReading() const = 0;
 
   // Age of last reading in milliseconds. If no reading yet, return UINT32_MAX.
@@ -36,4 +38,7 @@ public:
 
   // Optional: mark sensor unhealthy on repeated failures, wiring issues, etc.
   virtual bool healthy() const = 0;
+
+  virtual bool sleep() = 0;
+  virtual bool wake() = 0;
 };
