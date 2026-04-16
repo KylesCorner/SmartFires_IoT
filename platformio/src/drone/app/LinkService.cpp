@@ -10,7 +10,7 @@ void LinkService::update() {
   }
 
   if (_ctx.bridge.bootSeen() && !_state.link.bootMessagePrinted) {
-    Serial.println("[UART] Feather boot seen");
+    // Serial.println("[UART] Feather boot seen");
     _state.link.bootMessagePrinted = true;
   }
 
@@ -27,8 +27,8 @@ void LinkService::update() {
   if (_ctx.bridge.hasRx()) {
     static char lastRxPrinted[96] = {0};
     if (strcmp(lastRxPrinted, _ctx.bridge.lastRx()) != 0) {
-      Serial.print("[UART RX PAYLOAD] ");
-      Serial.println(_ctx.bridge.lastRx());
+      // Serial.print("[UART RX PAYLOAD] ");
+      // Serial.println(_ctx.bridge.lastRx());
       strncpy(lastRxPrinted, _ctx.bridge.lastRx(), sizeof(lastRxPrinted) - 1);
       lastRxPrinted[sizeof(lastRxPrinted) - 1] = '\0';
     }
