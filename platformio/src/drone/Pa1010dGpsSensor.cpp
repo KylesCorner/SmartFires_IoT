@@ -84,8 +84,9 @@ bool Pa1010dGpsSensor::ready() const {
 }
 
 bool Pa1010dGpsSensor::sleep() {
-  if (!_begun || !_healthy)
-    return false;
+  Serial.println("sleeping gps");
+  // if (!_begun || !_healthy)
+  //   return false;
   // if (_powerMode != PowerMode::FullPower)
   //   return false;
 
@@ -97,33 +98,85 @@ bool Pa1010dGpsSensor::sleep() {
   clearReading_();
   return true;
 }
-
 bool Pa1010dGpsSensor::wake() {
-  if (!_begun)
-    return false;
-
-  // if (_powerMode == PowerMode::FullPower) {
+  // if (!_begun) {
   //   return false;
   // }
 
-  if (_powerMode == PowerMode::Standby) {
-    // Datasheet: any byte wakes from standby.
-    // Sending the full-power PMTK is a reasonable wake stimulus on I2C.
-    _gps.sendCommand(kCmdFullPower);
-  } else if (_powerMode == PowerMode::Backup) {
+  if (_powerMode == PowerMode::Backup) {
     return wakeFromBackup();
-  } else {
+  }
+
+  if (_powerMode == PowerMode::FullPower) {
     return true;
   }
 
-  delay(10);
+  // For standby, do a gentle wake attempt first.
+  // Avoid assuming the PMTK full-power command is safe immediately.
+  if (_wire == nullptr) {
+    return false;
+  }
+
+  // Wake stimulus: a plain I2C transaction is often safer than jumping
+  // straight into full configuration traffic.
+  _wire->beginTransmission(_address);
+  uint8_t err = _wire->endTransmission(true);
+
+  if (err != 0) {
+    delay(50);
+
+    _wire->beginTransmission(_address);
+    err = _wire->endTransmission(true);
+
+    if (err != 0) {
+      _healthy = false;
+      return false;
+    }
+  }
+
+  // Give the GPS real time to wake up.
+  delay(100);
+
   _powerMode = PowerMode::FullPower;
   _lastWakeMs = millis();
   _healthy = true;
+  _hasReading = false;
   _consecutiveParseFailures = 0;
+  clearReading_();
+
+  // Delay before reconfiguring
+  delay(100);
 
   return configureGps_();
 }
+
+// bool Pa1010dGpsSensor::wake() {
+//   Serial.println("waking gps");
+//   if (!_begun)
+//     return false;
+//
+//   // if (_powerMode == PowerMode::FullPower) {
+//   //   return false;
+//   // }
+//
+//   if (_powerMode == PowerMode::Standby) {
+//     // Datasheet: any byte wakes from standby.
+//     // Sending the full-power PMTK is a reasonable wake stimulus on I2C.
+//     _gps.sendCommand(kCmdFullPower);
+//   } else if (_powerMode == PowerMode::Backup) {
+//     return wakeFromBackup();
+//   } else {
+//     return true;
+//   }
+//
+//   delay(10);
+//   _powerMode = PowerMode::FullPower;
+//   _lastWakeMs = millis();
+//   _healthy = true;
+//   _consecutiveParseFailures = 0;
+//
+//   return configureGps_();
+// }
 
 bool Pa1010dGpsSensor::enterBackupMode() {
   if (!_begun || !_healthy)

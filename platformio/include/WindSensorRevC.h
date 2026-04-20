@@ -2,6 +2,7 @@
 #include "ISensor.h"
 #include <Arduino.h>
 #include <math.h>
+#include "PinMapping.h"
 
 class WindSensorRevC : public ISensor {
 public:
@@ -20,6 +21,14 @@ public:
     uint32_t warmupMs = 10000;
     uint32_t minSamplePeriodMs = 200;
     uint8_t samplesToAverage = 8;
+    // Optional GPIO used to control external power switch for sensor VCC.
+    // Set to 255 to disable power control.
+    uint8_t pinPowerEnable = PIN_WIND_POWER;
+
+    // True  -> HIGH turns sensor power ON
+    // False -> LOW turns sensor power ON
+    bool powerEnableActiveHigh = true;
+
   };
 
   // Full config constructor
@@ -55,10 +64,18 @@ public:
     hasReading_ = false;
     healthy_ = true;
     consecutiveFailures_ = 0;
+
+    if (hasPowerControl()) {
+      pinMode(cfg_.pinPowerEnable, OUTPUT);
+      powerOn();
+    }
     return true;
   }
 
   bool ready() const override {
+    if (_sleeping) {
+      return false;
+    }
     return (millis() - startedAtMs_) >= cfg_.warmupMs;
   }
 
@@ -138,13 +155,64 @@ public:
 
   void setZeroWindAdjustmentVolts(float v) { cfg_.zeroWindAdjustmentVolts = v; }
 
+  // bool sleep() override {
+  //   _sleeping = true;
+  //   return true;
+  // }
+  //
+  // bool wake() override {
+  //   _sleeping = false;
+  //   return true;
+  // }
   bool sleep() override {
+    if (_sleeping) {
+      return true;
+    }
+
     _sleeping = true;
+
+    if (hasPowerControl()) {
+      powerOff();
+    }
+
+    // Invalidate last reading since sensor is no longer powered/warmed.
+    hasReading_ = false;
+    rvVolts_ = NAN;
+    tmpVolts_ = NAN;
+    zeroWindVolts_ = NAN;
+    temperatureC_ = NAN;
+    windMph_ = 0.0f;
+    windMps_ = 0.0f;
+
     return true;
   }
 
   bool wake() override {
+    if (!_sleeping) {
+      return true;
+    }
+
+    if (hasPowerControl()) {
+      powerOn();
+    }
+
     _sleeping = false;
+
+    // Treat as a fresh power-up.
+    startedAtMs_ = millis();
+    lastSampleMs_ = 0;
+    lastGoodSampleMs_ = 0;
+    hasReading_ = false;
+    healthy_ = true;
+    consecutiveFailures_ = 0;
+
+    rvVolts_ = NAN;
+    tmpVolts_ = NAN;
+    zeroWindVolts_ = NAN;
+    temperatureC_ = NAN;
+    windMph_ = 0.0f;
+    windMps_ = 0.0f;
+
     return true;
   }
 
@@ -190,5 +258,22 @@ private:
     if (consecutiveFailures_ >= 5) {
       healthy_ = false;
     }
+  }
+  bool hasPowerControl() const {
+    return cfg_.pinPowerEnable != 255;
+  }
+
+  void powerOn() {
+    if (!hasPowerControl())
+      return;
+    digitalWrite(cfg_.pinPowerEnable,
+                 cfg_.powerEnableActiveHigh ? HIGH : LOW);
+  }
+
+  void powerOff() {
+    if (!hasPowerControl())
+      return;
+    digitalWrite(cfg_.pinPowerEnable,
+                 cfg_.powerEnableActiveHigh ? LOW : HIGH);
   }
 };

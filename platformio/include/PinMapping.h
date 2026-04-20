@@ -1,3 +1,4 @@
+#pragma once
 #include <Arduino.h>
 
 // Pin definitions for the project. Adjust as needed for your specific board and wiring.
@@ -16,6 +17,7 @@ static constexpr uint8_t PIN_SERVO = 6; // choose a PWM-capable pin
 
 static constexpr uint8_t PIN_WIND_RV = A1;
 static constexpr uint8_t PIN_WIND_TMP = A0;
+static constexpr uint8_t PIN_WIND_POWER = D2;
 
 static constexpr uint8_t PIN_LORA_TX= TX;
 static constexpr uint8_t PIN_LORA_RX= RX;
