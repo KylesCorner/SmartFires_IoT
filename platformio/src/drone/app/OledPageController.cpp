@@ -7,7 +7,7 @@
 // IClock& clock)
 //     : _ctx(ctx), _state(state), _clock(clock) {}
 namespace {
-constexpr uint32_t kOledRenderIntervalMs = 250;
+constexpr uint32_t kOledRenderIntervalMs = 1000;
 }
 
 void OledPageController::render() {
@@ -33,16 +33,16 @@ void OledPageController::render() {
     renderImu();
     break;
 
-  case OledPage::Lidar:
-    renderLidar();
-    break;
-
   case OledPage::Uart:
     renderUart();
     break;
 
   case OledPage::Lora:
     renderLora();
+    break;
+
+  case OledPage::PM:
+    renderSps();
     break;
 
   default:
@@ -54,6 +54,32 @@ void OledPageController::render() {
   }
 
   _state.ui.oledNeedsRefresh = false;
+}
+void OledPageController::renderSps() {
+  if (_state.sensorsSleeping) {
+    _ctx.oled.printLine(0, "SPS30 [SLEEP]");
+  } else if (!_state.sensingEnabled) {
+    _ctx.oled.printLine(0, "SPS30 [PAUSED]");
+  } else {
+    _ctx.oled.printLine(0, "SPS30 Air");
+  }
+
+  if (_ctx.sps30.hasReading()) {
+    const auto& r = _ctx.sps30.reading();
+
+    _ctx.oled.printfLine(1, "PM1:%.1f PM2.5:%.1f",
+                         r.pm1_0, r.pm2_5);
+
+    _ctx.oled.printfLine(2, "PM4:%.1f PM10:%.1f",
+                         r.pm4_0, r.pm10);
+
+    _ctx.oled.printfLine(3, "TPS:%.2fum",
+                         r.typicalParticleSizeUm);
+  } else {
+    _ctx.oled.printLine(1, _state.sensingEnabled ? "No SPS reading" : "Paused");
+    _ctx.oled.printLine(2, "");
+    _ctx.oled.printLine(3, "");
+  }
 }
 
 void OledPageController::renderEnv() {
@@ -79,13 +105,14 @@ void OledPageController::renderEnv() {
     _ctx.oled.printLine(2, _state.sensingEnabled ? "T/H:no reading"
                                                  : "T/H: paused");
   }
+  _ctx.oled.printLine(3, "");
 
-  if (_ctx.flame.hasReading()) {
-    _ctx.oled.printfLine(3, "Flame:%d", _ctx.flame.analogRaw());
-  } else {
-    _ctx.oled.printLine(3, _state.sensingEnabled ? "No flame reading"
-                                                 : "Flame: paused");
-  }
+  // if (_ctx.flame.hasReading()) {
+  //   _ctx.oled.printfLine(3, "Flame:%d", _ctx.flame.analogRaw());
+  // } else {
+  //   _ctx.oled.printLine(3, _state.sensingEnabled ? "No flame reading"
+  //                                                : "Flame: paused");
+  // }
 }
 
 void OledPageController::renderGps() {
@@ -135,24 +162,6 @@ void OledPageController::renderImu() {
     _ctx.oled.printLine(2, "");
     _ctx.oled.printLine(3, "");
   }
-}
-
-void OledPageController::renderLidar() {
-  if (_state.sensorsSleeping) {
-    _ctx.oled.printLine(0, "Lidar [SLEEP]");
-  } else if (!_state.sensingEnabled) {
-    _ctx.oled.printLine(0, "Lidar [PAUSED]");
-  } else {
-    _ctx.oled.printLine(0, "Lidar");
-  }
-  if (_ctx.lidar.hasReading()) {
-    _ctx.oled.printfLine(1, "Dist: %d cm", _ctx.lidar.distanceCm());
-  } else {
-    _ctx.oled.printLine(1, _state.sensingEnabled ? "No readings" : "Paused");
-  }
-
-  _ctx.oled.printLine(2, "");
-  _ctx.oled.printLine(3, "");
 }
 
 void OledPageController::renderUart() {

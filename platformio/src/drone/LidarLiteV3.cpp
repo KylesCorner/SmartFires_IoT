@@ -13,7 +13,7 @@ bool LidarLiteV3::begin(TwoWire& wire) {
 
   // Sensor is documented for 400 kHz I2C max/supported.
   // Safe to call if your board supports it.
-  _wire->setClock(400000);
+  // _wire->setClock(400000);
 
   return ping();
 }

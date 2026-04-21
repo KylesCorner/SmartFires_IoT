@@ -16,8 +16,8 @@ private:
   void renderGps();
   void renderImu();
   void renderUart();
-  void renderLidar();
   void renderLora();
+  void renderSps();
 
   DroneContext& _ctx;
   AppState& _state;

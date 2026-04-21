@@ -18,7 +18,7 @@ bool Pa1010dGpsSensor::begin(TwoWire &wire) {
     return false;
   }
 
-  _wire->begin();
+  // _wire->begin();
 
   if (_wakePin >= 0) {
     pinMode(_wakePin, OUTPUT);

@@ -26,6 +26,7 @@ public:
 
   void setup();
   void loop();
+  void scanI2C();
 
 private:
   uint8_t _nodeId;

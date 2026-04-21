@@ -12,6 +12,8 @@ public:
   void sleepAllSensors();
   void wakeAllSensors();
 
+  void printSensorReadings();
+
 private:
   DroneContext& _ctx;
 };

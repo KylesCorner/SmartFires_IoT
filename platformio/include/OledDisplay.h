@@ -49,8 +49,8 @@ public:
   bool begin(TwoWire& wire = Wire) override {
     _wire = &wire;
 
-    _wire->begin();
-    _wire->setClock(400000);
+    // _wire->begin();
+    // _wire->setClock(400000);
 
     if (!ping()) {
       _healthy = false;

@@ -16,6 +16,8 @@ void DroneApp::setup() {
   Serial.begin(115200);
   delay(200);
   Wire.begin();
+  Wire.setClock(100000); // SPS30 uses standard-mode I2C
+  Wire.setTimeOut(50);   // milliseconds
 
   _sensors.beginAll();
   _actuators.beginAll();
@@ -46,6 +48,8 @@ void DroneApp::loop() {
     }
   }
 
+  // _sensors.printSensorReadings();
+
   _actuators.updateAll();
   _keypad.update();
   _link.maybeSendTelemetry(_nodeId);
@@ -53,5 +57,19 @@ void DroneApp::loop() {
 
   if (_ctx.oled.healthy()) {
     _oled.render();
+  }
+}
+
+void DroneApp::scanI2C() {
+  Serial.println("I2C scan...");
+  for (uint8_t addr = 1; addr < 127; ++addr) {
+    Wire.beginTransmission(addr);
+    uint8_t err = Wire.endTransmission();
+    if (err == 0) {
+      Serial.print("Found device at 0x");
+      if (addr < 16)
+        Serial.print('0');
+      Serial.println(addr, HEX);
+    }
   }
 }

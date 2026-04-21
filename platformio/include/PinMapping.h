@@ -4,15 +4,20 @@
 // Pin definitions for the project. Adjust as needed for your specific board and wiring.
 // Refers to the gpio pin numbers, not physical pin numbers. Check your board's documentation for details.
 
-static constexpr uint8_t PIN_FLAME_AO = A2;
-static constexpr uint8_t PIN_FLAME_DO = D12; // choose a digital pin (not all pins support interrupts, but that's optional for this sensor)
+// static constexpr uint8_t PIN_FLAME_AO = A2;
+// static constexpr uint8_t PIN_FLAME_DO = D12; // choose a digital pin (not all pins support interrupts, but that's optional for this sensor)
+
+
 
 //static constexpr uint8_t PIN_DHT = 2;
 //static constexpr uint8_t DHT_TYPE = DHT11; // or DHT22
 
-static constexpr uint8_t PIN_BUZZER = 5; // choose a PWM-capable pin (not required for tone())
+// static constexpr uint8_t PIN_BUZZER = 5; // choose a PWM-capable pin (not required for tone())
+//
+// static constexpr uint8_t PIN_SERVO = 6; // choose a PWM-capable pin
 
-static constexpr uint8_t PIN_SERVO = 6; // choose a PWM-capable pin
+static constexpr uint8_t PIN_SPS_RX = D12;
+static constexpr uint8_t PIN_SPS_TX = D11;
 
 
 static constexpr uint8_t PIN_WIND_RV = A1;
@@ -37,8 +42,8 @@ static const char KEYPAD_MAP[4][4] = {
 // keypad actions
 static const char KEYPAD_PREV_PAGE = '1';
 static const char KEYPAD_NEXT_PAGE= '2';
-static const char KEYPAD_TOGGLE_SENSING = '*';
-static const char KEYPAD_HOMEPAGE = '#';
-static const char KEYPAD_TOGGLE_SLEEP = '0';
+static const char KEYPAD_TOGGLE_SENSING = 'B';
+static const char KEYPAD_HOMEPAGE = 'C';
+static const char KEYPAD_TOGGLE_SLEEP = 'A';
 
 

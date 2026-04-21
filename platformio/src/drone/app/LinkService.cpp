@@ -44,7 +44,7 @@ void LinkService::maybeSendTelemetry(uint8_t nodeId) {
   _state.link.lastSendMs = now;
 
   if (_state.link.waitingForAck) {
-    Serial.println("[UART] still waiting for ACK, skipping send");
+    // Serial.println("[UART] still waiting for ACK, skipping send");
     return;
   }
 
@@ -60,8 +60,8 @@ void LinkService::handleAckTimeout() {
 
   if (_state.link.waitingForAck &&
       (now - _state.link.lastSendTimeMs >= UartLoRaBridge::kAckTimeoutMs)) {
-    Serial.print("[UART] ACK timeout for seq ");
-    Serial.println(_state.link.lastSentSeq);
+    // Serial.print("[UART] ACK timeout for seq ");
+    // Serial.println(_state.link.lastSentSeq);
     _state.link.waitingForAck = false;
   }
 }
@@ -74,11 +74,11 @@ void LinkService::sendTelemetryFrame(uint8_t nodeId, uint32_t seq) {
   payload.session_time = pkt.uptimeMs;
   payload.uptime_ms = pkt.uptimeMs;
   payload.sensor_flags = pkt.sensorFlags;
-  payload.flame = pkt.flameDetected ? 1u : 0u;
+  // payload.flame = pkt.flameDetected ? 1u : 0u;
   payload.wind_cms = static_cast<uint16_t>(pkt.windMps * 100.0f + 0.5f);
   payload.temp_cdegc = static_cast<int16_t>(pkt.tempC * 100.0f);
   payload.humidity_cpct = static_cast<uint16_t>(pkt.humidityPct * 100.0f + 0.5f);
-  payload.lidar_cm = static_cast<uint16_t>(pkt.lidarCm > 0 ? pkt.lidarCm : 0);
+  // payload.lidar_cm = static_cast<uint16_t>(pkt.lidarCm > 0 ? pkt.lidarCm : 0);
   payload.lat_e7 = static_cast<int32_t>(pkt.lat * 1e7);
   payload.lon_e7 = static_cast<int32_t>(pkt.lon * 1e7);
 

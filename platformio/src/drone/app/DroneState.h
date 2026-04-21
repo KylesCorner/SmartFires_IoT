@@ -6,8 +6,8 @@ enum class OledPage : uint8_t {
   Gps,
   Imu,
   Uart,
+  PM,
   Count, // pages end here
-  Lidar,
   Lora,
   Empty
 };

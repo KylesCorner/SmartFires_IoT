@@ -1,4 +1,6 @@
 #include "SensorManager.h"
+#include "USBCDC.h"
+// #include "USBCDC.h"
 #include <Arduino.h>
 
 void SensorManager::beginAll() {
@@ -17,9 +19,7 @@ void SensorManager::sampleAll() {
   }
 }
 
-void SensorManager::sampleKeypadOnly() {
-  _ctx.keypad.sample();
-}
+void SensorManager::sampleKeypadOnly() { _ctx.keypad.sample(); }
 
 void SensorManager::sleepAllSensors() {
   for (size_t i = 0; i < _ctx.numSensors; ++i) {
@@ -40,4 +40,16 @@ void SensorManager::wakeAllSensors() {
     Serial.print(": ");
     Serial.println(ok ? "OK" : "FAIL");
   }
+}
+
+void SensorManager::printSensorReadings() {
+  Serial.println(" === Sensor Readings === ");
+  for (size_t i = 0; i < _ctx.numSensors; ++i) {
+    if (_ctx.sensors[i]->hasReading()) {
+      Serial.printf("Name: %s has a reading\n", _ctx.sensors[i]->name());
+    } else {
+      Serial.printf("Name: %s no readings\n", _ctx.sensors[i]->name());
+    }
+  }
+  Serial.println(" =======================");
 }

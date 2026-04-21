@@ -28,8 +28,8 @@ public:
     _healthy = true;
     _powerMode = PowerMode::Normal;
 
-    _wire->begin();
-    _wire->setClock(400000);
+    // _wire->begin();
+    // _wire->setClock(400000);
 
     _icm.begin(*_wire, _ad0_val);
     if (_icm.status != ICM_20948_Stat_Ok) {
