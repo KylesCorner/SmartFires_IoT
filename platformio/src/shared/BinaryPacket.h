@@ -5,17 +5,17 @@
 // Binary wire format for SmartFires telemetry.
 //
 // UART frame — drone -> feather node:
-//   [0xAA][0x55][len:u8][PktHeader:4][FullStatePayload:27][crc8]
-//   len = 31  |  total frame = 35 bytes
+//   [0xAA][0x55][len:u8][PktHeader:4][FullStatePayload:32][crc8]
+//   len = 36  |  total frame = 40 bytes
 //   CRC-8/MAXIM covers the len byte + all data bytes.
 //
 // LoRa payload — feather node -> feather base:
-//   [PktHeader:4][FullStatePayload:27]  = 31 bytes
+//   [PktHeader:4][FullStatePayload:32]  = 36 bytes
 //   No extra framing; RadioHead handles framing on the radio link.
 //
 // UART frame — feather base -> Jetson:
-//   [0xAA][0x55][len:u8][rssi:i8][PktHeader:4][FullStatePayload:27][crc8]
-//   len = 32  |  total frame = 36 bytes
+//   [0xAA][0x55][len:u8][rssi:i8][PktHeader:4][FullStatePayload:32][crc8]
+//   len = 37  |  total frame = 41 bytes
 //   CRC-8/MAXIM covers the len byte + all data bytes (rssi included).
 
 #include <stdint.h>
@@ -47,21 +47,23 @@ struct __attribute__((packed)) PktHeader {
 };
 
 struct __attribute__((packed)) FullStatePayload {
-    uint32_t session_time;   // ms — local millis() until TIME_SYNC is live
+    uint32_t session_time;    // ms — local millis() until TIME_SYNC is live
     uint32_t uptime_ms;
-    uint16_t sensor_flags;   // same bitmask as TelemetryFlags in drone/main.cpp
-    uint8_t  flame;          // 0 or 1
-    uint16_t wind_cms;       // cm/s  (windMps * 100)
-    int16_t  temp_cdegc;     // centi-degrees C  (tempC * 100)
-    uint16_t humidity_cpct;  // centi-percent  (humidityPct * 100)
-    uint16_t lidar_cm;
-    int32_t  lat_e7;         // degrees * 1e7
-    int32_t  lon_e7;         // degrees * 1e7
+    uint16_t sensor_flags;    // bitmask: WIND=0x01 SHT31=0x02 GPS=0x04 IMU=0x08 SPS30=0x10
+    uint16_t wind_cms;        // cm/s  (windMps * 100)
+    int16_t  temp_cdegc;      // centi-degrees C  (tempC * 100)
+    uint16_t humidity_cpct;   // centi-percent  (humidityPct * 100)
+    uint16_t pm1_0_ug10;      // µg/m³ * 10
+    uint16_t pm2_5_ug10;      // µg/m³ * 10
+    uint16_t pm4_0_ug10;      // µg/m³ * 10
+    uint16_t pm10_ug10;       // µg/m³ * 10
+    int32_t  lat_e7;          // degrees * 1e7
+    int32_t  lon_e7;          // degrees * 1e7
 };
 
 // Compile-time size checks — caught at build time if packing is wrong
 static_assert(sizeof(PktHeader)        ==  4, "PktHeader must be 4 bytes");
-static_assert(sizeof(FullStatePayload) == 27, "FullStatePayload must be 27 bytes");
+static_assert(sizeof(FullStatePayload) == 32, "FullStatePayload must be 32 bytes");
 
 static constexpr size_t kLoRaPayloadSize =
     sizeof(PktHeader) + sizeof(FullStatePayload);  // 31
@@ -82,8 +84,8 @@ inline uint8_t crc8(const uint8_t* data, size_t len) {
 
 // ---------- encode: drone -> feather node UART frame ----------
 //
-// Writes: [0xAA][0x55][31][PktHeader][FullStatePayload][crc8]
-// Returns bytes written, or 0 if buf_size is too small (needs >= 35).
+// Writes: [0xAA][0x55][36][PktHeader][FullStatePayload][crc8]
+// Returns bytes written, or 0 if buf_size is too small (needs >= 40).
 
 inline size_t encodeFullStateFrame(
     uint8_t node_id, uint8_t seq,
@@ -116,9 +118,9 @@ inline size_t encodeFullStateFrame(
 
 // ---------- encode: feather base -> Jetson UART frame ----------
 //
-// Writes: [0xAA][0x55][32][rssi_i8][PktHeader][FullStatePayload][crc8]
-// raw_lora_payload must point to kLoRaPayloadSize (31) bytes as received from LoRa.
-// Returns bytes written, or 0 if buf_size is too small (needs >= 36).
+// Writes: [0xAA][0x55][37][rssi_i8][PktHeader][FullStatePayload][crc8]
+// raw_lora_payload must point to kLoRaPayloadSize (36) bytes as received from LoRa.
+// Returns bytes written, or 0 if buf_size is too small (needs >= 41).
 
 inline size_t encodeBaseFrame(
     int8_t rssi,

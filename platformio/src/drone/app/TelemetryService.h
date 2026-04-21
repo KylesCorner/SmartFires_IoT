@@ -6,12 +6,11 @@
 
 class TelemetryService {
 public:
-  static constexpr uint8_t TF_FLAME = 1 << 0;
-  static constexpr uint8_t TF_WIND  = 1 << 1;
-  static constexpr uint8_t TF_SHT31 = 1 << 2;
-  static constexpr uint8_t TF_LIDAR = 1 << 3;
-  static constexpr uint8_t TF_GPS   = 1 << 4;
-  static constexpr uint8_t TF_IMU   = 1 << 5;
+  static constexpr uint8_t TF_WIND  = 1 << 0;
+  static constexpr uint8_t TF_SHT31 = 1 << 1;
+  static constexpr uint8_t TF_GPS   = 1 << 2;
+  static constexpr uint8_t TF_IMU   = 1 << 3;
+  static constexpr uint8_t TF_SPS30 = 1 << 4;
 
   TelemetryService(DroneContext& ctx) : _ctx(ctx) {}
 

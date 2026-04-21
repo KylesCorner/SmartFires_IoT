@@ -25,8 +25,8 @@ The Feather M0 base station connects to the Jetson Orin Nano 40-pin header.
 
 Frame format received from Feather base station
 -----------------------------------------------
-    [0xAA][0x55][len=32: u8][rssi: i8][PktHeader: 4 bytes][FullStatePayload: 27 bytes][crc8]
-    CRC-8/MAXIM covers the len byte + all 32 data bytes.
+    [0xAA][0x55][len=37: u8][rssi: i8][PktHeader: 4 bytes][FullStatePayload: 32 bytes][crc8]
+    CRC-8/MAXIM covers the len byte + all 37 data bytes.
 """
 
 import argparse
@@ -56,11 +56,13 @@ CSV_COLUMNS = [
     "session_time_ms",  # ms from node millis() — will become synced time in Phase 2
     "uptime_ms",
     "sensor_flags",
-    "flame",
     "wind_mps",
     "temp_c",
     "humidity_pct",
-    "lidar_cm",
+    "pm1_0_ug_m3",
+    "pm2_5_ug_m3",
+    "pm4_0_ug_m3",
+    "pm10_ug_m3",
     "lat",
     "lon",
     "rssi",             # dBm as seen by the base station Feather
@@ -163,7 +165,8 @@ def run(port: str, baud: int, output_path: str) -> None:
                             f"[RX] node={pkt['node_id']}  seq={pkt['seq']:3d}  "
                             f"T={pkt['temp_c']:5.1f}°C  H={pkt['humidity_pct']:4.1f}%  "
                             f"wind={pkt['wind_mps']:.2f} m/s  "
-                            f"flame={'YES' if pkt['flame'] else 'no '}  "
+                            f"PM2.5={pkt['pm2_5_ug_m3']:.1f} PM10={pkt['pm10_ug_m3']:.1f} µg/m³  "
+                            f"lat={pkt['lat']:.5f} lon={pkt['lon']:.5f}  "
                             f"rssi={rssi:4d} dBm"
                         )
                     else:
