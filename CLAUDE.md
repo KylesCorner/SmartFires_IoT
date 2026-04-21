@@ -2,7 +2,7 @@
 
 ## Project Purpose
 
-Wildfire IoT sensor network. Remote drone nodes collect environmental data (temperature, humidity, wind speed, flame detection, GPS, LIDAR) and transmit it wirelessly over LoRa to a base station connected to a Jetson Orin Nano edge computer.
+Wildfire IoT sensor network. Remote drone nodes collect environmental data (temperature, humidity, wind speed, particulate matter, GPS) and transmit it wirelessly over LoRa to a base station connected to a Jetson Orin Nano edge computer.
 
 ---
 
@@ -10,8 +10,8 @@ Wildfire IoT sensor network. Remote drone nodes collect environmental data (temp
 
 ```
 [ESP32 drone node]
-    sensors: wind, flame, SHT31 (temp/humidity), GPS (PA1010D),
-             LIDAR Lite v3, ICM-20948 IMU, OLED display
+    sensors: wind, SHT31 (temp/humidity), GPS (PA1010D),
+             SPS30 (PM1.0/PM2.5/PM4.0/PM10), ICM-20948 IMU, OLED display
     |
     | UART 115200 baud (Serial1, binary frames)
     v
@@ -86,16 +86,16 @@ pio device monitor -e drone                      # serial monitor ESP32
 
 ## Wire Protocol
 
-### UART frame — drone → feather node (35 bytes)
+### UART frame — drone → feather node (40 bytes)
 
 ```
-[0xAA][0x55][len=31: u8][PktHeader: 4 bytes][FullStatePayload: 27 bytes][crc8]
+[0xAA][0x55][len=36: u8][PktHeader: 4 bytes][FullStatePayload: 32 bytes][crc8]
 ```
 
-### LoRa payload — feather node → feather base (31 bytes)
+### LoRa payload — feather node → feather base (36 bytes)
 
 ```
-[PktHeader: 4 bytes][FullStatePayload: 27 bytes]
+[PktHeader: 4 bytes][FullStatePayload: 32 bytes]
 ```
 
 RadioHead `RHReliableDatagram` handles LoRa framing, ACK, and retry. The node calls
@@ -113,10 +113,10 @@ which auto-sends the ACK. The raw sensor payload is forwarded as-is — no re-en
 Note: with the current single-node setup NODE_ID=1 and BASE_ADDR=0x01 share the same
 value. When adding node 2, set `NODE_ID=2` for that Feather — its address becomes 0x02.
 
-### UART frame — feather base → Jetson (36 bytes)
+### UART frame — feather base → Jetson (41 bytes)
 
 ```
-[0xAA][0x55][len=32: u8][rssi: i8][PktHeader: 4 bytes][FullStatePayload: 27 bytes][crc8]
+[0xAA][0x55][len=37: u8][rssi: i8][PktHeader: 4 bytes][FullStatePayload: 32 bytes][crc8]
 ```
 
 ### PktHeader (4 bytes, packed)
@@ -128,18 +128,20 @@ value. When adding node 2, set `NODE_ID=2` for that Feather — its address beco
 | `node_id` | `uint8_t` | compile-time `NODE_ID` |
 | `seq` | `uint8_t` | rolling 0–255 |
 
-### FullStatePayload (27 bytes, packed, little-endian)
+### FullStatePayload (32 bytes, packed, little-endian)
 
 | Field | Type | Encoding |
 |---|---|---|
 | `session_time` | `uint32_t` | ms (local millis until TIME_SYNC) |
 | `uptime_ms` | `uint32_t` | ms |
-| `sensor_flags` | `uint16_t` | bitmask: FLAME=0x01 WIND=0x02 SHT31=0x04 LIDAR=0x08 GPS=0x10 IMU=0x20 |
-| `flame` | `uint8_t` | 0 or 1 |
+| `sensor_flags` | `uint16_t` | bitmask: WIND=0x01 SHT31=0x02 GPS=0x04 IMU=0x08 SPS30=0x10 |
 | `wind_cms` | `uint16_t` | cm/s = windMps × 100 |
 | `temp_cdegc` | `int16_t` | centi-°C = tempC × 100 |
 | `humidity_cpct` | `uint16_t` | centi-% = humidityPct × 100 |
-| `lidar_cm` | `uint16_t` | cm |
+| `pm1_0_ug10` | `uint16_t` | µg/m³ × 10 |
+| `pm2_5_ug10` | `uint16_t` | µg/m³ × 10 |
+| `pm4_0_ug10` | `uint16_t` | µg/m³ × 10 |
+| `pm10_ug10` | `uint16_t` | µg/m³ × 10 |
 | `lat_e7` | `int32_t` | degrees × 1e7 |
 | `lon_e7` | `int32_t` | degrees × 1e7 |
 
@@ -183,7 +185,7 @@ CSV columns: `timestamp, node_id, seq, session_time_ms, uptime_ms, sensor_flags,
 
 ## Key Design Decisions
 
-- **Binary not text:** text CSV was ~90 bytes/packet; binary full-state is 31 bytes over LoRa.
+- **Binary not text:** text CSV was ~90 bytes/packet; binary full-state is 36 bytes over LoRa.
 - **Fixed-point integers:** no floats on the wire — deterministic size, no locale/printf issues on MCUs.
 - **8-bit rolling seq in header:** sufficient for drop detection; full `uint32_t` seq lives only in ESP32 RAM. ACK comparison uses `& 0xFF` on both sides.
 - **LoRa ACK/retry via RHReliableDatagram:** Node uses `sendtoWait()` (5 retries, 300 ms timeout each). Base uses `recvfromAck()` which auto-ACKs. Eliminates the ~40% fire-and-forget packet loss of the original raw `RH_RF95` approach.

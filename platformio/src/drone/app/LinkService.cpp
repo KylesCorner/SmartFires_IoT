@@ -71,18 +71,20 @@ void LinkService::sendTelemetryFrame(uint8_t nodeId, uint32_t seq) {
   TelemetryPacket pkt = _telemetry.build(seq, now);
 
   BinaryPacket::FullStatePayload payload{};
-  payload.session_time = pkt.uptimeMs;
-  payload.uptime_ms = pkt.uptimeMs;
-  payload.sensor_flags = pkt.sensorFlags;
-  // payload.flame = pkt.flameDetected ? 1u : 0u;
-  payload.wind_cms = static_cast<uint16_t>(pkt.windMps * 100.0f + 0.5f);
-  payload.temp_cdegc = static_cast<int16_t>(pkt.tempC * 100.0f);
-  payload.humidity_cpct = static_cast<uint16_t>(pkt.humidityPct * 100.0f + 0.5f);
-  // payload.lidar_cm = static_cast<uint16_t>(pkt.lidarCm > 0 ? pkt.lidarCm : 0);
-  payload.lat_e7 = static_cast<int32_t>(pkt.lat * 1e7);
-  payload.lon_e7 = static_cast<int32_t>(pkt.lon * 1e7);
+  payload.session_time   = pkt.uptimeMs;
+  payload.uptime_ms      = pkt.uptimeMs;
+  payload.sensor_flags   = pkt.sensorFlags;
+  payload.wind_cms       = static_cast<uint16_t>(pkt.windMps * 100.0f + 0.5f);
+  payload.temp_cdegc     = static_cast<int16_t>(pkt.tempC * 100.0f);
+  payload.humidity_cpct  = static_cast<uint16_t>(pkt.humidityPct * 100.0f + 0.5f);
+  payload.pm1_0_ug10     = static_cast<uint16_t>(isnan(pkt.pm1_0) ? 0u : (uint16_t)(pkt.pm1_0 * 10.0f + 0.5f));
+  payload.pm2_5_ug10     = static_cast<uint16_t>(isnan(pkt.pm2_5) ? 0u : (uint16_t)(pkt.pm2_5 * 10.0f + 0.5f));
+  payload.pm4_0_ug10     = static_cast<uint16_t>(isnan(pkt.pm4_0) ? 0u : (uint16_t)(pkt.pm4_0 * 10.0f + 0.5f));
+  payload.pm10_ug10      = static_cast<uint16_t>(isnan(pkt.pm10)  ? 0u : (uint16_t)(pkt.pm10  * 10.0f + 0.5f));
+  payload.lat_e7         = static_cast<int32_t>(pkt.lat * 1e7);
+  payload.lon_e7         = static_cast<int32_t>(pkt.lon * 1e7);
 
-  uint8_t frame[40];
+  uint8_t frame[48];
   const size_t len = BinaryPacket::encodeFullStateFrame(
       nodeId,
       static_cast<uint8_t>(seq & 0xFF),
