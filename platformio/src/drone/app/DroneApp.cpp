@@ -22,6 +22,8 @@ void DroneApp::setup() {
   _sensors.beginAll();
   _actuators.beginAll();
   _ctx.bridge.begin();
+
+  _sensors.sleepAllSensors();
 }
 
 void DroneApp::loop() {
@@ -45,7 +47,7 @@ void DroneApp::loop() {
     _sensors.sampleKeypadOnly();
   } else {
     _state.wakeupSequenceActive = false;
-    if (_state.sensingEnabled) {
+    if (_state.sensingEnabled && !_state.sensorsSleeping) {
       _sensors.sampleAll();
     } else {
       _sensors.sampleKeypadOnly();
