@@ -1,0 +1,95 @@
+import datetime
+import struct
+from typing import Optional
+
+import serial
+from smartfires_edge.packet import (
+    BASE_FRAME_DATA_LEN,
+    FRAME_M0,
+    FRAME_M1,
+    LORA_PAYLOAD_SIZE,
+    crc8,
+    decode_full_state,
+)
+
+_ST_WAIT_M0 = 0
+_ST_WAIT_M1 = 1
+_ST_WAIT_LEN = 2
+_ST_READ_DATA = 3
+_ST_CHECK_CRC = 4
+
+
+class FrameReceiver:
+    def __init__(self) -> None:
+        self.state = _ST_WAIT_M0
+        self.buf = bytearray()
+        self.expected_len = 0
+        self.crc_failures = 0
+        self.length_failures = 0
+
+    def push_byte(self, b: int) -> Optional[dict]:
+        if self.state == _ST_WAIT_M0:
+            if b == FRAME_M0:
+                self.state = _ST_WAIT_M1
+            return None
+
+        if self.state == _ST_WAIT_M1:
+            self.state = _ST_WAIT_LEN if b == FRAME_M1 else _ST_WAIT_M0
+            return None
+
+        if self.state == _ST_WAIT_LEN:
+            self.expected_len = b
+            if self.expected_len != BASE_FRAME_DATA_LEN:
+                self.length_failures += 1
+                self.state = _ST_WAIT_M0
+                return None
+            self.buf = bytearray([b])
+            self.state = _ST_READ_DATA
+            return None
+
+        if self.state == _ST_READ_DATA:
+            self.buf.append(b)
+            if len(self.buf) == 1 + self.expected_len:
+                self.state = _ST_CHECK_CRC
+            return None
+
+        if self.state == _ST_CHECK_CRC:
+            received_crc = b
+            computed_crc = crc8(bytes(self.buf))
+            self.state = _ST_WAIT_M0
+
+            if received_crc != computed_crc:
+                self.crc_failures += 1
+                self.buf = bytearray()
+                return None
+
+            rssi = struct.unpack_from("<b", self.buf, 1)[0]
+            raw_payload = bytes(self.buf[2 : 2 + LORA_PAYLOAD_SIZE])
+            self.buf = bytearray()
+
+            pkt = decode_full_state(raw_payload, rssi)
+            if pkt is None:
+                return None
+
+            pkt["timestamp"] = datetime.datetime.utcnow().isoformat(
+                timespec="milliseconds"
+            )
+            return pkt
+
+        self.state = _ST_WAIT_M0
+        self.buf = bytearray()
+        return None
+
+
+def iter_packets(port: str, baud: int):
+    receiver = FrameReceiver()
+
+    with serial.Serial(port, baud, timeout=0.25) as ser:
+        while True:
+            raw = ser.read(1)
+            if not raw:
+                continue
+
+            pkt = receiver.push_byte(raw[0])
+            if pkt is not None:
+                yield pkt, receiver
