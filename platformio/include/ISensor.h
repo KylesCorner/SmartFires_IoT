@@ -9,6 +9,9 @@
  * - Keep methods small and non-blocking where possible.
  * - Use return codes instead of exceptions.
  */
+
+class IWarmup;
+
 class ISensor {
 public:
   virtual ~ISensor() = default;
@@ -41,4 +44,8 @@ public:
 
   virtual bool sleep() = 0;
   virtual bool wake() = 0;
+
+    // Optional capability hook. Default: this sensor has no staged warmup role.
+  virtual IWarmup* warmup() { return nullptr; }
+  virtual const IWarmup* warmup() const { return nullptr; }
 };

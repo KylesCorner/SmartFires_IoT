@@ -27,6 +27,8 @@ static constexpr uint8_t PIN_WIND_POWER = D2;
 static constexpr uint8_t PIN_LORA_TX= TX;
 static constexpr uint8_t PIN_LORA_RX= RX;
 
+static constexpr uint8_t PIN_GPS_WAKE = A2;
+
 
 // keypad setup
 static const uint8_t KEYPAD_ROWS[4] = {D3, D4, D5, D6};

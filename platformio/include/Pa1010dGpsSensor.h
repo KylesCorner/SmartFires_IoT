@@ -1,15 +1,19 @@
 // Pa1010dGpsSensor.h
 #pragma once
 
-#include <Arduino.h>
-#include <Wire.h>
 #include <Adafruit_GPS.h>
 #include <Adafruit_PMTK.h>
+#include <Arduino.h>
+#include <Wire.h>
 
-#include "ISensor.h"
 #include "II2CDevice.h"
+#include "ISensor.h"
+#include "IWarmup.h"
+#include "PinMapping.h"
 
-class Pa1010dGpsSensor final : public ISensor, public II2CDevice {
+class Pa1010dGpsSensor final : public ISensor,
+                               public II2CDevice,
+                               public IWarmup {
 public:
   struct Reading {
     bool fix = false;
@@ -33,25 +37,21 @@ public:
     uint8_t year = 0;
   };
 
-  enum class PowerMode : uint8_t {
-    FullPower = 0,
-    Standby,
-    Backup
-  };
+  enum class PowerMode : uint8_t { FullPower = 0, Standby, Backup };
 
   static constexpr uint8_t kDefaultAddress = GPS_DEFAULT_I2C_ADDR;
   static constexpr uint8_t kDefaultCharsPerSample = 64;
   static constexpr uint32_t kWakeSettleMs = 250;
   static constexpr uint32_t kQuietTimeoutMs = 5000UL;
 
-  explicit Pa1010dGpsSensor(TwoWire& wire = Wire,
+  explicit Pa1010dGpsSensor(TwoWire &wire = Wire,
                             uint8_t address = kDefaultAddress,
-                            int8_t wakePin = -1);
+                            int8_t wakePin = PIN_GPS_WAKE);
 
   // II2CDevice
-  const char* name() const override { return "PA1010D Mini GPS"; }
+  const char *name() const override { return "PA1010D Mini GPS"; }
   uint8_t address() const override { return _address; }
-  bool begin(TwoWire& wire = Wire) override;
+  bool begin(TwoWire &wire = Wire) override;
   bool ping() override;
   bool healthy() const override { return _healthy; }
 
@@ -64,7 +64,7 @@ public:
 
   // GPS-specific accessors
   bool hasFix() const { return _hasReading && _reading.fix; }
-  const Reading& reading() const { return _reading; }
+  const Reading &reading() const { return _reading; }
 
   float latitudeDegrees() const { return _reading.latitudeDeg; }
   float longitudeDegrees() const { return _reading.longitudeDeg; }
@@ -79,17 +79,22 @@ public:
 
   // Power control
   bool wake();
-  bool sleep();              // software-controlled standby
-  bool enterBackupMode();    // requires wake pin
-  bool wakeFromBackup();     // requires wake pin
+  bool sleep();           // software-controlled standby
+  bool enterBackupMode(); // requires wake pin
+  bool wakeFromBackup();  // requires wake pin
+  bool requiresPriorityWarmup() const override { return true; }
+  bool warmupComplete() const override { return ready(); }
+  IWarmup *warmup() override { return this; }
+  const IWarmup *warmup() const override { return this; }
 
 private:
   bool configureGps_();
+  bool resetModule_();
   void copyReading_();
   void clearReading_();
 
 private:
-  TwoWire* _wire;
+  TwoWire *_wire;
   uint8_t _address;
   int8_t _wakePin;
   Adafruit_GPS _gps;

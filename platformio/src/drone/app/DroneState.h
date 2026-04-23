@@ -2,13 +2,13 @@
 #include <stdint.h>
 
 enum class OledPage : uint8_t {
-  Env = 0,
+  Home = 0,
+  Env,
   Gps,
   Imu,
   Uart,
   PM,
   Count, // pages end here
-  Lora,
   Empty
 };
 
@@ -24,7 +24,7 @@ struct LinkState {
 };
 
 struct UiState {
-  OledPage currentPage = OledPage::Env;
+  OledPage currentPage = OledPage::Home;
   bool oledNeedsRefresh = true;
   uint32_t lastRenderMs = 0;
 };
@@ -32,6 +32,7 @@ struct UiState {
 struct AppState {
   bool sensingEnabled = true;
   bool sensorsSleeping = false;
+  bool wakeupSequenceActive = true;
   bool lastSensorsSleeping = false;
   LinkState link;
   UiState ui;

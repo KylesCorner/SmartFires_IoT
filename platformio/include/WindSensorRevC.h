@@ -2,9 +2,10 @@
 #include "ISensor.h"
 #include <Arduino.h>
 #include <math.h>
+#include "IWarmup.h"
 #include "PinMapping.h"
 
-class WindSensorRevC : public ISensor {
+class WindSensorRevC : public ISensor , public IWarmup{
 public:
   struct Config {
     uint8_t pinRv = 0;
@@ -215,6 +216,10 @@ public:
 
     return true;
   }
+  IWarmup* warmup() override { return this; }
+  const IWarmup* warmup() const override { return this; }
+  bool requiresPriorityWarmup() const override { return true; }
+  bool warmupComplete() const override { return ready(); }
 
 private:
   Config cfg_;

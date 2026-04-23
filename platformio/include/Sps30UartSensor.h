@@ -4,10 +4,11 @@
 #include <HardwareSerial.h>
 
 #include "ISensor.h"
-#include <SensirionUartSps30.h>
+#include "IWarmup.h"
 #include "PinMapping.h"
+#include <SensirionUartSps30.h>
 
-class Sps30UartSensor final : public ISensor {
+class Sps30UartSensor final : public ISensor, public IWarmup{
 public:
   struct Reading {
     float pm1_0 = NAN;
@@ -24,8 +25,8 @@ public:
     float typicalParticleSizeUm = NAN;
   };
 
-    struct Config {
-    HardwareSerial* serial;
+  struct Config {
+    HardwareSerial *serial;
     uint8_t rxPin;
     uint8_t txPin;
     uint32_t baud;
@@ -34,28 +35,20 @@ public:
     uint8_t maxFailures;
     bool autoStartMeasurement;
 
-    Config(HardwareSerial* serial_ = nullptr,
-           uint8_t rxPin_ = PIN_SPS_RX,
-           uint8_t txPin_ = PIN_SPS_TX,
-           uint32_t baud_ = 115200,
-           uint32_t warmupMs_ = 10000,
-           uint32_t minSamplePeriodMs_ = 1000,
-           uint8_t maxFailures_ = 5,
-           bool autoStartMeasurement_ = true)
-        : serial(serial_),
-          rxPin(rxPin_),
-          txPin(txPin_),
-          baud(baud_),
-          warmupMs(warmupMs_),
-          minSamplePeriodMs(minSamplePeriodMs_),
+    Config(HardwareSerial *serial_ = nullptr, uint8_t rxPin_ = PIN_SPS_RX,
+           uint8_t txPin_ = PIN_SPS_TX, uint32_t baud_ = 115200,
+           uint32_t warmupMs_ = 10000, uint32_t minSamplePeriodMs_ = 1000,
+           uint8_t maxFailures_ = 5, bool autoStartMeasurement_ = true)
+        : serial(serial_), rxPin(rxPin_), txPin(txPin_), baud(baud_),
+          warmupMs(warmupMs_), minSamplePeriodMs(minSamplePeriodMs_),
           maxFailures(maxFailures_),
           autoStartMeasurement(autoStartMeasurement_) {}
   };
 
   Sps30UartSensor() = default;
-  explicit Sps30UartSensor(const Config& cfg) : cfg_(cfg) {}
+  explicit Sps30UartSensor(const Config &cfg) : cfg_(cfg) {}
 
-  const char* name() const override { return "SPS30-UART"; }
+  const char *name() const override { return "SPS30-UART"; }
 
   bool begin() override;
   bool ready() const override;
@@ -67,7 +60,13 @@ public:
   bool sleep() override;
   bool wake() override;
 
-  const Reading& reading() const { return reading_; }
+  const Reading &reading() const { return reading_; }
+
+  IWarmup* warmup() override { return this; }
+  const IWarmup* warmup() const override { return this; }
+
+  bool requiresPriorityWarmup() const override { return true; }
+  bool warmupComplete() const override { return ready(); }
 
 private:
   bool markFailure();
