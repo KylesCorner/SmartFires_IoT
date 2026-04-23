@@ -38,7 +38,7 @@ void LinkService::update() {
 void LinkService::maybeSendTelemetry(uint8_t nodeId) {
   const uint32_t now = _clock.millis();
 
-  if (!_state.sensingEnabled || _state.sensorsSleeping || _state.wakeupSequenceActive) return;
+  // if (!_state.sensingEnabled || _state.sensorsSleeping || _state.wakeupSequenceActive) return;
   if (now - _state.link.lastSendMs < UartLoRaBridge::kTelemetryPeriodMs) return;
 
   _state.link.lastSendMs = now;

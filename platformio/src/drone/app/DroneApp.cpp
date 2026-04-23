@@ -33,8 +33,8 @@ void DroneApp::loop() {
     if (_state.sensorsSleeping) {
       _sensors.sleepAllSensors();
     } else {
-      _sensors.startWakeSequence();
       _state.wakeupSequenceActive = true;
+      _sensors.startWakeSequence();
     }
 
     _state.lastSensorsSleeping = _state.sensorsSleeping;
@@ -46,18 +46,18 @@ void DroneApp::loop() {
     _sensors.serviceWakeSequence();
     _sensors.sampleKeypadOnly();
   } else {
-    _state.wakeupSequenceActive = false;
     if (_state.sensingEnabled && !_state.sensorsSleeping) {
       _sensors.sampleAll();
     } else {
       _sensors.sampleKeypadOnly();
     }
+    _state.wakeupSequenceActive = false;
+    _link.maybeSendTelemetry(_nodeId);
+    _link.handleAckTimeout();
   }
 
   _actuators.updateAll();
   _keypad.update();
-  _link.maybeSendTelemetry(_nodeId);
-  _link.handleAckTimeout();
 
   if (_ctx.oled.healthy()) {
     _oled.render();
