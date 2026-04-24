@@ -13,8 +13,10 @@ static constexpr float RFM95_FREQ = 915.0f;
 //   base station = BASE_ADDR (0x01)
 //   each node    = its compile-time NODE_ID
 static constexpr uint8_t  BASE_ADDR       = 0x01;
-static constexpr uint8_t  LORA_RETRIES    = 5;
-static constexpr uint16_t LORA_TIMEOUT_MS = 300;
+static constexpr uint8_t  LORA_RETRIES    = 3;
+// 100 ms ACK timeout — ACK typically arrives in ~35 ms (base processes + sends short ACK).
+// Worst-case 3 retries: 3 * (82 ms TX + 100 ms timeout) = 546 ms, fits in the active slot window.
+static constexpr uint16_t LORA_TIMEOUT_MS = 100;
 
 RH_RF95 rf95(RFM95_CS, RFM95_INT);
 
@@ -40,24 +42,47 @@ enum FrameState : uint8_t {
 // ---------------------------------------------------------------------------
 #if defined(LORA_NODE)
 // ---------------------------------------------------------------------------
-// NODE MODE
-//   - Receives binary telemetry frames from ESP32 over UART (Serial1)
-//   - Validates CRC, enqueues payload, sends text ACK back to ESP32 immediately
-//   - TX queue (kQueueDepth slots) decouples UART receive from LoRa TX
-//   - drainTxQueue() sends one slot per loop() call via sendtoWait()
-//   - After each TX, checkIncomingLora() checks for TIME_SYNC broadcasts from base
-//   - TIME_SYNC received over LoRa is forwarded to ESP32 as a UART binary frame
+// NODE MODE — TDMA
 //
-// Build flags required: -D LORA_NODE=1  -D NODE_ID=<n>
+//   TDMA frame structure (kNumSlots slots, each kSlotWidthMs wide):
+//
+//     |--guard--|---TX window---|--guard--|  ← one slot
+//     |  node 1  |  node 2  |  ...  |  node 1  |...
+//     0                              kFramePeriodMs
+//
+//   session_time is derived from the last TIME_SYNC broadcast received from
+//   the base station (driven by the Jetson). Drift between syncs (30 s interval)
+//   is ±1.5 ms at 50 ppm — well within the 20 ms guard bands.
+//
+//   Stale-sync fallback: if no TIME_SYNC arrives for kSyncStaleMs (5 min),
+//   TDMA is suspended and the node reverts to immediate TX to ensure data flows.
+//
+//   Queue is drop-oldest when full: always holds the most recent sensor data.
+//
+// Build flags required: -D LORA_NODE=1  -D NODE_ID=<n>  -D NUM_SLOTS=<m>
 // ---------------------------------------------------------------------------
 
 #ifndef NODE_ID
   #error "NODE_ID must be defined in platformio.ini when using LORA_NODE"
 #endif
 
+#ifndef NUM_SLOTS
+  #define NUM_SLOTS 2
+#endif
+
+// TDMA parameters — identical across all nodes in the network.
+static constexpr uint32_t kSlotWidthMs   = 600;
+static constexpr uint32_t kNumSlots      = static_cast<uint32_t>(NUM_SLOTS);
+static constexpr uint32_t kFramePeriodMs = kSlotWidthMs * kNumSlots;
+static constexpr uint32_t kGuardMs       = 20;    // silence at each slot boundary
+static constexpr uint32_t kSyncStaleMs   = 300000; // 5 min without sync → fallback mode
+
+// This node's slot index (0-based). NODE_ID=1 → slot 0, NODE_ID=2 → slot 1, etc.
+static constexpr uint8_t kMySlot = static_cast<uint8_t>((NODE_ID - 1) % NUM_SLOTS);
+
 RHReliableDatagram manager(rf95, static_cast<uint8_t>(NODE_ID));
 
-// ---- TX ring buffer ----
+// ---- TX ring buffer (drop-oldest when full) ----
 
 static constexpr uint8_t kQueueDepth = 4;
 
@@ -70,12 +95,17 @@ static uint8_t qHead  = 0;
 static uint8_t qTail  = 0;
 static uint8_t qCount = 0;
 
-static bool enqueue(const uint8_t* payload) {
-    if (qCount >= kQueueDepth) return false;
+// Always succeeds. Drops the oldest entry when the queue is full so that
+// the most recent sensor data is always preserved.
+static void enqueue(const uint8_t* payload) {
+    if (qCount >= kQueueDepth) {
+        // Evict oldest
+        qHead = (qHead + 1) % kQueueDepth;
+        qCount--;
+    }
     memcpy(txQueue[qTail].payload, payload, BinaryPacket::kLoRaPayloadSize);
     qTail = (qTail + 1) % kQueueDepth;
     qCount++;
-    return true;
 }
 
 static bool dequeue(uint8_t* payload) {
@@ -83,6 +113,44 @@ static bool dequeue(uint8_t* payload) {
     memcpy(payload, txQueue[qHead].payload, BinaryPacket::kLoRaPayloadSize);
     qHead = (qHead + 1) % kQueueDepth;
     qCount--;
+    return true;
+}
+
+// ---- TDMA clock (Feather-local session time) ----
+
+static uint32_t tdmaSyncSessionMs = 0;    // session_time_ms from last TIME_SYNC
+static uint32_t tdmaSyncLocalMs   = 0;    // millis() when that sync was received
+static bool     tdmaHasSynced     = false;
+static uint32_t tdmaLastSlotTx    = 0xFFFFFFFFu; // slot index of last TX attempt
+
+// Returns the estimated current session_time_ms.
+static uint32_t tdmaSessionNow() {
+    return tdmaSyncSessionMs + (millis() - tdmaSyncLocalMs);
+}
+
+// Returns true if the node should transmit right now.
+// Falls back to immediate TX if no valid sync exists or sync has gone stale.
+static bool tdmaMyTurn(uint32_t& slotIndexOut) {
+    const uint32_t localMs = millis();
+    const bool stale = tdmaHasSynced && ((localMs - tdmaSyncLocalMs) > kSyncStaleMs);
+
+    if (!tdmaHasSynced || stale) {
+        // No valid sync — transmit without slot restriction.
+        // Use a pseudo slot index that always looks "new" so 1-per-call limit still works.
+        slotIndexOut = localMs / kSlotWidthMs;
+        return true;
+    }
+
+    const uint32_t sessionMs = tdmaSyncSessionMs + (localMs - tdmaSyncLocalMs);
+    const uint32_t slotIndex = sessionMs / kSlotWidthMs;
+    const uint32_t posInSlot = sessionMs % kSlotWidthMs;
+    const uint32_t whichSlot = slotIndex % kNumSlots;
+
+    slotIndexOut = slotIndex;
+
+    if (whichSlot != kMySlot)                                    return false; // not our slot
+    if (posInSlot < kGuardMs)                                    return false; // leading guard
+    if (posInSlot >= kSlotWidthMs - kGuardMs)                    return false; // trailing guard
     return true;
 }
 
@@ -97,16 +165,17 @@ static uint8_t    framePos         = 0;
 void processFrame(const uint8_t* data, uint8_t len);
 void sendAck(uint8_t seq);
 void drainTxQueue();
+void sendPayload(const uint8_t* payload);
 void checkIncomingLora();
 
 void setup() {
-    Serial.begin(115200);   // USB — debug output
-    Serial1.begin(115200);  // UART — ESP32 link
+    Serial.begin(115200);
+    Serial1.begin(115200);
     delay(1000);
 
     resetRadio();
     if (!manager.init()) {
-        Serial.println("[LORA] RHReliableDatagram init failed");
+        Serial.println("[LORA] init failed");
         while (1) { delay(100); }
     }
     if (!rf95.setFrequency(RFM95_FREQ)) {
@@ -117,20 +186,23 @@ void setup() {
     manager.setRetries(LORA_RETRIES);
     manager.setTimeout(LORA_TIMEOUT_MS);
 
-    Serial.print("[LORA] Node ready, id=");
+    Serial.print("[TDMA] Node id=");
     Serial.print(NODE_ID);
-    Serial.print(", retries=");
-    Serial.print(LORA_RETRIES);
-    Serial.print(", timeout=");
-    Serial.print(LORA_TIMEOUT_MS);
-    Serial.println("ms, queue depth=");
-    Serial.println(kQueueDepth);
+    Serial.print(" slot=");
+    Serial.print(kMySlot);
+    Serial.print("/");
+    Serial.print(kNumSlots);
+    Serial.print(" slotWidth=");
+    Serial.print(kSlotWidthMs);
+    Serial.print("ms frame=");
+    Serial.print(kFramePeriodMs);
+    Serial.println("ms");
+    Serial.println("[TDMA] Waiting for TIME_SYNC before first TX...");
 }
 
 void loop() {
-    // Phase 1: Read bytes from ESP32 UART into frame state machine.
-    // processFrame() is called when a valid frame arrives; it enqueues + ACKs immediately.
-    // sendtoWait() is NOT called here, so this loop is always fast.
+    // Phase 1: Read bytes from ESP32 UART.
+    // processFrame() enqueues + ACKs immediately. No blocking TX here.
     while (Serial1.available() > 0) {
         const uint8_t b = static_cast<uint8_t>(Serial1.read());
 
@@ -180,16 +252,15 @@ void loop() {
         }
     }
 
-    // Phase 2: Send one packet from the TX queue over LoRa.
-    // sendtoWait() blocks here; UART bytes accumulate in the hardware RX buffer during that time.
+    // Phase 2: TDMA-gated TX.
     drainTxQueue();
 
-    // Phase 3: Non-blocking check for TIME_SYNC broadcast from the base station.
+    // Phase 3: Non-blocking check for TIME_SYNC broadcast.
     checkIncomingLora();
 }
 
 void processFrame(const uint8_t* data, uint8_t len) {
-    BinaryPacket::PktHeader       hdr{};
+    BinaryPacket::PktHeader        hdr{};
     BinaryPacket::FullStatePayload payload{};
 
     if (!BinaryPacket::decodeFullState(data, len, hdr, payload)) {
@@ -198,18 +269,13 @@ void processFrame(const uint8_t* data, uint8_t len) {
         return;
     }
 
-    // ACK immediately — ESP32 does not wait for LoRa outcome
-    sendAck(hdr.seq);
+    sendAck(hdr.seq);  // ACK to ESP32 immediately; LoRa outcome is irrelevant to it
 
-    if (!enqueue(data)) {
-        Serial.print("[TX] queue full, dropped seq=");
-        Serial.println(hdr.seq);
-    } else {
-        Serial.print("[TX] enqueued seq=");
-        Serial.print(hdr.seq);
-        Serial.print(" q=");
-        Serial.println(qCount);
-    }
+    enqueue(data);     // always succeeds; evicts oldest if full
+    Serial.print("[TX] enqueued seq=");
+    Serial.print(hdr.seq);
+    Serial.print(" q=");
+    Serial.println(qCount);
 }
 
 void sendAck(uint8_t seq) {
@@ -221,23 +287,37 @@ void sendAck(uint8_t seq) {
 void drainTxQueue() {
     if (qCount == 0) return;
 
+    uint32_t slotIndex = 0;
+    if (!tdmaMyTurn(slotIndex)) return;     // not our slot or guard period
+    if (slotIndex == tdmaLastSlotTx) return; // already attempted TX in this slot
+
+    // Claim the slot before dequeue so we don't retry even if dequeue is empty.
+    tdmaLastSlotTx = slotIndex;
+
     uint8_t payload[BinaryPacket::kLoRaPayloadSize];
     if (!dequeue(payload)) return;
 
+    sendPayload(payload);
+}
+
+void sendPayload(const uint8_t* payload) {
     BinaryPacket::PktHeader hdr;
     memcpy(&hdr, payload, sizeof(hdr));
 
+    const uint32_t sessionNow = tdmaHasSynced ? tdmaSessionNow() : millis();
     Serial.print("[LORA TX] seq=");
     Serial.print(hdr.seq);
-    Serial.print(" node=");
-    Serial.print(hdr.node_id);
+    Serial.print(" slot=");
+    Serial.print(kMySlot);
+    Serial.print(" session_ms=");
+    Serial.print(sessionNow);
     Serial.print(" q_remaining=");
     Serial.print(qCount);
     Serial.println(" sending...");
 
     const uint32_t retxBefore = manager.retransmissions();
     const bool ok = manager.sendtoWait(
-        payload,
+        const_cast<uint8_t*>(payload),
         static_cast<uint8_t>(BinaryPacket::kLoRaPayloadSize),
         BASE_ADDR);
     const uint32_t retries = manager.retransmissions() - retxBefore;
@@ -262,7 +342,6 @@ void drainTxQueue() {
 }
 
 void checkIncomingLora() {
-    // Non-blocking: return immediately if no packet is waiting.
     if (!manager.available()) return;
 
     uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
@@ -271,21 +350,28 @@ void checkIncomingLora() {
 
     if (!manager.recvfromAck(buf, &len, &from)) return;
 
-    // Only handle TIME_SYNC; ignore everything else (e.g. stray packets from other nodes).
-    BinaryPacket::PktHeader      hdr{};
+    // Only act on TIME_SYNC broadcasts; ignore everything else.
+    BinaryPacket::PktHeader       hdr{};
     BinaryPacket::TimeSyncPayload ts{};
     if (!BinaryPacket::decodeTimeSync(buf, len, hdr, ts)) return;
 
-    // Forward to ESP32 as a UART binary frame so it can update its session_time offset.
+    // Update the local TDMA clock.
+    tdmaSyncSessionMs = ts.session_time_ms;
+    tdmaSyncLocalMs   = millis();
+    tdmaHasSynced     = true;
+
+    Serial.print("[TDMA] sync: session_id=");
+    Serial.print(ts.session_id);
+    Serial.print(" session_ms=");
+    Serial.print(ts.session_time_ms);
+    Serial.print(" slot=");
+    Serial.print(ts.session_time_ms % kFramePeriodMs / kSlotWidthMs);
+    Serial.println();
+
+    // Forward to ESP32 so it can update its session_time offset for packet timestamps.
     uint8_t frame[20];
     const size_t frame_len = BinaryPacket::encodeTimeSyncFrame(0, hdr.seq, ts, frame, sizeof(frame));
-    if (frame_len > 0) {
-        Serial1.write(frame, frame_len);
-        Serial.print("[TIME_SYNC] forwarded to ESP32: session_id=");
-        Serial.print(ts.session_id);
-        Serial.print(" session_ms=");
-        Serial.println(ts.session_time_ms);
-    }
+    if (frame_len > 0) Serial1.write(frame, frame_len);
 }
 
 // ---------------------------------------------------------------------------
@@ -301,6 +387,8 @@ void checkIncomingLora() {
 //   - When a valid TIME_SYNC frame arrives from Jetson, broadcasts it over LoRa
 //     to all nodes using RH_BROADCAST_ADDRESS (fire-and-forget, no ACK expected)
 //
+// The base station has no TDMA logic — it receives whenever and auto-ACKs.
+//
 // Build flags required: -D LORA_BASE_STATION=1
 // ---------------------------------------------------------------------------
 
@@ -308,25 +396,25 @@ RHReliableDatagram manager(rf95, BASE_ADDR);
 
 // ---- Jetson → base UART frame state machine (TIME_SYNC commands) ----
 
-static FrameState jetsonState    = FS_WAIT_M0;
+static FrameState jetsonState   = FS_WAIT_M0;
 static uint8_t   jetsonBuf[20];
-static uint8_t   jetsonExpected  = 0;
-static uint8_t   jetsonPos       = 0;
+static uint8_t   jetsonExpected = 0;
+static uint8_t   jetsonPos      = 0;
 
 static bool    pendingTimeSync = false;
-static uint8_t timeSyncBuf[BinaryPacket::kTimeSyncLoRaSize];  // raw LoRa payload to broadcast
+static uint8_t timeSyncBuf[BinaryPacket::kTimeSyncLoRaSize];
 
 void handleJetsonByte(uint8_t b);
 void broadcastTimeSync();
 
 void setup() {
-    Serial.begin(115200);   // USB — debug output
-    Serial1.begin(115200);  // UART — Jetson link (bidirectional)
+    Serial.begin(115200);
+    Serial1.begin(115200);
     delay(1000);
 
     resetRadio();
     if (!manager.init()) {
-        Serial.println("[LORA] RHReliableDatagram init failed");
+        Serial.println("[LORA] init failed");
         while (1) { delay(100); }
     }
     if (!rf95.setFrequency(RFM95_FREQ)) {
@@ -337,11 +425,11 @@ void setup() {
     manager.setRetries(LORA_RETRIES);
     manager.setTimeout(LORA_TIMEOUT_MS);
 
-    Serial.println("[LORA] Base station ready (RHReliableDatagram, auto-ACK, TIME_SYNC enabled)");
+    Serial.println("[LORA] Base station ready (auto-ACK, TIME_SYNC relay enabled)");
 }
 
 void loop() {
-    // Read TIME_SYNC commands arriving from the Jetson on Serial1.
+    // Read TIME_SYNC commands from Jetson.
     while (Serial1.available() > 0) {
         handleJetsonByte(static_cast<uint8_t>(Serial1.read()));
     }
@@ -373,14 +461,11 @@ void loop() {
 
     Serial.print("[LORA RX] node=");
     Serial.print(hdr.node_id);
-    Serial.print(" from=0x");
-    Serial.print(from, HEX);
     Serial.print(" seq=");
     Serial.print(hdr.seq);
     Serial.print(" rssi=");
     Serial.println(rssi);
 
-    // Build UART frame for Jetson (41 bytes: header + rssi + lora payload + crc)
     uint8_t frame[41];
     const size_t frame_len =
         BinaryPacket::encodeBaseFrame(rssi, buf, frame, sizeof(frame));
@@ -428,7 +513,6 @@ void handleJetsonByte(uint8_t b) {
                 BinaryPacket::PktHeader       hdr{};
                 BinaryPacket::TimeSyncPayload ts{};
                 if (BinaryPacket::decodeTimeSync(jetsonBuf + 1, jetsonExpected, hdr, ts)) {
-                    // Store the raw 12-byte LoRa payload (PktHeader + TimeSyncPayload)
                     memcpy(timeSyncBuf, jetsonBuf + 1, BinaryPacket::kTimeSyncLoRaSize);
                     pendingTimeSync = true;
                     Serial.print("[TIME_SYNC] from Jetson: session_id=");
@@ -437,7 +521,7 @@ void handleJetsonByte(uint8_t b) {
                     Serial.println(ts.session_time_ms);
                 }
             } else {
-                Serial.println("[UART] Jetson frame CRC mismatch");
+                Serial.println("[UART] Jetson CRC mismatch");
             }
             jetsonState = FS_WAIT_M0;
             break;
@@ -446,7 +530,6 @@ void handleJetsonByte(uint8_t b) {
 }
 
 void broadcastTimeSync() {
-    // Fire-and-forget broadcast — nodes receive and handle; no ACK expected.
     manager.sendto(
         timeSyncBuf,
         static_cast<uint8_t>(BinaryPacket::kTimeSyncLoRaSize),
