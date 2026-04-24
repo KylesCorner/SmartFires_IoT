@@ -18,8 +18,14 @@ public:
 private:
   void sendTelemetryFrame(uint8_t nodeId, uint32_t seq);
 
-  DroneContext& _ctx;
-  AppState& _state;
-  IClock& _clock;
+  DroneContext&     _ctx;
+  AppState&         _state;
+  IClock&           _clock;
   TelemetryService& _telemetry;
+
+  // Session time sync state.
+  // session_time = millis() + _sessionTimeOffset  (offset is negative until first sync)
+  int64_t  _sessionTimeOffset  = 0;
+  uint32_t _lastSyncSessionId  = 0;
+  bool     _hasSynced          = false;
 };

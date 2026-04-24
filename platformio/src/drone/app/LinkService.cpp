@@ -10,7 +10,6 @@ void LinkService::update() {
   }
 
   if (_ctx.bridge.bootSeen() && !_state.link.bootMessagePrinted) {
-    // Serial.println("[UART] Feather boot seen");
     _state.link.bootMessagePrinted = true;
   }
 
@@ -27,11 +26,30 @@ void LinkService::update() {
   if (_ctx.bridge.hasRx()) {
     static char lastRxPrinted[96] = {0};
     if (strcmp(lastRxPrinted, _ctx.bridge.lastRx()) != 0) {
-      // Serial.print("[UART RX PAYLOAD] ");
-      // Serial.println(_ctx.bridge.lastRx());
       strncpy(lastRxPrinted, _ctx.bridge.lastRx(), sizeof(lastRxPrinted) - 1);
       lastRxPrinted[sizeof(lastRxPrinted) - 1] = '\0';
     }
+  }
+
+  // TIME_SYNC from Feather: update session_time offset.
+  if (_ctx.bridge.hasTimeSync()) {
+    const uint32_t sid       = _ctx.bridge.lastSessionId();
+    const uint32_t sessionMs = _ctx.bridge.lastSessionTimeMs();
+
+    if (!_hasSynced || sid != _lastSyncSessionId) {
+      // New Jetson session — reset offset tracking.
+      _lastSyncSessionId = sid;
+      _hasSynced         = true;
+      Serial.print("[SYNC] new session id=");
+      Serial.println(sid);
+    }
+
+    _sessionTimeOffset = static_cast<int64_t>(sessionMs) - static_cast<int64_t>(_clock.millis());
+    _ctx.bridge.clearTimeSync();
+
+    Serial.print("[SYNC] offset=");
+    Serial.print(static_cast<int32_t>(_sessionTimeOffset));
+    Serial.println("ms");
   }
 }
 
@@ -71,7 +89,8 @@ void LinkService::sendTelemetryFrame(uint8_t nodeId, uint32_t seq) {
   TelemetryPacket pkt = _telemetry.build(seq, now);
 
   BinaryPacket::FullStatePayload payload{};
-  payload.session_time   = pkt.uptimeMs;
+  // session_time uses Jetson-synced offset when available; falls back to local millis().
+  payload.session_time   = static_cast<uint32_t>(static_cast<int64_t>(now) + _sessionTimeOffset);
   payload.uptime_ms      = pkt.uptimeMs;
   payload.sensor_flags   = pkt.sensorFlags;
   payload.wind_cms       = static_cast<uint16_t>(pkt.windMps * 100.0f + 0.5f);

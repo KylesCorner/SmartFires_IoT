@@ -3,12 +3,19 @@ SmartFires binary packet definitions — Python mirror of BinaryPacket.h.
 
 Wire formats
 ------------
-LoRa payload (node -> base, 36 bytes):
+LoRa payload — node -> base (36 bytes):
     [PktHeader: 4][FullStatePayload: 32]
 
-Base station UART frame (Feather base -> Jetson, 41 bytes):
+Base station UART frame — Feather base -> Jetson (41 bytes):
     [0xAA][0x55][len=37: u8][rssi: i8][PktHeader: 4][FullStatePayload: 32][crc8]
     CRC-8/MAXIM covers the len byte + all data bytes that follow.
+
+LoRa TIME_SYNC payload — base broadcasts to nodes (12 bytes):
+    [PktHeader: 4][TimeSyncPayload: 8]
+
+TIME_SYNC UART frame — Jetson -> base (16 bytes):
+    [0xAA][0x55][len=12: u8][PktHeader: 4][TimeSyncPayload: 8][crc8]
+    CRC-8/MAXIM covers the len byte + all data bytes.
 """
 
 import struct
@@ -41,10 +48,17 @@ HEADER_SIZE = struct.calcsize(HEADER_FMT)   # 4
 FULL_STATE_FMT  = "<IIHHhHHHHHii"
 FULL_STATE_SIZE = struct.calcsize(FULL_STATE_FMT)  # 32
 
-LORA_PAYLOAD_SIZE = HEADER_SIZE + FULL_STATE_SIZE   # 36
+# TimeSyncPayload: session_id(u32) session_time_ms(u32)  →  8 bytes
+TIME_SYNC_PAYLOAD_FMT  = "<II"
+TIME_SYNC_PAYLOAD_SIZE = struct.calcsize(TIME_SYNC_PAYLOAD_FMT)  # 8
 
-# Expected value of the len byte in a base-station UART frame
-BASE_FRAME_DATA_LEN = 1 + LORA_PAYLOAD_SIZE         # 37  (rssi + 36)
+LORA_PAYLOAD_SIZE   = HEADER_SIZE + FULL_STATE_SIZE         # 36
+TIME_SYNC_LORA_SIZE = HEADER_SIZE + TIME_SYNC_PAYLOAD_SIZE  # 12
+
+# Expected len byte values in UART frames
+BASE_FRAME_DATA_LEN  = 1 + LORA_PAYLOAD_SIZE    # 37  (rssi + 36)
+TIME_SYNC_DATA_LEN   = TIME_SYNC_LORA_SIZE       # 12
+TIME_SYNC_FRAME_LEN  = 2 + 1 + TIME_SYNC_DATA_LEN + 1  # 16
 
 
 # ---------- CRC-8/MAXIM (polynomial 0x31) ----------
@@ -59,6 +73,31 @@ def crc8(data: bytes) -> int:
     return crc
 
 
+# ---------- encode ----------
+
+def encode_time_sync_frame(session_id: int, session_time_ms: int, seq: int = 0) -> bytes:
+    """
+    Encode a TIME_SYNC UART frame for sending from the Jetson to the base Feather.
+
+    Returns 16 bytes:
+        [0xAA][0x55][12][PktHeader(PKT_TIME_SYNC, node_id=0, seq)][TimeSyncPayload][crc8]
+    """
+    data_len = TIME_SYNC_DATA_LEN  # 12
+
+    hdr = struct.pack(HEADER_FMT, PKT_MAGIC, PKT_TIME_SYNC, 0, seq & 0xFF)
+    ts  = struct.pack(TIME_SYNC_PAYLOAD_FMT,
+                      session_id & 0xFFFFFFFF,
+                      session_time_ms & 0xFFFFFFFF)
+
+    payload = hdr + ts  # 12 bytes
+
+    # CRC covers: len byte + payload bytes
+    crc_input = bytes([data_len]) + payload
+    frame_crc = crc8(crc_input)
+
+    return bytes([FRAME_M0, FRAME_M1, data_len]) + payload + bytes([frame_crc])
+
+
 # ---------- decode ----------
 
 def decode_full_state(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Optional[dict]:
@@ -68,7 +107,7 @@ def decode_full_state(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Op
     Parameters
     ----------
     raw_lora_payload : bytes
-        Exactly LORA_PAYLOAD_SIZE (31) bytes as received from the radio.
+        Exactly LORA_PAYLOAD_SIZE (36) bytes as received from the radio.
     rssi : int, optional
         RSSI value in dBm extracted from the UART frame.
 

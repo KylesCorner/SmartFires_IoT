@@ -5,9 +5,14 @@ SmartFires edge receiver.
 Reads binary telemetry frames from the Feather base station over UART
 and writes sensor data to a CSV file. One row per received packet.
 
+Also sends periodic TIME_SYNC frames to the base station so all nodes
+can maintain a Jetson-synced session clock. The session starts when this
+process starts; session_time_ms is ms elapsed since then.
+
 Usage
 -----
     python receiver.py [--port /dev/ttyTHS0] [--baud 115200] [--output telemetry.csv]
+                       [--sync-interval 30]
 
 Jetson UART setup
 -----------------
@@ -27,14 +32,22 @@ Frame format received from Feather base station
 -----------------------------------------------
     [0xAA][0x55][len=37: u8][rssi: i8][PktHeader: 4 bytes][FullStatePayload: 32 bytes][crc8]
     CRC-8/MAXIM covers the len byte + all 37 data bytes.
+
+TIME_SYNC frame sent to Feather base station
+--------------------------------------------
+    [0xAA][0x55][len=12: u8][PktHeader(PKT_TIME_SYNC): 4 bytes][TimeSyncPayload: 8 bytes][crc8]
+    The base station broadcasts this over LoRa so all nodes update their session clock.
 """
 
 import argparse
 import csv
 import datetime
 import os
+import random
 import struct
 import sys
+import threading
+import time
 
 import serial
 
@@ -45,16 +58,17 @@ from packet import (
     LORA_PAYLOAD_SIZE,
     crc8,
     decode_full_state,
+    encode_time_sync_frame,
 )
 
 # ---------- CSV columns ----------
 
 CSV_COLUMNS = [
-    "timestamp",        # ISO-8601 UTC at time of Jetson receipt
+    "timestamp",        # ISO-8601 UTC wall-clock at time of Jetson receipt
     "node_id",
     "seq",              # 8-bit rolling sequence number
-    "session_time_ms",  # ms from node millis() — will become synced time in Phase 2
-    "uptime_ms",
+    "session_time_ms",  # synced ms since session start (Jetson-derived after first TIME_SYNC)
+    "uptime_ms",        # local ESP32 millis()
     "sensor_flags",
     "wind_mps",
     "temp_c",
@@ -80,14 +94,49 @@ _ST_CHECK_CRC = 4
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="SmartFires telemetry receiver")
-    p.add_argument("--port",   default="/dev/ttyTHS1", help="Serial port (default: /dev/ttyTHS1)")
-    p.add_argument("--baud",   type=int, default=115200, help="Baud rate (default: 115200)")
-    p.add_argument("--output", default="telemetry.csv", help="Output CSV file (default: telemetry.csv)")
+    p.add_argument("--port",          default="/dev/ttyTHS1", help="Serial port (default: /dev/ttyTHS1)")
+    p.add_argument("--baud",          type=int, default=115200, help="Baud rate (default: 115200)")
+    p.add_argument("--output",        default="telemetry.csv", help="Output CSV file (default: telemetry.csv)")
+    p.add_argument("--sync-interval", type=int, default=30,    help="TIME_SYNC interval in seconds (default: 30)")
     return p.parse_args()
 
 
-def run(port: str, baud: int, output_path: str) -> None:
+# ---------- TIME_SYNC sender thread ----------
+
+def _time_sync_sender(
+    ser: serial.Serial,
+    write_lock: threading.Lock,
+    session_id: int,
+    session_start: float,
+    interval_s: int,
+) -> None:
+    """Background thread: sends a TIME_SYNC frame to the base Feather every interval_s seconds."""
+    seq = 0
+    while True:
+        time.sleep(interval_s)
+        session_ms = int((time.time() - session_start) * 1000) & 0xFFFFFFFF
+        frame = encode_time_sync_frame(session_id, session_ms, seq)
+        with write_lock:
+            try:
+                ser.write(frame)
+            except serial.SerialException as exc:
+                print(f"[TIME_SYNC] write error: {exc}", file=sys.stderr)
+        print(f"[TIME_SYNC] sent  session_id={session_id:#010x}  session_ms={session_ms}")
+        seq = (seq + 1) & 0xFF
+
+
+# ---------- main receive loop ----------
+
+def run(port: str, baud: int, output_path: str, sync_interval_s: int) -> None:
     file_exists = os.path.isfile(output_path)
+
+    # Session identity: changes each time receiver.py restarts so nodes reset their offsets.
+    session_id    = random.randint(1, 0xFFFFFFFF)
+    session_start = time.time()
+
+    print(f"SmartFires receiver  |  {port} @ {baud} baud  |  output: {output_path}")
+    print(f"Session ID: {session_id:#010x}  |  TIME_SYNC every {sync_interval_s}s")
+    print("Waiting for packets …  (Ctrl-C to stop)\n")
 
     with serial.Serial(port, baud, timeout=1) as ser, \
          open(output_path, "a", newline="") as csvfile:
@@ -97,12 +146,25 @@ def run(port: str, baud: int, output_path: str) -> None:
             writer.writeheader()
             csvfile.flush()
 
-        print(f"SmartFires receiver  |  {port} @ {baud} baud  |  output: {output_path}")
-        print("Waiting for packets …  (Ctrl-C to stop)\n")
+        write_lock = threading.Lock()
+
+        # Send an immediate TIME_SYNC so nodes sync as soon as possible after startup.
+        initial_frame = encode_time_sync_frame(session_id, 0, seq=0)
+        with write_lock:
+            ser.write(initial_frame)
+        print(f"[TIME_SYNC] initial sync sent")
+
+        # Background thread sends TIME_SYNC every sync_interval_s seconds.
+        sync_thread = threading.Thread(
+            target=_time_sync_sender,
+            args=(ser, write_lock, session_id, session_start, sync_interval_s),
+            daemon=True,
+        )
+        sync_thread.start()
 
         # State machine variables
         state        = _ST_WAIT_M0
-        buf          = bytearray()  # accumulates [len_byte, data...]
+        buf          = bytearray()
         expected_len = 0
 
         while True:
@@ -124,7 +186,6 @@ def run(port: str, baud: int, output_path: str) -> None:
             elif state == _ST_WAIT_LEN:
                 expected_len = b
                 if expected_len != BASE_FRAME_DATA_LEN:
-                    # Unexpected length — not our frame type; resync
                     print(
                         f"[WARN] unexpected frame len={expected_len} "
                         f"(expected {BASE_FRAME_DATA_LEN}), resyncing",
@@ -138,7 +199,6 @@ def run(port: str, baud: int, output_path: str) -> None:
             # ------------------------------------------------------------------
             elif state == _ST_READ_DATA:
                 buf.append(b)
-                # buf holds [len_byte, data[0..expected_len-1]]
                 if len(buf) == 1 + expected_len:
                     state = _ST_CHECK_CRC
 
@@ -163,6 +223,7 @@ def run(port: str, baud: int, output_path: str) -> None:
                         csvfile.flush()
                         print(
                             f"[RX] node={pkt['node_id']}  seq={pkt['seq']:3d}  "
+                            f"session={pkt['session_time_ms']}ms  "
                             f"T={pkt['temp_c']:5.1f}°C  H={pkt['humidity_pct']:4.1f}%  "
                             f"wind={pkt['wind_mps']:.2f} m/s  "
                             f"PM2.5={pkt['pm2_5_ug_m3']:.1f} PM10={pkt['pm10_ug_m3']:.1f} µg/m³  "
@@ -181,7 +242,6 @@ def run(port: str, baud: int, output_path: str) -> None:
                         file=sys.stderr,
                     )
 
-                # Always reset after CRC check
                 state = _ST_WAIT_M0
                 buf   = bytearray()
 
@@ -191,7 +251,7 @@ def run(port: str, baud: int, output_path: str) -> None:
 if __name__ == "__main__":
     args = _parse_args()
     try:
-        run(args.port, args.baud, args.output)
+        run(args.port, args.baud, args.output, args.sync_interval)
     except KeyboardInterrupt:
         print("\nReceiver stopped.")
     except serial.SerialException as exc:

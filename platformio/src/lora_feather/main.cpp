@@ -26,14 +26,27 @@ void resetRadio() {
 }
 
 // ---------------------------------------------------------------------------
+// Shared UART frame receive state machine — used by both NODE and BASE sections.
+// ---------------------------------------------------------------------------
+
+enum FrameState : uint8_t {
+    FS_WAIT_M0 = 0,
+    FS_WAIT_M1,
+    FS_WAIT_LEN,
+    FS_READ_DATA,
+    FS_CHECK_CRC,
+};
+
+// ---------------------------------------------------------------------------
 #if defined(LORA_NODE)
 // ---------------------------------------------------------------------------
 // NODE MODE
 //   - Receives binary telemetry frames from ESP32 over UART (Serial1)
-//   - Validates CRC, sends text ACK back to ESP32 immediately
-//   - Forwards raw LoRa payload (PktHeader + FullStatePayload) to base station
-//   - Uses RHReliableDatagram: up to LORA_RETRIES attempts, LORA_TIMEOUT_MS per attempt
-//   - UART ACK to ESP32 is sent before LoRa TX; ESP32 does not see LoRa outcome
+//   - Validates CRC, enqueues payload, sends text ACK back to ESP32 immediately
+//   - TX queue (kQueueDepth slots) decouples UART receive from LoRa TX
+//   - drainTxQueue() sends one slot per loop() call via sendtoWait()
+//   - After each TX, checkIncomingLora() checks for TIME_SYNC broadcasts from base
+//   - TIME_SYNC received over LoRa is forwarded to ESP32 as a UART binary frame
 //
 // Build flags required: -D LORA_NODE=1  -D NODE_ID=<n>
 // ---------------------------------------------------------------------------
@@ -44,26 +57,47 @@ void resetRadio() {
 
 RHReliableDatagram manager(rf95, static_cast<uint8_t>(NODE_ID));
 
-// Binary frame receiver state machine
-enum FrameState : uint8_t {
-    FS_WAIT_M0 = 0,
-    FS_WAIT_M1,
-    FS_WAIT_LEN,
-    FS_READ_DATA,
-    FS_CHECK_CRC,
+// ---- TX ring buffer ----
+
+static constexpr uint8_t kQueueDepth = 4;
+
+struct TxEntry {
+    uint8_t payload[BinaryPacket::kLoRaPayloadSize];
 };
 
+static TxEntry txQueue[kQueueDepth];
+static uint8_t qHead  = 0;
+static uint8_t qTail  = 0;
+static uint8_t qCount = 0;
+
+static bool enqueue(const uint8_t* payload) {
+    if (qCount >= kQueueDepth) return false;
+    memcpy(txQueue[qTail].payload, payload, BinaryPacket::kLoRaPayloadSize);
+    qTail = (qTail + 1) % kQueueDepth;
+    qCount++;
+    return true;
+}
+
+static bool dequeue(uint8_t* payload) {
+    if (qCount == 0) return false;
+    memcpy(payload, txQueue[qHead].payload, BinaryPacket::kLoRaPayloadSize);
+    qHead = (qHead + 1) % kQueueDepth;
+    qCount--;
+    return true;
+}
+
+// ---- UART receive state machine ----
+
 static FrameState frameState      = FS_WAIT_M0;
+static uint8_t    frameBuf[64];
+static uint8_t    frameExpectedLen = 0;
+static uint8_t    framePos         = 0;
 
-// buf layout: [len_byte, data[0..len-1]]
-// CRC is computed over this entire buffer (len byte + data).
-// Sized for the largest expected UART frame (drone sends 35 bytes; data = 31).
-static uint8_t frameBuf[64];
-static uint8_t frameExpectedLen = 0;
-static uint8_t framePos         = 0;  // position in frameBuf (0 = len byte)
-
+// Forward declarations
 void processFrame(const uint8_t* data, uint8_t len);
 void sendAck(uint8_t seq);
+void drainTxQueue();
+void checkIncomingLora();
 
 void setup() {
     Serial.begin(115200);   // USB — debug output
@@ -89,10 +123,14 @@ void setup() {
     Serial.print(LORA_RETRIES);
     Serial.print(", timeout=");
     Serial.print(LORA_TIMEOUT_MS);
-    Serial.println("ms");
+    Serial.println("ms, queue depth=");
+    Serial.println(kQueueDepth);
 }
 
 void loop() {
+    // Phase 1: Read bytes from ESP32 UART into frame state machine.
+    // processFrame() is called when a valid frame arrives; it enqueues + ACKs immediately.
+    // sendtoWait() is NOT called here, so this loop is always fast.
     while (Serial1.available() > 0) {
         const uint8_t b = static_cast<uint8_t>(Serial1.read());
 
@@ -109,7 +147,7 @@ void loop() {
             case FS_WAIT_LEN:
                 frameExpectedLen = b;
                 framePos = 0;
-                frameBuf[framePos++] = b;  // frameBuf[0] = len byte (included in CRC)
+                frameBuf[framePos++] = b;
                 if (frameExpectedLen == 0 ||
                     static_cast<size_t>(1 + frameExpectedLen) > sizeof(frameBuf)) {
                     Serial.println("[UART] bad length, resync");
@@ -121,8 +159,6 @@ void loop() {
 
             case FS_READ_DATA:
                 frameBuf[framePos++] = b;
-                // frameBuf holds: [len, data[0..frameExpectedLen-1]]
-                // done when we have the len byte + all data bytes
                 if (framePos == static_cast<uint8_t>(1 + frameExpectedLen)) {
                     frameState = FS_CHECK_CRC;
                 }
@@ -131,7 +167,6 @@ void loop() {
             case FS_CHECK_CRC: {
                 const uint8_t computed = BinaryPacket::crc8(frameBuf, 1 + frameExpectedLen);
                 if (b == computed) {
-                    // data starts at frameBuf[1], length = frameExpectedLen
                     processFrame(frameBuf + 1, frameExpectedLen);
                 } else {
                     Serial.print("[UART] CRC mismatch: got ");
@@ -144,6 +179,13 @@ void loop() {
             }
         }
     }
+
+    // Phase 2: Send one packet from the TX queue over LoRa.
+    // sendtoWait() blocks here; UART bytes accumulate in the hardware RX buffer during that time.
+    drainTxQueue();
+
+    // Phase 3: Non-blocking check for TIME_SYNC broadcast from the base station.
+    checkIncomingLora();
 }
 
 void processFrame(const uint8_t* data, uint8_t len) {
@@ -156,20 +198,46 @@ void processFrame(const uint8_t* data, uint8_t len) {
         return;
     }
 
-    // ACK immediately — ESP32 does not need to wait for LoRa outcome
+    // ACK immediately — ESP32 does not wait for LoRa outcome
     sendAck(hdr.seq);
+
+    if (!enqueue(data)) {
+        Serial.print("[TX] queue full, dropped seq=");
+        Serial.println(hdr.seq);
+    } else {
+        Serial.print("[TX] enqueued seq=");
+        Serial.print(hdr.seq);
+        Serial.print(" q=");
+        Serial.println(qCount);
+    }
+}
+
+void sendAck(uint8_t seq) {
+    char line[16];
+    snprintf(line, sizeof(line), "ACK,%u", static_cast<unsigned>(seq));
+    Serial1.println(line);
+}
+
+void drainTxQueue() {
+    if (qCount == 0) return;
+
+    uint8_t payload[BinaryPacket::kLoRaPayloadSize];
+    if (!dequeue(payload)) return;
+
+    BinaryPacket::PktHeader hdr;
+    memcpy(&hdr, payload, sizeof(hdr));
 
     Serial.print("[LORA TX] seq=");
     Serial.print(hdr.seq);
     Serial.print(" node=");
     Serial.print(hdr.node_id);
+    Serial.print(" q_remaining=");
+    Serial.print(qCount);
     Serial.println(" sending...");
 
-    // sendtoWait blocks until ACK received or all retries exhausted.
-    // retransmissions() is a running total; delta gives retries for this packet.
     const uint32_t retxBefore = manager.retransmissions();
     const bool ok = manager.sendtoWait(
-        const_cast<uint8_t*>(data),
+        payload,
         static_cast<uint8_t>(BinaryPacket::kLoRaPayloadSize),
         BASE_ADDR);
     const uint32_t retries = manager.retransmissions() - retxBefore;
@@ -189,14 +257,35 @@ void processFrame(const uint8_t* data, uint8_t len) {
         Serial.print(hdr.seq);
         Serial.print(" FAILED after ");
         Serial.print(LORA_RETRIES);
-        Serial.println(" retries — packet dropped");
+        Serial.println(" retries — dropped");
     }
 }
 
-void sendAck(uint8_t seq) {
-    char line[16];
-    snprintf(line, sizeof(line), "ACK,%u", static_cast<unsigned>(seq));
-    Serial1.println(line);
+void checkIncomingLora() {
+    // Non-blocking: return immediately if no packet is waiting.
+    if (!manager.available()) return;
+
+    uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
+    uint8_t len  = sizeof(buf);
+    uint8_t from = 0;
+
+    if (!manager.recvfromAck(buf, &len, &from)) return;
+
+    // Only handle TIME_SYNC; ignore everything else (e.g. stray packets from other nodes).
+    BinaryPacket::PktHeader      hdr{};
+    BinaryPacket::TimeSyncPayload ts{};
+    if (!BinaryPacket::decodeTimeSync(buf, len, hdr, ts)) return;
+
+    // Forward to ESP32 as a UART binary frame so it can update its session_time offset.
+    uint8_t frame[20];
+    const size_t frame_len = BinaryPacket::encodeTimeSyncFrame(0, hdr.seq, ts, frame, sizeof(frame));
+    if (frame_len > 0) {
+        Serial1.write(frame, frame_len);
+        Serial.print("[TIME_SYNC] forwarded to ESP32: session_id=");
+        Serial.print(ts.session_id);
+        Serial.print(" session_ms=");
+        Serial.println(ts.session_time_ms);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -204,20 +293,35 @@ void sendAck(uint8_t seq) {
 // ---------------------------------------------------------------------------
 // BASE STATION MODE
 //   - Listens for LoRa packets from any node via RHReliableDatagram
-//   - recvfromAck() auto-ACKs each received packet back to the sender
+//   - recvfromAck() auto-ACKs each received telemetry packet back to the sender
 //   - Validates packet magic / type before forwarding
-//   - Forwards to Jetson over UART (Serial1) with RSSI prepended:
-//       [0xAA][0x55][len:32][rssi:i8][PktHeader:4][FullStatePayload:27][crc8]
+//   - Forwards to Jetson over UART (Serial1) with RSSI prepended (41-byte frame)
+//
+//   - ALSO reads TIME_SYNC commands from Jetson over UART (Serial1, bidirectional)
+//   - When a valid TIME_SYNC frame arrives from Jetson, broadcasts it over LoRa
+//     to all nodes using RH_BROADCAST_ADDRESS (fire-and-forget, no ACK expected)
 //
 // Build flags required: -D LORA_BASE_STATION=1
-// No NODE_ID needed — the base station is not a sensor node.
 // ---------------------------------------------------------------------------
 
 RHReliableDatagram manager(rf95, BASE_ADDR);
 
+// ---- Jetson → base UART frame state machine (TIME_SYNC commands) ----
+
+static FrameState jetsonState    = FS_WAIT_M0;
+static uint8_t   jetsonBuf[20];
+static uint8_t   jetsonExpected  = 0;
+static uint8_t   jetsonPos       = 0;
+
+static bool    pendingTimeSync = false;
+static uint8_t timeSyncBuf[BinaryPacket::kTimeSyncLoRaSize];  // raw LoRa payload to broadcast
+
+void handleJetsonByte(uint8_t b);
+void broadcastTimeSync();
+
 void setup() {
     Serial.begin(115200);   // USB — debug output
-    Serial1.begin(115200);  // UART — Jetson link
+    Serial1.begin(115200);  // UART — Jetson link (bidirectional)
     delay(1000);
 
     resetRadio();
@@ -233,20 +337,30 @@ void setup() {
     manager.setRetries(LORA_RETRIES);
     manager.setTimeout(LORA_TIMEOUT_MS);
 
-    Serial.println("[LORA] Base station ready (RHReliableDatagram, auto-ACK)");
+    Serial.println("[LORA] Base station ready (RHReliableDatagram, auto-ACK, TIME_SYNC enabled)");
 }
 
 void loop() {
+    // Read TIME_SYNC commands arriving from the Jetson on Serial1.
+    while (Serial1.available() > 0) {
+        handleJetsonByte(static_cast<uint8_t>(Serial1.read()));
+    }
+
+    // Broadcast pending TIME_SYNC when the radio is not mid-receive.
+    if (pendingTimeSync && !manager.available()) {
+        broadcastTimeSync();
+        pendingTimeSync = false;
+    }
+
+    // Receive telemetry from nodes.
     uint8_t buf[RH_RF95_MAX_MESSAGE_LEN];
     uint8_t len  = sizeof(buf);
     uint8_t from = 0;
 
-    // recvfromAck() returns true when a packet is available and ACK has been sent
     if (!manager.recvfromAck(buf, &len, &from)) return;
 
     const int8_t rssi = static_cast<int8_t>(rf95.lastRssi());
 
-    // Validate before forwarding — drop malformed packets silently
     BinaryPacket::PktHeader        hdr{};
     BinaryPacket::FullStatePayload payload{};
     if (!BinaryPacket::decodeFullState(buf, len, hdr, payload)) {
@@ -266,8 +380,8 @@ void loop() {
     Serial.print(" rssi=");
     Serial.println(rssi);
 
-    // Build and send UART frame to Jetson
-    uint8_t frame[40];
+    // Build UART frame for Jetson (41 bytes: header + rssi + lora payload + crc)
+    uint8_t frame[41];
     const size_t frame_len =
         BinaryPacket::encodeBaseFrame(rssi, buf, frame, sizeof(frame));
 
@@ -276,6 +390,68 @@ void loop() {
     } else {
         Serial.println("[UART] encodeBaseFrame failed");
     }
+}
+
+void handleJetsonByte(uint8_t b) {
+    switch (jetsonState) {
+
+        case FS_WAIT_M0:
+            if (b == BinaryPacket::FRAME_M0) jetsonState = FS_WAIT_M1;
+            break;
+
+        case FS_WAIT_M1:
+            jetsonState = (b == BinaryPacket::FRAME_M1) ? FS_WAIT_LEN : FS_WAIT_M0;
+            break;
+
+        case FS_WAIT_LEN:
+            jetsonExpected = b;
+            jetsonPos = 0;
+            if (jetsonExpected == 0 ||
+                static_cast<size_t>(1 + jetsonExpected) > sizeof(jetsonBuf)) {
+                jetsonState = FS_WAIT_M0;
+            } else {
+                jetsonBuf[jetsonPos++] = b;
+                jetsonState = FS_READ_DATA;
+            }
+            break;
+
+        case FS_READ_DATA:
+            if (jetsonPos < sizeof(jetsonBuf)) jetsonBuf[jetsonPos++] = b;
+            if (jetsonPos == static_cast<uint8_t>(1 + jetsonExpected)) {
+                jetsonState = FS_CHECK_CRC;
+            }
+            break;
+
+        case FS_CHECK_CRC: {
+            const uint8_t computed = BinaryPacket::crc8(jetsonBuf, 1 + jetsonExpected);
+            if (b == computed) {
+                BinaryPacket::PktHeader       hdr{};
+                BinaryPacket::TimeSyncPayload ts{};
+                if (BinaryPacket::decodeTimeSync(jetsonBuf + 1, jetsonExpected, hdr, ts)) {
+                    // Store the raw 12-byte LoRa payload (PktHeader + TimeSyncPayload)
+                    memcpy(timeSyncBuf, jetsonBuf + 1, BinaryPacket::kTimeSyncLoRaSize);
+                    pendingTimeSync = true;
+                    Serial.print("[TIME_SYNC] from Jetson: session_id=");
+                    Serial.print(ts.session_id);
+                    Serial.print(" session_ms=");
+                    Serial.println(ts.session_time_ms);
+                }
+            } else {
+                Serial.println("[UART] Jetson frame CRC mismatch");
+            }
+            jetsonState = FS_WAIT_M0;
+            break;
+        }
+    }
+}
+
+void broadcastTimeSync() {
+    // Fire-and-forget broadcast — nodes receive and handle; no ACK expected.
+    manager.sendto(
+        timeSyncBuf,
+        static_cast<uint8_t>(BinaryPacket::kTimeSyncLoRaSize),
+        RH_BROADCAST_ADDRESS);
+    Serial.println("[TIME_SYNC] broadcast sent over LoRa");
 }
 
 // ---------------------------------------------------------------------------
