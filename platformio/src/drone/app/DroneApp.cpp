@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <Wire.h>
+#include "esp32-hal-cpu.h"
 
 DroneApp::DroneApp(uint8_t nodeId, DroneContext &ctx, AppState &state,
                    IClock &clock, SensorManager &sensors,
@@ -13,6 +14,8 @@ DroneApp::DroneApp(uint8_t nodeId, DroneContext &ctx, AppState &state,
       _link(link), _keypad(keypad), _oled(oled) {}
 
 void DroneApp::setup() {
+  setCpuFrequencyMhz(80);
+
   Serial.begin(115200);
   delay(200);
   Wire.begin();
@@ -23,7 +26,10 @@ void DroneApp::setup() {
   _actuators.beginAll();
   _ctx.bridge.begin();
 
-  _sensors.sleepAllSensors();
+  delay(200);
+
+  // _sensors.sleepAllSensors();
+  _sensors.startWakeSequence();
 }
 
 void DroneApp::loop() {
@@ -52,6 +58,9 @@ void DroneApp::loop() {
       _sensors.sampleKeypadOnly();
     }
     _state.wakeupSequenceActive = false;
+  }
+
+  if (_state.sensingEnabled && !_state.sensorsSleeping && !_sensors.wakeSequenceActive()) {
     _link.maybeSendTelemetry(_nodeId);
     _link.handleAckTimeout();
   }
@@ -62,6 +71,7 @@ void DroneApp::loop() {
   if (_ctx.oled.healthy()) {
     _oled.render();
   }
+  
 }
 
 void DroneApp::scanI2C() {

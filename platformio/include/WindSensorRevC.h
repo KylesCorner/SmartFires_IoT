@@ -14,8 +14,10 @@ public:
     float adcRefVolts = 3.3f;
     uint16_t adcMax = 4095;
 
-    float rvDividerRatio = 1.0f;
-    float tmpDividerRatio = 1.0f;
+    // float rvDividerRatio = 1.0f;
+    // float tmpDividerRatio = 1.0f;
+    float rvDividerRatio = (15.0f + 22.0f) / 22.0f;  // ≈ 1.68
+    float tmpDividerRatio = 1.68f;
 
     float zeroWindAdjustmentVolts = 0.2f;
 

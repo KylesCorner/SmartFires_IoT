@@ -30,8 +30,8 @@ struct UiState {
 };
 
 struct AppState {
-  bool sensingEnabled = true;
-  bool sensorsSleeping = true;
+  bool sensingEnabled = false;
+  bool sensorsSleeping = false;
   bool wakeupSequenceActive = true;
   bool lastSensorsSleeping = false;
   LinkState link;
