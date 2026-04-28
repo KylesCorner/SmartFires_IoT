@@ -281,7 +281,8 @@ void processFrame(const uint8_t* data, uint8_t len) {
 
     if (hdr.magic != BinaryPacket::PKT_MAGIC ||
         (hdr.pkt_type != BinaryPacket::PKT_FULL_STATE &&
-         hdr.pkt_type != BinaryPacket::PKT_BUNDLE)) {
+         hdr.pkt_type != BinaryPacket::PKT_BUNDLE &&
+         hdr.pkt_type != BinaryPacket::PKT_GPS)) {
         Serial.println("[UART] bad magic or type");
         Serial1.println("ERR,bad_pkt");
         return;
@@ -291,7 +292,9 @@ void processFrame(const uint8_t* data, uint8_t len) {
 
     enqueue(data, len);  // always succeeds; evicts oldest if full
     Serial.print("[TX] enqueued type=");
-    Serial.print(hdr.pkt_type == BinaryPacket::PKT_BUNDLE ? "BUNDLE" : "FULL");
+    if (hdr.pkt_type == BinaryPacket::PKT_BUNDLE)   Serial.print("BUNDLE");
+    else if (hdr.pkt_type == BinaryPacket::PKT_GPS) Serial.print("GPS");
+    else                                             Serial.print("FULL");
     Serial.print(" seq=");
     Serial.print(hdr.seq);
     Serial.print(" len=");
@@ -329,7 +332,9 @@ void sendPayload(const uint8_t* payload, uint8_t len) {
 
     const uint32_t sessionNow = tdmaHasSynced ? tdmaSessionNow() : millis();
     Serial.print("[LORA TX] type=");
-    Serial.print(hdr.pkt_type == BinaryPacket::PKT_BUNDLE ? "BUNDLE" : "FULL");
+    if (hdr.pkt_type == BinaryPacket::PKT_BUNDLE)   Serial.print("BUNDLE");
+    else if (hdr.pkt_type == BinaryPacket::PKT_GPS) Serial.print("GPS");
+    else                                             Serial.print("FULL");
     Serial.print(" seq=");
     Serial.print(hdr.seq);
     Serial.print(" slot=");
@@ -486,7 +491,8 @@ void loop() {
     memcpy(&hdr, buf, sizeof(hdr));
     if (hdr.magic != BinaryPacket::PKT_MAGIC ||
         (hdr.pkt_type != BinaryPacket::PKT_FULL_STATE &&
-         hdr.pkt_type != BinaryPacket::PKT_BUNDLE)) {
+         hdr.pkt_type != BinaryPacket::PKT_BUNDLE &&
+         hdr.pkt_type != BinaryPacket::PKT_GPS)) {
         Serial.print("[LORA] invalid packet from=0x");
         Serial.print(from, HEX);
         Serial.print(" type=0x");
@@ -497,7 +503,9 @@ void loop() {
     }
 
     Serial.print("[LORA RX] type=");
-    Serial.print(hdr.pkt_type == BinaryPacket::PKT_BUNDLE ? "BUNDLE" : "FULL");
+    if (hdr.pkt_type == BinaryPacket::PKT_BUNDLE)   Serial.print("BUNDLE");
+    else if (hdr.pkt_type == BinaryPacket::PKT_GPS) Serial.print("GPS");
+    else                                             Serial.print("FULL");
     Serial.print(" node=");
     Serial.print(hdr.node_id);
     Serial.print(" seq=");

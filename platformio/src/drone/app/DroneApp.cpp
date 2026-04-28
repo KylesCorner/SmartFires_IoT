@@ -62,6 +62,7 @@ void DroneApp::loop() {
 
   if (_state.sensingEnabled && !_state.sensorsSleeping && !_sensors.wakeSequenceActive()) {
     _link.maybeSendTelemetry(_nodeId);
+    _link.maybeSendGpsOnce(_nodeId);
     _link.handleAckTimeout();
   }
 

@@ -5,22 +5,27 @@
 // Binary wire format for SmartFires telemetry.
 //
 // UART frame — drone -> feather node (FULL_STATE):
-//   [0xAA][0x55][len=36: u8][PktHeader:4][FullStatePayload:32][crc8]
-//   total frame = 40 bytes
+//   [0xAA][0x55][len=28: u8][PktHeader:4][FullStatePayload:24][crc8]
+//   total frame = 32 bytes
 //   CRC-8/MAXIM covers the len byte + all data bytes.
 //
+// UART frame — drone -> feather node (GPS):
+//   [0xAA][0x55][len=12: u8][PktHeader:4][GpsPayload:8][crc8]
+//   total frame = 16 bytes. Sent once per session when a valid GPS fix is acquired.
+//
 // UART frame — drone -> feather node (BUNDLE):
-//   [0xAA][0x55][len: u8][PktHeader:4][FullStatePayload:32][n_deltas:1][DeltaPayload×n:n*20][crc8]
-//   len = 37 + n*20 (max n=5 → len=137, frame=141 bytes)
+//   [0xAA][0x55][len: u8][PktHeader:4][FullStatePayload:24][n_deltas:1][DeltaPayload×n:n*16][crc8]
+//   len = 29 + n*16 (max n=7 → len=141, frame=145 bytes)
 //
 // LoRa payload — feather node -> feather base:
-//   FULL_STATE: [PktHeader:4][FullStatePayload:32]  = 36 bytes
-//   BUNDLE:     [PktHeader:4][FullStatePayload:32][n_deltas:1][DeltaPayload×n]  ≤ 137 bytes
+//   FULL_STATE: [PktHeader:4][FullStatePayload:24]  = 28 bytes
+//   GPS:        [PktHeader:4][GpsPayload:8]          = 12 bytes. One per session.
+//   BUNDLE:     [PktHeader:4][FullStatePayload:24][n_deltas:1][DeltaPayload×n]  ≤ 141 bytes
 //   No extra framing; RadioHead handles framing on the radio link.
 //
 // UART frame — feather base -> Jetson (variable length):
 //   [0xAA][0x55][len: u8][rssi:i8][LoRa payload][crc8]
-//   len = 1 + lora_payload_len (min 37 for FULL_STATE, max 138 for BUNDLE with 5 deltas)
+//   len = 1 + lora_payload_len (min 13 for GPS, 29 for FULL_STATE, max 142 for BUNDLE with 7 deltas)
 //   CRC-8/MAXIM covers the len byte + all data bytes (rssi included).
 //
 // LoRa TIME_SYNC payload — base broadcasts to all nodes:
@@ -48,6 +53,7 @@ enum PktType : uint8_t {
     PKT_HEARTBEAT  = 0x02,
     PKT_TIME_SYNC  = 0x03,  // base station -> nodes (broadcast)
     PKT_BUNDLE     = 0x04,  // reference FullStatePayload + N DeltaPayloads
+    PKT_GPS        = 0x05,  // one-time GPS fix per session (lat/lon not in regular packets)
 };
 
 // ---------- wire structs (packed — no padding) ----------
@@ -59,6 +65,8 @@ struct __attribute__((packed)) PktHeader {
     uint8_t seq;       // rolling 0-255; wraps every 256 packets
 };
 
+// lat/lon removed — transmitted once per session via PKT_GPS to save 8 bytes per packet.
+// GPS sensor continues sampling normally on the ESP32; only the wire encoding changed.
 struct __attribute__((packed)) FullStatePayload {
     uint32_t session_time;    // synced ms since session start (Jetson uptime)
     uint32_t uptime_ms;       // local ESP32 millis()
@@ -70,8 +78,12 @@ struct __attribute__((packed)) FullStatePayload {
     uint16_t pm2_5_ug10;      // µg/m³ * 10
     uint16_t pm4_0_ug10;      // µg/m³ * 10
     uint16_t pm10_ug10;       // µg/m³ * 10
-    int32_t  lat_e7;          // degrees * 1e7
-    int32_t  lon_e7;          // degrees * 1e7
+};
+
+// Sent once per session (PKT_GPS) when the ESP32 first acquires a valid GPS fix.
+struct __attribute__((packed)) GpsPayload {
+    int32_t lat_e7;   // degrees × 1e7
+    int32_t lon_e7;   // degrees × 1e7
 };
 
 struct __attribute__((packed)) TimeSyncPayload {
@@ -82,7 +94,8 @@ struct __attribute__((packed)) TimeSyncPayload {
 // DeltaPayload — compact representation of one sensor sample relative to a reference.
 //
 // wind_cms is stored as an absolute value (not delta) because wind can change rapidly.
-// All PM, temperature, humidity, lat, lon fields are signed deltas from the reference.
+// All PM, temperature, and humidity fields are signed deltas from the reference.
+// lat/lon removed — drones are stationary; location is in the separate PKT_GPS packet.
 // sensor_flags is inherited from the reference frame and not repeated here.
 struct __attribute__((packed)) DeltaPayload {
     uint16_t dt_ms;               // ms elapsed since reference session_time
@@ -93,24 +106,26 @@ struct __attribute__((packed)) DeltaPayload {
     int16_t  pm2_5_delta;
     int16_t  pm4_0_delta;
     int16_t  pm10_delta;
-    int16_t  lat_delta_e7;        // delta in degrees × 1e7 (±0.0033° ≈ ±370 m)
-    int16_t  lon_delta_e7;
 };
 
 // Compile-time size checks
 static_assert(sizeof(PktHeader)        ==  4, "PktHeader must be 4 bytes");
-static_assert(sizeof(FullStatePayload) == 32, "FullStatePayload must be 32 bytes");
+static_assert(sizeof(FullStatePayload) == 24, "FullStatePayload must be 24 bytes");
+static_assert(sizeof(GpsPayload)       ==  8, "GpsPayload must be 8 bytes");
 static_assert(sizeof(TimeSyncPayload)  ==  8, "TimeSyncPayload must be 8 bytes");
-static_assert(sizeof(DeltaPayload)     == 20, "DeltaPayload must be 20 bytes");
+static_assert(sizeof(DeltaPayload)     == 16, "DeltaPayload must be 16 bytes");
 
 static constexpr uint8_t kBundleMaxDeltas = 7;
 
 static constexpr size_t kLoRaPayloadSize =
-    sizeof(PktHeader) + sizeof(FullStatePayload);  // 36
+    sizeof(PktHeader) + sizeof(FullStatePayload);  // 28
+
+static constexpr size_t kGpsLoRaSize =
+    sizeof(PktHeader) + sizeof(GpsPayload);        // 12
 
 static constexpr size_t kMaxLoRaPayloadSize =
     sizeof(PktHeader) + sizeof(FullStatePayload) + 1 +
-    kBundleMaxDeltas * sizeof(DeltaPayload);  // 177
+    kBundleMaxDeltas * sizeof(DeltaPayload);  // 141
 
 static constexpr size_t kTimeSyncLoRaSize =
     sizeof(PktHeader) + sizeof(TimeSyncPayload);   // 12
@@ -129,18 +144,18 @@ inline uint8_t crc8(const uint8_t* data, size_t len) {
     return crc;
 }
 
-// ---------- encode: drone -> feather node UART frame ----------
+// ---------- encode: drone -> feather node UART frame (FULL_STATE) ----------
 //
-// Writes: [0xAA][0x55][36][PktHeader][FullStatePayload][crc8]  = 40 bytes
-// Returns bytes written, or 0 if buf_size is too small (needs >= 40).
+// Writes: [0xAA][0x55][28][PktHeader][FullStatePayload][crc8]  = 32 bytes
+// Returns bytes written, or 0 if buf_size is too small (needs >= 32).
 
 inline size_t encodeFullStateFrame(
     uint8_t node_id, uint8_t seq,
     const FullStatePayload& payload,
     uint8_t* buf, size_t buf_size)
 {
-    static constexpr size_t kDataLen  = sizeof(PktHeader) + sizeof(FullStatePayload); // 36
-    static constexpr size_t kFrameLen = 2 + 1 + kDataLen + 1;                         // 40
+    static constexpr size_t kDataLen  = sizeof(PktHeader) + sizeof(FullStatePayload); // 28
+    static constexpr size_t kFrameLen = 2 + 1 + kDataLen + 1;                         // 32
 
     if (buf_size < kFrameLen) return 0;
 
@@ -162,12 +177,48 @@ inline size_t encodeFullStateFrame(
     return kFrameLen;
 }
 
+// ---------- encode: drone -> feather node UART frame (GPS) ----------
+//
+// Writes: [0xAA][0x55][12][PktHeader(PKT_GPS)][GpsPayload][crc8]  = 16 bytes
+// Sent once per session when a valid GPS fix is first acquired.
+// The Feather enqueues this for LoRa TX but does NOT ACK it to the ESP32.
+// Returns bytes written, or 0 if buf_size is too small (needs >= 16).
+
+inline size_t encodeGpsFrame(
+    uint8_t node_id, uint8_t seq,
+    const GpsPayload& gps,
+    uint8_t* buf, size_t buf_size)
+{
+    static constexpr size_t kDataLen  = sizeof(PktHeader) + sizeof(GpsPayload); // 12
+    static constexpr size_t kFrameLen = 2 + 1 + kDataLen + 1;                   // 16
+
+    if (buf_size < kFrameLen) return 0;
+
+    buf[0] = FRAME_M0;
+    buf[1] = FRAME_M1;
+    buf[2] = static_cast<uint8_t>(kDataLen);
+
+    PktHeader hdr;
+    hdr.magic    = PKT_MAGIC;
+    hdr.pkt_type = PKT_GPS;
+    hdr.node_id  = node_id;
+    hdr.seq      = seq;
+
+    memcpy(buf + 3,                     &hdr, sizeof(PktHeader));
+    memcpy(buf + 3 + sizeof(PktHeader), &gps, sizeof(GpsPayload));
+
+    buf[3 + kDataLen] = crc8(buf + 2, 1 + kDataLen);
+
+    return kFrameLen;
+}
+
 // ---------- encode: feather base -> Jetson UART frame (variable length) ----------
 //
 // Writes: [0xAA][0x55][len][rssi_i8][LoRa payload][crc8]
 //   len = 1 + lora_len  (rssi byte + LoRa payload bytes)
-//   FULL_STATE: lora_len=36 → total frame = 41 bytes
-//   BUNDLE:     lora_len up to 137 → total frame up to 142 bytes
+//   GPS:        lora_len=12 → total frame = 17 bytes
+//   FULL_STATE: lora_len=28 → total frame = 33 bytes
+//   BUNDLE:     lora_len up to 141 → total frame up to 146 bytes
 // raw_lora_payload must point to lora_len bytes as received from LoRa.
 // Returns bytes written, or 0 on failure.
 
@@ -198,7 +249,7 @@ inline size_t encodeBaseFrame(
 //
 // Writes: [0xAA][0x55][len][PktHeader][FullStatePayload][n_deltas][DeltaPayload×n][crc8]
 //   len = sizeof(PktHeader) + sizeof(FullStatePayload) + 1 + n_deltas * sizeof(DeltaPayload)
-//   Max n_deltas = kBundleMaxDeltas (7) → len=177, frame=181 bytes
+//   Max n_deltas = kBundleMaxDeltas (7) → len=141, frame=145 bytes
 // Returns bytes written, or 0 on failure.
 
 inline size_t encodeBundleFrame(
@@ -290,6 +341,24 @@ inline bool decodeFullState(
         && (hdr_out.pkt_type == PKT_FULL_STATE);
 }
 
+// ---------- decode: validate a raw LoRa GPS payload ----------
+//
+// raw_payload must be at least kGpsLoRaSize bytes.
+// Returns true if magic and packet type are valid.
+
+inline bool decodeGps(
+    const uint8_t* raw_payload, size_t len,
+    PktHeader& hdr_out, GpsPayload& gps_out)
+{
+    if (len < kGpsLoRaSize) return false;
+
+    memcpy(&hdr_out, raw_payload,                     sizeof(PktHeader));
+    memcpy(&gps_out, raw_payload + sizeof(PktHeader), sizeof(GpsPayload));
+
+    return (hdr_out.magic    == PKT_MAGIC)
+        && (hdr_out.pkt_type == PKT_GPS);
+}
+
 // ---------- decode: validate a raw LoRa BUNDLE payload ----------
 //
 // raw_payload: pointer to the LoRa payload bytes (no UART framing).
@@ -318,7 +387,8 @@ inline bool decodeBundle(
         memcpy(&deltas_out[i], raw_payload + off, sizeof(DeltaPayload));
         off += sizeof(DeltaPayload);
     }
-    return true;}
+    return true;
+}
 
 // ---------- decode: validate a raw LoRa or UART TIME_SYNC payload ----------
 //

@@ -20,6 +20,11 @@ void LinkService::update() {
     if (_state.link.waitingForAck &&
         ((ackSeq & 0xFF) == (_state.link.lastSentSeq & 0xFF))) {
       _state.link.waitingForAck = false;
+      if (_waitingForGpsAck) {
+        _waitingForGpsAck   = false;
+        _gpsSentThisSession = true;
+        Serial.println("[GPS TX] ACKed — GPS sent for this session");
+      }
     }
   }
 
@@ -37,8 +42,9 @@ void LinkService::update() {
     const uint32_t sessionMs = _ctx.bridge.lastSessionTimeMs();
 
     if (!_hasSynced || sid != _lastSyncSessionId) {
-      _lastSyncSessionId = sid;
-      _hasSynced         = true;
+      _lastSyncSessionId      = sid;
+      _hasSynced              = true;
+      _gpsSentThisSession     = false;  // new session — allow GPS to be re-sent
       Serial.print("[SYNC] new session id=");
       Serial.println(sid);
     }
@@ -78,8 +84,22 @@ void LinkService::maybeSendTelemetry(uint8_t nodeId) {
 void LinkService::handleAckTimeout() {
   const uint32_t now = _clock.millis();
 
-  if (_state.link.waitingForAck &&
-      (now - _state.link.lastSendTimeMs >= UartLoRaBridge::kAckTimeoutMs)) {
+  if (!_state.link.waitingForAck) return;
+  if (now - _state.link.lastSendTimeMs < UartLoRaBridge::kAckTimeoutMs) return;
+
+  if (_waitingForGpsAck) {
+    if (_gpsRetryCount < kGpsMaxRetries) {
+      ++_gpsRetryCount;
+      Serial.print("[GPS TX] no ACK — retry ");
+      Serial.println(_gpsRetryCount);
+      sendGpsFrame();
+    } else {
+      // All retries exhausted — release lock so bundles can proceed.
+      // Leave _gpsSentThisSession = false so maybeSendGpsOnce() will try again later.
+      _state.link.waitingForAck = false;
+      _waitingForGpsAck         = false;
+    }
+  } else {
     _state.link.waitingForAck = false;
   }
 }
@@ -98,9 +118,45 @@ BinaryPacket::FullStatePayload LinkService::buildPayload(uint32_t now) const {
   p.pm2_5_ug10     = static_cast<uint16_t>(isnan(pkt.pm2_5) ? 0u : (uint16_t)(pkt.pm2_5 * 10.0f + 0.5f));
   p.pm4_0_ug10     = static_cast<uint16_t>(isnan(pkt.pm4_0) ? 0u : (uint16_t)(pkt.pm4_0 * 10.0f + 0.5f));
   p.pm10_ug10      = static_cast<uint16_t>(isnan(pkt.pm10)  ? 0u : (uint16_t)(pkt.pm10  * 10.0f + 0.5f));
-  p.lat_e7         = static_cast<int32_t>(pkt.lat * 1e7);
-  p.lon_e7         = static_cast<int32_t>(pkt.lon * 1e7);
   return p;
+}
+
+void LinkService::maybeSendGpsOnce(uint8_t nodeId) {
+  if (_gpsSentThisSession) return;
+  if (_waitingForGpsAck) return;       // retry handled by handleAckTimeout
+  if (_state.link.waitingForAck) return; // let the in-flight bundle complete first
+
+  TelemetryPacket pkt = _telemetry.build(0, _clock.millis());
+  if (!(pkt.sensorFlags & TelemetryService::TF_GPS)) return;  // no valid fix yet
+
+  _gpsPending.lat_e7 = static_cast<int32_t>(pkt.lat * 1e7);
+  _gpsPending.lon_e7 = static_cast<int32_t>(pkt.lon * 1e7);
+  _gpsNodeId         = nodeId;
+  _gpsRetryCount     = 0;
+
+  Serial.print("[GPS TX] lat=");
+  Serial.print(pkt.lat, 7);
+  Serial.print(" lon=");
+  Serial.println(pkt.lon, 7);
+
+  sendGpsFrame();
+}
+
+void LinkService::sendGpsFrame() {
+  ++_state.link.seq;
+  uint8_t frame[20];
+  const size_t len = BinaryPacket::encodeGpsFrame(
+      _gpsNodeId,
+      static_cast<uint8_t>(_state.link.seq & 0xFF),
+      _gpsPending,
+      frame, sizeof(frame));
+  if (len > 0) {
+    _ctx.bridge.sendBinaryFrame(frame, len);
+    _state.link.lastSentSeq    = _state.link.seq;
+    _state.link.lastSendTimeMs = _clock.millis();
+    _state.link.waitingForAck  = true;
+    _waitingForGpsAck          = true;
+  }
 }
 
 void LinkService::sendBundleFrame(uint8_t nodeId, uint32_t seq) {
@@ -125,8 +181,6 @@ void LinkService::sendBundleFrame(uint8_t nodeId, uint32_t seq) {
                               static_cast<int32_t>(s.pm4_0_ug10) - static_cast<int32_t>(ref.pm4_0_ug10));
     d.pm10_delta          = static_cast<int16_t>(
                               static_cast<int32_t>(s.pm10_ug10) - static_cast<int32_t>(ref.pm10_ug10));
-    d.lat_delta_e7        = static_cast<int16_t>(s.lat_e7 - ref.lat_e7);
-    d.lon_delta_e7        = static_cast<int16_t>(s.lon_e7 - ref.lon_e7);
   }
 
   uint8_t frame[200];

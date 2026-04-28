@@ -32,14 +32,23 @@ Frame format received from Feather base station
 -----------------------------------------------
     [0xAA][0x55][len: u8][rssi: i8][LoRa payload][crc8]
     len = 1 (rssi) + lora_payload_len
-      FULL_STATE: len=37  (rssi + PktHeader:4 + FullStatePayload:32)
-      BUNDLE:     len=178 max (rssi + PktHeader:4 + FullStatePayload:32 + n_deltas:1 + 7×DeltaPayload:140)
+      GPS:       len=13  (rssi + PktHeader:4 + GpsPayload:8)
+      FULL_STATE: len=29  (rssi + PktHeader:4 + FullStatePayload:24)
+      BUNDLE:     len=142 max (rssi + PktHeader:4 + FullStatePayload:24 + n_deltas:1 + 7×DeltaPayload:112)
     CRC-8/MAXIM covers the len byte + all data bytes that follow.
 
 TIME_SYNC frame sent to Feather base station
 --------------------------------------------
     [0xAA][0x55][len=12: u8][PktHeader(PKT_TIME_SYNC): 4 bytes][TimeSyncPayload: 8 bytes][crc8]
     The base station broadcasts this over LoRa so all nodes update their session clock.
+
+GPS handling
+------------
+    GPS coordinates are transmitted once per session via PKT_GPS (not in every packet).
+    receiver.py caches the last GPS fix per node_id and writes lat/lon into every
+    telemetry CSV row. Rows before the first GPS fix arrive have empty lat/lon fields.
+    A new Jetson session (receiver.py restart) causes nodes to re-send GPS on their
+    next valid fix because the new session_id triggers a reset on the firmware side.
 """
 
 import argparse
@@ -63,7 +72,9 @@ from packet import (
     PKT_MAGIC,
     PKT_FULL_STATE,
     PKT_BUNDLE,
+    PKT_GPS,
     crc8,
+    decode_gps,
     decode_full_state,
     decode_bundle,
     encode_time_sync_frame,
@@ -85,7 +96,7 @@ CSV_COLUMNS = [
     "pm2_5_ug_m3",
     "pm4_0_ug_m3",
     "pm10_ug_m3",
-    "lat",
+    "lat",              # from PKT_GPS; empty until first GPS fix received for this node
     "lon",
     "rssi",             # dBm as seen by the base station Feather
 ]
@@ -145,6 +156,9 @@ def run(port: str, baud: int, output_path: str, sync_interval_s: int) -> None:
     print(f"SmartFires receiver  |  {port} @ {baud} baud  |  output: {output_path}")
     print(f"Session ID: {session_id:#010x}  |  TIME_SYNC every {sync_interval_s}s")
     print("Waiting for packets …  (Ctrl-C to stop)\n")
+
+    # Per-node GPS cache: updated when a PKT_GPS arrives; injected into every telemetry row.
+    node_gps: dict = {}  # node_id -> (lat: float, lon: float)
 
     with serial.Serial(port, baud, timeout=1) as ser, \
          open(output_path, "a", newline="") as csvfile:
@@ -223,11 +237,26 @@ def run(port: str, baud: int, output_path: str, sync_interval_s: int) -> None:
                     raw_payload = bytes(buf[2:])
 
                     pkt_type = raw_payload[1] if len(raw_payload) >= 2 else 0xFF
+                    now_ts   = datetime.datetime.utcnow().isoformat(timespec="milliseconds")
 
-                    if pkt_type == PKT_FULL_STATE:
+                    if pkt_type == PKT_GPS:
+                        gps = decode_gps(raw_payload, rssi)
+                        if gps:
+                            nid = gps["node_id"]
+                            node_gps[nid] = (gps["lat"], gps["lon"])
+                            print(
+                                f"[GPS] node={nid}  "
+                                f"lat={gps['lat']:.7f}  lon={gps['lon']:.7f}  "
+                                f"rssi={rssi} dBm"
+                            )
+                        pkts = []
+
+                    elif pkt_type == PKT_FULL_STATE:
                         pkts = [decode_full_state(raw_payload, rssi)]
+
                     elif pkt_type == PKT_BUNDLE:
                         pkts = decode_bundle(raw_payload, rssi)
+
                     else:
                         pkts = []
                         print(
@@ -235,11 +264,14 @@ def run(port: str, baud: int, output_path: str, sync_interval_s: int) -> None:
                             file=sys.stderr,
                         )
 
-                    now_ts = datetime.datetime.utcnow().isoformat(timespec="milliseconds")
                     wrote = 0
                     for pkt in pkts:
                         if pkt is None:
                             continue
+                        # Inject last known GPS for this node (empty string if not yet received).
+                        gps_fix = node_gps.get(pkt["node_id"])
+                        pkt["lat"] = gps_fix[0] if gps_fix else ""
+                        pkt["lon"] = gps_fix[1] if gps_fix else ""
                         pkt["timestamp"] = now_ts
                         writer.writerow(pkt)
                         wrote += 1
@@ -247,6 +279,9 @@ def run(port: str, baud: int, output_path: str, sync_interval_s: int) -> None:
                     if wrote > 0:
                         csvfile.flush()
                         first = pkts[0]
+                        gps_fix = node_gps.get(first["node_id"])
+                        gps_str = (f"lat={gps_fix[0]:.5f} lon={gps_fix[1]:.5f}"
+                                   if gps_fix else "lat=none")
                         print(
                             f"[RX] node={first['node_id']}  seq={first['seq']:3d}  "
                             f"records={wrote}  "
@@ -254,10 +289,10 @@ def run(port: str, baud: int, output_path: str, sync_interval_s: int) -> None:
                             f"T={first['temp_c']:5.1f}°C  H={first['humidity_pct']:4.1f}%  "
                             f"wind={first['wind_mps']:.2f} m/s  "
                             f"PM2.5={first['pm2_5_ug_m3']:.1f} PM10={first['pm10_ug_m3']:.1f} µg/m³  "
-                            f"lat={first['lat']:.5f} lon={first['lon']:.5f}  "
+                            f"{gps_str}  "
                             f"rssi={rssi:4d} dBm"
                         )
-                    else:
+                    elif pkt_type not in (PKT_GPS,):
                         print(
                             f"[WARN] packet decode failed (payload len={len(raw_payload)})",
                             file=sys.stderr,
