@@ -403,7 +403,14 @@ void checkIncomingLora() {
     // Forward to ESP32 so it can update its session_time offset for packet timestamps.
     uint8_t frame[20];
     const size_t frame_len = BinaryPacket::encodeTimeSyncFrame(0, hdr.seq, ts, frame, sizeof(frame));
-    if (frame_len > 0) Serial1.write(frame, frame_len);
+    if (frame_len > 0) {
+        Serial1.write(frame, frame_len);
+        Serial.print("[TDMA] TIME_SYNC forwarded to ESP32 via UART (");
+        Serial.print(frame_len);
+        Serial.println(" bytes)");
+    } else {
+        Serial.println("[TDMA] TIME_SYNC encode failed — NOT forwarded to ESP32");
+    }
 }
 
 // ---------------------------------------------------------------------------

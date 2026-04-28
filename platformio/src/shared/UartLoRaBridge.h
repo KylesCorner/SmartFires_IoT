@@ -134,7 +134,14 @@ private:
 
       case BIN_CHECK_CRC: {
         const uint8_t computed = BinaryPacket::crc8(_binBuf, 1 + _binExpected);
-        if (b == computed) processBinaryFrame(_binBuf + 1, _binExpected);
+        if (b == computed) {
+          processBinaryFrame(_binBuf + 1, _binExpected);
+        } else {
+          Serial.print("[BRIDGE] binary CRC mismatch: got 0x");
+          Serial.print(b, HEX);
+          Serial.print(" expected 0x");
+          Serial.println(computed, HEX);
+        }
         _binMode = false;
         break;
       }
@@ -148,6 +155,12 @@ private:
       _hasTimeSync       = true;
       _lastSessionId     = ts.session_id;
       _lastSessionTimeMs = ts.session_time_ms;
+      Serial.print("[BRIDGE] TIME_SYNC decoded session_id=");
+      Serial.print(ts.session_id);
+      Serial.print(" session_ms=");
+      Serial.println(ts.session_time_ms);
+    } else {
+      Serial.println("[BRIDGE] binary frame decode failed (bad magic/type)");
     }
   }
 
