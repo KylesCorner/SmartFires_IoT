@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """ES-W302 anemometer reader via USB-RS485.
 
-Confirmed Modbus RTU settings:
+Sentec ModBus-RTU V1.11 register map:
   Port    : /dev/cu.usbserial-BG01PRCL
   Address : 1
   Baud    : 9600
   Parity  : Even
   Stop    : 1
-  Register 0x00 : wind speed    (raw ÷ 10 → m/s, 0.1 m/s resolution)
-  Register 0x01 : wind direction (degrees, 0–360)
 
-NOTE: The wind speed register on this unit is stuck at 2 (0.2 m/s)
-regardless of actual wind conditions. Direction works correctly.
-This is a hardware/firmware defect — the unit should be replaced.
+  0x0000 (Reg 1) : Device State  — bitmask (capability flags, NOT wind speed)
+  0x0001 (Reg 2) : Wind Direction — integer, degrees 0–360
+  0x0002 (Reg 3) : Wind Speed hi-word  ┐ 32-bit IEEE754 float, word-swapped
+  0x0003 (Reg 4) : Wind Speed lo-word  ┘ decode: unpack('>f', pack('>HH', reg4, reg3))
 """
 
 import argparse
+import struct
 import time
 import minimalmodbus
 
@@ -36,8 +36,11 @@ def make_instrument(port, baud, address):
 
 
 def read_once(inst):
-    regs = inst.read_registers(0, 2, functioncode=3)
-    return regs[0] / 10.0, regs[1]
+    regs = inst.read_registers(0, 4, functioncode=3)
+    direction = regs[1]
+    # Word-swapped IEEE754: reg3 (0x0002) is hi-word, reg4 (0x0003) is lo-word
+    speed = struct.unpack('>f', struct.pack('>HH', regs[3], regs[2]))[0]
+    return speed, direction
 
 
 def main():
@@ -62,7 +65,7 @@ def main():
             speed, direction = read_once(inst)
             errors = 0
             ts = time.strftime("%H:%M:%S")
-            print(f"{ts:>10}  {speed:>12.1f}  {direction:>14}", flush=True)
+            print(f"{ts:>10}  {speed:>12.3f}  {direction:>14}", flush=True)
         except Exception as e:
             errors += 1
             if errors <= 3:
