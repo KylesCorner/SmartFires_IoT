@@ -292,21 +292,30 @@ Success criteria:
 
 - sensor frames from different nodes can be compared using the same session timeline
 
-### Phase 3: Add Delta Packets
+### Phase 3: Add Delta Packets ✓ Done
 
 Add changed-field suppression while keeping periodic full-state refreshes.
 
 Deliverables:
 
-- quantized telemetry state struct
-- changed-field bitmask
-- threshold rules per field
-- periodic full-state cadence
+- quantized telemetry state struct ✓
+- `PKT_BUNDLE`: reference `FullStatePayload` + up to 7 `DeltaPayload` entries ✓
+- GPS coordinates separated into one-time `PKT_GPS` per session (saves 8 bytes/packet) ✓
+- 4 Hz sensing rate; bundle accumulates every 2 s at N_δ=7 ✓
+- periodic full-state refresh via the bundle reference frame ✓
+
+**TODO — startup TIME_SYNC before first reading:**
+Currently the ESP32 starts sending telemetry immediately, using `millis()` as `session_time`
+until the first TIME_SYNC arrives (~30 s). `uptime_ms` is retained in `FullStatePayload`
+partly to make this pre-sync period diagnosable. Once TIME_SYNC is forced to complete before
+the ESP32 begins sampling, `uptime_ms` becomes redundant with `session_time` and can be
+dropped — saving 4 bytes per packet (141 → 137 bytes at N_δ=7; recalculate slot sizing).
+Requires handshake or delay logic on both the node Feather and ESP32 at boot.
 
 Success criteria:
 
-- normal packets are significantly smaller than full-state packets
-- receiver stays correct across packet loss due to periodic full refresh
+- normal packets are significantly smaller than full-state packets ✓ (17.6 bytes/sample vs 36)
+- receiver stays correct across packet loss due to periodic full refresh ✓
 
 ### Phase 4: Add Feather Queueing
 
@@ -367,6 +376,13 @@ These should be decided before deep implementation:
 - queue depth on Feather
 - whether UART ACK means parsed, enqueued, or actually sent over LoRa
 - whether base station sends sync by broadcast only or also per-node repair messages
+
+## GPS Optimization Strategy ✓ Done
+
+GPS coordinates are transmitted once per session via `PKT_GPS` (not in every packet).
+The receiver caches the last GPS fix per node and injects it into every CSV row.
+Rows before the first GPS fix have empty lat/lon fields.
+A new session ID (receiver.py restart) causes nodes to re-send GPS on their next valid fix.
 
 ## Recommended First Concrete Step
 

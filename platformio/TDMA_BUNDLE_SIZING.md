@@ -31,24 +31,27 @@ The LoRa payload for a `PKT_BUNDLE` frame:
 
 ```
 L  =  4  (PktHeader)
-    + 32  (FullStatePayload — reference sample)
+    + 24  (FullStatePayload — reference sample; lat/lon removed, sent once via PKT_GPS)
     +  1  (delta_count byte)
-    + N_δ × 20  (DeltaPayload per delta sample)
+    + N_δ × 16  (DeltaPayload per delta sample)
 
-L  =  37  +  20 × N_δ          [bytes]
+L  =  29  +  16 × N_δ          [bytes]
 ```
 
 On-air byte count (including RadioHead 4-byte header):
 
 ```
-L_air  =  L + 4  =  41  +  20 × N_δ     [bytes]
+L_air  =  L + 4  =  33  +  16 × N_δ     [bytes]
 ```
 
-Comparison to the legacy `PKT_FULL_STATE` (no deltas):
+Comparison to the legacy `PKT_FULL_STATE` (no deltas, with lat/lon, now unused):
 
 ```
 L_full_state  =  4 + 32  =  36 bytes  →  L_air = 40 bytes
 ```
+
+At N_δ=7 the bundle is 141 bytes (L_air=145), carrying 8 samples. Effective per-sample
+cost = 141/8 = 17.6 bytes vs 36 bytes for individual FULL_STATE packets.
 
 ---
 
@@ -74,11 +77,13 @@ per 4 data symbols (×5 factor).
 
 ### Calibration check
 
-At N_δ = 0, L = 36, L_air = 40:
+At N_δ = 0, L = 29, L_air = 33:
 ```
-n_sym  =  8 + ⌈(320 + 16)/28⌉ × 5  =  8 + 12×5  =  68
-T_tx   =  (12.25 + 68) × 1.024  =  82.2 ms  ✓  (observed ≈ 82 ms)
+n_sym  =  8 + ⌈(264 + 16)/28⌉ × 5  =  8 + 10×5  =  58
+T_tx   =  (12.25 + 58) × 1.024  =  72 ms
 ```
+
+Legacy `PKT_FULL_STATE` (L=36, L_air=40, no longer sent): n_sym=68, T_tx≈82 ms.
 
 ---
 
@@ -86,17 +91,20 @@ T_tx   =  (12.25 + 68) × 1.024  =  82.2 ms  ✓  (observed ≈ 82 ms)
 
 | N_δ | L (bytes) | L_air (bytes) | n_sym | T_tx (ms) |
 |-----|-----------|----------------|-------|-----------|
-| 0   | 36        | 40             | 68    | 82        |
-| 1   | 57        | 61             | 98    | 113       |
-| 2   | 77        | 81             | 128   | 144       |
-| 3   | 97        | 101            | 158   | 174       |
-| 4   | 117       | 121            | 188   | 205       |
-| 5   | 137       | 141            | 213   | 231       |
-| 6   | 157       | 161            | 243   | 261       |
-| 7   | 177       | 181            | 273   | 292       |
-| 8   | 197       | 201            | 298   | 318       |
-| 9   | 217       | 221            | 328   | 348       |
-| 10  | 237       | 241            | 358   | 379       |
+| 0   | 29        | 33             | 58    | 72        |
+| 1   | 45        | 49             | 83    | 98        |
+| 2   | 61        | 65             | 108   | 123       |
+| 3   | 77        | 81             | 128   | 144       |
+| 4   | 93        | 97             | 153   | 169       |
+| 5   | 109       | 113            | 173   | 190       |
+| 6   | 125       | 129            | 198   | 215       |
+| **7** | **141** | **145**        | **218** | **236** |
+| 8   | 157       | 161            | 243   | 261       |
+| 9   | 173       | 177            | 268   | 287       |
+| 10  | 189       | 193            | 288   | 307       |
+| 11  | 205       | 209            | 313   | 333       |
+| 12  | 221       | 225            | 333   | 354       |
+| 13  | 237       | 241            | 358   | 379       |
 
 ---
 
@@ -119,19 +127,20 @@ Constraint:  (R + 1) × (T_tx + T_ack)  ≤  W - 2G
 
 | N_δ | T_tx (ms) | W_min at R=0 (ms) | W_min at R=1 (ms) | W_min at R=2 (ms) | W_min at R=3 (ms) |
 |-----|-----------|-------------------|-------------------|-------------------|-------------------|
-| 0   | 82        | 222               | 404               | 584               | 768               |
-| 1   | 113       | 253               | 466               | 679               | 892               |
-| 2   | 144       | 284               | 528               | 774               | 1016              |
-| 3   | 174       | 314               | 588               | 864               | 1136              |
-| 4   | 205       | 345               | 650               | 960               | 1260              |
-| 5   | 231       | 371               | 702               | 1040              | 1364              |
-| 6   | 261       | 401               | 764               | 1130              | 1484              |
-| **7** | **292** | **432**           | **824 → 900**     | 1224              | 1608              |
-| 8   | 318       | 458               | 882               | 1306              | 1712              |
-| 9   | 348       | 488               | 944               | 1396              | 1832              |
-| 10  | 379       | 519               | 1008              | 1490              | 1956              |
+| 0   | 72        | 212               | 384               | 556               | 728               |
+| 1   | 98        | 238               | 436               | 634               | 832               |
+| 2   | 123       | 263               | 486               | 709               | 932               |
+| 3   | 144       | 284               | 528               | 772               | 1016              |
+| 4   | 169       | 309               | 578               | 847               | 1116              |
+| 5   | 190       | 330               | 620               | 910               | 1200              |
+| 6   | 215       | 355               | 670               | 985               | 1300              |
+| **7** | **236** | **376**           | **712 → 900**     | 1048              | 1384              |
+| 8   | 261       | 401               | 762               | 1123              | 1484              |
+| 9   | 287       | 427               | 814               | 1201              | 1588              |
+| 10  | 307       | 447               | 854               | 1261              | 1668              |
+| 13  | 379       | 519               | 998               | 1477              | 1956              |
 
-*Current config: N_δ=7, R=1, W=900 ms (76 ms above W_min=824 ms).*
+*Current config: N_δ=7, R=1, W=900 ms (188 ms above W_min=712 ms).*
 
 ---
 
@@ -226,10 +235,10 @@ T_bundle stays fixed. There are three levers:
 |--------|-----|-----|---|--------|--------------|--------------|------|------|
 | Current | 2  | 7   | 1 | 900    | 2.0          | 1800         | 0.90 | 0%   |
 | 3 nodes | 3  | 7   | 1 | 900    | 2.0          | 2700         | 1.35 | 26%  |
-| 3 nodes | 3  | 10  | 1 | 1050   | 2.75         | 3150         | 1.15 | 13%  |
-| 4 nodes | 4  | 10  | 1 | 1050   | 2.75         | 4200         | 1.53 | 35%  |
+| 3 nodes | 3  | 10  | 1 | 900    | 2.75         | 2700         | 0.98 | 0%   |
+| 4 nodes | 4  | 10  | 1 | 900    | 2.75         | 3600         | 1.31 | 24%  |
 
-N_δ=10 is the RadioHead ceiling (L=237 B); 3 nodes still incurs ~13% loss.
+N_δ=13 is the RadioHead ceiling (L=237 B, W_min=998 ms at R=1 → W=1050 ms); 3 nodes at N_δ=10 fits cleanly in W=900 ms (W_min=854 ms).
 
 **2. Reduce sensing rate** (doubles T_bundle at 2 Hz, halves the problem).
 
@@ -267,12 +276,12 @@ strong and consistent RSSI (e.g., short-range fixed nodes with good LOS).
 RadioHead RH_RF95 caps the LoRa payload at **251 bytes** (255 max frame − 4 RH header).
 
 ```
-L  ≤  251  →  37 + 20 × N_δ  ≤  251  →  N_δ  ≤  10.7  →  N_δ_max  =  10
+L  ≤  251  →  29 + 16 × N_δ  ≤  251  →  N_δ  ≤  13.875  →  N_δ_max  =  13
 ```
 
-At N_δ=10: L=237 bytes, L_air=241 bytes, T_tx=379 ms.
+At N_δ=13: L=237 bytes, L_air=241 bytes, T_tx=379 ms, W_min=998 ms at R=1.
 
-This is a hard ceiling. Any approach requiring N_δ > 10 needs a different radio library
+This is a hard ceiling. Any approach requiring N_δ > 13 needs a different radio library
 or raw SX127x register access (which would allow up to 255 bytes on-air).
 
 ---
@@ -389,10 +398,10 @@ serve as the base for 4–8 nodes.
 | Parameter | Value | Constraint satisfied? |
 |-----------|-------|-----------------------|
 | f_s | 4 Hz | — |
-| N_δ | 7 | N_δ_max = 10 ✓ |
+| N_δ | 7 | N_δ_max = 13 ✓ |
 | R | 1 | — |
-| W | 900 ms | W_min = 824 ms ✓ (76 ms margin) |
-| TX window | 860 ms | 2×(292+100) = 784 ms ✓ |
+| W | 900 ms | W_min = 712 ms ✓ (188 ms margin) |
+| TX window | 860 ms | 2×(236+100) = 672 ms ✓ |
 | T_bundle | 2.0 s | — |
 | T_frame (2 nodes) | 1.8 s | — |
 | η (2 nodes) | 0.90 | < 1 ✓ no data loss |
