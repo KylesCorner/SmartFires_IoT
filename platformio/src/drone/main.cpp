@@ -26,6 +26,8 @@
 #include "app/TelemetryService.h"
 #include "platform/ArduinoClock.h"
 
+#include "config/DutyCycleConfig.h"
+
 #ifndef NODE_ID
 #error "NODE_ID must be set in platformio.ini build_flags (e.g. -D NODE_ID=1)"
 #endif
@@ -68,7 +70,7 @@ LinkService link(ctx, state, clock, telemetry);
 KeypadController keypadController(ctx, state);
 OledPageController oledController(ctx, state, clock);
 DutyCycleController dutyCycleController(
-  DutyCycleController::Config(30000,10000, true)
+  DutyCycleController::Config(DUTY_CYCLE_AWAKE_MS,DUTY_CYCLE_MIN_SLEEP_MS, true)
 );
 DroneApp app(NODE_ID, ctx, state, clock, sensorManager, actuatorManager,
              telemetry, link, keypadController, oledController, dutyCycleController);

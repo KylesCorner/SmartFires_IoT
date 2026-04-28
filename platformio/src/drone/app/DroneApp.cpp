@@ -5,9 +5,7 @@
 #include "esp32-hal.h"
 #include <Arduino.h>
 #include <Wire.h>
-
-constexpr float humidity_threshold = 5.0f;
-constexpr float temp_threshold = 1.0f;
+#include "../config/DutyCycleConfig.h"
 
 DroneApp::DroneApp(uint8_t nodeId, DroneContext &ctx, AppState &state,
                    IClock &clock, SensorManager &sensors,
@@ -110,7 +108,7 @@ void DroneApp::loop() {
   DutyCycleController::Inputs dutyInputs;
   dutyInputs.wakeTrigger =
       _state.sensorsSleeping &&
-      _sensors.sht31DeltaTriggered(temp_threshold, humidity_threshold);
+      _sensors.sht31DeltaTriggered(TEMPERATURE_C_THRESHOLD, HUMIDITY_THRESHOLD);
   dutyInputs.wakeSequenceComplete = _sensors.wakeSequenceComplete();
   dutyInputs.sensingEnabled = _state.sensingEnabled;
 
