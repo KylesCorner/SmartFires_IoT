@@ -166,7 +166,7 @@ public:
 
   void setDutyCycleIntervalMs(uint32_t ms) { _dutyCycleIntervalMs = ms; }
 
-  // ---- Reading getters ----
+  // ---- Reading getters ----1
   bool hasReading() const { return _hasReading; }
 
   float ax_mg() const { return _ax_mg; }
@@ -184,11 +184,43 @@ public:
   float temp_C() const { return _temp_C; }
 
 private:
+  // bool configureNormalMode() {
+  //
+  //   if (_powerMode == PowerMode::Normal) {
+  //     return false;
+  //   }
+  //   // Wake if needed
+  //   if (_icm.sleep(false) != ICM_20948_Stat_Ok) {
+  //     _healthy = false;
+  //     return false;
+  //   }
+  //
+  //   // Disable low-power cycling
+  //   if (_icm.lowPower(false) != ICM_20948_Stat_Ok) {
+  //     _healthy = false;
+  //     return false;
+  //   }
+  //
+  //   // Run accel + gyro continuously
+  //   if (_icm.setSampleMode(ICM_20948_Internal_Acc,
+  //                          ICM_20948_Sample_Mode_Continuous) !=
+  //       ICM_20948_Stat_Ok) {
+  //     _healthy = false;
+  //     return false;
+  //   }
+  //
+  //   if (_icm.setSampleMode(ICM_20948_Internal_Gyr,
+  //                          ICM_20948_Sample_Mode_Continuous) !=
+  //       ICM_20948_Stat_Ok) {
+  //     _healthy = false;
+  //     return false;
+  //   }
+  //
+  //   _powerMode = PowerMode::Normal;
+  //   _healthy = true;
+  //   return true;
+  // }
   bool configureNormalMode() {
-
-    if (_powerMode == PowerMode::Normal) {
-      return false;
-    }
     // Wake if needed
     if (_icm.sleep(false) != ICM_20948_Stat_Ok) {
       _healthy = false;

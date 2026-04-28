@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include "DroneContext.h"
 #include "DroneState.h"
+#include "DutyCycleController.h"
 #include "IClock.h"
 #include "SensorManager.h"
 #include "ActuatorManager.h"
@@ -22,7 +23,8 @@ public:
            TelemetryService& telemetry,
            LinkService& link,
            KeypadController& keypad,
-           OledPageController& oled);
+           OledPageController& oled,
+           DutyCycleController& duty_cycle);
 
   void setup();
   void loop();
@@ -39,6 +41,7 @@ private:
   LinkService& _link;
   KeypadController& _keypad;
   OledPageController& _oled;
+  DutyCycleController& _duty_cycle;
 
   bool _sensorsSleeping = false;
 };

@@ -1,17 +1,22 @@
 #include "DroneApp.h"
 
+#include "USBCDC.h"
+#include "esp32-hal-cpu.h"
+#include "esp32-hal.h"
 #include <Arduino.h>
 #include <Wire.h>
-#include "esp32-hal-cpu.h"
+
+constexpr float humidity_threshold = 5.0f;
+constexpr float temp_threshold = 1.0f;
 
 DroneApp::DroneApp(uint8_t nodeId, DroneContext &ctx, AppState &state,
                    IClock &clock, SensorManager &sensors,
                    ActuatorManager &actuators, TelemetryService &telemetry,
                    LinkService &link, KeypadController &keypad,
-                   OledPageController &oled)
+                   OledPageController &oled, DutyCycleController &duty_cycle)
     : _nodeId(nodeId), _ctx(ctx), _state(state), _clock(clock),
       _sensors(sensors), _actuators(actuators), _telemetry(telemetry),
-      _link(link), _keypad(keypad), _oled(oled) {}
+      _link(link), _keypad(keypad), _oled(oled), _duty_cycle(duty_cycle) {}
 
 void DroneApp::setup() {
   setCpuFrequencyMhz(80);
@@ -26,41 +31,119 @@ void DroneApp::setup() {
   _actuators.beginAll();
   _ctx.bridge.begin();
 
-  delay(200);
+  delay(1000);
 
-  // _sensors.sleepAllSensors();
+  _duty_cycle.begin(millis());
   _sensors.startWakeSequence();
 }
-
 void DroneApp::loop() {
+  const uint32_t now = millis();
+
   _link.update();
 
-  if (_state.sensorsSleeping != _state.lastSensorsSleeping) {
-    if (_state.sensorsSleeping) {
-      _sensors.sleepAllSensors();
-    } else {
+  static bool lastContinuousMode = false;
+
+  // Detect mode changes
+  if (_state.continousMode != lastContinuousMode) {
+    Serial.println(_state.continousMode
+                       ? "[Mode] entering continuous mode"
+                       : "[Mode] entering duty-cycle mode");
+
+    _state.sensorsSleeping = false;
+    _state.wakeupSequenceActive = true;
+    _state.lastSensorsSleeping = false;
+
+    _duty_cycle.begin(now);
+    _sensors.startWakeSequence();
+
+    lastContinuousMode = _state.continousMode;
+  }
+
+  // ============================================================
+  // CONTINUOUS MODE
+  // ============================================================
+  if (_state.continousMode) {
+    _duty_cycle.update_enabled(false);
+
+    _state.sensorsSleeping = false;
+
+    const bool sensorsActive =
+        !_sensors.wakeSequenceActive() && _sensors.wakeSequenceComplete();
+
+    if (!sensorsActive) {
       _state.wakeupSequenceActive = true;
-      _sensors.startWakeSequence();
-    }
 
-    _state.lastSensorsSleeping = _state.sensorsSleeping;
-  }
-
-  if (_state.sensorsSleeping) {
-    _sensors.sampleKeypadOnly();
-  } else if (_sensors.wakeSequenceActive()) {
-    _sensors.serviceWakeSequence();
-    _sensors.sampleKeypadOnly();
-  } else {
-    if (_state.sensingEnabled && !_state.sensorsSleeping) {
-      _sensors.sampleAll();
-    } else {
+      // Keep warming / waking sensors until complete
+      _sensors.serviceWakeSequence();
       _sensors.sampleKeypadOnly();
+    } else {
+      _state.wakeupSequenceActive = false;
+
+      if (_state.sensingEnabled) {
+        _sensors.sampleAll();
+      } else {
+        _sensors.sampleKeypadOnly();
+      }
+
+      // Telemetry only when fully awake / active
+      if (_state.sensingEnabled) {
+        _link.maybeSendTelemetry(_nodeId);
+        _link.handleAckTimeout();
+      }
     }
-    _state.wakeupSequenceActive = false;
+
+    _actuators.updateAll();
+    _keypad.update();
+
+    if (_ctx.oled.healthy()) {
+      _oled.render();
+    }
+
+    return;
   }
 
-  if (_state.sensingEnabled && !_state.sensorsSleeping && !_sensors.wakeSequenceActive()) {
+  // ============================================================
+  // DUTY-CYCLE MODE
+  // ============================================================
+  _duty_cycle.update_enabled(true);
+
+  DutyCycleController::Inputs dutyInputs;
+  dutyInputs.wakeTrigger =
+      _state.sensorsSleeping &&
+      _sensors.sht31DeltaTriggered(temp_threshold, humidity_threshold);
+  dutyInputs.wakeSequenceComplete = _sensors.wakeSequenceComplete();
+  dutyInputs.sensingEnabled = _state.sensingEnabled;
+
+  DutyCycleController::Actions dutyActions =
+      _duty_cycle.update(now, dutyInputs);
+
+  _state.sensorsSleeping = dutyActions.sensorsSleeping;
+  _state.wakeupSequenceActive = dutyActions.wakeupSequenceActive;
+
+  if (dutyActions.startWakeSequence) {
+    Serial.println("[DutyCycle] start wake sequence");
+    _sensors.startWakeSequence();
+  }
+
+  if (dutyActions.serviceWakeSequence) {
+    _sensors.serviceWakeSequence();
+  }
+
+  if (dutyActions.sleepSensors) {
+    Serial.println("[DutyCycle] sleep sensors");
+    _sensors.sleepAllSensors();
+  }
+
+  if (dutyActions.sampleAll) {
+    _sensors.sampleAll();
+  }
+
+  if (dutyActions.sampleKeypadOnly) {
+    _sensors.sampleKeypadOnly();
+  }
+
+  // Telemetry only when the duty-cycle controller says we are awake
+  if (dutyActions.sendTelemetry) {
     _link.maybeSendTelemetry(_nodeId);
     _link.maybeSendGpsOnce(_nodeId);
     _link.handleAckTimeout();
@@ -72,7 +155,6 @@ void DroneApp::loop() {
   if (_ctx.oled.healthy()) {
     _oled.render();
   }
-  
 }
 
 void DroneApp::scanI2C() {

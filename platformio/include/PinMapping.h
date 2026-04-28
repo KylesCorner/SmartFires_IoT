@@ -45,7 +45,8 @@ static const char KEYPAD_MAP[4][4] = {
 static const char KEYPAD_PREV_PAGE = '1';
 static const char KEYPAD_NEXT_PAGE= '2';
 static const char KEYPAD_TOGGLE_SENSING = 'B';
-static const char KEYPAD_HOMEPAGE = 'C';
+static const char KEYPAD_HOMEPAGE = '#';
 static const char KEYPAD_TOGGLE_SLEEP = 'A';
+static const char KEYPAD_TOGGLE_CONT = 'C';
 
 

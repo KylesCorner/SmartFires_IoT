@@ -154,6 +154,10 @@ bool Sps30UartSensor::wake() {
     return false;
   }
 
+  if (!sleeping_) {
+    return true;
+  }
+
   int16_t err = sensor_.wakeUpSequence();
   if (err != 0) {
     Serial.print("[SPS30-UART] wakeUpSequence err=");
@@ -174,6 +178,3 @@ bool Sps30UartSensor::wake() {
 
   return true;
 }
-
-
-

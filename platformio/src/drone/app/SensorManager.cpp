@@ -20,9 +20,7 @@ void SensorManager::sampleAll() {
   }
 }
 
-void SensorManager::sampleKeypadOnly() {
-  _ctx.keypad.sample();
-}
+void SensorManager::sampleKeypadOnly() { _ctx.keypad.sample(); }
 
 void SensorManager::sleepAllSensors() {
   for (size_t i = 0; i < _ctx.numSensors; ++i) {
@@ -37,11 +35,11 @@ void SensorManager::sleepAllSensors() {
 }
 
 bool SensorManager::isPriorityWarmupSensor_(size_t index) const {
-  const IWarmup* warm = _ctx.sensors[index]->warmup();
+  const IWarmup *warm = _ctx.sensors[index]->warmup();
   return (warm != nullptr) && warm->requiresPriorityWarmup();
 }
 
-bool SensorManager::wakeSensor_(size_t index, const char* label) {
+bool SensorManager::wakeSensor_(size_t index, const char *label) {
   const bool ok = _ctx.sensors[index]->wake();
   Serial.print(label);
   Serial.print(_ctx.sensors[index]->name());
@@ -51,6 +49,9 @@ bool SensorManager::wakeSensor_(size_t index, const char* label) {
 }
 
 void SensorManager::startWakeSequence() {
+  if (_wakePhase == WakePhase::WaitingPriorityWarmup) {
+    return;
+  }
   // Phase 1: only wake priority warmup sensors.
   for (size_t i = 0; i < _ctx.numSensors; ++i) {
     if (isPriorityWarmupSensor_(i)) {
@@ -58,44 +59,46 @@ void SensorManager::startWakeSequence() {
     }
   }
 
+ 
+
   _wakePhase = WakePhase::WaitingPriorityWarmup;
 }
 
 void SensorManager::serviceWakeSequence() {
   // Keep already-awake sensors progressing.
-  sampleAll();
+  // sampleAll();
 
   switch (_wakePhase) {
-    case WakePhase::Idle:
-    case WakePhase::Complete:
+  case WakePhase::Idle:
+  case WakePhase::Complete:
+    return;
+
+  case WakePhase::WaitingPriorityWarmup:
+    if (!priorityWarmupComplete()) {
       return;
+    }
 
-    case WakePhase::WaitingPriorityWarmup:
-      if (!priorityWarmupComplete()) {
-        return;
+    // Phase 2: wake everything else.
+    for (size_t i = 0; i < _ctx.numSensors; ++i) {
+      if (!isPriorityWarmupSensor_(i)) {
+        wakeSensor_(i, "Wake remaining ");
       }
+    }
 
-      // Phase 2: wake everything else.
-      for (size_t i = 0; i < _ctx.numSensors; ++i) {
-        if (!isPriorityWarmupSensor_(i)) {
-          wakeSensor_(i, "Wake remaining ");
-        }
-      }
+    _wakePhase = WakePhase::WaitingAllReady;
+    return;
 
-      _wakePhase = WakePhase::WaitingAllReady;
-      return;
-
-    case WakePhase::WaitingAllReady:
-      if (allSensorsReady()) {
-        _wakePhase = WakePhase::Complete;
-      }
-      return;
+  case WakePhase::WaitingAllReady:
+    if (allSensorsReady()) {
+      _wakePhase = WakePhase::Complete;
+    }
+    return;
   }
 }
 
 bool SensorManager::priorityWarmupComplete() const {
   for (size_t i = 0; i < _ctx.numSensors; ++i) {
-    const IWarmup* warm = _ctx.sensors[i]->warmup();
+    const IWarmup *warm = _ctx.sensors[i]->warmup();
     if (warm != nullptr && warm->requiresPriorityWarmup()) {
       if (!_ctx.sensors[i]->ready()) {
         return false;
@@ -115,8 +118,7 @@ bool SensorManager::allSensorsReady() const {
 }
 
 bool SensorManager::wakeSequenceActive() const {
-  return _wakePhase != WakePhase::Idle &&
-         _wakePhase != WakePhase::Complete;
+  return _wakePhase != WakePhase::Idle && _wakePhase != WakePhase::Complete;
 }
 
 bool SensorManager::wakeSequenceComplete() const {
@@ -150,4 +152,48 @@ void SensorManager::printSensorReadings() {
     }
   }
   Serial.println(" =======================");
+}
+
+bool SensorManager::sht31DeltaTriggered(float tempThresholdC,
+                                        float humidityThresholdPct) {
+  // Keep only the SHT31 active enough to check for wake trigger.
+  _ctx.sht31.sample();
+
+  if (!_ctx.sht31.hasReading()) {
+    return false;
+  }
+
+  // Adjust these names if your SHT31 reading struct uses different fields.
+  // const Sht31Sensor::Reading reading = _ctx.sht31.reading();
+  //
+  // const float tempC = reading.tempC;
+  // const float humidityPct = reading.humidityPct;
+  const float tempC = _ctx.sht31.temperatureC();
+  const float humidityPct = _ctx.sht31.humidityPct();
+
+  if (!_sht31BaselineValid) {
+    _lastSht31TempC = tempC;
+    _lastSht31HumidityPct = humidityPct;
+    _sht31BaselineValid = true;
+    return false;
+  }
+
+  const float tempDeltaC = fabsf(tempC - _lastSht31TempC);
+  const float humidityDeltaPct = fabsf(humidityPct - _lastSht31HumidityPct);
+
+  const bool triggered =
+      tempDeltaC >= tempThresholdC || humidityDeltaPct >= humidityThresholdPct;
+
+  if (triggered) {
+    Serial.println("[DutyCycle] SHT31 wake trigger");
+    Serial.print("Temp delta C: ");
+    Serial.println(tempDeltaC);
+    Serial.print("Humidity delta %: ");
+    Serial.println(humidityDeltaPct);
+
+    _lastSht31TempC = tempC;
+    _lastSht31HumidityPct = humidityPct;
+  }
+
+  return triggered;
 }

@@ -21,7 +21,7 @@ bool OledPageController::warmingUp() const {
   return _state.wakeupSequenceActive;
 }
 
-const char* OledPageController::systemStateText() const {
+const char *OledPageController::systemStateText() const {
   if (sensorsSleeping()) {
     return "SLEEP";
   }
@@ -32,10 +32,14 @@ const char* OledPageController::systemStateText() const {
     return "WARMING";
   }
 
+  if (_state.continousMode) {
+    return "CONT";
+  }
+
   return "ACTIVE";
 }
 
-const char* OledPageController::sensorPageHeader(const char* name) const {
+const char *OledPageController::sensorPageHeader(const char *name) const {
   static char buf[24];
 
   if (sensorsSleeping()) {
@@ -152,7 +156,7 @@ void OledPageController::renderSps() {
     return;
   }
 
-  const auto& r = _ctx.sps30.reading();
+  const auto &r = _ctx.sps30.reading();
 
   _ctx.oled.printfLine(1, "PM1:%.1f PM2.5:%.1f", r.pm1_0, r.pm2_5);
   _ctx.oled.printfLine(2, "PM4:%.1f PM10:%.1f", r.pm4_0, r.pm10);
@@ -182,8 +186,7 @@ void OledPageController::renderEnv() {
   }
 
   if (_ctx.sht31.hasReading()) {
-    _ctx.oled.printfLine(2, "T:%.1fF H:%.1f%%",
-                         _ctx.sht31.temperatureF(),
+    _ctx.oled.printfLine(2, "T:%.1fF H:%.1f%%", _ctx.sht31.temperatureF(),
                          _ctx.sht31.humidityPct());
   } else {
     _ctx.oled.printLine(2, "T/H: No data");
@@ -223,8 +226,7 @@ void OledPageController::renderGps() {
     return;
   }
 
-  _ctx.oled.printfLine(1, "Fix S:%u Alt:%.0fm",
-                       _ctx.gps.satellites(),
+  _ctx.oled.printfLine(1, "Fix S:%u Alt:%.0fm", _ctx.gps.satellites(),
                        _ctx.gps.altitudeMeters());
   _ctx.oled.printfLine(2, "Lat:%.4f", _ctx.gps.latitudeDegrees());
   _ctx.oled.printfLine(3, "Lon:%.4f", _ctx.gps.longitudeDegrees());
@@ -254,18 +256,12 @@ void OledPageController::renderImu() {
     return;
   }
 
-  _ctx.oled.printfLine(1, "A:%.1f %.1f %.1f",
-                       _ctx.imu.ax_mg(),
-                       _ctx.imu.ay_mg(),
-                       _ctx.imu.az_mg());
-  _ctx.oled.printfLine(2, "G:%.1f %.1f %.1f",
-                       _ctx.imu.gx_dps(),
-                       _ctx.imu.gy_dps(),
-                       _ctx.imu.gz_dps());
-  _ctx.oled.printfLine(3, "M:%.1f %.1f %.1f",
-                       _ctx.imu.mx_uT(),
-                       _ctx.imu.my_uT(),
-                       _ctx.imu.mz_uT());
+  _ctx.oled.printfLine(1, "A:%.1f %.1f %.1f", _ctx.imu.ax_mg(),
+                       _ctx.imu.ay_mg(), _ctx.imu.az_mg());
+  _ctx.oled.printfLine(2, "G:%.1f %.1f %.1f", _ctx.imu.gx_dps(),
+                       _ctx.imu.gy_dps(), _ctx.imu.gz_dps());
+  _ctx.oled.printfLine(3, "M:%.1f %.1f %.1f", _ctx.imu.mx_uT(),
+                       _ctx.imu.my_uT(), _ctx.imu.mz_uT());
 }
 void OledPageController::renderUart() {
   _ctx.oled.printfLine(0, "UART [%s]", systemStateText());
@@ -280,4 +276,3 @@ void OledPageController::renderUart() {
   _ctx.oled.printfLine(3, "UART:%s",
                        _ctx.bridge.hasError() ? _ctx.bridge.lastError() : "OK");
 }
-
