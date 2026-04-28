@@ -194,6 +194,7 @@ void setup() {
     rf95.setTxPower(13, false);
     manager.setRetries(LORA_RETRIES);
     manager.setTimeout(LORA_TIMEOUT_MS);
+    rf95.setCADTimeout(10);  // sense channel for up to 10 ms before each TX
 
     Serial.print("[TDMA] Node id=");
     Serial.print(NODE_ID);
@@ -450,6 +451,7 @@ void setup() {
     rf95.setTxPower(13, false);
     manager.setRetries(LORA_RETRIES);
     manager.setTimeout(LORA_TIMEOUT_MS);
+    rf95.setCADTimeout(10);  // sense channel for up to 10 ms before each TX
 
     Serial.println("[LORA] Base station ready (auto-ACK, TIME_SYNC relay enabled)");
 }
