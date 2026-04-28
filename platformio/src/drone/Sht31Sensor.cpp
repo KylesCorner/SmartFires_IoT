@@ -81,7 +81,7 @@ bool Sht31Sensor::ready() const {
 }
 
 bool Sht31Sensor::sample() {
-  if (!_begun || _sleeping) {
+  if (!_begun) {
     return false;
   }
 

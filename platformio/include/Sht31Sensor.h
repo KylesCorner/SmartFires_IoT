@@ -13,6 +13,7 @@
 
 class Sht31Sensor final : public ISensor, public II2CDevice {
 public:
+
   static constexpr uint8_t kDefaultAddress = 0x44;
   static constexpr uint8_t kAlternateAddress = 0x45;
   static constexpr uint8_t kFailureThreshold = 3;

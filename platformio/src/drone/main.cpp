@@ -1,3 +1,4 @@
+#include "DutyCycleController.h"
 #include "esp32-hal.h"
 #ifndef PIO_UNIT_TESTING
 
@@ -57,6 +58,7 @@ DroneContext ctx{wind,      imu,
                  sensors,   sizeof(sensors) / sizeof(sensors[0]),
                  actuators, sizeof(actuators) / sizeof(actuators[0])};
 
+
 AppState state{};
 ArduinoClock clock;
 SensorManager sensorManager(ctx);
@@ -65,8 +67,11 @@ TelemetryService telemetry(ctx);
 LinkService link(ctx, state, clock, telemetry);
 KeypadController keypadController(ctx, state);
 OledPageController oledController(ctx, state, clock);
+DutyCycleController dutyCycleController(
+  DutyCycleController::Config(30000,10000, true)
+);
 DroneApp app(NODE_ID, ctx, state, clock, sensorManager, actuatorManager,
-             telemetry, link, keypadController, oledController);
+             telemetry, link, keypadController, oledController, dutyCycleController);
 } // namespace
 
 void setup() {
