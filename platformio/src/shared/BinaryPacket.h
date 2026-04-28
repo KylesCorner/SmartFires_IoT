@@ -4,18 +4,23 @@
 //
 // Binary wire format for SmartFires telemetry.
 //
-// UART frame — drone -> feather node:
+// UART frame — drone -> feather node (FULL_STATE):
 //   [0xAA][0x55][len=36: u8][PktHeader:4][FullStatePayload:32][crc8]
 //   total frame = 40 bytes
 //   CRC-8/MAXIM covers the len byte + all data bytes.
 //
+// UART frame — drone -> feather node (BUNDLE):
+//   [0xAA][0x55][len: u8][PktHeader:4][FullStatePayload:32][n_deltas:1][DeltaPayload×n:n*20][crc8]
+//   len = 37 + n*20 (max n=5 → len=137, frame=141 bytes)
+//
 // LoRa payload — feather node -> feather base:
-//   [PktHeader:4][FullStatePayload:32]  = 36 bytes
+//   FULL_STATE: [PktHeader:4][FullStatePayload:32]  = 36 bytes
+//   BUNDLE:     [PktHeader:4][FullStatePayload:32][n_deltas:1][DeltaPayload×n]  ≤ 137 bytes
 //   No extra framing; RadioHead handles framing on the radio link.
 //
-// UART frame — feather base -> Jetson:
-//   [0xAA][0x55][len=37: u8][rssi:i8][PktHeader:4][FullStatePayload:32][crc8]
-//   total frame = 41 bytes
+// UART frame — feather base -> Jetson (variable length):
+//   [0xAA][0x55][len: u8][rssi:i8][LoRa payload][crc8]
+//   len = 1 + lora_payload_len (min 37 for FULL_STATE, max 138 for BUNDLE with 5 deltas)
 //   CRC-8/MAXIM covers the len byte + all data bytes (rssi included).
 //
 // LoRa TIME_SYNC payload — base broadcasts to all nodes:
@@ -42,6 +47,7 @@ enum PktType : uint8_t {
     PKT_FULL_STATE = 0x01,
     PKT_HEARTBEAT  = 0x02,
     PKT_TIME_SYNC  = 0x03,  // base station -> nodes (broadcast)
+    PKT_BUNDLE     = 0x04,  // reference FullStatePayload + N DeltaPayloads
 };
 
 // ---------- wire structs (packed — no padding) ----------
@@ -73,13 +79,38 @@ struct __attribute__((packed)) TimeSyncPayload {
     uint32_t session_time_ms; // ms since session start on Jetson
 };
 
+// DeltaPayload — compact representation of one sensor sample relative to a reference.
+//
+// wind_cms is stored as an absolute value (not delta) because wind can change rapidly.
+// All PM, temperature, humidity, lat, lon fields are signed deltas from the reference.
+// sensor_flags is inherited from the reference frame and not repeated here.
+struct __attribute__((packed)) DeltaPayload {
+    uint16_t dt_ms;               // ms elapsed since reference session_time
+    uint16_t wind_cms;            // absolute wind speed in cm/s
+    int16_t  temp_delta_cdegc;    // delta from reference in centi-°C
+    int16_t  humidity_delta_cpct; // delta from reference in centi-%
+    int16_t  pm1_0_delta;         // delta in µg/m³ × 10
+    int16_t  pm2_5_delta;
+    int16_t  pm4_0_delta;
+    int16_t  pm10_delta;
+    int16_t  lat_delta_e7;        // delta in degrees × 1e7 (±0.0033° ≈ ±370 m)
+    int16_t  lon_delta_e7;
+};
+
 // Compile-time size checks
 static_assert(sizeof(PktHeader)        ==  4, "PktHeader must be 4 bytes");
 static_assert(sizeof(FullStatePayload) == 32, "FullStatePayload must be 32 bytes");
 static_assert(sizeof(TimeSyncPayload)  ==  8, "TimeSyncPayload must be 8 bytes");
+static_assert(sizeof(DeltaPayload)     == 20, "DeltaPayload must be 20 bytes");
+
+static constexpr uint8_t kBundleMaxDeltas = 7;
 
 static constexpr size_t kLoRaPayloadSize =
     sizeof(PktHeader) + sizeof(FullStatePayload);  // 36
+
+static constexpr size_t kMaxLoRaPayloadSize =
+    sizeof(PktHeader) + sizeof(FullStatePayload) + 1 +
+    kBundleMaxDeltas * sizeof(DeltaPayload);  // 177
 
 static constexpr size_t kTimeSyncLoRaSize =
     sizeof(PktHeader) + sizeof(TimeSyncPayload);   // 12
@@ -131,31 +162,80 @@ inline size_t encodeFullStateFrame(
     return kFrameLen;
 }
 
-// ---------- encode: feather base -> Jetson UART frame ----------
+// ---------- encode: feather base -> Jetson UART frame (variable length) ----------
 //
-// Writes: [0xAA][0x55][37][rssi_i8][PktHeader][FullStatePayload][crc8]  = 41 bytes
-// raw_lora_payload must point to kLoRaPayloadSize (36) bytes as received from LoRa.
-// Returns bytes written, or 0 if buf_size is too small (needs >= 41).
+// Writes: [0xAA][0x55][len][rssi_i8][LoRa payload][crc8]
+//   len = 1 + lora_len  (rssi byte + LoRa payload bytes)
+//   FULL_STATE: lora_len=36 → total frame = 41 bytes
+//   BUNDLE:     lora_len up to 137 → total frame up to 142 bytes
+// raw_lora_payload must point to lora_len bytes as received from LoRa.
+// Returns bytes written, or 0 on failure.
 
 inline size_t encodeBaseFrame(
     int8_t rssi,
-    const uint8_t* raw_lora_payload,
+    const uint8_t* raw_lora_payload, size_t lora_len,
     uint8_t* buf, size_t buf_size)
 {
-    static constexpr size_t kDataLen  = 1 + kLoRaPayloadSize;  // 37  (rssi + 36)
-    static constexpr size_t kFrameLen = 2 + 1 + kDataLen + 1;  // 41
+    const size_t kDataLen  = 1 + lora_len;
+    const size_t kFrameLen = 2 + 1 + kDataLen + 1;
 
-    if (buf_size < kFrameLen) return 0;
+    if (kDataLen > 255)        return 0;  // len byte is uint8_t
+    if (buf_size < kFrameLen)  return 0;
 
     buf[0] = FRAME_M0;
     buf[1] = FRAME_M1;
     buf[2] = static_cast<uint8_t>(kDataLen);
     buf[3] = static_cast<uint8_t>(rssi);
 
-    memcpy(buf + 4, raw_lora_payload, kLoRaPayloadSize);
+    memcpy(buf + 4, raw_lora_payload, lora_len);
 
-    buf[4 + kLoRaPayloadSize] = crc8(buf + 2, 1 + kDataLen);
+    buf[4 + lora_len] = crc8(buf + 2, 1 + kDataLen);
 
+    return kFrameLen;
+}
+
+// ---------- encode: drone -> feather node UART bundle frame ----------
+//
+// Writes: [0xAA][0x55][len][PktHeader][FullStatePayload][n_deltas][DeltaPayload×n][crc8]
+//   len = sizeof(PktHeader) + sizeof(FullStatePayload) + 1 + n_deltas * sizeof(DeltaPayload)
+//   Max n_deltas = kBundleMaxDeltas (7) → len=177, frame=181 bytes
+// Returns bytes written, or 0 on failure.
+
+inline size_t encodeBundleFrame(
+    uint8_t node_id, uint8_t seq,
+    const FullStatePayload& ref,
+    const DeltaPayload* deltas, uint8_t n_deltas,
+    uint8_t* buf, size_t buf_size)
+{
+    if (n_deltas > kBundleMaxDeltas) return 0;
+
+    const size_t kDataLen  = sizeof(PktHeader) + sizeof(FullStatePayload)
+                           + 1 + static_cast<size_t>(n_deltas) * sizeof(DeltaPayload);
+    const size_t kFrameLen = 2 + 1 + kDataLen + 1;
+
+    if (kDataLen > 255)        return 0;
+    if (buf_size < kFrameLen)  return 0;
+
+    buf[0] = FRAME_M0;
+    buf[1] = FRAME_M1;
+    buf[2] = static_cast<uint8_t>(kDataLen);
+
+    PktHeader hdr;
+    hdr.magic    = PKT_MAGIC;
+    hdr.pkt_type = PKT_BUNDLE;
+    hdr.node_id  = node_id;
+    hdr.seq      = seq;
+
+    size_t off = 3;
+    memcpy(buf + off, &hdr, sizeof(PktHeader));        off += sizeof(PktHeader);
+    memcpy(buf + off, &ref, sizeof(FullStatePayload)); off += sizeof(FullStatePayload);
+    buf[off++] = n_deltas;
+    for (uint8_t i = 0; i < n_deltas; ++i) {
+        memcpy(buf + off, &deltas[i], sizeof(DeltaPayload));
+        off += sizeof(DeltaPayload);
+    }
+
+    buf[off] = crc8(buf + 2, 1 + kDataLen);
     return kFrameLen;
 }
 
@@ -209,6 +289,36 @@ inline bool decodeFullState(
     return (hdr_out.magic    == PKT_MAGIC)
         && (hdr_out.pkt_type == PKT_FULL_STATE);
 }
+
+// ---------- decode: validate a raw LoRa BUNDLE payload ----------
+//
+// raw_payload: pointer to the LoRa payload bytes (no UART framing).
+// deltas_out must point to a buffer of at least kBundleMaxDeltas DeltaPayload entries.
+// Returns true if the bundle is valid; delta_count_out holds the number of deltas decoded.
+
+inline bool decodeBundle(
+    const uint8_t* raw_payload, size_t len,
+    PktHeader& hdr_out, FullStatePayload& ref_out,
+    uint8_t& delta_count_out, DeltaPayload* deltas_out)
+{
+    const size_t kMinLen = sizeof(PktHeader) + sizeof(FullStatePayload) + 1;
+    if (len < kMinLen) return false;
+
+    size_t off = 0;
+    memcpy(&hdr_out, raw_payload + off, sizeof(PktHeader)); off += sizeof(PktHeader);
+    if (hdr_out.magic != PKT_MAGIC || hdr_out.pkt_type != PKT_BUNDLE) return false;
+
+    memcpy(&ref_out, raw_payload + off, sizeof(FullStatePayload)); off += sizeof(FullStatePayload);
+    delta_count_out = raw_payload[off++];
+
+    if (delta_count_out > kBundleMaxDeltas) return false;
+    if (len < off + static_cast<size_t>(delta_count_out) * sizeof(DeltaPayload)) return false;
+
+    for (uint8_t i = 0; i < delta_count_out; ++i) {
+        memcpy(&deltas_out[i], raw_payload + off, sizeof(DeltaPayload));
+        off += sizeof(DeltaPayload);
+    }
+    return true;}
 
 // ---------- decode: validate a raw LoRa or UART TIME_SYNC payload ----------
 //

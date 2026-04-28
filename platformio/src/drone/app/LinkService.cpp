@@ -37,7 +37,6 @@ void LinkService::update() {
     const uint32_t sessionMs = _ctx.bridge.lastSessionTimeMs();
 
     if (!_hasSynced || sid != _lastSyncSessionId) {
-      // New Jetson session — reset offset tracking.
       _lastSyncSessionId = sid;
       _hasSynced         = true;
       Serial.print("[SYNC] new session id=");
@@ -56,21 +55,24 @@ void LinkService::update() {
 void LinkService::maybeSendTelemetry(uint8_t nodeId) {
   const uint32_t now = _clock.millis();
 
-  // if (!_state.sensingEnabled || _state.sensorsSleeping || _state.wakeupSequenceActive) return;
+  // Accumulate one sample per telemetry period.
   if (now - _state.link.lastSendMs < UartLoRaBridge::kTelemetryPeriodMs) return;
-
   _state.link.lastSendMs = now;
 
-  if (_state.link.waitingForAck) {
-    // Serial.println("[UART] still waiting for ACK, skipping send");
-    return;
+  if (_sampleCount < kBundleSamples) {
+    _sampleBuf[_sampleCount++] = buildPayload(now);
   }
 
+  // Send when the buffer is full and the Feather is ready.
+  if (_sampleCount < kBundleSamples) return;
+  if (_state.link.waitingForAck)     return;
+
   ++_state.link.seq;
-  sendTelemetryFrame(nodeId, _state.link.seq);
-  _state.link.lastSentSeq = _state.link.seq;
+  sendBundleFrame(nodeId, _state.link.seq);
+  _state.link.lastSentSeq    = _state.link.seq;
   _state.link.lastSendTimeMs = now;
-  _state.link.waitingForAck = true;
+  _state.link.waitingForAck  = true;
+  _sampleCount = 0;
 }
 
 void LinkService::handleAckTimeout() {
@@ -78,42 +80,71 @@ void LinkService::handleAckTimeout() {
 
   if (_state.link.waitingForAck &&
       (now - _state.link.lastSendTimeMs >= UartLoRaBridge::kAckTimeoutMs)) {
-    // Serial.print("[UART] ACK timeout for seq ");
-    // Serial.println(_state.link.lastSentSeq);
     _state.link.waitingForAck = false;
   }
 }
 
-void LinkService::sendTelemetryFrame(uint8_t nodeId, uint32_t seq) {
-  const uint32_t now = _clock.millis();
-  TelemetryPacket pkt = _telemetry.build(seq, now);
+BinaryPacket::FullStatePayload LinkService::buildPayload(uint32_t now) const {
+  TelemetryPacket pkt = _telemetry.build(0, now);
 
-  BinaryPacket::FullStatePayload payload{};
-  // session_time uses Jetson-synced offset when available; falls back to local millis().
-  payload.session_time   = static_cast<uint32_t>(static_cast<int64_t>(now) + _sessionTimeOffset);
-  payload.uptime_ms      = pkt.uptimeMs;
-  payload.sensor_flags   = pkt.sensorFlags;
-  payload.wind_cms       = static_cast<uint16_t>(pkt.windMps * 100.0f + 0.5f);
-  payload.temp_cdegc     = static_cast<int16_t>(pkt.tempC * 100.0f);
-  payload.humidity_cpct  = static_cast<uint16_t>(pkt.humidityPct * 100.0f + 0.5f);
-  payload.pm1_0_ug10     = static_cast<uint16_t>(isnan(pkt.pm1_0) ? 0u : (uint16_t)(pkt.pm1_0 * 10.0f + 0.5f));
-  payload.pm2_5_ug10     = static_cast<uint16_t>(isnan(pkt.pm2_5) ? 0u : (uint16_t)(pkt.pm2_5 * 10.0f + 0.5f));
-  payload.pm4_0_ug10     = static_cast<uint16_t>(isnan(pkt.pm4_0) ? 0u : (uint16_t)(pkt.pm4_0 * 10.0f + 0.5f));
-  payload.pm10_ug10      = static_cast<uint16_t>(isnan(pkt.pm10)  ? 0u : (uint16_t)(pkt.pm10  * 10.0f + 0.5f));
-  payload.lat_e7         = static_cast<int32_t>(pkt.lat * 1e7);
-  payload.lon_e7         = static_cast<int32_t>(pkt.lon * 1e7);
+  BinaryPacket::FullStatePayload p{};
+  p.session_time   = static_cast<uint32_t>(static_cast<int64_t>(now) + _sessionTimeOffset);
+  p.uptime_ms      = pkt.uptimeMs;
+  p.sensor_flags   = pkt.sensorFlags;
+  p.wind_cms       = static_cast<uint16_t>(pkt.windMps * 100.0f + 0.5f);
+  p.temp_cdegc     = static_cast<int16_t>(pkt.tempC * 100.0f);
+  p.humidity_cpct  = static_cast<uint16_t>(pkt.humidityPct * 100.0f + 0.5f);
+  p.pm1_0_ug10     = static_cast<uint16_t>(isnan(pkt.pm1_0) ? 0u : (uint16_t)(pkt.pm1_0 * 10.0f + 0.5f));
+  p.pm2_5_ug10     = static_cast<uint16_t>(isnan(pkt.pm2_5) ? 0u : (uint16_t)(pkt.pm2_5 * 10.0f + 0.5f));
+  p.pm4_0_ug10     = static_cast<uint16_t>(isnan(pkt.pm4_0) ? 0u : (uint16_t)(pkt.pm4_0 * 10.0f + 0.5f));
+  p.pm10_ug10      = static_cast<uint16_t>(isnan(pkt.pm10)  ? 0u : (uint16_t)(pkt.pm10  * 10.0f + 0.5f));
+  p.lat_e7         = static_cast<int32_t>(pkt.lat * 1e7);
+  p.lon_e7         = static_cast<int32_t>(pkt.lon * 1e7);
+  return p;
+}
 
-  uint8_t frame[48];
-  const size_t len = BinaryPacket::encodeFullStateFrame(
+void LinkService::sendBundleFrame(uint8_t nodeId, uint32_t seq) {
+  const BinaryPacket::FullStatePayload& ref = _sampleBuf[0];
+  const uint8_t n = static_cast<uint8_t>(_sampleCount - 1);
+
+  BinaryPacket::DeltaPayload deltas[BinaryPacket::kBundleMaxDeltas];
+  for (uint8_t i = 0; i < n; ++i) {
+    const BinaryPacket::FullStatePayload& s = _sampleBuf[i + 1];
+    BinaryPacket::DeltaPayload& d = deltas[i];
+    d.dt_ms               = static_cast<uint16_t>(s.session_time - ref.session_time);
+    d.wind_cms            = s.wind_cms;
+    d.temp_delta_cdegc    = static_cast<int16_t>(
+                              static_cast<int32_t>(s.temp_cdegc) - static_cast<int32_t>(ref.temp_cdegc));
+    d.humidity_delta_cpct = static_cast<int16_t>(
+                              static_cast<int32_t>(s.humidity_cpct) - static_cast<int32_t>(ref.humidity_cpct));
+    d.pm1_0_delta         = static_cast<int16_t>(
+                              static_cast<int32_t>(s.pm1_0_ug10) - static_cast<int32_t>(ref.pm1_0_ug10));
+    d.pm2_5_delta         = static_cast<int16_t>(
+                              static_cast<int32_t>(s.pm2_5_ug10) - static_cast<int32_t>(ref.pm2_5_ug10));
+    d.pm4_0_delta         = static_cast<int16_t>(
+                              static_cast<int32_t>(s.pm4_0_ug10) - static_cast<int32_t>(ref.pm4_0_ug10));
+    d.pm10_delta          = static_cast<int16_t>(
+                              static_cast<int32_t>(s.pm10_ug10) - static_cast<int32_t>(ref.pm10_ug10));
+    d.lat_delta_e7        = static_cast<int16_t>(s.lat_e7 - ref.lat_e7);
+    d.lon_delta_e7        = static_cast<int16_t>(s.lon_e7 - ref.lon_e7);
+  }
+
+  uint8_t frame[200];
+  const size_t len = BinaryPacket::encodeBundleFrame(
       nodeId,
       static_cast<uint8_t>(seq & 0xFF),
-      payload,
-      frame,
-      sizeof(frame));
+      ref, deltas, n,
+      frame, sizeof(frame));
 
   if (len > 0) {
     _ctx.bridge.sendBinaryFrame(frame, len);
+    Serial.print("[UART TX] bundle seq=");
+    Serial.print(seq & 0xFF);
+    Serial.print(" deltas=");
+    Serial.print(n);
+    Serial.print(" len=");
+    Serial.println(len);
   } else {
-    Serial.println("[UART TX] encode failed");
+    Serial.println("[UART TX] bundle encode failed");
   }
 }

@@ -3,7 +3,7 @@
 
 class UartLoRaBridge {
 public:
-  static constexpr uint32_t kTelemetryPeriodMs = 1000;
+  static constexpr uint32_t kTelemetryPeriodMs = 250;   // 4 Hz sensing rate
   static constexpr uint32_t kAckTimeoutMs = 300;
 
   UartLoRaBridge(HardwareSerial& port, int rxPin, int txPin, uint32_t baud = 115200)

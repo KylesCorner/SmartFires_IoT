@@ -5,6 +5,7 @@
 #include "DroneState.h"
 #include "IClock.h"
 #include "TelemetryService.h"
+#include "shared/BinaryPacket.h"
 
 class LinkService {
 public:
@@ -16,7 +17,8 @@ public:
   void handleAckTimeout();
 
 private:
-  void sendTelemetryFrame(uint8_t nodeId, uint32_t seq);
+  BinaryPacket::FullStatePayload buildPayload(uint32_t now) const;
+  void sendBundleFrame(uint8_t nodeId, uint32_t seq);
 
   DroneContext&     _ctx;
   AppState&         _state;
@@ -25,7 +27,12 @@ private:
 
   // Session time sync state.
   // session_time = millis() + _sessionTimeOffset  (offset is negative until first sync)
-  int64_t  _sessionTimeOffset  = 0;
-  uint32_t _lastSyncSessionId  = 0;
-  bool     _hasSynced          = false;
+  int64_t  _sessionTimeOffset = 0;
+  uint32_t _lastSyncSessionId = 0;
+  bool     _hasSynced         = false;
+
+  // Bundle accumulator: one reference + kBundleMaxDeltas delta samples.
+  static constexpr uint8_t kBundleSamples = BinaryPacket::kBundleMaxDeltas + 1;
+  BinaryPacket::FullStatePayload _sampleBuf[kBundleSamples];
+  uint8_t _sampleCount = 0;
 };

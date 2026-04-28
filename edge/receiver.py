@@ -30,8 +30,11 @@ The Feather M0 base station connects to the Jetson Orin Nano 40-pin header.
 
 Frame format received from Feather base station
 -----------------------------------------------
-    [0xAA][0x55][len=37: u8][rssi: i8][PktHeader: 4 bytes][FullStatePayload: 32 bytes][crc8]
-    CRC-8/MAXIM covers the len byte + all 37 data bytes.
+    [0xAA][0x55][len: u8][rssi: i8][LoRa payload][crc8]
+    len = 1 (rssi) + lora_payload_len
+      FULL_STATE: len=37  (rssi + PktHeader:4 + FullStatePayload:32)
+      BUNDLE:     len=178 max (rssi + PktHeader:4 + FullStatePayload:32 + n_deltas:1 + 7×DeltaPayload:140)
+    CRC-8/MAXIM covers the len byte + all data bytes that follow.
 
 TIME_SYNC frame sent to Feather base station
 --------------------------------------------
@@ -52,12 +55,17 @@ import time
 import serial
 
 from packet import (
-    BASE_FRAME_DATA_LEN,
+    BASE_FRAME_MIN_DATA_LEN,
+    BASE_FRAME_MAX_DATA_LEN,
     FRAME_M0,
     FRAME_M1,
-    LORA_PAYLOAD_SIZE,
+    HEADER_FMT,
+    PKT_MAGIC,
+    PKT_FULL_STATE,
+    PKT_BUNDLE,
     crc8,
     decode_full_state,
+    decode_bundle,
     encode_time_sync_frame,
 )
 
@@ -185,10 +193,10 @@ def run(port: str, baud: int, output_path: str, sync_interval_s: int) -> None:
             # ------------------------------------------------------------------
             elif state == _ST_WAIT_LEN:
                 expected_len = b
-                if expected_len != BASE_FRAME_DATA_LEN:
+                if expected_len < BASE_FRAME_MIN_DATA_LEN or expected_len > BASE_FRAME_MAX_DATA_LEN:
                     print(
                         f"[WARN] unexpected frame len={expected_len} "
-                        f"(expected {BASE_FRAME_DATA_LEN}), resyncing",
+                        f"(expected {BASE_FRAME_MIN_DATA_LEN}–{BASE_FRAME_MAX_DATA_LEN}), resyncing",
                         file=sys.stderr,
                     )
                     state = _ST_WAIT_M0
@@ -210,24 +218,43 @@ def run(port: str, baud: int, output_path: str, sync_interval_s: int) -> None:
                 if received_crc == computed_crc:
                     # buf[0]  = len byte
                     # buf[1]  = rssi (signed)
-                    # buf[2:] = raw LoRa payload (PktHeader + FullStatePayload)
+                    # buf[2:] = raw LoRa payload (variable length)
                     rssi        = struct.unpack_from("<b", buf, 1)[0]
-                    raw_payload = bytes(buf[2 : 2 + LORA_PAYLOAD_SIZE])
+                    raw_payload = bytes(buf[2:])
 
-                    pkt = decode_full_state(raw_payload, rssi)
-                    if pkt is not None:
-                        pkt["timestamp"] = datetime.datetime.utcnow().isoformat(
-                            timespec="milliseconds"
-                        )
-                        writer.writerow(pkt)
-                        csvfile.flush()
+                    pkt_type = raw_payload[1] if len(raw_payload) >= 2 else 0xFF
+
+                    if pkt_type == PKT_FULL_STATE:
+                        pkts = [decode_full_state(raw_payload, rssi)]
+                    elif pkt_type == PKT_BUNDLE:
+                        pkts = decode_bundle(raw_payload, rssi)
+                    else:
+                        pkts = []
                         print(
-                            f"[RX] node={pkt['node_id']}  seq={pkt['seq']:3d}  "
-                            f"session={pkt['session_time_ms']}ms  "
-                            f"T={pkt['temp_c']:5.1f}°C  H={pkt['humidity_pct']:4.1f}%  "
-                            f"wind={pkt['wind_mps']:.2f} m/s  "
-                            f"PM2.5={pkt['pm2_5_ug_m3']:.1f} PM10={pkt['pm10_ug_m3']:.1f} µg/m³  "
-                            f"lat={pkt['lat']:.5f} lon={pkt['lon']:.5f}  "
+                            f"[WARN] unknown pkt_type=0x{pkt_type:02x}",
+                            file=sys.stderr,
+                        )
+
+                    now_ts = datetime.datetime.utcnow().isoformat(timespec="milliseconds")
+                    wrote = 0
+                    for pkt in pkts:
+                        if pkt is None:
+                            continue
+                        pkt["timestamp"] = now_ts
+                        writer.writerow(pkt)
+                        wrote += 1
+
+                    if wrote > 0:
+                        csvfile.flush()
+                        first = pkts[0]
+                        print(
+                            f"[RX] node={first['node_id']}  seq={first['seq']:3d}  "
+                            f"records={wrote}  "
+                            f"session={first['session_time_ms']}ms  "
+                            f"T={first['temp_c']:5.1f}°C  H={first['humidity_pct']:4.1f}%  "
+                            f"wind={first['wind_mps']:.2f} m/s  "
+                            f"PM2.5={first['pm2_5_ug_m3']:.1f} PM10={first['pm10_ug_m3']:.1f} µg/m³  "
+                            f"lat={first['lat']:.5f} lon={first['lon']:.5f}  "
                             f"rssi={rssi:4d} dBm"
                         )
                     else:

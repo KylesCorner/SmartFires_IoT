@@ -13,9 +13,10 @@ static constexpr float RFM95_FREQ = 915.0f;
 //   base station = BASE_ADDR (0x01)
 //   each node    = its compile-time NODE_ID
 static constexpr uint8_t  BASE_ADDR       = 0x01;
-static constexpr uint8_t  LORA_RETRIES    = 3;
+static constexpr uint8_t  LORA_RETRIES    = 1;
 // 100 ms ACK timeout — ACK typically arrives in ~35 ms (base processes + sends short ACK).
-// Worst-case 3 retries: 3 * (82 ms TX + 100 ms timeout) = 546 ms, fits in the active slot window.
+// Bundle TX time ≈ 292 ms for N_δ=7 (177-byte payload). Worst-case 1 retry (2 total attempts):
+//   2 × (292 ms TX + 100 ms timeout) = 784 ms < 860 ms active window (900 ms slot - 2×20 ms guard).
 static constexpr uint16_t LORA_TIMEOUT_MS = 100;
 
 RH_RF95 rf95(RFM95_CS, RFM95_INT);
@@ -71,7 +72,9 @@ enum FrameState : uint8_t {
 #endif
 
 // TDMA parameters — identical across all nodes in the network.
-static constexpr uint32_t kSlotWidthMs   = 600;
+// Slot width sized for N_δ=7 bundles (177-byte LoRa payload, T_tx≈292 ms) with 1 retry:
+//   W_min = 2 × (292 + 100) + 40 = 824 ms → rounded up to 900 ms for margin.
+static constexpr uint32_t kSlotWidthMs   = 900;
 static constexpr uint32_t kNumSlots      = static_cast<uint32_t>(NUM_SLOTS);
 static constexpr uint32_t kFramePeriodMs = kSlotWidthMs * kNumSlots;
 static constexpr uint32_t kGuardMs       = 20;    // silence at each slot boundary
@@ -87,7 +90,8 @@ RHReliableDatagram manager(rf95, static_cast<uint8_t>(NODE_ID));
 static constexpr uint8_t kQueueDepth = 4;
 
 struct TxEntry {
-    uint8_t payload[BinaryPacket::kLoRaPayloadSize];
+    uint8_t payload[BinaryPacket::kMaxLoRaPayloadSize];  // up to 177 bytes for N_δ=7 bundle
+    uint8_t len;
 };
 
 static TxEntry txQueue[kQueueDepth];
@@ -97,20 +101,22 @@ static uint8_t qCount = 0;
 
 // Always succeeds. Drops the oldest entry when the queue is full so that
 // the most recent sensor data is always preserved.
-static void enqueue(const uint8_t* payload) {
+static void enqueue(const uint8_t* payload, uint8_t len) {
     if (qCount >= kQueueDepth) {
         // Evict oldest
         qHead = (qHead + 1) % kQueueDepth;
         qCount--;
     }
-    memcpy(txQueue[qTail].payload, payload, BinaryPacket::kLoRaPayloadSize);
+    memcpy(txQueue[qTail].payload, payload, len);
+    txQueue[qTail].len = len;
     qTail = (qTail + 1) % kQueueDepth;
     qCount++;
 }
 
-static bool dequeue(uint8_t* payload) {
+static bool dequeue(uint8_t* payload, uint8_t& len_out) {
     if (qCount == 0) return false;
-    memcpy(payload, txQueue[qHead].payload, BinaryPacket::kLoRaPayloadSize);
+    len_out = txQueue[qHead].len;
+    memcpy(payload, txQueue[qHead].payload, len_out);
     qHead = (qHead + 1) % kQueueDepth;
     qCount--;
     return true;
@@ -155,9 +161,12 @@ static bool tdmaMyTurn(uint32_t& slotIndexOut) {
 }
 
 // ---- UART receive state machine ----
+// frameBuf holds [len_byte][LoRa payload bytes].
+// Max bundle UART frame data: PktHeader(4)+FullStatePayload(32)+n_deltas(1)+7×DeltaPayload(140) = 177.
+// frameBuf needs 1 (len byte) + 177 = 178 bytes minimum; use 200 for headroom.
 
 static FrameState frameState      = FS_WAIT_M0;
-static uint8_t    frameBuf[64];
+static uint8_t    frameBuf[200];
 static uint8_t    frameExpectedLen = 0;
 static uint8_t    framePos         = 0;
 
@@ -165,7 +174,7 @@ static uint8_t    framePos         = 0;
 void processFrame(const uint8_t* data, uint8_t len);
 void sendAck(uint8_t seq);
 void drainTxQueue();
-void sendPayload(const uint8_t* payload);
+void sendPayload(const uint8_t* payload, uint8_t len);
 void checkIncomingLora();
 
 void setup() {
@@ -260,20 +269,32 @@ void loop() {
 }
 
 void processFrame(const uint8_t* data, uint8_t len) {
-    BinaryPacket::PktHeader        hdr{};
-    BinaryPacket::FullStatePayload payload{};
+    if (len < sizeof(BinaryPacket::PktHeader)) {
+        Serial.println("[UART] frame too short");
+        Serial1.println("ERR,too_short");
+        return;
+    }
 
-    if (!BinaryPacket::decodeFullState(data, len, hdr, payload)) {
-        Serial.println("[UART] decode failed");
-        Serial1.println("ERR,decode_failed");
+    BinaryPacket::PktHeader hdr{};
+    memcpy(&hdr, data, sizeof(hdr));
+
+    if (hdr.magic != BinaryPacket::PKT_MAGIC ||
+        (hdr.pkt_type != BinaryPacket::PKT_FULL_STATE &&
+         hdr.pkt_type != BinaryPacket::PKT_BUNDLE)) {
+        Serial.println("[UART] bad magic or type");
+        Serial1.println("ERR,bad_pkt");
         return;
     }
 
     sendAck(hdr.seq);  // ACK to ESP32 immediately; LoRa outcome is irrelevant to it
 
-    enqueue(data);     // always succeeds; evicts oldest if full
-    Serial.print("[TX] enqueued seq=");
+    enqueue(data, len);  // always succeeds; evicts oldest if full
+    Serial.print("[TX] enqueued type=");
+    Serial.print(hdr.pkt_type == BinaryPacket::PKT_BUNDLE ? "BUNDLE" : "FULL");
+    Serial.print(" seq=");
     Serial.print(hdr.seq);
+    Serial.print(" len=");
+    Serial.print(len);
     Serial.print(" q=");
     Serial.println(qCount);
 }
@@ -294,23 +315,28 @@ void drainTxQueue() {
     // Claim the slot before dequeue so we don't retry even if dequeue is empty.
     tdmaLastSlotTx = slotIndex;
 
-    uint8_t payload[BinaryPacket::kLoRaPayloadSize];
-    if (!dequeue(payload)) return;
+    uint8_t payload[BinaryPacket::kMaxLoRaPayloadSize];
+    uint8_t payloadLen = 0;
+    if (!dequeue(payload, payloadLen)) return;
 
-    sendPayload(payload);
+    sendPayload(payload, payloadLen);
 }
 
-void sendPayload(const uint8_t* payload) {
+void sendPayload(const uint8_t* payload, uint8_t len) {
     BinaryPacket::PktHeader hdr;
     memcpy(&hdr, payload, sizeof(hdr));
 
     const uint32_t sessionNow = tdmaHasSynced ? tdmaSessionNow() : millis();
-    Serial.print("[LORA TX] seq=");
+    Serial.print("[LORA TX] type=");
+    Serial.print(hdr.pkt_type == BinaryPacket::PKT_BUNDLE ? "BUNDLE" : "FULL");
+    Serial.print(" seq=");
     Serial.print(hdr.seq);
     Serial.print(" slot=");
     Serial.print(kMySlot);
     Serial.print(" session_ms=");
     Serial.print(sessionNow);
+    Serial.print(" len=");
+    Serial.print(len);
     Serial.print(" q_remaining=");
     Serial.print(qCount);
     Serial.println(" sending...");
@@ -318,7 +344,7 @@ void sendPayload(const uint8_t* payload) {
     const uint32_t retxBefore = manager.retransmissions();
     const bool ok = manager.sendtoWait(
         const_cast<uint8_t*>(payload),
-        static_cast<uint8_t>(BinaryPacket::kLoRaPayloadSize),
+        len,
         BASE_ADDR);
     const uint32_t retries = manager.retransmissions() - retxBefore;
 
@@ -449,26 +475,40 @@ void loop() {
 
     const int8_t rssi = static_cast<int8_t>(rf95.lastRssi());
 
-    BinaryPacket::PktHeader        hdr{};
-    BinaryPacket::FullStatePayload payload{};
-    if (!BinaryPacket::decodeFullState(buf, len, hdr, payload)) {
+    // Validate: accept FULL_STATE and BUNDLE packets; reject anything else.
+    if (len < sizeof(BinaryPacket::PktHeader)) {
+        Serial.println("[LORA] packet too short");
+        return;
+    }
+    BinaryPacket::PktHeader hdr{};
+    memcpy(&hdr, buf, sizeof(hdr));
+    if (hdr.magic != BinaryPacket::PKT_MAGIC ||
+        (hdr.pkt_type != BinaryPacket::PKT_FULL_STATE &&
+         hdr.pkt_type != BinaryPacket::PKT_BUNDLE)) {
         Serial.print("[LORA] invalid packet from=0x");
         Serial.print(from, HEX);
+        Serial.print(" type=0x");
+        Serial.print(hdr.pkt_type, HEX);
         Serial.print(" len=");
         Serial.println(len);
         return;
     }
 
-    Serial.print("[LORA RX] node=");
+    Serial.print("[LORA RX] type=");
+    Serial.print(hdr.pkt_type == BinaryPacket::PKT_BUNDLE ? "BUNDLE" : "FULL");
+    Serial.print(" node=");
     Serial.print(hdr.node_id);
     Serial.print(" seq=");
     Serial.print(hdr.seq);
+    Serial.print(" len=");
+    Serial.print(len);
     Serial.print(" rssi=");
     Serial.println(rssi);
 
-    uint8_t frame[41];
+    // Frame buffer: 2 preamble + 1 len + 1 rssi + up to 177 LoRa bytes + 1 CRC = 182 bytes max.
+    uint8_t frame[200];
     const size_t frame_len =
-        BinaryPacket::encodeBaseFrame(rssi, buf, frame, sizeof(frame));
+        BinaryPacket::encodeBaseFrame(rssi, buf, len, frame, sizeof(frame));
 
     if (frame_len > 0) {
         Serial1.write(frame, frame_len);
