@@ -1,4 +1,29 @@
 #include <Arduino.h>
+
+#if defined(LORA_BASE)
+
+void setup() {
+  Serial.begin(115200);
+  while (!Serial && millis() < 3000) {
+  }
+
+  Serial1.begin(115200);
+  Serial.println("SmartFires base station firmware entrypoint active");
+  Serial.println("Base station class-architecture port is pending");
+}
+
+void loop() {
+  static uint32_t lastStatusMs = 0;
+  const uint32_t now = millis();
+
+  if (now - lastStatusMs >= 5000) {
+    Serial.println("[base] waiting for base station port implementation");
+    lastStatusMs = now;
+  }
+}
+
+#else
+
 #include <Wire.h>
 
 #include "app/SmartFiresNodeApp.h"
@@ -17,7 +42,6 @@
 #include "radio/TdmaRadioService.h"
 #include "radio/TdmaTxQueue.h"
 
-// Sensors/drivers here
 #include "platform/AdafruitSht31Driver.h"
 #include "sensors/Sht31Sensor.h"
 
@@ -29,23 +53,10 @@
 #define NUM_SLOTS 2
 #endif
 
-// -----------------------------------------------------------------------------
-// Platform
-// -----------------------------------------------------------------------------
-
 ArduinoClock clock;
 ArduinoAnalogReader analog;
 
-// -----------------------------------------------------------------------------
-// Sensors
-// -----------------------------------------------------------------------------
-
 AdafruitSht31Driver sht31Driver;
-
-// makeSht31Cfg(uint8_t address_ = 0x45, uint32_t minSamplesPeriodMs_ = 1000,
-//              uint32_t wakeDelayMs_ = 15,
-//              SensorDutyClass dutyClass_ = SensorDutyClass::DutyCycled) {
-
 Sht31Sensor::Config sht31Cfg =
     Sht31Sensor::Config::makeSht31Cfg(0x45, 1000, 0, SensorDutyClass::AlwaysOn);
 Sht31Sensor sht31(sht31Cfg, sht31Driver, clock);
@@ -54,33 +65,16 @@ ISensor* sensors[] = {
     &sht31,
 };
 
-// constexpr size_t sensorCount = sizeof(sensors) / sizeof(sensors[0]);
 constexpr size_t sensorCount = 1;
-
-// -----------------------------------------------------------------------------
-// Battery
-// -----------------------------------------------------------------------------
 
 BatteryMonitor::Config batteryCfg = BatteryMonitor::Config::makeBatConfig();
 BatteryMonitor battery(batteryCfg, analog, clock);
 
-// -----------------------------------------------------------------------------
-// Duty cycle
-// -----------------------------------------------------------------------------
-
 DutyCycleConfig dutyCfg = DutyCycleConfig::dutyCycleCfg();
 DutyCycleController duty(dutyCfg, sht31, sensors, sensorCount, clock);
 
-// -----------------------------------------------------------------------------
-// Telemetry
-// -----------------------------------------------------------------------------
-
 PacketHandler::Config packetHandlerCfg = PacketHandler::Config::make(NODE_ID);
 PacketHandler packetHandler(packetHandlerCfg);
-
-// -----------------------------------------------------------------------------
-// TDMA LoRa
-// -----------------------------------------------------------------------------
 
 TdmaConfig tdmaCfg = TdmaConfig::tdmaCfg();
 TdmaClock tdmaClock(tdmaCfg, clock);
@@ -92,12 +86,6 @@ RadioHeadTdmaDriver radioDriver(radioDriverCfg);
 
 TdmaRadioService tdmaRadio(tdmaCfg, tdmaClock, tdmaQueue, radioDriver);
 
-// -----------------------------------------------------------------------------
-// App
-// -----------------------------------------------------------------------------
-
-// SmartFiresNodeApp::Config appCfg;
-// appCfg.enableBattery = true;
 SmartFiresNodeApp::Config appCfg =
     SmartFiresNodeApp::Config::appCfg(NODE_ID, false);
 
@@ -144,3 +132,5 @@ void loop() {
   app.update();
   delay(25);
 }
+
+#endif
