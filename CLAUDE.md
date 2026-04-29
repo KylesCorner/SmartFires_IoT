@@ -30,6 +30,7 @@ Wildfire IoT sensor network. Remote drone nodes collect environmental data (temp
     v
 [Jetson Orin Nano]
   edge/edge-reciever/src/smartfires_edge/ingest_service.py → rotated telemetry CSV
+    optionally polls ES-W302 anemometer and logs local wind with node telemetry
     Sends periodic TIME_SYNC frames to keep all nodes on a common session clock.
 ```
 
@@ -100,9 +101,16 @@ SmartFires_IoT/
 │       ├── fakes/                        FakeClock, FakeRadio, FakeSensor, etc.
 │       └── test_*/                       Unity test suites (run on native)
 ├── edge/                          Jetson Python code
-│   ├── receiver.py                UART frame receiver → CSV writer + TIME_SYNC sender
-│   ├── packet.py                  Python mirror of BinaryPacket.h
-│   └── requirements.txt           pyserial>=3.5
+│   ├── anemometer_read.py         Standalone ES-W302 reader (uses smartfires_edge module)
+│   └── edge-reciever/
+│       ├── pyproject.toml         Package + dependencies (pyserial, minimalmodbus)
+│       ├── README.md
+│       └── src/smartfires_edge/
+│           ├── ingest_service.py  UART ingest + TIME_SYNC + ACK summary + CSV logging
+│           ├── packet.py          Python mirror of BinaryPacket.h (FULL_STATE/STATUS/BUNDLE)
+│           ├── uart_receiver.py   UART frame parser state machine
+│           ├── anemometer.py      ES-W302 polling module for integrated local wind logging
+│           └── main.py            CLI entrypoint (`smartfires-edge`)
 ├── documentation/
 │   ├── BINARY_PACKET_PIPELINE.md  Current pipeline design + remaining work
 │   ├── FLASHING.md
@@ -283,8 +291,8 @@ slots and call `TdmaClock::applySync(sessionMs)`.
 
 | Field | Type | Notes |
 |---|---|---|
-| `session_id` | `uint32_t` | Random value set at receiver.py startup. Change triggers STATUS re-send and clock reset. |
-| `session_time_ms` | `uint32_t` | ms since receiver.py started. Wraps at ~49 days. |
+| `session_id` | `uint32_t` | Random value set at `smartfires-edge receive` startup. Change triggers STATUS re-send and clock reset. |
+| `session_time_ms` | `uint32_t` | ms since `smartfires-edge receive` started. Wraps at ~49 days. |
 
 CRC: CRC-8/MAXIM (polynomial 0x31), covers the `len` byte + all data bytes.
 
@@ -367,6 +375,7 @@ SmartFiresNodeApp::update() — sensing begins
 | Base station port | **Pending** | feather_m0_lora env exists but firmware not ported to new class structure |
 | Remaining sensors | **Pending** | Wind, GPS, SPS30, IMU — implement fillSnapshot() as each is wired in |
 | edge-reciever packet bundle decode | **Done** | `smartfires_edge/packet.py` updated for 20-byte FullStatePayload + compact 12-byte deltas |
+| Jetson anemometer integration | **Done** | `smartfires-edge receive` can poll ES-W302 and add `jetson_wind_mps` + `jetson_wind_dir_deg` to CSV rows |
 
 Full details and design notes in `documentation/BINARY_PACKET_PIPELINE.md`.
 Sizing and scaling math tables are in `documentation/BANDWIDTH_SCALING.md`.
@@ -379,6 +388,7 @@ Sizing and scaling math tables are in `documentation/BANDWIDTH_SCALING.md`.
 pip install -e edge/edge-reciever
 smartfires-edge receive --port /dev/ttyTHS1 --data-dir /mnt/nvme_drive/data
 smartfires-edge receive --sync-interval 600      # 10-min sync interval
+smartfires-edge receive --anemometer-port /dev/ttyUSB0 --anemometer-baud 9600 --anemometer-address 1
 ```
 
 `edge/edge-reciever/src/smartfires_edge/packet.py` mirrors `BinaryPacket.h` for STATUS/FULL_STATE/BUNDLE parsing and
