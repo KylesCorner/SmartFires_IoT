@@ -120,6 +120,13 @@ size_t Sht31Sensor::readingSize() const {
   return sizeof(Reading);
 }
 
+void Sht31Sensor::fillSnapshot(SensorSnapshot &snap) const {
+  if (!_reading.valid) return;
+  snap.tempC        = _reading.tempC;
+  snap.humidityPct  = _reading.humidityPct;
+  snap.sensorFlags |= 0x02;  // SHT31
+}
+
 size_t Sht31Sensor::writeTelemetry(char *out, size_t maxLen) const {
   if (!out || maxLen == 0) {
     return 0;
