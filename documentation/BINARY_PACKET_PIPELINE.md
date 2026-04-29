@@ -33,10 +33,12 @@ TdmaRadioService::enqueueTelemetry(payload, len)
          ▼
 TdmaRadioService::drainTxQueue()   [called every loop via radio.update()]
          │   TdmaClock::myTurn() — TDMA slot + guard check
-         │   one TX attempt per slot index
+         │   multiple TX attempts per slot while budget remains
+         │   app-layer reliability: cache recent seq payloads, process ACK summaries,
+         │   retransmit missing fresh packets when no new payload is queued
          ▼
-ITdmaRadioDriver::sendToWait()
-         │   RadioHeadTdmaDriver → RHReliableDatagram::sendtoWait()
+ITdmaRadioDriver::send()
+         │   RadioHeadTdmaDriver → RHReliableDatagram::sendto() (non-blocking)
          ▼
 LoRa 915 MHz → base station Feather M0
 ```
@@ -113,22 +115,18 @@ and zero deltas. This is valid — `sensor_flags` tells the receiver which field
 
 ## What Remains
 
-### 1. TIME_SYNC binary decode in `RadioHeadTdmaDriver`
+### 1. Base station port
 
-`TdmaRadioService::isTimeSyncPacket()` currently parses a placeholder text format
-`"TS,<ms>"` for native testing. The real implementation must be in
-`RadioHeadTdmaDriver::receive()`, which should decode `BinaryPacket::decodeTimeSync()`
-and pass the session_ms to `TdmaClock::applySync()`.
-
-The `isTimeSyncPacket()` text path can remain for native unit tests; the driver handles
-the real protocol.
+The base station Feather (`feather_m0_lora` env) is still not ported to the new
+class architecture. Node and edge support app-layer ACK summaries, but base firmware
+must forward ACK summary UART frames to LoRa for full end-to-end closure.
 
 ### 2. STATUS packet (PKT_STATUS) — implemented
 
 `PacketHandler` encodes a `PKT_STATUS` payload carrying GPS + battery. The first
 status packet is emitted on the first `push()`, then every 15 minutes.
 
-### 4. Remaining sensors
+### 2. Remaining sensors
 
 As sensors are added to `main.cpp`, implement `fillSnapshot()` in each:
 
@@ -139,7 +137,7 @@ As sensors are added to `main.cpp`, implement `fillSnapshot()` in each:
 | `Icm20948Sensor` | `0x08` | (no fields in current FullStatePayload) |
 | `Sps30Sensor` | `0x10` | `pm1_0`, `pm2_5`, `pm4_0`, `pm10` |
 
-### 4. Delta quantization tuning
+### 3. Delta quantization tuning
 
 Current compact delta encoding uses mixed precision to improve bundle density:
 - `dt_ticks_250ms` (uint8), `wind_cms` absolute (uint16)
@@ -148,14 +146,7 @@ Current compact delta encoding uses mixed precision to improve bundle density:
 - PM2.5 and PM10 deltas in 0.1 ug/m3 (int16)
 - `flags` bitmask marks clamped values
 
-### 5. Base station
-
-The base station Feather (`lora_feather_base` environment) is not yet ported to the new
-class structure. It still needs to be implemented to:
-- Receive LoRa bundles and forward them to the Jetson over UART
-- Receive TIME_SYNC UART frames from the Jetson and broadcast them over LoRa
-
-### 6. Edge receiver (Jetson)
+### 4. Edge receiver (Jetson)
 
 `edge/packet.py` must stay aligned with `BinaryPacket.h` for delta expansion.
 Current wire assumptions are FullStatePayload=20 bytes, DeltaPayload=12 bytes,
@@ -173,3 +164,29 @@ At the current config (N_δ=14, R=1, SF7):
 - Frame period (4 nodes): 3600 ms → η = 0.96 → no steady-state queue loss
 
 For scaling beyond 2 nodes see `documentation/old/TDMA_BUNDLE_SIZING.md`.
+For current (post-reliability, multi-send) scaling math, see `documentation/BANDWIDTH_SCALING.md`.
+
+---
+
+## App-Layer Reliability (Current)
+
+`TdmaRadioService` now supports bounded app-layer retransmission for telemetry:
+
+- Fresh telemetry TX uses non-blocking datagram send (`sendto`) instead of per-packet
+  ACK waits.
+- Sent telemetry packets are cached in a fixed-size ring (`reliabilityWindowDepth`,
+  default 4).
+- Base can send `PKT_ACK_SUMMARY` (`AckSummaryPayload`) to acknowledge a contiguous
+  sequence base plus a 16-bit lookahead bitmap.
+- Cached packets are retired when acknowledged, expired by age
+  (`reliabilityMaxAgeMs`), or when max attempts are reached
+  (`reliabilityMaxAttempts`).
+- Retransmit attempts are rate-limited (`reliabilityMinRetryGapMs`) and only
+  attempted when no fresh payload is pending in the TX queue.
+
+This keeps RAM bounded while preserving freshness-first behavior.
+
+Edge integration notes:
+- `edge/receiver.py` now tracks per-node sequence reception and periodically emits
+  `PKT_ACK_SUMMARY` frames over UART (`--ack-interval`, default 4.0 s).
+- Node-side reliability cache depth remains 4 (`reliabilityWindowDepth=4`).

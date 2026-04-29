@@ -171,7 +171,8 @@ PacketHandler
 
 TdmaRadioService::update()
   checkIncomingTimeSync()  ← polls driver, decodes binary BinaryPacket::TimeSyncPayload
-  drainTxQueue()           ← sends one payload per TDMA slot via RadioHeadTdmaDriver
+  drainTxQueue()           ← sends multiple payloads per TDMA slot while budget allows
+                              and app-layer reliability retransmits pending misses
 ```
 
 ### Key data flow
@@ -186,6 +187,7 @@ BinaryPacket::encodeBundlePayload()       raw LoRa bytes (≤193 bytes)
 TdmaTxQueue::enqueue()                    4-slot ring buffer, drop-oldest
         ↓
 RadioHeadTdmaDriver::sendToWait()         TDMA-gated LoRa TX
+RadioHeadTdmaDriver::send()               non-blocking LoRa TX for fresh telemetry
 ```
 
 ---
@@ -200,8 +202,9 @@ BUNDLE:  [PktHeader: 4][FullStatePayload: 20][n_deltas: 1][DeltaPayload×n: n×1
 STATUS:  [PktHeader: 4][StatusPayload: 12]                                           = 16 bytes
 ```
 
-RadioHead `RHReliableDatagram` handles LoRa framing, ACK, and retry. Node calls
-`sendtoWait()` (1 retry, 100 ms timeout); base calls `recvfromAck()` which auto-ACKs.
+RadioHead `RHReliableDatagram` handles LoRa framing and addressing.
+Node fresh telemetry uses non-blocking `sendto()` with app-layer reliability; the
+base still receives via `recvfromAck()` and auto-ACKs at the LoRa link layer.
 
 ### LoRa TIME_SYNC broadcast — base → all nodes (12 bytes)
 
@@ -366,6 +369,7 @@ SmartFiresNodeApp::update() — sensing begins
 | edge/packet.py bundle decode | **Done** | Updated for 20-byte FullStatePayload + compact 12-byte deltas |
 
 Full details and design notes in `documentation/BINARY_PACKET_PIPELINE.md`.
+Sizing and scaling math tables are in `documentation/BANDWIDTH_SCALING.md`.
 
 ---
 

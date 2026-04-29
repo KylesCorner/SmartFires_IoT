@@ -15,6 +15,7 @@ public:
   virtual ~ITdmaRadioDriver() = default;
 
   virtual bool begin() = 0;
+  virtual bool send(const uint8_t *data, uint8_t len, uint8_t to) = 0;
   virtual bool sendToWait(const uint8_t *data, uint8_t len, uint8_t to) = 0;
 
   virtual bool available() = 0;

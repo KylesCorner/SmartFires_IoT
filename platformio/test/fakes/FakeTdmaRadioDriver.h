@@ -33,6 +33,19 @@ public:
     return beginOk;
   }
 
+  bool send(const uint8_t *data, uint8_t len, uint8_t to) override {
+    if (!sendOk || !data || len == 0) {
+      return false;
+    }
+
+    lastTo = to;
+    lastSentLen = len;
+    memcpy(lastSent, data, len);
+    sendCount++;
+
+    return true;
+  }
+
   bool sendToWait(const uint8_t *data, uint8_t len, uint8_t to) override {
     if (!sendOk || !data || len == 0) {
       return false;

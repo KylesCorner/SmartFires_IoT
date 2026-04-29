@@ -34,6 +34,7 @@ enum PktType : uint8_t {
     PKT_BUNDLE     = 0x04,
     PKT_STATUS     = 0x05,  // GPS + battery, sent every 15 min
     PKT_AWAKEN     = 0x06,  // boot handshake — node broadcasts before sensing starts
+    PKT_ACK_SUMMARY = 0x07, // base -> node app-layer reliability summary
 };
 
 struct __attribute__((packed)) PktHeader {
@@ -73,6 +74,15 @@ struct __attribute__((packed)) TimeSyncPayload {
     uint32_t session_time_ms;   // ms since receiver.py started
 };
 
+// Base station summary for one node's recently received sequence numbers.
+// ack_base_seq acknowledges all contiguous packets up to and including base.
+// ack_mask bit i acknowledges sequence (ack_base_seq + 1 + i), i in [0..15].
+struct __attribute__((packed)) AckSummaryPayload {
+    uint8_t  node_id;
+    uint8_t  ack_base_seq;
+    uint16_t ack_mask;
+};
+
 // wind_cms is absolute (not a delta) — wind changes too fast to delta-encode reliably.
 // Compact delta encoding (12 bytes) keeps PM2.5/PM10 high precision while coarsening
 // slower channels to improve payload efficiency.
@@ -100,6 +110,7 @@ static_assert(sizeof(PktHeader)        ==  4, "PktHeader must be 4 bytes");
 static_assert(sizeof(FullStatePayload) == 20, "FullStatePayload must be 20 bytes");
 static_assert(sizeof(StatusPayload)    == 12, "StatusPayload must be 12 bytes");
 static_assert(sizeof(TimeSyncPayload)  ==  8, "TimeSyncPayload must be 8 bytes");
+static_assert(sizeof(AckSummaryPayload) == 4, "AckSummaryPayload must be 4 bytes");
 static_assert(sizeof(DeltaPayload)     == 12, "DeltaPayload must be 12 bytes");
 
 static constexpr uint8_t kBundleMaxDeltas = 14;
@@ -111,6 +122,8 @@ static constexpr size_t kStatusLoRaSize =
     sizeof(PktHeader) + sizeof(StatusPayload);                          // 16
 static constexpr size_t kTimeSyncLoRaSize =
     sizeof(PktHeader) + sizeof(TimeSyncPayload);                        // 12
+static constexpr size_t kAckSummaryLoRaSize =
+    sizeof(PktHeader) + sizeof(AckSummaryPayload);                      // 8
 static constexpr size_t kFullStateLoRaSize =
     sizeof(PktHeader) + sizeof(FullStatePayload);                       // 24
 static constexpr size_t kMaxBundleLoRaSize =
@@ -181,6 +194,22 @@ inline uint8_t encodeTimeSyncPayload(
     memcpy(buf,                    &hdr, sizeof(PktHeader));
     memcpy(buf + sizeof(PktHeader), &ts,  sizeof(TimeSyncPayload));
     return static_cast<uint8_t>(kTimeSyncLoRaSize);
+}
+
+inline uint8_t encodeAckSummaryPayload(
+    uint8_t seq,
+    const AckSummaryPayload& as,
+    uint8_t* buf, size_t buf_size)
+{
+    if (buf_size < kAckSummaryLoRaSize) return 0;
+    PktHeader hdr;
+    hdr.magic    = PKT_MAGIC;
+    hdr.pkt_type = PKT_ACK_SUMMARY;
+    hdr.node_id  = 0;
+    hdr.seq      = seq;
+    memcpy(buf,                    &hdr, sizeof(PktHeader));
+    memcpy(buf + sizeof(PktHeader), &as, sizeof(AckSummaryPayload));
+    return static_cast<uint8_t>(kAckSummaryLoRaSize);
 }
 
 // ---------- encode: raw LoRa BUNDLE payload ----------
@@ -311,6 +340,16 @@ inline bool decodeTimeSync(
     memcpy(&hdr_out, raw,                    sizeof(PktHeader));
     memcpy(&ts_out,  raw + sizeof(PktHeader), sizeof(TimeSyncPayload));
     return hdr_out.magic == PKT_MAGIC && hdr_out.pkt_type == PKT_TIME_SYNC;
+}
+
+inline bool decodeAckSummary(
+    const uint8_t* raw, size_t len,
+    PktHeader& hdr_out, AckSummaryPayload& as_out)
+{
+    if (len < kAckSummaryLoRaSize) return false;
+    memcpy(&hdr_out, raw,                    sizeof(PktHeader));
+    memcpy(&as_out,  raw + sizeof(PktHeader), sizeof(AckSummaryPayload));
+    return hdr_out.magic == PKT_MAGIC && hdr_out.pkt_type == PKT_ACK_SUMMARY;
 }
 
 } // namespace BinaryPacket

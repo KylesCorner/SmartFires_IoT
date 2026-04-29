@@ -38,6 +38,7 @@ PKT_TIME_SYNC  = 0x03
 PKT_BUNDLE     = 0x04
 PKT_STATUS     = 0x05
 PKT_GPS        = PKT_STATUS  # legacy alias used by receiver.py
+PKT_ACK_SUMMARY = 0x07
 
 # ---------- struct formats (little-endian, packed) ----------
 
@@ -70,6 +71,10 @@ BUNDLE_MAX_DELTAS = 14
 # TimeSyncPayload: session_id(u32) session_time_ms(u32)  →  8 bytes
 TIME_SYNC_PAYLOAD_FMT  = "<II"
 TIME_SYNC_PAYLOAD_SIZE = struct.calcsize(TIME_SYNC_PAYLOAD_FMT)  # 8
+
+# AckSummaryPayload: node_id(u8) ack_base_seq(u8) ack_mask(u16)  →  4 bytes
+ACK_SUMMARY_PAYLOAD_FMT  = "<BBH"
+ACK_SUMMARY_PAYLOAD_SIZE = struct.calcsize(ACK_SUMMARY_PAYLOAD_FMT)  # 4
 
 STATUS_LORA_SIZE       = HEADER_SIZE + STATUS_PAYLOAD_SIZE                           # 16
 LORA_PAYLOAD_SIZE      = HEADER_SIZE + FULL_STATE_SIZE                               # 24
@@ -118,6 +123,27 @@ def encode_time_sync_frame(session_id: int, session_time_ms: int, seq: int = 0) 
     crc_input = bytes([data_len]) + payload
     frame_crc = crc8(crc_input)
 
+    return bytes([FRAME_M0, FRAME_M1, data_len]) + payload + bytes([frame_crc])
+
+
+def encode_ack_summary_frame(node_id: int, ack_base_seq: int, ack_mask: int, seq: int = 0) -> bytes:
+    """
+    Encode an ACK_SUMMARY UART frame for forwarding to the base Feather.
+
+    Returns 12 bytes:
+        [0xAA][0x55][8][PktHeader(PKT_ACK_SUMMARY,node_id=0,seq)][AckSummaryPayload][crc8]
+    """
+    hdr = struct.pack(HEADER_FMT, PKT_MAGIC, PKT_ACK_SUMMARY, 0, seq & 0xFF)
+    ack = struct.pack(
+        ACK_SUMMARY_PAYLOAD_FMT,
+        node_id & 0xFF,
+        ack_base_seq & 0xFF,
+        ack_mask & 0xFFFF,
+    )
+    payload = hdr + ack
+    data_len = len(payload)
+    crc_input = bytes([data_len]) + payload
+    frame_crc = crc8(crc_input)
     return bytes([FRAME_M0, FRAME_M1, data_len]) + payload + bytes([frame_crc])
 
 

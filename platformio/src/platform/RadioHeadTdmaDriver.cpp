@@ -42,6 +42,16 @@ bool RadioHeadTdmaDriver::begin() {
   return true;
 }
 
+bool RadioHeadTdmaDriver::send(const uint8_t *data,
+                               uint8_t len,
+                               uint8_t to) {
+  if (!_healthy || !data || len == 0) {
+    return false;
+  }
+
+  return _manager.sendto(const_cast<uint8_t *>(data), len, to);
+}
+
 bool RadioHeadTdmaDriver::sendToWait(const uint8_t *data,
                                      uint8_t len,
                                      uint8_t to) {

@@ -4,6 +4,38 @@
 
 #include <string.h>
 
+namespace {
+
+// Conservative slot-budget estimates to prevent crossing slot boundaries.
+// Values include airtime plus software/radio overhead margin.
+uint16_t estimateTxBudgetMs(const uint8_t *payload, uint8_t len) {
+  if (!payload || len < sizeof(BinaryPacket::PktHeader)) {
+    return 140;
+  }
+
+  BinaryPacket::PktHeader hdr;
+  memcpy(&hdr, payload, sizeof(BinaryPacket::PktHeader));
+
+  if (hdr.magic != BinaryPacket::PKT_MAGIC) {
+    return 140;
+  }
+
+  switch (hdr.pkt_type) {
+    case BinaryPacket::PKT_BUNDLE:
+      return 340;
+    case BinaryPacket::PKT_STATUS:
+      return 120;
+    case BinaryPacket::PKT_AWAKEN:
+      return 90;
+    case BinaryPacket::PKT_FULL_STATE:
+      return 140;
+    default:
+      return 140;
+  }
+}
+
+} // namespace
+
 TdmaRadioService::TdmaRadioService(const TdmaConfig &cfg,
                                    TdmaClock &tdmaClock,
                                    TdmaTxQueue &queue,
@@ -74,9 +106,7 @@ uint32_t TdmaRadioService::lastTxSlotIndex() const {
 }
 
 void TdmaRadioService::drainTxQueue() {
-  if (_queue.empty()) {
-    return;
-  }
+  dropExpiredPending();
 
   uint32_t slotIndex = 0;
 
@@ -84,28 +114,86 @@ void TdmaRadioService::drainTxQueue() {
     return;
   }
 
-  if (slotIndex == _lastTxSlotIndex) {
-    return;
-  }
-
   _lastTxSlotIndex = slotIndex;
 
-  uint8_t payload[TdmaConfig::MaxPayloadLen] = {};
-  uint8_t len = 0;
+  const bool useSlotBudget = _tdmaClock.hasSync() && !_tdmaClock.syncStale();
+  const uint32_t slotEndMs = (_cfg.slotWidthMs > _cfg.guardMs) ? (_cfg.slotWidthMs - _cfg.guardMs) : _cfg.slotWidthMs;
+  const uint8_t kMaxSendsPerUpdate = 6;
 
-  if (!_queue.dequeue(payload, len)) {
-    return;
-  }
+  uint8_t sendsThisUpdate = 0;
 
-  const bool ok = _driver.sendToWait(payload, len, _cfg.baseAddr);
+  while (sendsThisUpdate < kMaxSendsPerUpdate) {
+    if (useSlotBudget) {
+      const uint32_t posInSlot = _tdmaClock.positionInSlotMs();
+      if (posInSlot >= slotEndMs) {
+        return;
+      }
+    } else if (sendsThisUpdate > 0) {
+      // In unsynced/stale fallback mode, keep behavior conservative.
+      return;
+    }
 
-  if (ok) {
-    _sentCount++;
-  } else {
-    _failedSendCount++;
-    _error = TdmaRadioError::SendFailed;
+    uint8_t payload[TdmaConfig::MaxPayloadLen] = {};
+    uint8_t len = 0;
+    bool fromQueue = false;
+    uint8_t pendingIndex = 0;
+    uint8_t retrySeq = 0;
 
-    // Match original behavior: failed LoRa send is dropped, not requeued.
+    if (!_queue.empty()) {
+      if (!_queue.dequeue(payload, len)) {
+        return;
+      }
+      fromQueue = true;
+    } else if (_cfg.enableAppReliability) {
+      if (!pickRetransmitCandidate(payload, len, retrySeq, pendingIndex)) {
+        return;
+      }
+    } else {
+      return;
+    }
+
+    if (useSlotBudget) {
+      const uint32_t posInSlot = _tdmaClock.positionInSlotMs();
+      const uint32_t remainingMs = (slotEndMs > posInSlot) ? (slotEndMs - posInSlot) : 0;
+      const uint16_t neededMs = estimateTxBudgetMs(payload, len);
+      if (remainingMs < neededMs) {
+        // Not enough safe budget left for this payload.
+        if (fromQueue) {
+          const bool enqOk = _queue.enqueue(payload, len);
+          if (!enqOk) {
+            _error = TdmaRadioError::EnqueueFailed;
+          }
+        }
+        return;
+      }
+    }
+
+    const bool ok = _cfg.enableAppReliability
+                        ? _driver.send(payload, len, _cfg.baseAddr)
+                        : _driver.sendToWait(payload, len, _cfg.baseAddr);
+
+    if (ok) {
+      _sentCount++;
+      if (_cfg.enableAppReliability) {
+        if (fromQueue) {
+          rememberSentTelemetry(payload, len);
+        } else {
+          markRetransmitSent(pendingIndex);
+        }
+      }
+    } else {
+      _failedSendCount++;
+      _error = TdmaRadioError::SendFailed;
+
+      // Match original behavior for fresh telemetry: failed send is dropped, not requeued.
+      // Retransmit entries are retained unless expired/attempt-limited.
+    }
+
+    sendsThisUpdate++;
+
+    if (_queue.empty() && !_cfg.enableAppReliability) {
+      return;
+    }
   }
 }
 
@@ -118,9 +206,15 @@ void TdmaRadioService::checkIncomingTimeSync() {
     }
 
     uint32_t sessionMs = 0;
+    BinaryPacket::AckSummaryPayload ack = {};
 
     if (isTimeSyncPacket(packet, sessionMs)) {
       _tdmaClock.applySync(sessionMs);
+      continue;
+    }
+
+    if (_cfg.enableAppReliability && isAckSummaryPacket(packet, ack)) {
+      applyAckSummary(ack);
     }
   }
 }
@@ -137,4 +231,240 @@ bool TdmaRadioService::isTimeSyncPacket(
 
   sessionMsOut = ts.session_time_ms;
   return true;
+}
+
+bool TdmaRadioService::isAckSummaryPacket(
+    const ITdmaRadioDriver::ReceivedPacket &packet,
+    BinaryPacket::AckSummaryPayload &ackOut) const {
+  BinaryPacket::PktHeader hdr;
+  return BinaryPacket::decodeAckSummary(packet.data, packet.len, hdr, ackOut);
+}
+
+bool TdmaRadioService::isTelemetryPacketForNode(const uint8_t *payload,
+                                                uint8_t len,
+                                                uint8_t &seqOut) const {
+  if (!payload || len < sizeof(BinaryPacket::PktHeader)) {
+    return false;
+  }
+
+  BinaryPacket::PktHeader hdr;
+  memcpy(&hdr, payload, sizeof(BinaryPacket::PktHeader));
+
+  if (hdr.magic != BinaryPacket::PKT_MAGIC || hdr.node_id != _cfg.nodeId) {
+    return false;
+  }
+
+  const bool telemetryType =
+      hdr.pkt_type == BinaryPacket::PKT_BUNDLE ||
+      hdr.pkt_type == BinaryPacket::PKT_STATUS ||
+      hdr.pkt_type == BinaryPacket::PKT_AWAKEN ||
+      hdr.pkt_type == BinaryPacket::PKT_FULL_STATE;
+
+  if (!telemetryType) {
+    return false;
+  }
+
+  seqOut = hdr.seq;
+  return true;
+}
+
+void TdmaRadioService::rememberSentTelemetry(const uint8_t *payload, uint8_t len) {
+  uint8_t seq = 0;
+  if (!isTelemetryPacketForNode(payload, len, seq)) {
+    return;
+  }
+
+  const uint8_t windowDepth =
+      (_cfg.reliabilityWindowDepth > kMaxReliabilityWindow)
+          ? kMaxReliabilityWindow
+          : _cfg.reliabilityWindowDepth;
+  if (windowDepth == 0) {
+    return;
+  }
+
+  const uint32_t nowMs = _tdmaClock.sessionNowMs();
+
+  int8_t freeIndex = -1;
+  int8_t oldestIndex = -1;
+  uint32_t oldestSentMs = 0;
+
+  for (uint8_t i = 0; i < windowDepth; ++i) {
+    PendingEntry &e = _pending[i];
+    if (!e.inUse) {
+      if (freeIndex < 0) {
+        freeIndex = static_cast<int8_t>(i);
+      }
+      continue;
+    }
+
+    if (e.seq == seq) {
+      memcpy(e.payload, payload, len);
+      e.len = len;
+      e.lastSentMs = nowMs;
+      e.attempts = 1;
+      return;
+    }
+
+    if (oldestIndex < 0 || e.firstSentMs < oldestSentMs) {
+      oldestIndex = static_cast<int8_t>(i);
+      oldestSentMs = e.firstSentMs;
+    }
+  }
+
+  int8_t slot = freeIndex;
+  if (slot < 0) {
+    slot = oldestIndex;
+  }
+  if (slot < 0) {
+    return;
+  }
+
+  PendingEntry &e = _pending[slot];
+  if (!e.inUse) {
+    _pendingCount++;
+  }
+
+  e.inUse = true;
+  e.seq = seq;
+  memcpy(e.payload, payload, len);
+  e.len = len;
+  e.firstSentMs = nowMs;
+  e.lastSentMs = nowMs;
+  e.attempts = 1;
+}
+
+bool TdmaRadioService::pickRetransmitCandidate(uint8_t *payloadOut,
+                                               uint8_t &lenOut,
+                                               uint8_t &seqOut,
+                                               uint8_t &pendingIndexOut) {
+  const uint8_t windowDepth =
+      (_cfg.reliabilityWindowDepth > kMaxReliabilityWindow)
+          ? kMaxReliabilityWindow
+          : _cfg.reliabilityWindowDepth;
+  if (windowDepth == 0 || !payloadOut) {
+    lenOut = 0;
+    return false;
+  }
+
+  const uint32_t nowMs = _tdmaClock.sessionNowMs();
+
+  int8_t bestIndex = -1;
+  uint32_t oldestLastSentMs = 0;
+
+  for (uint8_t i = 0; i < windowDepth; ++i) {
+    PendingEntry &e = _pending[i];
+    if (!e.inUse) {
+      continue;
+    }
+
+    const uint32_t ageMs = nowMs - e.firstSentMs;
+    if (ageMs > _cfg.reliabilityMaxAgeMs || e.attempts >= _cfg.reliabilityMaxAttempts) {
+      e.inUse = false;
+      if (_pendingCount > 0) {
+        _pendingCount--;
+      }
+      continue;
+    }
+
+    if ((nowMs - e.lastSentMs) < _cfg.reliabilityMinRetryGapMs) {
+      continue;
+    }
+
+    if (bestIndex < 0 || e.lastSentMs < oldestLastSentMs) {
+      bestIndex = static_cast<int8_t>(i);
+      oldestLastSentMs = e.lastSentMs;
+    }
+  }
+
+  if (bestIndex < 0) {
+    lenOut = 0;
+    return false;
+  }
+
+  PendingEntry &e = _pending[bestIndex];
+  memcpy(payloadOut, e.payload, e.len);
+  lenOut = e.len;
+  seqOut = e.seq;
+  pendingIndexOut = static_cast<uint8_t>(bestIndex);
+  return true;
+}
+
+void TdmaRadioService::markRetransmitSent(uint8_t pendingIndex) {
+  if (pendingIndex >= kMaxReliabilityWindow) {
+    return;
+  }
+
+  PendingEntry &e = _pending[pendingIndex];
+  if (!e.inUse) {
+    return;
+  }
+
+  e.lastSentMs = _tdmaClock.sessionNowMs();
+  if (e.attempts < 0xFF) {
+    e.attempts++;
+  }
+}
+
+void TdmaRadioService::applyAckSummary(const BinaryPacket::AckSummaryPayload &ack) {
+  if (ack.node_id != _cfg.nodeId) {
+    return;
+  }
+
+  const uint8_t windowDepth =
+      (_cfg.reliabilityWindowDepth > kMaxReliabilityWindow)
+          ? kMaxReliabilityWindow
+          : _cfg.reliabilityWindowDepth;
+
+  for (uint8_t i = 0; i < windowDepth; ++i) {
+    PendingEntry &e = _pending[i];
+    if (!e.inUse) {
+      continue;
+    }
+
+    bool acked = false;
+
+    // If (ack_base_seq - seq) is < 128 in modulo arithmetic, seq is older/equal.
+    if (static_cast<uint8_t>(ack.ack_base_seq - e.seq) < 128u) {
+      acked = true;
+    } else {
+      const uint8_t ahead = static_cast<uint8_t>(e.seq - ack.ack_base_seq);
+      if (ahead >= 1 && ahead <= 16) {
+        acked = ((ack.ack_mask >> (ahead - 1)) & 0x01u) != 0u;
+      }
+    }
+
+    if (acked) {
+      e.inUse = false;
+      if (_pendingCount > 0) {
+        _pendingCount--;
+      }
+    }
+  }
+}
+
+void TdmaRadioService::dropExpiredPending() {
+  if (!_cfg.enableAppReliability) {
+    return;
+  }
+
+  const uint8_t windowDepth =
+      (_cfg.reliabilityWindowDepth > kMaxReliabilityWindow)
+          ? kMaxReliabilityWindow
+          : _cfg.reliabilityWindowDepth;
+  const uint32_t nowMs = _tdmaClock.sessionNowMs();
+
+  for (uint8_t i = 0; i < windowDepth; ++i) {
+    PendingEntry &e = _pending[i];
+    if (!e.inUse) {
+      continue;
+    }
+
+    const uint32_t ageMs = nowMs - e.firstSentMs;
+    if (ageMs > _cfg.reliabilityMaxAgeMs || e.attempts >= _cfg.reliabilityMaxAttempts) {
+      e.inUse = false;
+      if (_pendingCount > 0) {
+        _pendingCount--;
+      }
+    }
+  }
 }

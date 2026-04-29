@@ -73,10 +73,12 @@ from packet import (
     PKT_FULL_STATE,
     PKT_BUNDLE,
     PKT_GPS,
+    PKT_STATUS,
     crc8,
     decode_gps,
     decode_full_state,
     decode_bundle,
+    encode_ack_summary_frame,
     encode_time_sync_frame,
 )
 
@@ -117,7 +119,51 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--baud",          type=int, default=115200, help="Baud rate (default: 115200)")
     p.add_argument("--output",        default="telemetry.csv", help="Output CSV file (default: telemetry.csv)")
     p.add_argument("--sync-interval", type=int, default=30,    help="TIME_SYNC interval in seconds (default: 30)")
+    p.add_argument("--ack-interval",  type=float, default=4.0, help="ACK summary interval in seconds (default: 4.0)")
     return p.parse_args()
+
+
+def _seq_ahead(base: int, seq: int) -> int:
+    return (seq - base) & 0xFF
+
+
+def _ack_state_update(state: dict, seq: int) -> None:
+    if not state.get("init", False):
+        state["base"] = (seq - 1) & 0xFF
+        state["init"] = True
+
+    received = state.setdefault("received", set())
+    received.add(seq & 0xFF)
+
+    base = state["base"]
+    while True:
+        nxt = (base + 1) & 0xFF
+        if nxt not in received:
+            break
+        received.remove(nxt)
+        base = nxt
+    state["base"] = base
+
+    # Keep only near-future seq values relevant for 16-bit ack mask.
+    to_drop = []
+    for s in received:
+        d = _seq_ahead(base, s)
+        if d == 0 or d > 16:
+            to_drop.append(s)
+    for s in to_drop:
+        received.discard(s)
+
+
+def _ack_state_mask(state: dict) -> int:
+    if not state.get("init", False):
+        return 0
+    base = state["base"]
+    mask = 0
+    for s in state.get("received", set()):
+        d = _seq_ahead(base, s)
+        if 1 <= d <= 16:
+            mask |= 1 << (d - 1)
+    return mask
 
 
 # ---------- TIME_SYNC sender thread ----------
@@ -146,7 +192,7 @@ def _time_sync_sender(
 
 # ---------- main receive loop ----------
 
-def run(port: str, baud: int, output_path: str, sync_interval_s: int) -> None:
+def run(port: str, baud: int, output_path: str, sync_interval_s: int, ack_interval_s: float) -> None:
     file_exists = os.path.isfile(output_path)
 
     # Session identity: changes each time receiver.py restarts so nodes reset their offsets.
@@ -159,6 +205,9 @@ def run(port: str, baud: int, output_path: str, sync_interval_s: int) -> None:
 
     # Per-node GPS cache: updated when a PKT_GPS arrives; injected into every telemetry row.
     node_gps: dict = {}  # node_id -> (lat: float, lon: float)
+    ack_state: dict = {}  # node_id -> {init: bool, base: int, received: set[int]}
+    ack_seq = 0
+    next_ack_at = time.time() + ack_interval_s
 
     with serial.Serial(port, baud, timeout=1) as ser, \
          open(output_path, "a", newline="") as csvfile:
@@ -239,6 +288,14 @@ def run(port: str, baud: int, output_path: str, sync_interval_s: int) -> None:
                     pkt_type = raw_payload[1] if len(raw_payload) >= 2 else 0xFF
                     now_ts   = datetime.datetime.utcnow().isoformat(timespec="milliseconds")
 
+                    hdr_node = None
+                    hdr_seq = None
+                    if len(raw_payload) >= 4:
+                        magic, hdr_pkt, node_id, seq = struct.unpack_from(HEADER_FMT, raw_payload, 0)
+                        if magic == PKT_MAGIC:
+                            hdr_node = node_id
+                            hdr_seq = seq
+
                     if pkt_type == PKT_GPS:
                         gps = decode_gps(raw_payload, rssi)
                         if gps:
@@ -256,6 +313,14 @@ def run(port: str, baud: int, output_path: str, sync_interval_s: int) -> None:
 
                     elif pkt_type == PKT_BUNDLE:
                         pkts = decode_bundle(raw_payload, rssi)
+
+                    elif pkt_type == PKT_STATUS:
+                        # STATUS is parsed through decode_gps for GPS cache updates.
+                        gps = decode_gps(raw_payload, rssi)
+                        if gps:
+                            nid = gps["node_id"]
+                            node_gps[nid] = (gps["lat"], gps["lon"])
+                        pkts = []
 
                     else:
                         pkts = []
@@ -297,6 +362,29 @@ def run(port: str, baud: int, output_path: str, sync_interval_s: int) -> None:
                             f"[WARN] packet decode failed (payload len={len(raw_payload)})",
                             file=sys.stderr,
                         )
+
+                    if hdr_node is not None and hdr_seq is not None and pkt_type in (PKT_FULL_STATE, PKT_BUNDLE, PKT_STATUS):
+                        st = ack_state.setdefault(hdr_node, {"init": False, "base": 0, "received": set()})
+                        _ack_state_update(st, hdr_seq)
+
+                    now = time.time()
+                    if now >= next_ack_at and ack_state:
+                        for node_id, st in ack_state.items():
+                            if not st.get("init", False):
+                                continue
+                            frame = encode_ack_summary_frame(
+                                node_id=node_id,
+                                ack_base_seq=st["base"],
+                                ack_mask=_ack_state_mask(st),
+                                seq=ack_seq,
+                            )
+                            with write_lock:
+                                try:
+                                    ser.write(frame)
+                                except serial.SerialException as exc:
+                                    print(f"[ACK_SUM] write error: {exc}", file=sys.stderr)
+                            ack_seq = (ack_seq + 1) & 0xFF
+                        next_ack_at = now + ack_interval_s
                 else:
                     print(
                         f"[WARN] CRC mismatch: got {received_crc:#04x}, "
@@ -313,7 +401,7 @@ def run(port: str, baud: int, output_path: str, sync_interval_s: int) -> None:
 if __name__ == "__main__":
     args = _parse_args()
     try:
-        run(args.port, args.baud, args.output, args.sync_interval)
+        run(args.port, args.baud, args.output, args.sync_interval, args.ack_interval)
     except KeyboardInterrupt:
         print("\nReceiver stopped.")
     except serial.SerialException as exc:
