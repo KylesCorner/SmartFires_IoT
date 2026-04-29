@@ -7,9 +7,22 @@
 class Icm20948Sensor final : public ISensor {
 public:
   struct Config {
-    uint32_t minSamplePeriodMs = 10000;
-    uint32_t wakeDelayMs = 0;
-    SensorDutyClass dutyClass = SensorDutyClass::OnDemand;
+    uint32_t minSamplePeriodMs;
+    uint32_t wakeDelayMs;
+    SensorDutyClass dutyClass;
+    uint8_t address;
+
+    static Icm20948Sensor::Config
+    makeImuCfg(uint32_t minSamplePeriodMs_ = 10, uint32_t wakeDelayMs_ = 0,
+               SensorDutyClass dutyClass_ = SensorDutyClass::DutyCycled,
+               uint8_t address_ = 0) {
+      Icm20948Sensor::Config cfg;
+      cfg.minSamplePeriodMs = minSamplePeriodMs_;
+      cfg.wakeDelayMs = wakeDelayMs_;
+      cfg.dutyClass = dutyClass_;
+      cfg.address = address_;
+      return cfg;
+    }
   };
 
   struct Reading : public IIcm20948Driver::Data {

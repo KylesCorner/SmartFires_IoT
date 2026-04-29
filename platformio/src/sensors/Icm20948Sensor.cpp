@@ -8,7 +8,7 @@ Icm20948Sensor::Icm20948Sensor(const Config &cfg, IIcm20948Driver &driver,
 const char *Icm20948Sensor::name() const { return "imu"; }
 
 bool Icm20948Sensor::begin() {
-  _healthy = _driver.begin();
+  _healthy = _driver.begin(_cfg.address);
   _state = _healthy ? SensorPowerState::Sleeping : SensorPowerState::Error;
   return _healthy;
 }

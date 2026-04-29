@@ -24,6 +24,12 @@ bool DutyCycleController::begin() {
     return false;
   }
 
+  if (!wakeDutyCycledSensors()) {
+    Serial.println("Duty failed to wake duty cycled sensors");
+    transitionTo(DutyCyclePhase::Error);
+    return false;
+  }
+
   transitionTo(DutyCyclePhase::WarmingUp);
   return true;
 }
