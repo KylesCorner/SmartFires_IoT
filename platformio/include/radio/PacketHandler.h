@@ -6,25 +6,27 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// Accumulates SensorSnapshot readings into PKT_BUNDLE and PKT_GPS LoRa payloads.
+// Accumulates SensorSnapshot readings into PKT_BUNDLE and PKT_STATUS LoRa payloads.
 //
 // Bundle path:
 //   Call push() on each sensing cycle. When a reference + maxDeltas samples have
 //   accumulated, the bundle is encoded and bundleReady() returns true. Retrieve
 //   with takeBundle(), then accumulation continues into the next bundle.
 //
-// GPS path:
-//   The first push() that carries a valid GPS fix (sensorFlags & GPS_FLAG) encodes
-//   a one-shot PKT_GPS payload. gpsPacketReady() returns true; retrieve with
-//   takeGpsPacket(). Stays suppressed until resetGpsSession() is called (call this
-//   when a new session_id arrives from TIME_SYNC so the receiver gets a fresh fix).
+// STATUS path:
+//   A PKT_STATUS (GPS + battery) is emitted immediately on the first push(), then
+//   every kStatusIntervalMs thereafter (keyed off snap.sessionTimeMs). Retrieve
+//   with takeStatusPacket(). Call resetStatusTimer() when a new session_id arrives
+//   from TIME_SYNC to force an immediate re-send.
 //
 // Output is raw LoRa payload bytes — pass directly to
 // TdmaRadioService::enqueueTelemetry().
 
 class PacketHandler {
 public:
-    static constexpr uint16_t GPS_FLAG = 0x04;
+    static constexpr uint16_t GPS_FLAG  = 0x04;
+
+    static constexpr uint32_t kStatusIntervalMs = 15u * 60u * 1000u;  // 15 min
 
     struct Config {
         uint8_t nodeId    = 1;
@@ -43,19 +45,19 @@ public:
 
     // Add one sensor reading.
     // Returns true if a complete bundle is now ready (check bundleReady()).
-    // Also sets gpsPacketReady() on first valid GPS fix in this session.
+    // Also sets statusPacketReady() on first push and every kStatusIntervalMs after.
     bool push(const SensorSnapshot &snap);
 
     // --- bundle ---
     bool    bundleReady() const;
     uint8_t takeBundle(uint8_t *buf, size_t bufSize);
 
-    // --- GPS ---
-    bool    gpsPacketReady() const;
-    uint8_t takeGpsPacket(uint8_t *buf, size_t bufSize);
+    // --- STATUS (GPS + battery, every 15 min) ---
+    bool    statusPacketReady() const;
+    uint8_t takeStatusPacket(uint8_t *buf, size_t bufSize);
 
-    // Call when a new session_id arrives from TIME_SYNC so GPS is re-sent.
-    void resetGpsSession();
+    // Force STATUS to be sent on the next push (call on new session_id from TIME_SYNC).
+    void resetStatusTimer();
 
     // Full reset (new node session / reboot).
     void reset();
@@ -73,16 +75,17 @@ private:
     uint8_t _bundleBuf[BinaryPacket::kMaxBundleLoRaSize] = {};
     uint8_t _bundleLen   = 0;
 
-    // GPS state
-    bool    _gpsSent     = false;
-    bool    _gpsReady    = false;
-    uint8_t _gpsBuf[BinaryPacket::kGpsLoRaSize] = {};
-    uint8_t _gpsLen      = 0;
+    // STATUS state
+    bool     _statusEverSent    = false;
+    uint32_t _lastStatusMs      = 0;
+    bool     _statusReady       = false;
+    uint8_t  _statusBuf[BinaryPacket::kStatusLoRaSize] = {};
+    uint8_t  _statusLen         = 0;
 
     static BinaryPacket::FullStatePayload quantize(const SensorSnapshot &snap);
     static BinaryPacket::DeltaPayload     makeDelta(
         const BinaryPacket::FullStatePayload &ref,
         const BinaryPacket::FullStatePayload &sample);
 
-    void tryEncodeGps(const SensorSnapshot &snap);
+    void tryEncodeStatus(const SensorSnapshot &snap);
 };

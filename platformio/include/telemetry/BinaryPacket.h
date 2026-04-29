@@ -2,12 +2,19 @@
 
 // Binary wire format for SmartFires telemetry.
 //
-// LoRa payload — feather node -> feather base:
-//   BUNDLE:     [PktHeader:4][FullStatePayload:24][n_deltas:1][DeltaPayload×n]  ≤ 141 bytes
-//   GPS:        [PktHeader:4][GpsPayload:8]                                       = 12 bytes
+// LoRa payloads — node -> base:
+//   AWAKEN:     [PktHeader:4]                                                    =  4 bytes
+//   BUNDLE:     [PktHeader:4][FullStatePayload:20][n_deltas:1][DeltaPayload×n]  ≤ 137 bytes
+//   STATUS:     [PktHeader:4][StatusPayload:12]                                  = 16 bytes
 //
-// UART TIME_SYNC frame — Jetson -> base, or node feather -> ESP32 (16 bytes):
+// LoRa TIME_SYNC — base -> all nodes (broadcast):
+//   TIME_SYNC:  [PktHeader:4][TimeSyncPayload:8]                                 = 12 bytes
+//
+// UART TIME_SYNC frame — Jetson -> base (16 bytes):
 //   [0xAA][0x55][len=12][PktHeader(PKT_TIME_SYNC):4][TimeSyncPayload:8][crc8]
+//
+// UART base frame — base -> Jetson (variable):
+//   [0xAA][0x55][len:u8][rssi:i8][LoRa payload][crc8]
 //
 // CRC: CRC-8/MAXIM (polynomial 0x31), covers len byte + all data bytes.
 
@@ -25,7 +32,8 @@ enum PktType : uint8_t {
     PKT_HEARTBEAT  = 0x02,
     PKT_TIME_SYNC  = 0x03,
     PKT_BUNDLE     = 0x04,
-    PKT_GPS        = 0x05,
+    PKT_STATUS     = 0x05,  // GPS + battery, sent every 15 min
+    PKT_AWAKEN     = 0x06,  // boot handshake — node broadcasts before sensing starts
 };
 
 struct __attribute__((packed)) PktHeader {
@@ -35,29 +43,34 @@ struct __attribute__((packed)) PktHeader {
     uint8_t seq;
 };
 
-// lat/lon removed — sent once per session via PKT_GPS.
 struct __attribute__((packed)) FullStatePayload {
-    uint32_t session_time;     // synced ms since Jetson session start
-    uint32_t uptime_ms;        // local millis() — kept until TIME_SYNC startup handshake lands
-    uint16_t sensor_flags;     // WIND=0x01 SHT31=0x02 GPS=0x04 IMU=0x08 SPS30=0x10
-    uint16_t wind_cms;         // cm/s
-    int16_t  temp_cdegc;       // centi-°C
-    uint16_t humidity_cpct;    // centi-%
-    uint16_t pm1_0_ug10;       // µg/m³ × 10
+    uint32_t session_time;      // synced ms since Jetson session start
+    uint16_t sensor_flags;      // WIND=0x01 SHT31=0x02 GPS=0x04 IMU=0x08 SPS30=0x10
+    uint16_t wind_cms;          // cm/s
+    int16_t  temp_cdegc;        // centi-°C
+    uint16_t humidity_cpct;     // centi-%
+    uint16_t pm1_0_ug10;        // µg/m³ × 10
     uint16_t pm2_5_ug10;
     uint16_t pm4_0_ug10;
     uint16_t pm10_ug10;
 };
 
-// Sent once per session when the first valid GPS fix is acquired.
-struct __attribute__((packed)) GpsPayload {
-    int32_t lat_e7;
-    int32_t lon_e7;
+// Sent every 15 minutes — GPS position + battery level.
+// flags bits: STATUS_GPS_VALID=0x01, STATUS_BATT_VALID=0x02
+static constexpr uint8_t STATUS_GPS_VALID  = 0x01;
+static constexpr uint8_t STATUS_BATT_VALID = 0x02;
+
+struct __attribute__((packed)) StatusPayload {
+    int32_t  lat_e7;        // degrees × 1e7  (valid if STATUS_GPS_VALID)
+    int32_t  lon_e7;        // degrees × 1e7  (valid if STATUS_GPS_VALID)
+    uint16_t battery_mv;    // millivolts      (valid if STATUS_BATT_VALID)
+    uint8_t  battery_pct;   // 0–100           (valid if STATUS_BATT_VALID)
+    uint8_t  flags;         // STATUS_GPS_VALID | STATUS_BATT_VALID
 };
 
 struct __attribute__((packed)) TimeSyncPayload {
-    uint32_t session_id;
-    uint32_t session_time_ms;
+    uint32_t session_id;        // random; change triggers STATUS re-send and clock reset
+    uint32_t session_time_ms;   // ms since receiver.py started
 };
 
 // wind_cms is absolute (not a delta) — wind changes too fast to delta-encode reliably.
@@ -74,23 +87,25 @@ struct __attribute__((packed)) DeltaPayload {
 };
 
 static_assert(sizeof(PktHeader)        ==  4, "PktHeader must be 4 bytes");
-static_assert(sizeof(FullStatePayload) == 24, "FullStatePayload must be 24 bytes");
-static_assert(sizeof(GpsPayload)       ==  8, "GpsPayload must be 8 bytes");
+static_assert(sizeof(FullStatePayload) == 20, "FullStatePayload must be 20 bytes");
+static_assert(sizeof(StatusPayload)    == 12, "StatusPayload must be 12 bytes");
 static_assert(sizeof(TimeSyncPayload)  ==  8, "TimeSyncPayload must be 8 bytes");
 static_assert(sizeof(DeltaPayload)     == 16, "DeltaPayload must be 16 bytes");
 
 static constexpr uint8_t kBundleMaxDeltas = 7;
 
 // LoRa payload sizes (no UART framing).
-static constexpr size_t kFullStateLoRaSize =
-    sizeof(PktHeader) + sizeof(FullStatePayload);  // 28
-static constexpr size_t kGpsLoRaSize =
-    sizeof(PktHeader) + sizeof(GpsPayload);        // 12
+static constexpr size_t kAwakenLoRaSize =
+    sizeof(PktHeader);                                                  //  4
+static constexpr size_t kStatusLoRaSize =
+    sizeof(PktHeader) + sizeof(StatusPayload);                          // 16
 static constexpr size_t kTimeSyncLoRaSize =
-    sizeof(PktHeader) + sizeof(TimeSyncPayload);   // 12
+    sizeof(PktHeader) + sizeof(TimeSyncPayload);                        // 12
+static constexpr size_t kFullStateLoRaSize =
+    sizeof(PktHeader) + sizeof(FullStatePayload);                       // 24
 static constexpr size_t kMaxBundleLoRaSize =
     sizeof(PktHeader) + sizeof(FullStatePayload) + 1 +
-    kBundleMaxDeltas * sizeof(DeltaPayload);       // 141
+    kBundleMaxDeltas * sizeof(DeltaPayload);                            // 137
 
 // ---------- CRC-8/MAXIM (polynomial 0x31) ----------
 
@@ -106,10 +121,61 @@ inline uint8_t crc8(const uint8_t* data, size_t len) {
     return crc;
 }
 
-// ---------- encode: raw LoRa bundle payload (no UART framing) ----------
+// ---------- encode: raw LoRa AWAKEN payload (4 bytes) ----------
+
+inline uint8_t encodeAwakenPayload(
+    uint8_t node_id, uint8_t seq,
+    uint8_t* buf, size_t buf_size)
+{
+    if (buf_size < kAwakenLoRaSize) return 0;
+    PktHeader hdr;
+    hdr.magic    = PKT_MAGIC;
+    hdr.pkt_type = PKT_AWAKEN;
+    hdr.node_id  = node_id;
+    hdr.seq      = seq;
+    memcpy(buf, &hdr, sizeof(PktHeader));
+    return static_cast<uint8_t>(kAwakenLoRaSize);
+}
+
+// ---------- encode: raw LoRa STATUS payload (16 bytes) ----------
+
+inline uint8_t encodeStatusPayload(
+    uint8_t node_id, uint8_t seq,
+    const StatusPayload& sp,
+    uint8_t* buf, size_t buf_size)
+{
+    if (buf_size < kStatusLoRaSize) return 0;
+    PktHeader hdr;
+    hdr.magic    = PKT_MAGIC;
+    hdr.pkt_type = PKT_STATUS;
+    hdr.node_id  = node_id;
+    hdr.seq      = seq;
+    memcpy(buf,                    &hdr, sizeof(PktHeader));
+    memcpy(buf + sizeof(PktHeader), &sp,  sizeof(StatusPayload));
+    return static_cast<uint8_t>(kStatusLoRaSize);
+}
+
+// ---------- encode: raw LoRa TIME_SYNC payload (12 bytes, base -> nodes broadcast) ----------
+
+inline uint8_t encodeTimeSyncPayload(
+    uint8_t seq,
+    const TimeSyncPayload& ts,
+    uint8_t* buf, size_t buf_size)
+{
+    if (buf_size < kTimeSyncLoRaSize) return 0;
+    PktHeader hdr;
+    hdr.magic    = PKT_MAGIC;
+    hdr.pkt_type = PKT_TIME_SYNC;
+    hdr.node_id  = 0;
+    hdr.seq      = seq;
+    memcpy(buf,                    &hdr, sizeof(PktHeader));
+    memcpy(buf + sizeof(PktHeader), &ts,  sizeof(TimeSyncPayload));
+    return static_cast<uint8_t>(kTimeSyncLoRaSize);
+}
+
+// ---------- encode: raw LoRa BUNDLE payload ----------
 //
-// Output: [PktHeader:4][FullStatePayload:24][n_deltas:1][DeltaPayload×n]
-// This is what goes directly into TdmaRadioService::enqueueTelemetry().
+// Output: [PktHeader:4][FullStatePayload:20][n_deltas:1][DeltaPayload×n]
 // Returns bytes written, or 0 on failure.
 
 inline uint8_t encodeBundlePayload(
@@ -142,27 +208,7 @@ inline uint8_t encodeBundlePayload(
     return static_cast<uint8_t>(len);
 }
 
-// ---------- encode: raw LoRa GPS payload (no UART framing) ----------
-
-inline uint8_t encodeGpsPayload(
-    uint8_t node_id, uint8_t seq,
-    const GpsPayload& gps,
-    uint8_t* buf, size_t buf_size)
-{
-    if (buf_size < kGpsLoRaSize) return 0;
-
-    PktHeader hdr;
-    hdr.magic    = PKT_MAGIC;
-    hdr.pkt_type = PKT_GPS;
-    hdr.node_id  = node_id;
-    hdr.seq      = seq;
-
-    memcpy(buf, &hdr, sizeof(PktHeader));
-    memcpy(buf + sizeof(PktHeader), &gps, sizeof(GpsPayload));
-    return static_cast<uint8_t>(kGpsLoRaSize);
-}
-
-// ---------- encode: TIME_SYNC UART frame (Jetson->base or node->ESP32, 16 bytes) ----------
+// ---------- encode: TIME_SYNC UART frame (Jetson -> base, 16 bytes) ----------
 
 inline size_t encodeTimeSyncFrame(
     uint8_t node_id, uint8_t seq,
@@ -191,9 +237,7 @@ inline size_t encodeTimeSyncFrame(
     return kFrameLen;
 }
 
-// ---------- encode: feather base -> Jetson UART frame (variable length) ----------
-//
-// Wraps a raw LoRa payload (any type) with UART framing and RSSI prefix.
+// ---------- encode: base -> Jetson UART frame (variable length) ----------
 
 inline size_t encodeBaseFrame(
     int8_t rssi,
@@ -239,14 +283,14 @@ inline bool decodeBundle(
     return true;
 }
 
-inline bool decodeGps(
+inline bool decodeStatus(
     const uint8_t* raw, size_t len,
-    PktHeader& hdr_out, GpsPayload& gps_out)
+    PktHeader& hdr_out, StatusPayload& sp_out)
 {
-    if (len < kGpsLoRaSize) return false;
-    memcpy(&hdr_out, raw, sizeof(PktHeader));
-    memcpy(&gps_out, raw + sizeof(PktHeader), sizeof(GpsPayload));
-    return hdr_out.magic == PKT_MAGIC && hdr_out.pkt_type == PKT_GPS;
+    if (len < kStatusLoRaSize) return false;
+    memcpy(&hdr_out, raw,                    sizeof(PktHeader));
+    memcpy(&sp_out,  raw + sizeof(PktHeader), sizeof(StatusPayload));
+    return hdr_out.magic == PKT_MAGIC && hdr_out.pkt_type == PKT_STATUS;
 }
 
 inline bool decodeTimeSync(
@@ -254,7 +298,7 @@ inline bool decodeTimeSync(
     PktHeader& hdr_out, TimeSyncPayload& ts_out)
 {
     if (len < kTimeSyncLoRaSize) return false;
-    memcpy(&hdr_out, raw, sizeof(PktHeader));
+    memcpy(&hdr_out, raw,                    sizeof(PktHeader));
     memcpy(&ts_out,  raw + sizeof(PktHeader), sizeof(TimeSyncPayload));
     return hdr_out.magic == PKT_MAGIC && hdr_out.pkt_type == PKT_TIME_SYNC;
 }

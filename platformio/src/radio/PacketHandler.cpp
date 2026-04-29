@@ -8,7 +8,7 @@ PacketHandler::PacketHandler(const Config &cfg) : _cfg(cfg) {}
 bool PacketHandler::push(const SensorSnapshot &snap) {
     _bundleReady = false;
 
-    tryEncodeGps(snap);
+    tryEncodeStatus(snap);
 
     const BinaryPacket::FullStatePayload sample = quantize(snap);
 
@@ -50,23 +50,23 @@ uint8_t PacketHandler::takeBundle(uint8_t *buf, size_t bufSize) {
     return _bundleLen;
 }
 
-// --- GPS ---
+// --- STATUS ---
 
-bool PacketHandler::gpsPacketReady() const {
-    return _gpsReady;
+bool PacketHandler::statusPacketReady() const {
+    return _statusReady;
 }
 
-uint8_t PacketHandler::takeGpsPacket(uint8_t *buf, size_t bufSize) {
-    if (!_gpsReady || !buf || bufSize < _gpsLen) return 0;
-    memcpy(buf, _gpsBuf, _gpsLen);
-    _gpsReady = false;
-    return _gpsLen;
+uint8_t PacketHandler::takeStatusPacket(uint8_t *buf, size_t bufSize) {
+    if (!_statusReady || !buf || bufSize < _statusLen) return 0;
+    memcpy(buf, _statusBuf, _statusLen);
+    _statusReady = false;
+    return _statusLen;
 }
 
-void PacketHandler::resetGpsSession() {
-    _gpsSent  = false;
-    _gpsReady = false;
-    _gpsLen   = 0;
+void PacketHandler::resetStatusTimer() {
+    _statusEverSent = false;
+    _statusReady    = false;
+    _statusLen      = 0;
 }
 
 // --- full reset ---
@@ -80,30 +80,49 @@ void PacketHandler::reset() {
     memset(&_ref,      0, sizeof(_ref));
     memset(_deltas,    0, sizeof(_deltas));
     memset(_bundleBuf, 0, sizeof(_bundleBuf));
-    resetGpsSession();
-    memset(_gpsBuf, 0, sizeof(_gpsBuf));
+    resetStatusTimer();
+    memset(_statusBuf, 0, sizeof(_statusBuf));
 }
 
 // ---------- private ----------
 
-void PacketHandler::tryEncodeGps(const SensorSnapshot &snap) {
-    if (_gpsSent) return;
-    if (!(snap.sensorFlags & GPS_FLAG)) return;
+void PacketHandler::tryEncodeStatus(const SensorSnapshot &snap) {
+    const bool intervalElapsed =
+        !_statusEverSent ||
+        (snap.sessionTimeMs - _lastStatusMs >= kStatusIntervalMs);
 
-    BinaryPacket::GpsPayload gps;
-    gps.lat_e7 = static_cast<int32_t>(snap.latDeg * 1e7f);
-    gps.lon_e7 = static_cast<int32_t>(snap.lonDeg * 1e7f);
+    if (!intervalElapsed) return;
 
-    _gpsLen   = BinaryPacket::encodeGpsPayload(_cfg.nodeId, _seq++, gps,
-                                                _gpsBuf, sizeof(_gpsBuf));
-    _gpsReady = (_gpsLen > 0);
-    _gpsSent  = true;
+    BinaryPacket::StatusPayload sp = {};
+    uint8_t flags = 0;
+
+    if (snap.sensorFlags & GPS_FLAG) {
+        sp.lat_e7 = static_cast<int32_t>(snap.latDeg * 1e7f);
+        sp.lon_e7 = static_cast<int32_t>(snap.lonDeg * 1e7f);
+        flags |= BinaryPacket::STATUS_GPS_VALID;
+    }
+
+    if (snap.batteryValid) {
+        sp.battery_mv  = snap.batteryMv;
+        sp.battery_pct = snap.batteryPct;
+        flags |= BinaryPacket::STATUS_BATT_VALID;
+    }
+
+    sp.flags = flags;
+
+    _statusLen   = BinaryPacket::encodeStatusPayload(
+        _cfg.nodeId, _seq++, sp, _statusBuf, sizeof(_statusBuf));
+    _statusReady = (_statusLen > 0);
+
+    if (_statusReady) {
+        _lastStatusMs    = snap.sessionTimeMs;
+        _statusEverSent  = true;
+    }
 }
 
 BinaryPacket::FullStatePayload PacketHandler::quantize(const SensorSnapshot &snap) {
     BinaryPacket::FullStatePayload p = {};
     p.session_time  = snap.sessionTimeMs;
-    p.uptime_ms     = snap.uptimeMs;
     p.sensor_flags  = snap.sensorFlags;
     p.wind_cms      = static_cast<uint16_t>(snap.windMps     * 100.0f + 0.5f);
     p.temp_cdegc    = static_cast<int16_t> (snap.tempC       * 100.0f);

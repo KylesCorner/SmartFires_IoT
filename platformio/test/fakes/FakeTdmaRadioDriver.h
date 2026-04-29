@@ -86,4 +86,22 @@ public:
     rxTail = static_cast<uint8_t>((rxTail + 1) % MaxPackets);
     rxCount++;
   }
+
+  void queueRxBinary(const uint8_t *data, uint8_t len,
+                     uint8_t from = 0x01, int8_t rssi = -42) {
+    if (!data || len == 0 || rxCount >= MaxPackets) {
+      return;
+    }
+
+    ReceivedPacket &p = rx[rxTail];
+
+    p.from = from;
+    p.rssi = rssi;
+    p.len  = (len > MaxLen) ? MaxLen : len;
+
+    memcpy(p.data, data, p.len);
+
+    rxTail = static_cast<uint8_t>((rxTail + 1) % MaxPackets);
+    rxCount++;
+  }
 };

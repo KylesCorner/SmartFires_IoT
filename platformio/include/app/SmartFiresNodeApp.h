@@ -5,14 +5,19 @@
 #include "power/BatteryMonitor.h"
 #include "power/DutyCycleController.h"
 #include "radio/PacketHandler.h"
+#include "radio/TdmaClock.h"
 #include "radio/TdmaRadioService.h"
 
 class SmartFiresNodeApp {
 public:
     struct Config {
-        bool enableBattery;
-        static SmartFiresNodeApp::Config appCfg(bool enableBattery_ = true) {
+        uint8_t nodeId;
+        bool    enableBattery;
+
+        static SmartFiresNodeApp::Config appCfg(uint8_t nodeId_ = 1,
+                                                bool enableBattery_ = true) {
             SmartFiresNodeApp::Config cfg;
+            cfg.nodeId        = nodeId_;
             cfg.enableBattery = enableBattery_;
             return cfg;
         }
@@ -20,6 +25,7 @@ public:
 
     SmartFiresNodeApp(const Config &cfg, IClock &clock, DutyCycleController &duty,
                       PacketHandler &packetHandler, TdmaRadioService &radio,
+                      TdmaClock &tdmaClock,
                       ISensor **sensors, size_t sensorCount,
                       BatteryMonitor *battery);
 
@@ -27,19 +33,25 @@ public:
     void update();
 
 private:
+    static constexpr uint32_t kAwakenIntervalMs = 5000;  // re-send AWAKEN every 5 s until sync
+
     Config _cfg;
 
     IClock              &_clock;
     DutyCycleController &_duty;
     PacketHandler       &_packetHandler;
     TdmaRadioService    &_radio;
+    TdmaClock           &_tdmaClock;
 
     ISensor **_sensors;
     size_t    _sensorCount;
 
     BatteryMonitor *_battery;
 
-    bool _initialized = false;
+    bool     _initialized    = false;
+    uint32_t _awakenLastSentMs = 0;
+    uint8_t  _awakenSeq        = 0;
 
+    void sendAwakenPacket();
     SensorSnapshot buildSnapshot() const;
 };

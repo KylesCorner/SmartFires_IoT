@@ -96,10 +96,10 @@ TdmaRadioService tdmaRadio(tdmaCfg, tdmaClock, tdmaQueue, radioDriver);
 
 // SmartFiresNodeApp::Config appCfg;
 // appCfg.enableBattery = true;
-SmartFiresNodeApp::Config appCfg = SmartFiresNodeApp::Config::appCfg(false);
+SmartFiresNodeApp::Config appCfg = SmartFiresNodeApp::Config::appCfg(NODE_ID, false);
 
-SmartFiresNodeApp app(appCfg, clock, duty, packetHandler, tdmaRadio, sensors,
-                      sensorCount, &battery);
+SmartFiresNodeApp app(appCfg, clock, duty, packetHandler, tdmaRadio, tdmaClock,
+                      sensors, sensorCount, &battery);
 
 void scanI2C() {
   Serial.println("I2C scan...");

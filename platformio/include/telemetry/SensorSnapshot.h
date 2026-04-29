@@ -8,8 +8,7 @@
 // Sensors fill their own fields via ISensor::fillSnapshot().
 
 struct SensorSnapshot {
-    uint32_t sessionTimeMs = 0;
-    uint32_t uptimeMs      = 0;
+    uint32_t sessionTimeMs = 0;   // from TdmaClock::sessionNowMs()
 
     uint16_t sensorFlags   = 0;  // WIND=0x01 SHT31=0x02 GPS=0x04 IMU=0x08 SPS30=0x10
 
@@ -23,4 +22,9 @@ struct SensorSnapshot {
 
     float latDeg           = 0.0f;
     float lonDeg           = 0.0f;
+
+    // Battery — populated by SmartFiresNodeApp from BatteryMonitor if enabled.
+    uint16_t batteryMv     = 0;
+    uint8_t  batteryPct    = 0;
+    bool     batteryValid  = false;
 };
