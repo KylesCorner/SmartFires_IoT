@@ -19,7 +19,7 @@ public:
 
   virtual ~IGpsDriver() = default;
 
-  virtual bool begin() = 0;
+  virtual bool begin(uint8_t address) = 0;
   virtual bool poll() = 0;
   virtual bool read(Data &out) = 0;
 };

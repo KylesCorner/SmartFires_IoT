@@ -56,7 +56,9 @@ void loop() {
 #include "radio/TdmaTxQueue.h"
 
 #include "platform/AdafruitSht31Driver.h"
+#include "platform/AdafruitGpsDriver.h"
 #include "sensors/Sht31Sensor.h"
+#include "sensors/Pa1010dGpsSensor.h"
 
 #ifndef NODE_ID
 #define NODE_ID 1
@@ -66,25 +68,54 @@ void loop() {
 #define NUM_SLOTS 2
 #endif
 
+// -----------------------------------------------------------------------------
+// Platform
+// -----------------------------------------------------------------------------
 ArduinoClock clock;
 ArduinoAnalogReader analog;
 
+// -----------------------------------------------------------------------------
+// Sensors
+// -----------------------------------------------------------------------------
+
 AdafruitSht31Driver sht31Driver;
+
+// makeSht31Cfg(uint8_t address_ = 0x45, uint32_t minSamplesPeriodMs_ = 1000,
+//              uint32_t wakeDelayMs_ = 15,
+//              SensorDutyClass dutyClass_ = SensorDutyClass::DutyCycled) {
+
 Sht31Sensor::Config sht31Cfg =
-    Sht31Sensor::Config::makeSht31Cfg(0x45, 1000, 0, SensorDutyClass::AlwaysOn);
+    Sht31Sensor::Config::makeSht31Cfg(0x45, 100, 0, SensorDutyClass::AlwaysOn);
 Sht31Sensor sht31(sht31Cfg, sht31Driver, clock);
+
+AdafruitGpsDriver gpsDriver;
+Pa1010dGpsSensor::Config gpsCfg = Pa1010dGpsSensor::Config::makeGpsCfg();
+Pa1010dGpsSensor gps(gpsCfg,gpsDriver,clock);
 
 ISensor* sensors[] = {
     &sht31,
+    &gps,
 };
 
-constexpr size_t sensorCount = 1;
+constexpr size_t sensorCount = sizeof(sensors) / sizeof(sensors[0]);
+
+// -----------------------------------------------------------------------------
+// Battery
+// -----------------------------------------------------------------------------
 
 BatteryMonitor::Config batteryCfg = BatteryMonitor::Config::makeBatConfig();
 BatteryMonitor battery(batteryCfg, analog, clock);
 
+// -----------------------------------------------------------------------------
+// Duty Cycle 
+// -----------------------------------------------------------------------------
+
 DutyCycleConfig dutyCfg = DutyCycleConfig::dutyCycleCfg();
 DutyCycleController duty(dutyCfg, sht31, sensors, sensorCount, clock);
+
+// -----------------------------------------------------------------------------
+// Networking
+// -----------------------------------------------------------------------------
 
 PacketHandler::Config packetHandlerCfg = PacketHandler::Config::make(NODE_ID);
 PacketHandler packetHandler(packetHandlerCfg);
@@ -101,6 +132,10 @@ TdmaRadioService tdmaRadio(tdmaCfg, tdmaClock, tdmaQueue, radioDriver);
 
 SmartFiresNodeApp::Config appCfg =
     SmartFiresNodeApp::Config::appCfg(NODE_ID, false);
+
+// -----------------------------------------------------------------------------
+// App
+// -----------------------------------------------------------------------------
 
 SmartFiresNodeApp app(appCfg, clock, duty, packetHandler, tdmaRadio, tdmaClock,
                       sensors, sensorCount, &battery);

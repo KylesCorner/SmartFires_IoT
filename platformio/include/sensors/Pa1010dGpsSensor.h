@@ -3,13 +3,26 @@
 #include "drivers/IGpsDriver.h"
 #include "interfaces/IClock.h"
 #include "interfaces/ISensor.h"
+#include <cstdint>
 
 class Pa1010dGpsSensor final : public ISensor {
 public:
   struct Config {
-    uint32_t minSamplePeriodMs = 1000;
-    uint32_t wakeDelayMs = 0;
-    SensorDutyClass dutyClass = SensorDutyClass::AlwaysOn;
+    uint32_t minSamplePeriodMs;
+    uint32_t wakeDelayMs;
+    SensorDutyClass dutyClass;
+    uint8_t address;
+
+    static Pa1010dGpsSensor::Config
+    makeGpsCfg(uint32_t minSamplePeriodMs_ = 100, uint32_t wakeDelayMs_ = 0,
+               SensorDutyClass dutyClass_ = SensorDutyClass::AlwaysOn, uint8_t address_=0x10) {
+      Pa1010dGpsSensor::Config cfg;
+      cfg.minSamplePeriodMs = minSamplePeriodMs_;
+      cfg.wakeDelayMs = wakeDelayMs_;
+      cfg.dutyClass = dutyClass_;
+      cfg.address = address_;
+      return cfg;
+    }
   };
 
   struct Reading : public IGpsDriver::Data {

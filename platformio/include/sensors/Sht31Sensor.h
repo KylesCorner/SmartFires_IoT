@@ -18,7 +18,7 @@ public:
     static Sht31Sensor::Config
     makeSht31Cfg(uint8_t address_ = 0x45, uint32_t minSamplesPeriodMs_ = 1000,
                  uint32_t wakeDelayMs_ = 15,
-                 SensorDutyClass dutyClass_ = SensorDutyClass::DutyCycled) {
+                 SensorDutyClass dutyClass_ = SensorDutyClass::AlwaysOn) {
       Sht31Sensor::Config cfg;
       cfg.address = address_;
       cfg.minSamplePeriodMs = minSamplesPeriodMs_;
