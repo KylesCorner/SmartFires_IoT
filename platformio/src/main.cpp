@@ -2,24 +2,37 @@
 
 #if defined(LORA_BASE)
 
+#include "app/SmartFiresBaseApp.h"
+#include "platform/ArduinoClock.h"
+#include "platform/RadioHeadTdmaDriver.h"
+
+ArduinoClock baseClock;
+
+RadioHeadTdmaDriver::Config baseRadioCfg =
+    RadioHeadTdmaDriver::Config::radioHeadCfg(0x01);
+RadioHeadTdmaDriver baseRadio(baseRadioCfg);
+
+SmartFiresBaseApp::Config baseAppCfg = SmartFiresBaseApp::Config::baseCfg();
+SmartFiresBaseApp baseApp(baseAppCfg, baseClock, baseRadio, Serial1, Serial);
+
 void setup() {
   Serial.begin(115200);
   while (!Serial && millis() < 3000) {
   }
 
-  Serial1.begin(115200);
-  Serial.println("SmartFires base station firmware entrypoint active");
-  Serial.println("Base station class-architecture port is pending");
+  Serial.println("SmartFires base station starting...");
+  if (!baseApp.begin()) {
+    Serial.println("SmartFires base app begin failed");
+    while (true) {
+      delay(500);
+    }
+  }
+  Serial.println("SmartFires base app ready");
 }
 
 void loop() {
-  static uint32_t lastStatusMs = 0;
-  const uint32_t now = millis();
-
-  if (now - lastStatusMs >= 5000) {
-    Serial.println("[base] waiting for base station port implementation");
-    lastStatusMs = now;
-  }
+  baseApp.update();
+  delay(5);
 }
 
 #else
