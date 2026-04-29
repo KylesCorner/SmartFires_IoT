@@ -1,5 +1,5 @@
 #include "sensors/Sht31Sensor.h"
-
+#include <Arduino.h>
 #include <stdio.h>
 
 Sht31Sensor::Sht31Sensor(const Config &cfg, ISht31Driver &driver,
@@ -12,8 +12,9 @@ const char *Sht31Sensor::name() const {
 
 bool Sht31Sensor::begin() {
   _healthy = _driver.begin(_cfg.address);
-
   if (!_healthy) {
+    Serial.println("SHT31 is not healthy!");
+  
     _state = SensorPowerState::Error;
     return false;
   }

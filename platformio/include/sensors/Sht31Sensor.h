@@ -11,10 +11,21 @@
 class Sht31Sensor final : public ISensor {
 public:
   struct Config {
-    uint8_t address = 0x44;
-    uint32_t minSamplePeriodMs = 1000;
-    uint32_t wakeDelayMs = 15;
-    SensorDutyClass dutyClass = SensorDutyClass::DutyCycled;
+    uint8_t address;
+    uint32_t minSamplePeriodMs;
+    uint32_t wakeDelayMs;
+    SensorDutyClass dutyClass;
+    static Sht31Sensor::Config
+    makeSht31Cfg(uint8_t address_ = 0x45, uint32_t minSamplesPeriodMs_ = 1000,
+                 uint32_t wakeDelayMs_ = 15,
+                 SensorDutyClass dutyClass_ = SensorDutyClass::DutyCycled) {
+      Sht31Sensor::Config cfg;
+      cfg.address = address_;
+      cfg.minSamplePeriodMs = minSamplesPeriodMs_;
+      cfg.wakeDelayMs = wakeDelayMs_;
+      cfg.dutyClass = dutyClass_;
+      return cfg;
+    }
   };
 
   struct Reading {

@@ -10,15 +10,20 @@
 class TelemetryBuilder {
 public:
   struct Config {
-    uint8_t nodeId = 1;
-    bool includeBattery = true;
+    uint8_t nodeId;
+    bool includeBattery;
+    static TelemetryBuilder::Config telemetryCfg(uint8_t nodeId_ = 1,
+                                                 bool includeBattery_ = true) {
+      TelemetryBuilder::Config cfg;
+      cfg.nodeId = nodeId_;
+      cfg.includeBattery = includeBattery_;
+      return cfg;
+    }
   };
 
   explicit TelemetryBuilder(const Config &cfg);
 
-  bool build(TelemetryFrame &frame,
-             ISensor **sensors,
-             size_t sensorCount,
+  bool build(TelemetryFrame &frame, ISensor **sensors, size_t sensorCount,
              const BatteryMonitor *battery) const;
 
 private:
