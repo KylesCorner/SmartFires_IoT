@@ -1,197 +1,223 @@
-#include <Arduino.h>
-#include <Wire.h>
 #include <unity.h>
+#include <cstring>
 
-#include "Pa1010dGpsSensor.h"
+#include "fakes/FakeClock.h"
+#include "fakes/FakeGpsDriver.h"
+#include "sensors/Pa1010dGpsSensor.h"
 
-static Pa1010dGpsSensor gps(Wire);
-
-// Adjust as needed for your antenna / sky view
-static constexpr uint32_t GPS_BOOT_WARMUP_MS    = 1000;
-static constexpr uint32_t GPS_SAMPLE_TIMEOUT_MS = 15000;
-static constexpr uint32_t GPS_WAKE_WARMUP_MS    = 500;
-static constexpr uint32_t GPS_RETRY_STEP_MS     = 100;
-
-void setUp(void) {}
-void tearDown(void) {}
-
-static bool waitForParsedSentence(Pa1010dGpsSensor& sensor, uint32_t timeoutMs) {
-  const uint32_t start = millis();
-  while ((millis() - start) < timeoutMs) {
-    if (sensor.sample()) {
-      return true;
-    }
-    delay(GPS_RETRY_STEP_MS);
-  }
-  return false;
+static void assertState(Pa1010dGpsSensor &sensor, SensorPowerState expected) {
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(expected),
+                          static_cast<uint8_t>(sensor.powerState()));
 }
 
-// static bool waitForValidUtcTime(Pa1010dGpsSensor& sensor, uint32_t timeoutMs) {
-//   const uint32_t start = millis();
-//   while ((millis() - start) < timeoutMs) {
-//     sensor.sample();
-//
-//     uint8_t hour = 0;
-//     uint8_t minute = 0;
-//     uint8_t second = 0;
-//     uint16_t millisecond = 0;
-//
-//     if (sensor.getUtcTime(hour, minute, second, millisecond)) {
-//       return true;
-//     }
-//
-//     delay(GPS_RETRY_STEP_MS);
-//   }
-//   return false;
-// }
+void test_gps_begin_success_starts_ready_for_always_on() {
+  FakeClock clock;
+  FakeGpsDriver driver;
 
-static bool waitForPositionData(Pa1010dGpsSensor& sensor, uint32_t timeoutMs) {
-  const uint32_t start = millis();
-  while ((millis() - start) < timeoutMs) {
-    sensor.sample();
+  Pa1010dGpsSensor::Config cfg;
+  cfg.dutyClass = SensorDutyClass::AlwaysOn;
 
-    const float lat = sensor.latitudeDegrees();
-    const float lon = sensor.longitudeDegrees();
-    const uint8_t sats = sensor.satellites();
+  Pa1010dGpsSensor sensor(cfg, driver, clock);
 
-    const bool latValid = !isnan(lat) && lat >= -90.0f && lat <= 90.0f;
-    const bool lonValid = !isnan(lon) && lon >= -180.0f && lon <= 180.0f;
-    const bool satsValid = sats > 0;
-
-    if (latValid && lonValid && satsValid) {
-      return true;
-    }
-
-    delay(GPS_RETRY_STEP_MS);
-  }
-  return false;
+  TEST_ASSERT_TRUE(sensor.begin());
+  TEST_ASSERT_TRUE(driver.beginCalled);
+  TEST_ASSERT_TRUE(sensor.healthy());
+  assertState(sensor, SensorPowerState::Ready);
 }
 
-void test_gps_begin(void) {
-  TEST_ASSERT_TRUE_MESSAGE(gps.begin(Wire), "GPS begin() failed");
+void test_gps_begin_failure_enters_error() {
+  FakeClock clock;
+  FakeGpsDriver driver;
+  driver.beginOk = false;
+
+  Pa1010dGpsSensor::Config cfg;
+  Pa1010dGpsSensor sensor(cfg, driver, clock);
+
+  TEST_ASSERT_FALSE(sensor.begin());
+  TEST_ASSERT_FALSE(sensor.healthy());
+  assertState(sensor, SensorPowerState::Error);
 }
 
-void test_gps_time_position_and_satellites(void) {
-  TEST_ASSERT_TRUE_MESSAGE(gps.begin(Wire), "GPS begin() failed");
+void test_gps_service_polls_driver() {
+  FakeClock clock;
+  FakeGpsDriver driver;
 
-  delay(GPS_BOOT_WARMUP_MS);
+  Pa1010dGpsSensor::Config cfg;
+  cfg.dutyClass = SensorDutyClass::AlwaysOn;
 
-  TEST_ASSERT_TRUE_MESSAGE(
-    waitForParsedSentence(gps, GPS_SAMPLE_TIMEOUT_MS),
-    "GPS did not produce any parsed sentence"
-  );
+  Pa1010dGpsSensor sensor(cfg, driver, clock);
 
-  // TEST_ASSERT_TRUE_MESSAGE(
-  //   waitForValidUtcTime(gps, GPS_SAMPLE_TIMEOUT_MS),
-  //   "GPS did not produce valid UTC time"
-  // );
+  TEST_ASSERT_TRUE(sensor.begin());
 
-  TEST_ASSERT_TRUE_MESSAGE(
-    waitForPositionData(gps, GPS_SAMPLE_TIMEOUT_MS),
-    "GPS did not produce valid lat/lon/satellite data"
-  );
+  TEST_ASSERT_TRUE(sensor.service());
+  TEST_ASSERT_EQUAL_UINT32(1, driver.pollCount);
 
-  uint8_t hour = 0;
-  uint8_t minute = 0;
-  uint8_t second = 0;
-  uint16_t millisecond = 0;
-
-  // TEST_ASSERT_TRUE_MESSAGE(
-  //   gps.getUtcTime(hour, minute, second, millisecond),
-  //   "getUtcTime() failed"
-  // );
-
-  // TEST_ASSERT_LESS_OR_EQUAL_UINT8_MESSAGE(23, hour, "GPS hour out of range");
-  // TEST_ASSERT_LESS_OR_EQUAL_UINT8_MESSAGE(59, minute, "GPS minute out of range");
-  // TEST_ASSERT_LESS_OR_EQUAL_UINT8_MESSAGE(59, second, "GPS second out of range");
-  // TEST_ASSERT_LESS_OR_EQUAL_UINT16_MESSAGE(999, millisecond, "GPS millisecond out of range");
-  //
-  const float lat = gps.latitudeDegrees();
-  const float lon = gps.longitudeDegrees();
-  const uint8_t sats = gps.satellites();
-
-  TEST_ASSERT_FALSE_MESSAGE(isnan(lat), "Latitude is NaN");
-  TEST_ASSERT_FALSE_MESSAGE(isnan(lon), "Longitude is NaN");
-  TEST_ASSERT_TRUE_MESSAGE(lat >= -90.0f && lat <= 90.0f, "Latitude out of range");
-  TEST_ASSERT_TRUE_MESSAGE(lon >= -180.0f && lon <= 180.0f, "Longitude out of range");
-  TEST_ASSERT_TRUE_MESSAGE(sats > 0, "Satellite count must be > 0");
-
-  Serial.printf("GPS UTC time: %02u:%02u:%02u.%03u\n",
-                hour, minute, second, millisecond);
-  Serial.printf("GPS position: lat=%.6f lon=%.6f sats=%u\n",
-                lat, lon, sats);
+  TEST_ASSERT_TRUE(sensor.service());
+  TEST_ASSERT_EQUAL_UINT32(2, driver.pollCount);
 }
 
-void test_gps_sleep_wake_and_resume_data(void) {
-  TEST_ASSERT_TRUE_MESSAGE(gps.begin(Wire), "GPS begin() failed");
+void test_gps_sample_with_fix() {
+  FakeClock clock;
+  FakeGpsDriver driver;
 
-  delay(GPS_BOOT_WARMUP_MS);
+  driver.data.fix = true;
+  driver.data.fixQuality = 1;
+  driver.data.satellites = 8;
+  driver.data.latitudeDeg = 46.8721f;
+  driver.data.longitudeDeg = -113.9940f;
+  driver.data.altitudeM = 978.5f;
+  driver.data.hour = 12;
+  driver.data.minute = 34;
+  driver.data.second = 56;
 
-  TEST_ASSERT_TRUE_MESSAGE(
-    waitForParsedSentence(gps, GPS_SAMPLE_TIMEOUT_MS),
-    "GPS did not produce parsed data before sleep"
-  );
+  Pa1010dGpsSensor::Config cfg;
+  cfg.dutyClass = SensorDutyClass::AlwaysOn;
+  cfg.minSamplePeriodMs = 1000;
 
-  TEST_ASSERT_TRUE_MESSAGE(gps.sleep(), "GPS sleep() failed");
-  TEST_ASSERT_FALSE_MESSAGE(gps.sample(), "GPS sample() should fail while sleeping");
+  Pa1010dGpsSensor sensor(cfg, driver, clock);
 
-  TEST_ASSERT_TRUE_MESSAGE(gps.wake(), "GPS wake() failed");
-  delay(GPS_WAKE_WARMUP_MS);
+  TEST_ASSERT_TRUE(sensor.begin());
+  TEST_ASSERT_FALSE(sensor.ready());
 
-  TEST_ASSERT_TRUE_MESSAGE(
-    waitForParsedSentence(gps, GPS_SAMPLE_TIMEOUT_MS),
-    "GPS did not resume parsed data after wake"
-  );
+  clock.advance(1000);
 
-  // TEST_ASSERT_TRUE_MESSAGE(
-  //   waitForValidUtcTime(gps, GPS_SAMPLE_TIMEOUT_MS),
-  //   "GPS did not resume valid UTC time after wake"
-  // );
+  TEST_ASSERT_TRUE(sensor.ready());
+  TEST_ASSERT_TRUE(sensor.sample());
 
-  TEST_ASSERT_TRUE_MESSAGE(
-    waitForPositionData(gps, GPS_SAMPLE_TIMEOUT_MS),
-    "GPS did not resume valid lat/lon/satellite data after wake"
-  );
+  const auto &r = sensor.reading();
 
-  // uint8_t hour = 0;
-  // uint8_t minute = 0;
-  // uint8_t second = 0;
-  // uint16_t millisecond = 0;
-  //
-  // TEST_ASSERT_TRUE_MESSAGE(
-  //   gps.getUtcTime(hour, minute, second, millisecond),
-  //   "getUtcTime() failed after wake"
-  // );
-
-  delay(120000);
-
-  const float lat = gps.latitudeDegrees();
-  const float lon = gps.longitudeDegrees();
-  const uint8_t sats = gps.satellites();
-
-  TEST_ASSERT_TRUE_MESSAGE(lat >= -90.0f && lat <= 90.0f, "Latitude out of range after wake");
-  TEST_ASSERT_TRUE_MESSAGE(lon >= -180.0f && lon <= 180.0f, "Longitude out of range after wake");
-  TEST_ASSERT_TRUE_MESSAGE(sats > 0, "Satellite count must be > 0 after wake");
-
-  // Serial.printf("GPS UTC time after wake: %02u:%02u:%02u.%03u\n",
-  //               hour, minute, second, millisecond);
-  Serial.printf("GPS position after wake: lat=%.6f lon=%.6f sats=%u\n",
-                lat, lon, sats);
+  TEST_ASSERT_TRUE(r.valid);
+  TEST_ASSERT_TRUE(r.fix);
+  TEST_ASSERT_EQUAL_UINT8(1, r.fixQuality);
+  TEST_ASSERT_EQUAL_UINT8(8, r.satellites);
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, 46.8721f, r.latitudeDeg);
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, -113.9940f, r.longitudeDeg);
+  TEST_ASSERT_FLOAT_WITHIN(0.1f, 978.5f, r.altitudeM);
+  TEST_ASSERT_EQUAL_UINT8(12, r.hour);
+  TEST_ASSERT_EQUAL_UINT8(34, r.minute);
+  TEST_ASSERT_EQUAL_UINT8(56, r.second);
+  TEST_ASSERT_EQUAL_UINT32(1000, r.timestampMs);
+  TEST_ASSERT_EQUAL_UINT32(1, driver.readCount);
 }
 
-void setup() {
-  delay(2000);
-  Serial.begin(115200);
-  Wire.begin();
-  delay(200);
+void test_gps_sample_without_fix_is_not_valid_but_sample_succeeds() {
+  FakeClock clock;
+  FakeGpsDriver driver;
 
+  driver.data.fix = false;
+  driver.data.satellites = 3;
+
+  Pa1010dGpsSensor::Config cfg;
+  cfg.dutyClass = SensorDutyClass::AlwaysOn;
+  cfg.minSamplePeriodMs = 0;
+
+  Pa1010dGpsSensor sensor(cfg, driver, clock);
+
+  TEST_ASSERT_TRUE(sensor.begin());
+  TEST_ASSERT_TRUE(sensor.sample());
+
+  const auto &r = sensor.reading();
+
+  TEST_ASSERT_FALSE(r.valid);
+  TEST_ASSERT_FALSE(r.fix);
+  TEST_ASSERT_EQUAL_UINT8(3, r.satellites);
+}
+
+void test_gps_read_failure_fails_sample() {
+  FakeClock clock;
+  FakeGpsDriver driver;
+  driver.readOk = false;
+
+  Pa1010dGpsSensor::Config cfg;
+  cfg.dutyClass = SensorDutyClass::AlwaysOn;
+  cfg.minSamplePeriodMs = 0;
+
+  Pa1010dGpsSensor sensor(cfg, driver, clock);
+
+  TEST_ASSERT_TRUE(sensor.begin());
+  TEST_ASSERT_FALSE(sensor.sample());
+  TEST_ASSERT_FALSE(sensor.reading().valid);
+}
+
+void test_gps_duty_cycled_wake_delay_then_sample() {
+  FakeClock clock;
+  FakeGpsDriver driver;
+
+  driver.data.fix = true;
+  driver.data.satellites = 5;
+
+  Pa1010dGpsSensor::Config cfg;
+  cfg.dutyClass = SensorDutyClass::DutyCycled;
+  cfg.wakeDelayMs = 25;
+  cfg.minSamplePeriodMs = 100;
+
+  Pa1010dGpsSensor sensor(cfg, driver, clock);
+
+  TEST_ASSERT_TRUE(sensor.begin());
+  assertState(sensor, SensorPowerState::Ready);
+
+  TEST_ASSERT_TRUE(sensor.sleep());
+  assertState(sensor, SensorPowerState::Sleeping);
+
+  TEST_ASSERT_TRUE(sensor.wake());
+  assertState(sensor, SensorPowerState::Waking);
+
+  clock.advance(24);
+  TEST_ASSERT_FALSE(sensor.service());
+
+  clock.advance(1);
+  TEST_ASSERT_TRUE(sensor.service());
+  assertState(sensor, SensorPowerState::Ready);
+
+  clock.advance(100);
+  TEST_ASSERT_TRUE(sensor.sample());
+  TEST_ASSERT_TRUE(sensor.reading().valid);
+}
+
+void test_gps_telemetry_writes_string() {
+  FakeClock clock;
+  FakeGpsDriver driver;
+
+  driver.data.fix = true;
+  driver.data.satellites = 9;
+  driver.data.latitudeDeg = 46.1f;
+  driver.data.longitudeDeg = -114.2f;
+  driver.data.altitudeM = 1000.0f;
+  driver.data.hour = 1;
+  driver.data.minute = 2;
+  driver.data.second = 3;
+
+  Pa1010dGpsSensor::Config cfg;
+  cfg.dutyClass = SensorDutyClass::AlwaysOn;
+  cfg.minSamplePeriodMs = 0;
+
+  Pa1010dGpsSensor sensor(cfg, driver, clock);
+
+  TEST_ASSERT_TRUE(sensor.begin());
+  TEST_ASSERT_TRUE(sensor.sample());
+
+  char buf[180];
+  const size_t n = sensor.writeTelemetry(buf, sizeof(buf));
+
+  TEST_ASSERT_GREATER_THAN_UINT32(0, n);
+  TEST_ASSERT_NOT_NULL(strstr(buf, "gps"));
+  TEST_ASSERT_NOT_NULL(strstr(buf, "fix=1"));
+  TEST_ASSERT_NOT_NULL(strstr(buf, "sats=9"));
+  TEST_ASSERT_NOT_NULL(strstr(buf, "lat="));
+  TEST_ASSERT_NOT_NULL(strstr(buf, "lon="));
+}
+
+int main() {
   UNITY_BEGIN();
-  RUN_TEST(test_gps_begin);
-  delay(2000);
-  RUN_TEST(test_gps_time_position_and_satellites);
-  delay(2000);
-  RUN_TEST(test_gps_sleep_wake_and_resume_data);
-  UNITY_END();
-}
 
-void loop() {}
+  RUN_TEST(test_gps_begin_success_starts_ready_for_always_on);
+  RUN_TEST(test_gps_begin_failure_enters_error);
+  RUN_TEST(test_gps_service_polls_driver);
+  RUN_TEST(test_gps_sample_with_fix);
+  RUN_TEST(test_gps_sample_without_fix_is_not_valid_but_sample_succeeds);
+  RUN_TEST(test_gps_read_failure_fails_sample);
+  RUN_TEST(test_gps_duty_cycled_wake_delay_then_sample);
+  RUN_TEST(test_gps_telemetry_writes_string);
+
+  return UNITY_END();
+}
