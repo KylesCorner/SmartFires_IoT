@@ -3,10 +3,11 @@
 #include <Arduino.h>
 
 DutyCycleController::DutyCycleController(const DutyCycleConfig &cfg,
-                                          Sht31Sensor &triggerSensor,
+                                         Sht31Sensor &triggerSensor,
                                          ISensor **sensors, size_t sensorCount,
                                          IClock &clock)
-    : _cfg(cfg), _sensors(sensors), _sensorCount(sensorCount), _clock(clock),_triggerSensor(triggerSensor) {}
+    : _cfg(cfg), _sensors(sensors), _sensorCount(sensorCount), _clock(clock),
+      _triggerSensor(triggerSensor) {}
 
 bool DutyCycleController::begin() {
   _error = DutyCycleError::None;
@@ -46,7 +47,7 @@ void DutyCycleController::update() {
 
   case DutyCyclePhase::CooldownSleeping:
     Serial.println("Duty cycle: cooling down");
-    
+    updateCooldownSleeping();
     break;
 
   case DutyCyclePhase::Error:
@@ -61,12 +62,13 @@ void DutyCycleController::update() {
 }
 
 void DutyCycleController::markTelemetrySent() {
-  if (_phase != DutyCyclePhase::ActiveSampling) {
+  if (_phase != DutyCyclePhase::ActiveSampling || !_freshSampleReady) {
     return;
   }
 
-  sleepDutyCycledSensors();
-  transitionTo(DutyCyclePhase::CooldownSleeping);
+  _freshSampleReady = false;
+  // sleepDutyCycledSensors();
+  // transitionTo(DutyCyclePhase::CooldownSleeping);
 }
 
 DutyCyclePhase DutyCycleController::phase() const { return _phase; }
@@ -74,7 +76,7 @@ DutyCyclePhase DutyCycleController::phase() const { return _phase; }
 DutyCycleError DutyCycleController::error() const { return _error; }
 
 bool DutyCycleController::telemetryReady() const {
-  return _phase == DutyCyclePhase::ActiveSampling;
+  return _phase == DutyCyclePhase::ActiveSampling && _freshSampleReady;
 }
 
 uint32_t DutyCycleController::phaseElapsedMs() const {
@@ -84,6 +86,11 @@ uint32_t DutyCycleController::phaseElapsedMs() const {
 void DutyCycleController::transitionTo(DutyCyclePhase next) {
   _phase = next;
   _phaseStartMs = _clock.millis();
+
+  if (next == DutyCyclePhase::ActiveSampling) {
+    _freshSampleReady = false;
+    _lastSampleMs = 0; // force first sample immediately
+  }
 }
 bool DutyCycleController::thresholdCrossed(
     const Sht31Sensor::Reading &r) const {
@@ -130,36 +137,47 @@ void DutyCycleController::updateCooldownSleeping() {
 }
 
 void DutyCycleController::updateWakingSensors() {
-  _triggerSensor.service();
-
-  if (_triggerSensor.ready()) {
-    _triggerSensor.sample();
+  for (size_t i = 0; i < _sensorCount; ++i) {
+    ISensor *sensor = _sensors[i];
+    sensor->service();
   }
+  // forEachDutyCycledSensor([](ISensor &s) {
+  //   s.service();
+  // });
 
-  if (phaseElapsedMs() >= _cfg.minSleepMs) {
-    transitionTo(DutyCyclePhase::IdleSleeping);
+  if (phaseElapsedMs() >= _cfg.warmupMs) {
+    transitionTo(DutyCyclePhase::ActiveSampling);
   }
 }
-
 void DutyCycleController::updateSampling() {
   if (_clock.millis() - _lastSampleMs >= _cfg.samplePeriodMs) {
     _lastSampleMs = _clock.millis();
+
+    bool sampledAny = false;
+
     for (size_t i = 0; i < _sensorCount; ++i) {
       ISensor *sensor = _sensors[i];
+
+      if (!sensor) {
+        continue;
+      }
+
       sensor->service();
 
       if (sensor->ready()) {
+        Serial.print(sensor->name());
+        Serial.println(" Sampled");
         sensor->sample();
+        sampledAny = true;
+      } else {
+        Serial.print(sensor->name());
+        Serial.println(" Sample failed, not ready");
       }
     }
 
-    // forEachSensor([](ISensor &s) {
-    //   s.service();
-    //
-    //   if (s.ready()) {
-    //     s.sample();
-    //   }
-    // });
+    if (sampledAny) {
+      _freshSampleReady = true;
+    }
   }
 
   if (phaseElapsedMs() >= _cfg.activeSampleMs) {
@@ -171,6 +189,7 @@ void DutyCycleController::updateSampling() {
       _baselineHumidityPct = r.humidityPct;
     }
 
+    _freshSampleReady = false;
     transitionTo(DutyCyclePhase::CooldownSleeping);
   }
 }

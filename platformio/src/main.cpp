@@ -54,7 +54,8 @@ ISensor *sensors[] = {
     &sht31,
 };
 
-constexpr size_t sensorCount = sizeof(sensors) / sizeof(sensors[0]);
+// constexpr size_t sensorCount = sizeof(sensors) / sizeof(sensors[0]);
+constexpr size_t sensorCount = 1;
 
 // -----------------------------------------------------------------------------
 // Battery

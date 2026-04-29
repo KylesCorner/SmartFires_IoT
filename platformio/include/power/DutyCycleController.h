@@ -30,15 +30,17 @@ struct DutyCycleConfig {
   uint32_t maxWakeMs;
   uint32_t activeSampleMs;
   uint32_t samplePeriodMs;
+  uint32_t warmupMs;
 
   float tempDeltaThresholdC;
   float humidityDeltaThresholdPct;
   bool failOnSampleError;
 
   static DutyCycleConfig dutyCycleCfg(uint32_t minSleepMs_ = 3000,
-                                      uint32_t maxWakeMs_ = 100000,
-                                      uint32_t activeSampleMs_ = 300000,
-                                      uint32_t samplePeriodMs_ = 1000,
+                                      uint32_t maxWakeMs_ = 1000,
+                                      uint32_t activeSampleMs_ = 10000,
+                                      uint32_t samplePeriodMs_ = 500,
+                                      uint32_t warmupMs_ = 10000,
                                       float tempDeltaThresholdC_ = 1.0f,
                                       float humidityDeltaThresholdPct_ = 5.0f,
                                       bool failOnSampleError_ = false) {
@@ -48,6 +50,7 @@ struct DutyCycleConfig {
     cfg.failOnSampleError = failOnSampleError_;
     cfg.activeSampleMs = activeSampleMs_;
     cfg.samplePeriodMs = samplePeriodMs_;
+    cfg.warmupMs = warmupMs_;
     cfg.tempDeltaThresholdC = tempDeltaThresholdC_;
     cfg.humidityDeltaThresholdPct = humidityDeltaThresholdPct_;
     cfg.failOnSampleError = failOnSampleError_;
@@ -76,6 +79,7 @@ private:
   ISensor **_sensors;
   size_t _sensorCount;
   IClock &_clock;
+  bool _freshSampleReady = false;
 
   DutyCyclePhase _phase = DutyCyclePhase::NotStarted;
   DutyCycleError _error = DutyCycleError::None;
