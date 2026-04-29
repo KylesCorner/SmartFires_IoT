@@ -4,41 +4,54 @@
 #include "interfaces/ISensor.h"
 #include "power/BatteryMonitor.h"
 #include "power/DutyCycleController.h"
-// #include "radio/RadioService.h"
+#include "radio/PacketHandler.h"
+#include "radio/TdmaClock.h"
 #include "radio/TdmaRadioService.h"
-#include "telemetry/TelemetryBuilder.h"
 
 class SmartFiresNodeApp {
 public:
-  struct Config {
-    bool enableBattery;
-    static SmartFiresNodeApp::Config appCfg(bool enableBattery_ = true) {
-      SmartFiresNodeApp::Config cfg;
-      cfg.enableBattery = enableBattery_;
-      return cfg;
-    }
-  };
+    struct Config {
+        uint8_t nodeId;
+        bool    enableBattery;
 
-  SmartFiresNodeApp(const Config &cfg, IClock &clock, DutyCycleController &duty,
-                    TelemetryBuilder &telemetry, TdmaRadioService &radio,
-                    ISensor **sensors, size_t sensorCount,
-                    BatteryMonitor *battery);
+        static SmartFiresNodeApp::Config appCfg(uint8_t nodeId_ = 1,
+                                                bool enableBattery_ = true) {
+            SmartFiresNodeApp::Config cfg;
+            cfg.nodeId        = nodeId_;
+            cfg.enableBattery = enableBattery_;
+            return cfg;
+        }
+    };
 
-  bool begin();
-  void update();
+    SmartFiresNodeApp(const Config &cfg, IClock &clock, DutyCycleController &duty,
+                      PacketHandler &packetHandler, TdmaRadioService &radio,
+                      TdmaClock &tdmaClock,
+                      ISensor **sensors, size_t sensorCount,
+                      BatteryMonitor *battery);
+
+    bool begin();
+    void update();
 
 private:
-  Config _cfg;
+    static constexpr uint32_t kAwakenIntervalMs = 5000;  // re-send AWAKEN every 5 s until sync
 
-  IClock &_clock;
-  DutyCycleController &_duty;
-  TelemetryBuilder &_telemetry;
-  TdmaRadioService &_radio;
+    Config _cfg;
 
-  ISensor **_sensors;
-  size_t _sensorCount;
+    IClock              &_clock;
+    DutyCycleController &_duty;
+    PacketHandler       &_packetHandler;
+    TdmaRadioService    &_radio;
+    TdmaClock           &_tdmaClock;
 
-  BatteryMonitor *_battery;
+    ISensor **_sensors;
+    size_t    _sensorCount;
 
-  bool _initialized = false;
+    BatteryMonitor *_battery;
+
+    bool     _initialized    = false;
+    uint32_t _awakenLastSentMs = 0;
+    uint8_t  _awakenSeq        = 0;
+
+    void sendAwakenPacket();
+    SensorSnapshot buildSnapshot() const;
 };

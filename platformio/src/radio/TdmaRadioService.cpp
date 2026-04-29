@@ -1,5 +1,7 @@
 #include "radio/TdmaRadioService.h"
 
+#include "telemetry/BinaryPacket.h"
+
 #include <string.h>
 
 TdmaRadioService::TdmaRadioService(const TdmaConfig &cfg,
@@ -126,34 +128,13 @@ void TdmaRadioService::checkIncomingTimeSync() {
 bool TdmaRadioService::isTimeSyncPacket(
     const ITdmaRadioDriver::ReceivedPacket &packet,
     uint32_t &sessionMsOut) const {
-  // Hardware-free placeholder packet format for native testing:
-  //
-  //   "TS,<session_ms>"
-  //
-  // Later, RadioHeadTdmaDriver or a BinaryPacket adapter can decode your real
-  // BinaryPacket::TimeSyncPayload and pass the decoded session time into this
-  // service. This keeps native tests independent of RadioHead and Arduino.
+  BinaryPacket::PktHeader hdr;
+  BinaryPacket::TimeSyncPayload ts;
 
-  if (packet.len < 4) {
+  if (!BinaryPacket::decodeTimeSync(packet.data, packet.len, hdr, ts)) {
     return false;
   }
 
-  if (packet.data[0] != 'T' || packet.data[1] != 'S' || packet.data[2] != ',') {
-    return false;
-  }
-
-  uint32_t value = 0;
-
-  for (uint8_t i = 3; i < packet.len; ++i) {
-    const uint8_t c = packet.data[i];
-
-    if (c < '0' || c > '9') {
-      return false;
-    }
-
-    value = value * 10u + static_cast<uint32_t>(c - '0');
-  }
-
-  sessionMsOut = value;
+  sessionMsOut = ts.session_time_ms;
   return true;
 }

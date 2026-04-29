@@ -1,5 +1,7 @@
 #pragma once
 
+#include "telemetry/SensorSnapshot.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -40,4 +42,6 @@ public:
   virtual size_t readingSize() const = 0;
 
   virtual size_t writeTelemetry(char *out, size_t maxLen) const = 0;
+
+  virtual void fillSnapshot(SensorSnapshot &snap) const {}
 };

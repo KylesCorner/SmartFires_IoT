@@ -11,12 +11,11 @@
 #include "power/BatteryMonitor.h"
 #include "power/DutyCycleController.h"
 
+#include "radio/PacketHandler.h"
 #include "radio/TdmaClock.h"
 #include "radio/TdmaConfig.h"
 #include "radio/TdmaRadioService.h"
 #include "radio/TdmaTxQueue.h"
-
-#include "telemetry/TelemetryBuilder.h"
 
 // Sensors/drivers here
 #include "platform/AdafruitSht31Driver.h"
@@ -75,13 +74,8 @@ DutyCycleController duty(dutyCfg,sht31, sensors, sensorCount, clock);
 // Telemetry
 // -----------------------------------------------------------------------------
 
-// TelemetryBuilder::Config telemetryCfg;
-// telemetryCfg.nodeId = NODE_ID;
-// telemetryCfg.includeBattery = true;
-
-TelemetryBuilder::Config telemetryCfg =
-    TelemetryBuilder::Config::telemetryCfg(NODE_ID, false);
-TelemetryBuilder telemetry(telemetryCfg);
+PacketHandler::Config packetHandlerCfg = PacketHandler::Config::make(NODE_ID);
+PacketHandler packetHandler(packetHandlerCfg);
 
 // -----------------------------------------------------------------------------
 // TDMA LoRa
@@ -103,10 +97,10 @@ TdmaRadioService tdmaRadio(tdmaCfg, tdmaClock, tdmaQueue, radioDriver);
 
 // SmartFiresNodeApp::Config appCfg;
 // appCfg.enableBattery = true;
-SmartFiresNodeApp::Config appCfg = SmartFiresNodeApp::Config::appCfg(false);
+SmartFiresNodeApp::Config appCfg = SmartFiresNodeApp::Config::appCfg(NODE_ID, false);
 
-SmartFiresNodeApp app(appCfg, clock, duty, telemetry, tdmaRadio, sensors,
-                      sensorCount, &battery);
+SmartFiresNodeApp app(appCfg, clock, duty, packetHandler, tdmaRadio, tdmaClock,
+                      sensors, sensorCount, &battery);
 
 void scanI2C() {
   Serial.println("I2C scan...");

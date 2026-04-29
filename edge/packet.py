@@ -4,13 +4,13 @@ SmartFires binary packet definitions — Python mirror of BinaryPacket.h.
 Wire formats
 ------------
 LoRa payload — node -> base:
-    GPS        (12 bytes):  [PktHeader: 4][GpsPayload: 8]. One per session.
-    FULL_STATE (28 bytes):  [PktHeader: 4][FullStatePayload: 24]
-    BUNDLE     (≤141 bytes): [PktHeader: 4][FullStatePayload: 24][n_deltas: 1][DeltaPayload×n: n*16]
+    STATUS     (16 bytes):  [PktHeader: 4][StatusPayload: 12]
+    FULL_STATE (24 bytes):  [PktHeader: 4][FullStatePayload: 20]
+    BUNDLE     (≤193 bytes): [PktHeader: 4][FullStatePayload: 20][n_deltas: 1][DeltaPayload×n: n*12]
 
 Base station UART frame — Feather base -> Jetson (variable length):
     [0xAA][0x55][len: u8][rssi: i8][LoRa payload][crc8]
-    len = 1 + lora_payload_len  (min 13 for GPS, 29 for FULL_STATE, max 142 for BUNDLE with 7 deltas)
+    len = 1 + lora_payload_len  (min 5 for AWAKEN, 17 for STATUS, 25 for FULL_STATE, max 194 for BUNDLE with 14 deltas)
     CRC-8/MAXIM covers the len byte + all data bytes that follow.
 
 LoRa TIME_SYNC payload — base broadcasts to nodes (12 bytes):
@@ -36,7 +36,8 @@ PKT_FULL_STATE = 0x01
 PKT_HEARTBEAT  = 0x02
 PKT_TIME_SYNC  = 0x03
 PKT_BUNDLE     = 0x04
-PKT_GPS        = 0x05  # one-time GPS fix per session
+PKT_STATUS     = 0x05
+PKT_GPS        = PKT_STATUS  # legacy alias used by receiver.py
 
 # ---------- struct formats (little-endian, packed) ----------
 
@@ -44,39 +45,40 @@ PKT_GPS        = 0x05  # one-time GPS fix per session
 HEADER_FMT  = "<BBBB"
 HEADER_SIZE = struct.calcsize(HEADER_FMT)   # 4
 
-# FullStatePayload (lat/lon removed — transmitted via PKT_GPS once per session):
-#   session_time(u32) uptime_ms(u32) sensor_flags(u16)
+# FullStatePayload:
+#   session_time(u32) sensor_flags(u16)
 #   wind_cms(u16) temp_cdegc(i16) humidity_cpct(u16)
 #   pm1_0_ug10(u16) pm2_5_ug10(u16) pm4_0_ug10(u16) pm10_ug10(u16)
-#   →  24 bytes
-FULL_STATE_FMT  = "<IIHHhHHHHH"
-FULL_STATE_SIZE = struct.calcsize(FULL_STATE_FMT)  # 24
+#   →  20 bytes
+FULL_STATE_FMT  = "<IHHhHHHHH"
+FULL_STATE_SIZE = struct.calcsize(FULL_STATE_FMT)  # 20
 
-# GpsPayload: lat_e7(i32) lon_e7(i32)  →  8 bytes
-GPS_PAYLOAD_FMT  = "<ii"
-GPS_PAYLOAD_SIZE = struct.calcsize(GPS_PAYLOAD_FMT)  # 8
+# StatusPayload: lat_e7(i32) lon_e7(i32) battery_mv(u16) battery_pct(u8) flags(u8)
+STATUS_PAYLOAD_FMT  = "<iiHBB"
+STATUS_PAYLOAD_SIZE = struct.calcsize(STATUS_PAYLOAD_FMT)  # 12
+STATUS_GPS_VALID = 0x01
 
-# DeltaPayload (lat/lon deltas removed — drones are stationary):
-#   dt_ms(u16) wind_cms(u16) temp_delta(i16) humidity_delta(i16)
-#   pm1_0_delta(i16) pm2_5_delta(i16) pm4_0_delta(i16) pm10_delta(i16)
-#   →  16 bytes
-DELTA_FMT  = "<HHhhhhhh"
-DELTA_SIZE = struct.calcsize(DELTA_FMT)  # 16
+# DeltaPayload (compact 12-byte format):
+#   dt_ticks_250ms(u8) wind_cms(u16) temp_delta_deci_c(i8) humidity_delta_0p2pct(i8)
+#   pm1_0_delta_ug(i8) pm2_5_delta_ug10(i16) pm4_0_delta_ug(i8) pm10_delta_ug10(i16)
+#   flags(u8)
+DELTA_FMT  = "<BHbbbhbhB"
+DELTA_SIZE = struct.calcsize(DELTA_FMT)  # 12
 
-BUNDLE_MAX_DELTAS = 7
+BUNDLE_MAX_DELTAS = 14
 
 # TimeSyncPayload: session_id(u32) session_time_ms(u32)  →  8 bytes
 TIME_SYNC_PAYLOAD_FMT  = "<II"
 TIME_SYNC_PAYLOAD_SIZE = struct.calcsize(TIME_SYNC_PAYLOAD_FMT)  # 8
 
-GPS_LORA_SIZE          = HEADER_SIZE + GPS_PAYLOAD_SIZE                              # 12
-LORA_PAYLOAD_SIZE      = HEADER_SIZE + FULL_STATE_SIZE                               # 28
-LORA_BUNDLE_MAX_SIZE   = HEADER_SIZE + FULL_STATE_SIZE + 1 + BUNDLE_MAX_DELTAS * DELTA_SIZE  # 141
+STATUS_LORA_SIZE       = HEADER_SIZE + STATUS_PAYLOAD_SIZE                           # 16
+LORA_PAYLOAD_SIZE      = HEADER_SIZE + FULL_STATE_SIZE                               # 24
+LORA_BUNDLE_MAX_SIZE   = HEADER_SIZE + FULL_STATE_SIZE + 1 + BUNDLE_MAX_DELTAS * DELTA_SIZE  # 193
 TIME_SYNC_LORA_SIZE    = HEADER_SIZE + TIME_SYNC_PAYLOAD_SIZE                        # 12
 
 # Minimum base-frame data len (rssi byte + smallest valid LoRa payload)
-BASE_FRAME_MIN_DATA_LEN = 1 + GPS_LORA_SIZE          # 13
-BASE_FRAME_MAX_DATA_LEN = 1 + LORA_BUNDLE_MAX_SIZE   # 142
+BASE_FRAME_MIN_DATA_LEN = 5                           # rssi + AWAKEN payload (4)
+BASE_FRAME_MAX_DATA_LEN = 1 + LORA_BUNDLE_MAX_SIZE   # 194
 
 TIME_SYNC_DATA_LEN  = TIME_SYNC_LORA_SIZE           # 12
 TIME_SYNC_FRAME_LEN = 2 + 1 + TIME_SYNC_DATA_LEN + 1  # 16
@@ -123,7 +125,7 @@ def encode_time_sync_frame(session_id: int, session_time_ms: int, seq: int = 0) 
 
 def _full_state_fields(
     node_id: int, seq: int,
-    session_time: int, uptime_ms: int, sensor_flags: int,
+    session_time: int, sensor_flags: int,
     wind_cms: int, temp_cdegc: int, humidity_cpct: int,
     pm1_0_ug10: int, pm2_5_ug10: int, pm4_0_ug10: int, pm10_ug10: int,
     rssi: Optional[int],
@@ -132,7 +134,7 @@ def _full_state_fields(
         "node_id":         node_id,
         "seq":             seq,
         "session_time_ms": session_time,
-        "uptime_ms":       uptime_ms,
+        "uptime_ms":       session_time,
         "sensor_flags":    sensor_flags,
         "wind_mps":        round(wind_cms / 100.0, 2),
         "temp_c":          round(temp_cdegc / 100.0, 2),
@@ -147,18 +149,21 @@ def _full_state_fields(
 
 def decode_gps(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Optional[dict]:
     """
-    Decode a raw LoRa GPS payload (PktHeader + GpsPayload) into a dict.
+    Decode a raw LoRa STATUS payload and return GPS fields when valid.
 
     Returns dict with node_id, seq, lat, lon, rssi — or None if invalid.
     """
-    if len(raw_lora_payload) < GPS_LORA_SIZE:
+    if len(raw_lora_payload) < STATUS_LORA_SIZE:
         return None
 
     magic, pkt_type, node_id, seq = struct.unpack_from(HEADER_FMT, raw_lora_payload, 0)
-    if magic != PKT_MAGIC or pkt_type != PKT_GPS:
+    if magic != PKT_MAGIC or pkt_type != PKT_STATUS:
         return None
 
-    lat_e7, lon_e7 = struct.unpack_from(GPS_PAYLOAD_FMT, raw_lora_payload, HEADER_SIZE)
+    lat_e7, lon_e7, _battery_mv, _battery_pct, flags = struct.unpack_from(
+        STATUS_PAYLOAD_FMT, raw_lora_payload, HEADER_SIZE)
+    if (flags & STATUS_GPS_VALID) == 0:
+        return None
     return {
         "node_id": node_id,
         "seq":     seq,
@@ -175,7 +180,7 @@ def decode_full_state(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Op
     Parameters
     ----------
     raw_lora_payload : bytes
-        Exactly LORA_PAYLOAD_SIZE (28) bytes as received from the radio.
+        Exactly LORA_PAYLOAD_SIZE (24) bytes as received from the radio.
     rssi : int, optional
         RSSI value in dBm extracted from the UART frame.
 
@@ -192,13 +197,13 @@ def decode_full_state(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Op
         return None
 
     (
-        session_time, uptime_ms, sensor_flags,
+        session_time, sensor_flags,
         wind_cms, temp_cdegc, humidity_cpct,
         pm1_0_ug10, pm2_5_ug10, pm4_0_ug10, pm10_ug10,
     ) = struct.unpack_from(FULL_STATE_FMT, raw_lora_payload, HEADER_SIZE)
 
     return _full_state_fields(
-        node_id, seq, session_time, uptime_ms, sensor_flags,
+        node_id, seq, session_time, sensor_flags,
         wind_cms, temp_cdegc, humidity_cpct,
         pm1_0_ug10, pm2_5_ug10, pm4_0_ug10, pm10_ug10,
         rssi,
@@ -226,7 +231,7 @@ def decode_bundle(raw_lora_payload: bytes, rssi: Optional[int] = None) -> list:
         return []
 
     (
-        session_time, uptime_ms, sensor_flags,
+        session_time, sensor_flags,
         wind_cms, temp_cdegc, humidity_cpct,
         pm1_0_ug10, pm2_5_ug10, pm4_0_ug10, pm10_ug10,
     ) = struct.unpack_from(FULL_STATE_FMT, raw_lora_payload, HEADER_SIZE)
@@ -242,7 +247,7 @@ def decode_bundle(raw_lora_payload: bytes, rssi: Optional[int] = None) -> list:
 
     results = [
         _full_state_fields(
-            node_id, seq, session_time, uptime_ms, sensor_flags,
+            node_id, seq, session_time, sensor_flags,
             wind_cms, temp_cdegc, humidity_cpct,
             pm1_0_ug10, pm2_5_ug10, pm4_0_ug10, pm10_ug10,
             rssi,
@@ -251,24 +256,26 @@ def decode_bundle(raw_lora_payload: bytes, rssi: Optional[int] = None) -> list:
 
     for _ in range(delta_count):
         (
-            dt_ms, d_wind_cms,
-            d_temp, d_humidity,
-            d_pm1_0, d_pm2_5, d_pm4_0, d_pm10,
+            dt_ticks_250ms, d_wind_cms,
+            d_temp_deci_c, d_humidity_0p2pct,
+            d_pm1_0_ug, d_pm2_5_ug10, d_pm4_0_ug, d_pm10_ug10,
+            _flags,
         ) = struct.unpack_from(DELTA_FMT, raw_lora_payload, offset)
         offset += DELTA_SIZE
+
+        dt_ms = dt_ticks_250ms * 250
 
         results.append(_full_state_fields(
             node_id, seq,
             session_time + dt_ms,
-            uptime_ms + dt_ms,
             sensor_flags,
             d_wind_cms,
-            temp_cdegc     + d_temp,
-            humidity_cpct  + d_humidity,
-            pm1_0_ug10     + d_pm1_0,
-            pm2_5_ug10     + d_pm2_5,
-            pm4_0_ug10     + d_pm4_0,
-            pm10_ug10      + d_pm10,
+            temp_cdegc     + (d_temp_deci_c * 10),
+            humidity_cpct  + (d_humidity_0p2pct * 20),
+            pm1_0_ug10     + (d_pm1_0_ug * 10),
+            pm2_5_ug10     + d_pm2_5_ug10,
+            pm4_0_ug10     + (d_pm4_0_ug * 10),
+            pm10_ug10      + d_pm10_ug10,
             rssi,
         ))
 

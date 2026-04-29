@@ -1,72 +1,133 @@
 #include "app/SmartFiresNodeApp.h"
+
+#ifndef UNIT_TEST
 #include <Arduino.h>
+#define APP_LOG(msg) Serial.println(msg)
+#else
+#define APP_LOG(msg) ((void)0)
+#endif
 
 SmartFiresNodeApp::SmartFiresNodeApp(
     const Config &cfg,
     IClock &clock,
     DutyCycleController &duty,
-    TelemetryBuilder &telemetry,
+    PacketHandler &packetHandler,
     TdmaRadioService &radio,
+    TdmaClock &tdmaClock,
     ISensor **sensors,
     size_t sensorCount,
     BatteryMonitor *battery)
     : _cfg(cfg),
       _clock(clock),
       _duty(duty),
-      _telemetry(telemetry),
+      _packetHandler(packetHandler),
       _radio(radio),
+      _tdmaClock(tdmaClock),
       _sensors(sensors),
       _sensorCount(sensorCount),
       _battery(battery) {}
 
 bool SmartFiresNodeApp::begin() {
-  if (_cfg.enableBattery && _battery) {
-    if (!_battery->begin()) {
-      Serial.println("Battery Failed to begin!");
-      return false;
+    if (_cfg.enableBattery && _battery) {
+        if (!_battery->begin()) {
+            APP_LOG("[App] Battery begin failed");
+            return false;
+        }
     }
-  }
 
-  if (!_duty.begin()) {
-    Serial.println("Duty Failed to begin!");
-    return false;
-  }
+    if (!_duty.begin()) {
+        APP_LOG("[App] DutyCycle begin failed");
+        return false;
+    }
 
-  if (!_radio.begin()) {
-    Serial.println("Radio Failed to begin!");
-    return false;
-  }
+    if (!_radio.begin()) {
+        APP_LOG("[App] Radio begin failed");
+        return false;
+    }
 
-  _initialized = true;
-  return true;
+    _initialized = true;
+
+    // Broadcast AWAKEN immediately — sensors stay idle until TIME_SYNC arrives.
+    sendAwakenPacket();
+    _awakenLastSentMs = _clock.millis();
+
+    APP_LOG("[App] Waiting for TIME_SYNC...");
+    return true;
 }
+
 void SmartFiresNodeApp::update() {
-  if (!_initialized) {
-    return;
-  }
+    if (!_initialized) return;
 
-  // Keep LoRa/TDMA alive every loop.
-  _radio.update();
+    // Always poll radio so TIME_SYNC packets are processed.
+    _radio.update();
 
-  // Advance duty-cycle state machine.
-  _duty.update();
-
-  // Battery is sampled independently from duty-cycled sensors.
-  if (_cfg.enableBattery && _battery && _battery->ready()) {
-    _battery->sample();
-  }
-
-  // When duty cycle says readings are ready, build telemetry and queue it
-  // for TDMA-gated LoRa TX.
-  if (_duty.telemetryReady()) {
-    TelemetryFrame frame;
-
-    if (_telemetry.build(frame, _sensors, _sensorCount, _battery)) {
-      _radio.enqueueTelemetry(
-          reinterpret_cast<const uint8_t *>(frame.payload),
-          static_cast<uint8_t>(frame.len));
+    // Hold off sensing until the base station has provided the session clock.
+    if (!_tdmaClock.hasSync()) {
+        const uint32_t now = _clock.millis();
+        if (now - _awakenLastSentMs >= kAwakenIntervalMs) {
+            sendAwakenPacket();
+            _awakenLastSentMs = now;
+        }
+        return;
     }
 
-    _duty.markTelemetrySent();
-  }
+    _duty.update();
+
+    if (_cfg.enableBattery && _battery && _battery->ready()) {
+        _battery->sample();
+    }
+
+    if (_duty.telemetryReady()) {
+        const SensorSnapshot snap = buildSnapshot();
+        _packetHandler.push(snap);
+
+        if (_packetHandler.statusPacketReady()) {
+            uint8_t buf[BinaryPacket::kStatusLoRaSize];
+            const uint8_t len = _packetHandler.takeStatusPacket(buf, sizeof(buf));
+            if (len > 0) {
+                _radio.enqueueTelemetry(buf, len);
+            }
+        }
+
+        if (_packetHandler.bundleReady()) {
+            uint8_t buf[BinaryPacket::kMaxBundleLoRaSize];
+            const uint8_t len = _packetHandler.takeBundle(buf, sizeof(buf));
+            if (len > 0) {
+                _radio.enqueueTelemetry(buf, len);
+            }
+        }
+
+        _duty.markTelemetrySent();
+    }
+}
+
+void SmartFiresNodeApp::sendAwakenPacket() {
+    uint8_t buf[BinaryPacket::kAwakenLoRaSize];
+    const uint8_t len = BinaryPacket::encodeAwakenPayload(
+        _cfg.nodeId, _awakenSeq++, buf, sizeof(buf));
+    if (len > 0) {
+        _radio.enqueueTelemetry(buf, len);
+    }
+}
+
+SensorSnapshot SmartFiresNodeApp::buildSnapshot() const {
+    SensorSnapshot snap;
+    snap.sessionTimeMs = _tdmaClock.sessionNowMs();
+
+    for (size_t i = 0; i < _sensorCount; ++i) {
+        if (_sensors[i]) {
+            _sensors[i]->fillSnapshot(snap);
+        }
+    }
+
+    if (_cfg.enableBattery && _battery) {
+        const BatteryMonitor::Reading &batt = _battery->reading();
+        if (batt.valid) {
+            snap.batteryMv    = static_cast<uint16_t>(batt.batteryVolts * 1000.0f);
+            snap.batteryPct   = static_cast<uint8_t>(batt.percent);
+            snap.batteryValid = true;
+        }
+    }
+
+    return snap;
 }

@@ -19,7 +19,7 @@ struct TdmaConfig {
   static TdmaConfig tdmaCfg(uint8_t nodeId_ = 1, uint8_t baseAddr_ = 0x01,
                             uint8_t numSlots_ = 2, uint32_t slotWidthMs_ = 900,
                             uint32_t guardMs_ = 20,
-                            uint32_t syncStaleMs_ = 300000,
+                            uint32_t syncStaleMs_ = 1320000,  // 22 min
                             uint8_t queueDepth_ = 4, uint8_t maxRetries_ = 1,
                             uint16_t ackTimeoutMs_ = 100) {
     TdmaConfig cfg;
@@ -35,5 +35,6 @@ struct TdmaConfig {
     return cfg;
   }
 
-  static constexpr size_t MaxPayloadLen = 177;
+  // Must be >= BinaryPacket::kMaxBundleLoRaSize (currently 193 bytes).
+  static constexpr size_t MaxPayloadLen = 220;
 };

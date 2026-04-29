@@ -7,6 +7,7 @@
 #include "radio/TdmaClock.h"
 #include "radio/TdmaRadioService.h"
 #include "radio/TdmaTxQueue.h"
+#include "telemetry/BinaryPacket.h"
 
 static void assertState(TdmaRadioService &svc, TdmaRadioState expected) {
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(expected),
@@ -231,7 +232,16 @@ void test_sync_packet_updates_tdma_clock() {
 
   TEST_ASSERT_TRUE(service.begin());
 
-  radio.queueRxString("TS,900");
+  // Build a real binary TIME_SYNC LoRa payload.
+  BinaryPacket::TimeSyncPayload ts;
+  ts.session_id      = 0x12345678;
+  ts.session_time_ms = 900;
+
+  uint8_t tsBuf[BinaryPacket::kTimeSyncLoRaSize];
+  const uint8_t tsLen = BinaryPacket::encodeTimeSyncPayload(0, ts, tsBuf, sizeof(tsBuf));
+  TEST_ASSERT_EQUAL_UINT8(BinaryPacket::kTimeSyncLoRaSize, tsLen);
+
+  radio.queueRxBinary(tsBuf, tsLen);
   service.update();
 
   TEST_ASSERT_TRUE(tdmaClock.hasSync());
