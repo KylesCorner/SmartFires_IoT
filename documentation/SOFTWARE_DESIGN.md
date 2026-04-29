@@ -63,7 +63,7 @@ The protocol is binary, fixed-point, and deterministic — no floats on the wire
     | UART (Serial1, 115200 baud, binary frames, 36 bytes with RSSI)
     v
 [Jetson Orin Nano]
-    edge/receiver.py → telemetry.csv
+    edge/edge-reciever/src/smartfires_edge/ingest_service.py → telemetry CSV
 ```
 
 Multiple nodes share the same 915 MHz channel. Each node has a unique `NODE_ID` baked in at compile time. Collision avoidance is currently staggered TX intervals with random jitter (Phase 1 approach). TDMA is planned for Phase 2 once TIME_SYNC is live.
@@ -427,7 +427,7 @@ BinaryPacket::encodeBaseFrame()
 Serial1.write() to Jetson  — UART 115200 baud
     │
     ▼
-edge/receiver.py           — state-machine frame parser
+smartfires_edge/uart_receiver.py   — state-machine frame parser
     │
     ▼
 packet.decode_full_state() — unpack struct, scale back to floats
@@ -503,10 +503,10 @@ The Python receiver runs on the Jetson Orin Nano and consumes the 36-byte UART f
 
 ```bash
 # Install dependency
-pip install -r edge/requirements.txt   # pyserial>=3.5
+pip install -e edge/edge-reciever
 
 # Run (adjust --port as needed)
-python3 edge/receiver.py --output telemetry.csv --port /dev/ttyTHS1
+smartfires-edge receive --port /dev/ttyTHS1 --data-dir /mnt/nvme_drive/data
 ```
 
 ### Jetson UART one-time setup

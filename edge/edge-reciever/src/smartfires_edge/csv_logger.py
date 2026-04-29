@@ -20,6 +20,8 @@ CSV_COLUMNS = [
     "lat",
     "lon",
     "rssi",
+    "jetson_wind_mps",
+    "jetson_wind_dir_deg",
 ]
 
 

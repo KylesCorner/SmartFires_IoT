@@ -1,46 +1,28 @@
 #!/usr/bin/env python3
-"""ES-W302 anemometer reader via USB-RS485.
-
-Sentec ModBus-RTU V1.11 register map:
-  Port    : /dev/cu.usbserial-BG01PRCL
-  Address : 1
-  Baud    : 9600
-  Parity  : Even
-  Stop    : 1
-
-  0x0000 (Reg 1) : Device State  — bitmask (capability flags, NOT wind speed)
-  0x0001 (Reg 2) : Wind Direction — integer, degrees 0–360
-  0x0002 (Reg 3) : Wind Speed hi-word  ┐ 32-bit IEEE754 float, word-swapped
-  0x0003 (Reg 4) : Wind Speed lo-word  ┘ decode: unpack('>f', pack('>HH', reg4, reg3))
-"""
+"""Standalone ES-W302 reader that reuses smartfires_edge anemometer logic."""
 
 import argparse
-import struct
 import time
-import minimalmodbus
+from pathlib import Path
+
+import sys
+
+EDGE_RECEIVER_SRC = (
+    Path(__file__).resolve().parent / "edge-reciever" / "src"
+)
+if str(EDGE_RECEIVER_SRC) not in sys.path:
+    sys.path.insert(0, str(EDGE_RECEIVER_SRC))
+
+from smartfires_edge.anemometer import (  # noqa: E402
+    DEFAULT_ADDRESS,
+    DEFAULT_BAUD,
+    make_instrument,
+    read_once,
+)
 
 PORT    = "/dev/cu.usbserial-BG01PRCL"
-BAUD    = 9600
-ADDRESS = 1
-
-
-def make_instrument(port, baud, address):
-    inst = minimalmodbus.Instrument(port, address, debug=False)
-    inst.serial.baudrate = baud
-    inst.serial.bytesize = 8
-    inst.serial.parity   = minimalmodbus.serial.PARITY_EVEN
-    inst.serial.stopbits = 1
-    inst.serial.timeout  = 1.0
-    inst.mode = minimalmodbus.MODE_RTU
-    return inst
-
-
-def read_once(inst):
-    regs = inst.read_registers(0, 4, functioncode=3)
-    direction = regs[1]
-    # Word-swapped IEEE754: reg3 (0x0002) is hi-word, reg4 (0x0003) is lo-word
-    speed = struct.unpack('>f', struct.pack('>HH', regs[3], regs[2]))[0]
-    return speed, direction
+BAUD    = DEFAULT_BAUD
+ADDRESS = DEFAULT_ADDRESS
 
 
 def main():

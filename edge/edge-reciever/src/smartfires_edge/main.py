@@ -15,8 +15,14 @@ def build_parser() -> argparse.ArgumentParser:
     recv.add_argument("--data-dir", type=Path, default=Path("/mnt/nvme_drive/data"))
     recv.add_argument("--nodes", nargs="+", type=int, default=[1, 2])
     recv.add_argument("--metrics-interval", type=int, default=10)
+    recv.add_argument("--sync-interval", type=int, default=600)
+    recv.add_argument("--ack-interval", type=float, default=4.0)
     recv.add_argument("--fsync-every-row", action="store_true")
     recv.add_argument("--raw-log", action="store_true")
+    recv.add_argument("--anemometer-port", default=None)
+    recv.add_argument("--anemometer-baud", type=int, default=9600)
+    recv.add_argument("--anemometer-address", type=int, default=1)
+    recv.add_argument("--anemometer-interval", type=float, default=1.0)
 
     summary = sub.add_parser("summary", help="Print current packet-loss summary")
     summary.add_argument("--data-dir", type=Path, default=Path("/mnt/nvme_drive/data"))
@@ -35,8 +41,14 @@ def main() -> int:
             data_dir=args.data_dir,
             nodes=args.nodes,
             metrics_interval_s=args.metrics_interval,
+            sync_interval_s=args.sync_interval,
+            ack_interval_s=args.ack_interval,
             fsync_every_row=args.fsync_every_row,
             raw_log=args.raw_log,
+            anemometer_port=args.anemometer_port,
+            anemometer_baud=args.anemometer_baud,
+            anemometer_address=args.anemometer_address,
+            anemometer_interval_s=args.anemometer_interval,
         )
 
     if args.command == "summary":

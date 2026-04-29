@@ -148,7 +148,7 @@ Current compact delta encoding uses mixed precision to improve bundle density:
 
 ### 4. Edge receiver (Jetson)
 
-`edge/packet.py` must stay aligned with `BinaryPacket.h` for delta expansion.
+`edge/edge-reciever/src/smartfires_edge/packet.py` must stay aligned with `BinaryPacket.h` for delta expansion.
 Current wire assumptions are FullStatePayload=20 bytes, DeltaPayload=12 bytes,
 and max deltas per bundle=14.
 
@@ -187,6 +187,6 @@ For current (post-reliability, multi-send) scaling math, see `documentation/BAND
 This keeps RAM bounded while preserving freshness-first behavior.
 
 Edge integration notes:
-- `edge/receiver.py` now tracks per-node sequence reception and periodically emits
+- `smartfires_edge` receiver now tracks per-node sequence reception and periodically emits
   `PKT_ACK_SUMMARY` frames over UART (`--ack-interval`, default 4.0 s).
 - Node-side reliability cache depth remains 4 (`reliabilityWindowDepth=4`).

@@ -29,7 +29,7 @@ Wildfire IoT sensor network. Remote drone nodes collect environmental data (temp
     |   Jetson → Feather: TIME_SYNC command frames (16 bytes, every 10 min)
     v
 [Jetson Orin Nano]
-    edge/receiver.py → telemetry.csv
+  edge/edge-reciever/src/smartfires_edge/ingest_service.py → rotated telemetry CSV
     Sends periodic TIME_SYNC frames to keep all nodes on a common session clock.
 ```
 
@@ -366,7 +366,7 @@ SmartFiresNodeApp::update() — sensing begins
 | TIME_SYNC binary decode | **Done** | TdmaRadioService uses BinaryPacket::decodeTimeSync() |
 | Base station port | **Pending** | feather_m0_lora env exists but firmware not ported to new class structure |
 | Remaining sensors | **Pending** | Wind, GPS, SPS30, IMU — implement fillSnapshot() as each is wired in |
-| edge/packet.py bundle decode | **Done** | Updated for 20-byte FullStatePayload + compact 12-byte deltas |
+| edge-reciever packet bundle decode | **Done** | `smartfires_edge/packet.py` updated for 20-byte FullStatePayload + compact 12-byte deltas |
 
 Full details and design notes in `documentation/BINARY_PACKET_PIPELINE.md`.
 Sizing and scaling math tables are in `documentation/BANDWIDTH_SCALING.md`.
@@ -376,12 +376,12 @@ Sizing and scaling math tables are in `documentation/BANDWIDTH_SCALING.md`.
 ## Edge Receiver (Jetson)
 
 ```bash
-pip install -r edge/requirements.txt
-python3 edge/receiver.py --output telemetry.csv   # default port /dev/ttyTHS1
-python3 edge/receiver.py --sync-interval 600      # 10-min sync interval
+pip install -e edge/edge-reciever
+smartfires-edge receive --port /dev/ttyTHS1 --data-dir /mnt/nvme_drive/data
+smartfires-edge receive --sync-interval 600      # 10-min sync interval
 ```
 
-`edge/packet.py` mirrors `BinaryPacket.h` for STATUS/FULL_STATE/BUNDLE parsing and
+`edge/edge-reciever/src/smartfires_edge/packet.py` mirrors `BinaryPacket.h` for STATUS/FULL_STATE/BUNDLE parsing and
 bundle delta expansion.
 
 Jetson UART setup (one-time):

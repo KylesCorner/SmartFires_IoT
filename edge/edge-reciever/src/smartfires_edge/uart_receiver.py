@@ -4,12 +4,20 @@ from typing import Optional
 
 import serial
 from smartfires_edge.packet import (
-    BASE_FRAME_DATA_LEN,
+    BASE_FRAME_MAX_DATA_LEN,
+    BASE_FRAME_MIN_DATA_LEN,
     FRAME_M0,
     FRAME_M1,
-    LORA_PAYLOAD_SIZE,
+    HEADER_FMT,
+    PKT_BUNDLE,
+    PKT_FULL_STATE,
+    PKT_GPS,
+    PKT_MAGIC,
+    PKT_STATUS,
     crc8,
+    decode_bundle,
     decode_full_state,
+    decode_gps,
 )
 
 _ST_WAIT_M0 = 0
@@ -39,7 +47,7 @@ class FrameReceiver:
 
         if self.state == _ST_WAIT_LEN:
             self.expected_len = b
-            if self.expected_len != BASE_FRAME_DATA_LEN:
+            if self.expected_len < BASE_FRAME_MIN_DATA_LEN or self.expected_len > BASE_FRAME_MAX_DATA_LEN:
                 self.length_failures += 1
                 self.state = _ST_WAIT_M0
                 return None
@@ -64,17 +72,41 @@ class FrameReceiver:
                 return None
 
             rssi = struct.unpack_from("<b", self.buf, 1)[0]
-            raw_payload = bytes(self.buf[2 : 2 + LORA_PAYLOAD_SIZE])
+            raw_payload = bytes(self.buf[2:])
             self.buf = bytearray()
 
-            pkt = decode_full_state(raw_payload, rssi)
-            if pkt is None:
-                return None
+            pkt_type = raw_payload[1] if len(raw_payload) >= 2 else 0xFF
+            hdr_node = None
+            hdr_seq = None
+            if len(raw_payload) >= 4:
+                magic, _hdr_pkt, node_id, seq = struct.unpack_from(HEADER_FMT, raw_payload, 0)
+                if magic == PKT_MAGIC:
+                    hdr_node = node_id
+                    hdr_seq = seq
 
-            pkt["timestamp"] = datetime.datetime.utcnow().isoformat(
-                timespec="milliseconds"
-            )
-            return pkt
+            gps = None
+            packets: list[dict] = []
+            if pkt_type == PKT_GPS or pkt_type == PKT_STATUS:
+                gps = decode_gps(raw_payload, rssi)
+            elif pkt_type == PKT_FULL_STATE:
+                pkt = decode_full_state(raw_payload, rssi)
+                if pkt is not None:
+                    packets = [pkt]
+            elif pkt_type == PKT_BUNDLE:
+                packets = decode_bundle(raw_payload, rssi)
+
+            now_ts = datetime.datetime.utcnow().isoformat(timespec="milliseconds")
+            for pkt in packets:
+                pkt["timestamp"] = now_ts
+
+            return {
+                "pkt_type": pkt_type,
+                "node_id": hdr_node,
+                "seq": hdr_seq,
+                "rssi": rssi,
+                "gps": gps,
+                "packets": packets,
+            }
 
         self.state = _ST_WAIT_M0
         self.buf = bytearray()
@@ -90,6 +122,6 @@ def iter_packets(port: str, baud: int):
             if not raw:
                 continue
 
-            pkt = receiver.push_byte(raw[0])
-            if pkt is not None:
-                yield pkt, receiver
+            event = receiver.push_byte(raw[0])
+            if event is not None:
+                yield event, receiver, ser
