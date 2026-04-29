@@ -4,7 +4,7 @@
 //
 // LoRa payloads — node -> base:
 //   AWAKEN:     [PktHeader:4]                                                    =  4 bytes
-//   BUNDLE:     [PktHeader:4][FullStatePayload:20][n_deltas:1][DeltaPayload×n]  ≤ 137 bytes
+//   BUNDLE:     [PktHeader:4][FullStatePayload:20][n_deltas:1][DeltaPayload×n]  ≤ 193 bytes
 //   STATUS:     [PktHeader:4][StatusPayload:12]                                  = 16 bytes
 //
 // LoRa TIME_SYNC — base -> all nodes (broadcast):
@@ -74,25 +74,35 @@ struct __attribute__((packed)) TimeSyncPayload {
 };
 
 // wind_cms is absolute (not a delta) — wind changes too fast to delta-encode reliably.
-// All other fields are signed deltas from the bundle's reference FullStatePayload.
+// Compact delta encoding (12 bytes) keeps PM2.5/PM10 high precision while coarsening
+// slower channels to improve payload efficiency.
 struct __attribute__((packed)) DeltaPayload {
-    uint16_t dt_ms;
+    uint8_t  dt_ticks_250ms;        // dt in 250 ms ticks from reference
     uint16_t wind_cms;
-    int16_t  temp_delta_cdegc;
-    int16_t  humidity_delta_cpct;
-    int16_t  pm1_0_delta;
-    int16_t  pm2_5_delta;
-    int16_t  pm4_0_delta;
-    int16_t  pm10_delta;
+    int8_t   temp_delta_deci_c;     // 0.1 C units (from cdegC / 10)
+    int8_t   humidity_delta_0p2pct; // 0.2 %RH units (from cpct / 20)
+    int8_t   pm1_0_delta_ug;        // 1.0 ug/m3 units (from ug10 / 10)
+    int16_t  pm2_5_delta_ug10;      // 0.1 ug/m3 units
+    int8_t   pm4_0_delta_ug;        // 1.0 ug/m3 units (from ug10 / 10)
+    int16_t  pm10_delta_ug10;       // 0.1 ug/m3 units
+    uint8_t  flags;                 // clamp/overflow indicator bits
 };
+
+static constexpr uint8_t DELTA_FLAG_DT_CLAMPED       = 0x01;
+static constexpr uint8_t DELTA_FLAG_TEMP_CLAMPED     = 0x02;
+static constexpr uint8_t DELTA_FLAG_HUMID_CLAMPED    = 0x04;
+static constexpr uint8_t DELTA_FLAG_PM1_CLAMPED      = 0x08;
+static constexpr uint8_t DELTA_FLAG_PM2_5_CLAMPED    = 0x10;
+static constexpr uint8_t DELTA_FLAG_PM4_CLAMPED      = 0x20;
+static constexpr uint8_t DELTA_FLAG_PM10_CLAMPED     = 0x40;
 
 static_assert(sizeof(PktHeader)        ==  4, "PktHeader must be 4 bytes");
 static_assert(sizeof(FullStatePayload) == 20, "FullStatePayload must be 20 bytes");
 static_assert(sizeof(StatusPayload)    == 12, "StatusPayload must be 12 bytes");
 static_assert(sizeof(TimeSyncPayload)  ==  8, "TimeSyncPayload must be 8 bytes");
-static_assert(sizeof(DeltaPayload)     == 16, "DeltaPayload must be 16 bytes");
+static_assert(sizeof(DeltaPayload)     == 12, "DeltaPayload must be 12 bytes");
 
-static constexpr uint8_t kBundleMaxDeltas = 7;
+static constexpr uint8_t kBundleMaxDeltas = 14;
 
 // LoRa payload sizes (no UART framing).
 static constexpr size_t kAwakenLoRaSize =
@@ -105,7 +115,7 @@ static constexpr size_t kFullStateLoRaSize =
     sizeof(PktHeader) + sizeof(FullStatePayload);                       // 24
 static constexpr size_t kMaxBundleLoRaSize =
     sizeof(PktHeader) + sizeof(FullStatePayload) + 1 +
-    kBundleMaxDeltas * sizeof(DeltaPayload);                            // 137
+    kBundleMaxDeltas * sizeof(DeltaPayload);                            // 193
 
 // ---------- CRC-8/MAXIM (polynomial 0x31) ----------
 

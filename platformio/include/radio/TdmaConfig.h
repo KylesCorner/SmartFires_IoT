@@ -35,5 +35,6 @@ struct TdmaConfig {
     return cfg;
   }
 
-  static constexpr size_t MaxPayloadLen = 177;
+  // Must be >= BinaryPacket::kMaxBundleLoRaSize (currently 193 bytes).
+  static constexpr size_t MaxPayloadLen = 220;
 };

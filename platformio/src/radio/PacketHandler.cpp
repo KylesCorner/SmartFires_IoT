@@ -1,7 +1,43 @@
 #include "radio/PacketHandler.h"
 
+#include <limits.h>
 #include <math.h>
 #include <string.h>
+
+namespace {
+
+inline int32_t roundDivideSigned(int32_t value, int32_t divisor) {
+    if (value >= 0) {
+        return (value + divisor / 2) / divisor;
+    }
+    return -(((-value) + divisor / 2) / divisor);
+}
+
+inline int8_t clampToInt8(int32_t value, uint8_t flagBit, uint8_t &flags) {
+    if (value < INT8_MIN) {
+        flags |= flagBit;
+        return INT8_MIN;
+    }
+    if (value > INT8_MAX) {
+        flags |= flagBit;
+        return INT8_MAX;
+    }
+    return static_cast<int8_t>(value);
+}
+
+inline int16_t clampToInt16(int32_t value, uint8_t flagBit, uint8_t &flags) {
+    if (value < INT16_MIN) {
+        flags |= flagBit;
+        return INT16_MIN;
+    }
+    if (value > INT16_MAX) {
+        flags |= flagBit;
+        return INT16_MAX;
+    }
+    return static_cast<int16_t>(value);
+}
+
+} // namespace
 
 PacketHandler::PacketHandler(const Config &cfg) : _cfg(cfg) {}
 
@@ -139,18 +175,42 @@ BinaryPacket::DeltaPayload PacketHandler::makeDelta(
     const BinaryPacket::FullStatePayload &s)
 {
     BinaryPacket::DeltaPayload d = {};
-    d.dt_ms               = static_cast<uint16_t>(s.session_time - ref.session_time);
+
+    const uint32_t dtMs = static_cast<uint32_t>(s.session_time - ref.session_time);
+    uint8_t flags = 0;
+
+    uint32_t dtTicks = (dtMs + 125u) / 250u;
+    if (dtTicks > 255u) {
+        dtTicks = 255u;
+        flags |= BinaryPacket::DELTA_FLAG_DT_CLAMPED;
+    }
+
+    d.dt_ticks_250ms      = static_cast<uint8_t>(dtTicks);
     d.wind_cms            = s.wind_cms;
-    d.temp_delta_cdegc    = static_cast<int16_t>(s.temp_cdegc - ref.temp_cdegc);
-    d.humidity_delta_cpct = static_cast<int16_t>(
-        static_cast<int32_t>(s.humidity_cpct) - static_cast<int32_t>(ref.humidity_cpct));
-    d.pm1_0_delta         = static_cast<int16_t>(
-        static_cast<int32_t>(s.pm1_0_ug10) - static_cast<int32_t>(ref.pm1_0_ug10));
-    d.pm2_5_delta         = static_cast<int16_t>(
-        static_cast<int32_t>(s.pm2_5_ug10) - static_cast<int32_t>(ref.pm2_5_ug10));
-    d.pm4_0_delta         = static_cast<int16_t>(
-        static_cast<int32_t>(s.pm4_0_ug10) - static_cast<int32_t>(ref.pm4_0_ug10));
-    d.pm10_delta          = static_cast<int16_t>(
-        static_cast<int32_t>(s.pm10_ug10)  - static_cast<int32_t>(ref.pm10_ug10));
+
+    const int32_t tempDeltaCdeg = static_cast<int32_t>(s.temp_cdegc) - static_cast<int32_t>(ref.temp_cdegc);
+    d.temp_delta_deci_c = clampToInt8(
+        roundDivideSigned(tempDeltaCdeg, 10), BinaryPacket::DELTA_FLAG_TEMP_CLAMPED, flags);
+
+    const int32_t humidityDeltaCpct =
+        static_cast<int32_t>(s.humidity_cpct) - static_cast<int32_t>(ref.humidity_cpct);
+    d.humidity_delta_0p2pct = clampToInt8(
+        roundDivideSigned(humidityDeltaCpct, 20), BinaryPacket::DELTA_FLAG_HUMID_CLAMPED, flags);
+
+    const int32_t pm1DeltaUg10 = static_cast<int32_t>(s.pm1_0_ug10) - static_cast<int32_t>(ref.pm1_0_ug10);
+    d.pm1_0_delta_ug = clampToInt8(
+        roundDivideSigned(pm1DeltaUg10, 10), BinaryPacket::DELTA_FLAG_PM1_CLAMPED, flags);
+
+    const int32_t pm25DeltaUg10 = static_cast<int32_t>(s.pm2_5_ug10) - static_cast<int32_t>(ref.pm2_5_ug10);
+    d.pm2_5_delta_ug10 = clampToInt16(pm25DeltaUg10, BinaryPacket::DELTA_FLAG_PM2_5_CLAMPED, flags);
+
+    const int32_t pm4DeltaUg10 = static_cast<int32_t>(s.pm4_0_ug10) - static_cast<int32_t>(ref.pm4_0_ug10);
+    d.pm4_0_delta_ug = clampToInt8(
+        roundDivideSigned(pm4DeltaUg10, 10), BinaryPacket::DELTA_FLAG_PM4_CLAMPED, flags);
+
+    const int32_t pm10DeltaUg10 = static_cast<int32_t>(s.pm10_ug10) - static_cast<int32_t>(ref.pm10_ug10);
+    d.pm10_delta_ug10 = clampToInt16(pm10DeltaUg10, BinaryPacket::DELTA_FLAG_PM10_CLAMPED, flags);
+
+    d.flags = flags;
     return d;
 }

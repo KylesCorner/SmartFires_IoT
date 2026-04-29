@@ -24,8 +24,8 @@ SmartFiresNodeApp::update()
 PacketHandler::push(SensorSnapshot)
          │   quantizes floats → fixed-point integers
          │   sample 0:        stored as reference FullStatePayload
-         │   samples 1–7:     stored as DeltaPayload (signed delta from reference)
-         │   on sample 8:     encode PKT_BUNDLE LoRa payload → bundleReady() = true
+         │   samples 1–14:    stored as DeltaPayload (compact deltas from reference)
+         │   on sample 15:    encode PKT_BUNDLE LoRa payload → bundleReady() = true
          │                    reset (next sample becomes new reference)
          ▼
 TdmaRadioService::enqueueTelemetry(payload, len)
@@ -68,12 +68,12 @@ state. Key types:
 | Struct | Size | Notes |
 |---|---|---|
 | `PktHeader` | 4 B | magic, pkt_type, node_id, seq |
-| `FullStatePayload` | 24 B | reference sample; fixed-point integers |
-| `DeltaPayload` | 16 B | signed deltas from reference; wind absolute |
-| `GpsPayload` | 8 B | lat/lon × 1e7; sent once per session |
+| `FullStatePayload` | 20 B | reference sample; fixed-point integers |
+| `DeltaPayload` | 12 B | compact deltas from reference; wind absolute |
+| `StatusPayload` | 12 B | lat/lon + battery; sent every 15 minutes |
 | `TimeSyncPayload` | 8 B | session_id + session_time_ms |
 
-Max bundle LoRa payload: `4 + 24 + 1 + 7×16 = 141 bytes`.
+Max bundle LoRa payload: `4 + 20 + 1 + 14×12 = 193 bytes`.
 
 New function `encodeBundlePayload()` outputs the raw LoRa bytes (no UART framing),
 which is what `TdmaRadioService::enqueueTelemetry()` expects.
@@ -85,7 +85,7 @@ Owns bundle accumulation. Stateful: holds the reference frame and partial delta 
 ```
 Config:
   nodeId      — written into PktHeader.node_id
-  maxDeltas   — default 7 (kBundleMaxDeltas)
+  maxDeltas   — default 14 (kBundleMaxDeltas)
 
 push(SensorSnapshot) → bool
   Returns true when a complete bundle has been encoded and is waiting.
@@ -123,28 +123,10 @@ and pass the session_ms to `TdmaClock::applySync()`.
 The `isTimeSyncPacket()` text path can remain for native unit tests; the driver handles
 the real protocol.
 
-### 2. GPS packet (PKT_GPS) — implemented
+### 2. STATUS packet (PKT_STATUS) — implemented
 
-`PacketHandler` encodes a `PKT_GPS` payload on the first `push()` that carries
-`sensorFlags & GPS_FLAG`. `gpsPacketReady()` / `takeGpsPacket()` drain it. Call
-`resetGpsSession()` when a new `session_id` arrives from TIME_SYNC.
-
-Still requires `Pa1010dGpsSensor::fillSnapshot()` to be implemented once that sensor
-is wired into `main.cpp`.
-
-### 3. Battery data alongside GPS packet
-
-When the GPS packet is sent (session start / first fix), battery voltage and percent
-should accompany it as session metadata. Options:
-- Extend `GpsPayload` with battery fields (breaks the clean 8-byte struct).
-- Define a new `PKT_SESSION_INFO` packet type that carries GPS + battery together.
-- Enqueue a separate small battery packet immediately after the GPS packet.
-
-The preferred approach is a new `PKT_SESSION_INFO` (type `0x06`) with a
-`SessionInfoPayload` struct containing `lat_e7`, `lon_e7`, `battery_mv` (uint16_t),
-and `battery_pct` (uint8_t). `PacketHandler` would encode this instead of the bare
-`PKT_GPS` once a battery reading is available. Requires adding `batteryMv` and
-`batteryPct` fields to `SensorSnapshot` and a `BatteryMonitor::fillSnapshot()` path.
+`PacketHandler` encodes a `PKT_STATUS` payload carrying GPS + battery. The first
+status packet is emitted on the first `push()`, then every 15 minutes.
 
 ### 4. Remaining sensors
 
@@ -153,16 +135,18 @@ As sensors are added to `main.cpp`, implement `fillSnapshot()` in each:
 | Sensor | Flag | Fields |
 |---|---|---|
 | `WindSensorRevC` | `0x01` | `windMps` |
-| `Pa1010dGpsSensor` | `0x04` | `latDeg`, `lonDeg` (GPS packet only) |
+| `Pa1010dGpsSensor` | `0x04` | `latDeg`, `lonDeg` (STATUS packet) |
 | `Icm20948Sensor` | `0x08` | (no fields in current FullStatePayload) |
 | `Sps30Sensor` | `0x10` | `pm1_0`, `pm2_5`, `pm4_0`, `pm10` |
 
-### 4. `uptime_ms` deprecation
+### 4. Delta quantization tuning
 
-`FullStatePayload` still carries `uptime_ms` (4 bytes). Once TIME_SYNC is guaranteed
-to complete before first telemetry, `uptime_ms` is redundant with `session_time` and
-can be removed — saving 4 bytes per bundle (141 → 137 bytes). Recalculate slot sizing
-when this change is made (see `documentation/old/TDMA_BUNDLE_SIZING.md`).
+Current compact delta encoding uses mixed precision to improve bundle density:
+- `dt_ticks_250ms` (uint8), `wind_cms` absolute (uint16)
+- temp delta in 0.1 C (int8), humidity delta in 0.2% (int8)
+- PM1.0 and PM4.0 deltas in 1.0 ug/m3 (int8)
+- PM2.5 and PM10 deltas in 0.1 ug/m3 (int16)
+- `flags` bitmask marks clamped values
 
 ### 5. Base station
 
@@ -173,19 +157,19 @@ class structure. It still needs to be implemented to:
 
 ### 6. Edge receiver (Jetson)
 
-`edge/packet.py` must be updated to decode `PKT_BUNDLE` with delta expansion.
-The old pre-refactor version handled this; it needs to be reconciled with the current
-`FullStatePayload` layout (24 bytes, no lat/lon).
+`edge/packet.py` must stay aligned with `BinaryPacket.h` for delta expansion.
+Current wire assumptions are FullStatePayload=20 bytes, DeltaPayload=12 bytes,
+and max deltas per bundle=14.
 
 ---
 
 ## Slot Sizing Reference
 
-At the current config (N_δ=7, R=1, SF7):
-- Bundle LoRa payload: 141 bytes → airtime ≈ 236 ms
+At the current config (N_δ=14, R=1, SF7):
+- Bundle LoRa payload: 193 bytes → airtime ≈ 313 ms
 - Slot width W = 900 ms, guard G = 20 ms → TX window = 860 ms
-- Worst-case TX: (1+1) × (236 + 100) = 672 ms < 860 ms ✓
-- Bundle period at 1 Hz sensing: 8 s (reference + 7 deltas)
-- Frame period (2 nodes): 1800 ms → η = 1800/8000 = 0.225 → no data loss
+- Worst-case TX: (1+1) × (313 + 100) = 826 ms < 860 ms ✓
+- Bundle period at 4 Hz sensing: 3.75 s (reference + 14 deltas)
+- Frame period (4 nodes): 3600 ms → η = 0.96 → no steady-state queue loss
 
 For scaling beyond 2 nodes see `documentation/old/TDMA_BUNDLE_SIZING.md`.

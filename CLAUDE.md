@@ -15,17 +15,18 @@ Wildfire IoT sensor network. Remote drone nodes collect environmental data (temp
     runs: SmartFiresNodeApp → PacketHandler → TdmaRadioService → RadioHeadTdmaDriver
     |
     | LoRa 915 MHz (RadioHead RHReliableDatagram, 13 dBm)
-    |   Node → Base: BUNDLE payload (≤141 bytes, 1 retry, 100 ms timeout, TDMA-gated)
-    |                GPS payload (12 bytes, once per session on first valid fix)
+    |   Node → Base: AWAKEN payload (4 bytes, on boot until TIME_SYNC received)
+    |                BUNDLE payload (≤193 bytes, 1 retry, 100 ms timeout, TDMA-gated)
+    |                STATUS payload (16 bytes, GPS + battery, every 15 min)
     |   Base → Node: TIME_SYNC broadcast (12 bytes, fire-and-forget, RH_BROADCAST_ADDRESS)
     v
 [Adafruit Feather M0 RFM95 — base station]  ← NOT YET PORTED to class architecture
     Receives telemetry, auto-ACKs, relays to Jetson over UART.
-    Reads TIME_SYNC commands from Jetson UART, broadcasts them over LoRa.
+    Reads TIME_SYNC commands from Jetson UART, broadcasts them over LoRa every 10 min.
     |
     | UART 115200 baud (Serial1, binary frames — bidirectional)
-    |   Feather → Jetson: base UART frames with RSSI (variable length, ≤146 bytes)
-    |   Jetson → Feather: TIME_SYNC command frames (16 bytes, every 30 s)
+    |   Feather → Jetson: base UART frames with RSSI (variable length, ≤198 bytes)
+    |   Jetson → Feather: TIME_SYNC command frames (16 bytes, every 10 min)
     v
 [Jetson Orin Nano]
     edge/receiver.py → telemetry.csv
@@ -56,7 +57,7 @@ SmartFires_IoT/
 │   │   │   ├── IRadio.h
 │   │   │   └── IAnalogReader.h
 │   │   ├── radio/
-│   │   │   ├── PacketHandler.h           Bundle + GPS packet assembly ← main protocol entry
+│   │   │   ├── PacketHandler.h           Bundle + STATUS packet assembly ← main protocol entry
 │   │   │   ├── TdmaRadioService.h        TDMA-gated LoRa TX/RX orchestration
 │   │   │   ├── TdmaClock.h               Session clock + slot timing
 │   │   │   ├── TdmaConfig.h              All TDMA parameters in one struct
@@ -100,7 +101,7 @@ SmartFires_IoT/
 │       └── test_*/                       Unity test suites (run on native)
 ├── edge/                          Jetson Python code
 │   ├── receiver.py                UART frame receiver → CSV writer + TIME_SYNC sender
-│   ├── packet.py                  Python mirror of BinaryPacket.h (needs update for bundles)
+│   ├── packet.py                  Python mirror of BinaryPacket.h
 │   └── requirements.txt           pyserial>=3.5
 ├── documentation/
 │   ├── BINARY_PACKET_PIPELINE.md  Current pipeline design + remaining work
@@ -146,27 +147,30 @@ main.cpp
   constructs: ArduinoClock, sensors, DutyCycleController,
               PacketHandler, TdmaConfig/Clock/Queue/RadioService,
               RadioHeadTdmaDriver, SmartFiresNodeApp
-  setup() → app.begin()
+  setup() → app.begin()   ← broadcasts PKT_AWAKEN immediately
   loop()  → app.update()
 
 SmartFiresNodeApp::update()
   _radio.update()          ← TDMA tick, TIME_SYNC receive
+  if !tdmaClock.hasSync():
+    re-send PKT_AWAKEN every 5 s, return   ← sensors idle until synced
   _duty.update()           ← sensor wake/sample/sleep state machine
   if duty.telemetryReady():
-    buildSnapshot()        ← calls sensor.fillSnapshot() on each ISensor*
+    buildSnapshot()        ← calls sensor.fillSnapshot() + battery reading;
+                              timestamps via TdmaClock::sessionNowMs()
     packetHandler.push(snapshot)
-    if gpsPacketReady()  → enqueueTelemetry(GPS payload, 12 bytes)
-    if bundleReady()     → enqueueTelemetry(BUNDLE payload, ≤141 bytes)
+    if statusPacketReady() → enqueueTelemetry(STATUS payload, 16 bytes)
+    if bundleReady()       → enqueueTelemetry(BUNDLE payload, ≤193 bytes)
 
 PacketHandler
   push(SensorSnapshot):
-    tryEncodeGps()         ← emits PKT_GPS once per session on first GPS fix
+    tryEncodeStatus()      ← emits PKT_STATUS on first push, then every 15 min
     quantize() → FullStatePayload (fixed-point integers)
-    accumulate reference + up to 7 DeltaPayloads
-    on 8th sample: encodeBundlePayload() → bundleReady = true
+    accumulate reference + up to 14 DeltaPayloads
+    on 15th sample: encodeBundlePayload() → bundleReady = true
 
 TdmaRadioService::update()
-  checkIncomingTimeSync()  ← polls driver for TIME_SYNC broadcasts
+  checkIncomingTimeSync()  ← polls driver, decodes binary BinaryPacket::TimeSyncPayload
   drainTxQueue()           ← sends one payload per TDMA slot via RadioHeadTdmaDriver
 ```
 
@@ -177,7 +181,7 @@ ISensor::fillSnapshot(SensorSnapshot&)    float units (tempC, windMps, …)
         ↓
 PacketHandler::quantize()                 fixed-point integers (FullStatePayload)
         ↓
-BinaryPacket::encodeBundlePayload()       raw LoRa bytes (≤141 bytes)
+BinaryPacket::encodeBundlePayload()       raw LoRa bytes (≤193 bytes)
         ↓
 TdmaTxQueue::enqueue()                    4-slot ring buffer, drop-oldest
         ↓
@@ -188,11 +192,12 @@ RadioHeadTdmaDriver::sendToWait()         TDMA-gated LoRa TX
 
 ## Wire Protocol
 
-### LoRa payloads — node → base (variable)
+### LoRa payloads — node → base
 
 ```
-BUNDLE:  [PktHeader: 4][FullStatePayload: 24][n_deltas: 1][DeltaPayload×n: n×16]  ≤ 141 bytes
-GPS:     [PktHeader: 4][GpsPayload: 8]                                               = 12 bytes
+AWAKEN:  [PktHeader: 4]                                                              =  4 bytes
+BUNDLE:  [PktHeader: 4][FullStatePayload: 20][n_deltas: 1][DeltaPayload×n: n×12]  ≤ 193 bytes
+STATUS:  [PktHeader: 4][StatusPayload: 12]                                           = 16 bytes
 ```
 
 RadioHead `RHReliableDatagram` handles LoRa framing, ACK, and retry. Node calls
@@ -211,8 +216,9 @@ slots and call `TdmaClock::applySync(sessionMs)`.
 
 ```
 [0xAA][0x55][len: u8][rssi: i8][LoRa payload][crc8]
-  GPS:    len=13  → total frame 17 bytes
-  BUNDLE: len≤142 → total frame ≤146 bytes
+  AWAKEN: len=5   → total frame  9 bytes
+  STATUS: len=17  → total frame 21 bytes
+  BUNDLE: len≤194 → total frame ≤198 bytes
 ```
 
 ### UART TIME_SYNC frame — Jetson → base (16 bytes)
@@ -226,16 +232,15 @@ slots and call `TdmaClock::applySync(sessionMs)`.
 | Field | Type | Notes |
 |---|---|---|
 | `magic` | `uint8_t` | `0xA5` |
-| `pkt_type` | `uint8_t` | `0x01` FULL_STATE · `0x02` HEARTBEAT · `0x03` TIME_SYNC · `0x04` BUNDLE · `0x05` GPS |
+| `pkt_type` | `uint8_t` | `0x01` FULL_STATE · `0x02` HEARTBEAT · `0x03` TIME_SYNC · `0x04` BUNDLE · `0x05` STATUS · `0x06` AWAKEN |
 | `node_id` | `uint8_t` | compile-time `NODE_ID`; `0` for TIME_SYNC frames |
 | `seq` | `uint8_t` | rolling 0–255 |
 
-### FullStatePayload (24 bytes, packed, little-endian)
+### FullStatePayload (20 bytes, packed, little-endian)
 
 | Field | Type | Encoding |
 |---|---|---|
-| `session_time` | `uint32_t` | ms since Jetson session start (synced via TIME_SYNC) |
-| `uptime_ms` | `uint32_t` | local millis() — kept until startup TIME_SYNC handshake is enforced |
+| `session_time` | `uint32_t` | ms since Jetson session start (from TdmaClock::sessionNowMs()) |
 | `sensor_flags` | `uint16_t` | WIND=0x01 SHT31=0x02 GPS=0x04 IMU=0x08 SPS30=0x10 |
 | `wind_cms` | `uint16_t` | cm/s = windMps × 100 |
 | `temp_cdegc` | `int16_t` | centi-°C = tempC × 100 |
@@ -245,33 +250,37 @@ slots and call `TdmaClock::applySync(sessionMs)`.
 | `pm4_0_ug10` | `uint16_t` | µg/m³ × 10 |
 | `pm10_ug10` | `uint16_t` | µg/m³ × 10 |
 
-### GpsPayload (8 bytes) — sent once per session via PKT_GPS
+### StatusPayload (12 bytes) — sent every 15 min via PKT_STATUS
 
 | Field | Type | Encoding |
 |---|---|---|
-| `lat_e7` | `int32_t` | degrees × 1e7 |
-| `lon_e7` | `int32_t` | degrees × 1e7 |
+| `lat_e7` | `int32_t` | degrees × 1e7 (valid if `flags & STATUS_GPS_VALID`) |
+| `lon_e7` | `int32_t` | degrees × 1e7 (valid if `flags & STATUS_GPS_VALID`) |
+| `battery_mv` | `uint16_t` | millivolts (valid if `flags & STATUS_BATT_VALID`) |
+| `battery_pct` | `uint8_t` | 0–100 (valid if `flags & STATUS_BATT_VALID`) |
+| `flags` | `uint8_t` | STATUS_GPS_VALID=0x01 · STATUS_BATT_VALID=0x02 |
 
-### DeltaPayload (16 bytes, packed, little-endian)
+### DeltaPayload (12 bytes, packed, little-endian)
 
-`wind_cms` is absolute; all other fields are signed deltas from the bundle reference.
+`wind_cms` is absolute; remaining fields are compact deltas from the bundle reference.
 
 | Field | Type | Encoding |
 |---|---|---|
-| `dt_ms` | `uint16_t` | ms since reference `session_time` |
+| `dt_ticks_250ms` | `uint8_t` | ticks since reference; `dt_ms = ticks × 250` |
 | `wind_cms` | `uint16_t` | absolute cm/s |
-| `temp_delta_cdegc` | `int16_t` | centi-°C delta |
-| `humidity_delta_cpct` | `int16_t` | centi-% delta |
-| `pm1_0_delta` | `int16_t` | µg/m³ × 10 delta |
-| `pm2_5_delta` | `int16_t` | µg/m³ × 10 delta |
-| `pm4_0_delta` | `int16_t` | µg/m³ × 10 delta |
-| `pm10_delta` | `int16_t` | µg/m³ × 10 delta |
+| `temp_delta_deci_c` | `int8_t` | 0.1 °C delta |
+| `humidity_delta_0p2pct` | `int8_t` | 0.2 %RH delta |
+| `pm1_0_delta_ug` | `int8_t` | 1.0 µg/m³ delta |
+| `pm2_5_delta_ug10` | `int16_t` | 0.1 µg/m³ delta |
+| `pm4_0_delta_ug` | `int8_t` | 1.0 µg/m³ delta |
+| `pm10_delta_ug10` | `int16_t` | 0.1 µg/m³ delta |
+| `flags` | `uint8_t` | clamp/overflow bitmask |
 
 ### TimeSyncPayload (8 bytes, packed, little-endian)
 
 | Field | Type | Notes |
 |---|---|---|
-| `session_id` | `uint32_t` | Random value set at receiver.py startup. Change triggers GPS re-send and clock reset. |
+| `session_id` | `uint32_t` | Random value set at receiver.py startup. Change triggers STATUS re-send and clock reset. |
 | `session_time_ms` | `uint32_t` | ms since receiver.py started. Wraps at ~49 days. |
 
 CRC: CRC-8/MAXIM (polynomial 0x31), covers the `len` byte + all data bytes.
@@ -294,11 +303,11 @@ each split into `NUM_SLOTS` equal slots. Each node transmits only in its assigne
 
 | Parameter | Value | Notes |
 |---|---|---|
-| `slotWidthMs` | 900 ms | Fits worst-case 2×(236 ms TX + 100 ms timeout) + 2×20 ms guard |
-| `guardMs` | 20 ms | Covers ≤1.5 ms crystal drift per 30 s sync interval at 50 ppm |
+| `slotWidthMs` | 900 ms | Fits worst-case 2×(313 ms TX + 100 ms timeout) + 2×20 ms guard |
+| `guardMs` | 20 ms | Covers crystal drift between 10-min sync intervals at 50 ppm |
 | `maxRetries` | 1 | One re-attempt; ACK typically arrives in ~35 ms |
 | `ackTimeoutMs` | 100 ms | Per-attempt timeout |
-| `syncStaleMs` | 300 000 ms | After 5 min without TIME_SYNC, fall back to immediate TX |
+| `syncStaleMs` | 1 320 000 ms | After 22 min without TIME_SYNC, fall back to immediate TX |
 | `NUM_SLOTS` (build flag) | 2 (default) | Must match across all node Feathers |
 
 TDMA state is managed by `TdmaClock`. The session clock is:
@@ -316,23 +325,24 @@ holds the freshest data. `TdmaRadioService::drainTxQueue()` sends one payload pe
 
 ---
 
-## TIME_SYNC flow
+## Boot handshake + TIME_SYNC flow
 
 ```
-receiver.py (Jetson)
-  │  Sends 16-byte TIME_SYNC UART frame at startup and every 30 s
+Node Feather — SmartFiresNodeApp::begin()
+  │  Broadcasts PKT_AWAKEN (4 bytes) to base station address
+  │  Re-broadcasts every 5 s while waiting
+  │  Sensors and duty cycle are HELD OFF until sync is received
   ▼
 Base Feather  ← NOT YET PORTED
-  │  Decodes TimeSyncPayload from UART frame
-  │  Broadcasts 12-byte LoRa packet to RH_BROADCAST_ADDRESS
+  │  Relays PKT_AWAKEN to Jetson over UART
+  │  Receives TIME_SYNC UART frame from Jetson
+  │  Broadcasts 12-byte LoRa TIME_SYNC to RH_BROADCAST_ADDRESS (every 10 min)
   ▼
 Node Feather — TdmaRadioService::checkIncomingTimeSync()
-  │  RadioHeadTdmaDriver::receive() — decodes BinaryPacket::TimeSyncPayload
-  │  NOTE: driver currently uses placeholder text "TS,<ms>" for native tests;
-  │        real binary decode via BinaryPacket::decodeTimeSync() is pending
-  │  TdmaClock::applySync(sessionMs) — updates session clock
+  │  RadioHeadTdmaDriver::receive() — decodes BinaryPacket::TimeSyncPayload (binary)
+  │  TdmaClock::applySync(sessionMs) — sets hasSync() = true, updates session clock
   ▼
-PacketHandler::push(SensorSnapshot)
+SmartFiresNodeApp::update() — sensing begins
   snap.sessionTimeMs = TdmaClock::sessionNowMs()   ← attached to every packet
 ```
 
@@ -344,16 +354,16 @@ PacketHandler::push(SensorSnapshot)
 |---|---|---|
 | Class-based firmware architecture | **Done** | SmartFiresNodeApp, PacketHandler, TdmaRadioService, TdmaClock, TdmaTxQueue |
 | Binary bundle protocol (PKT_BUNDLE) | **Done** | BinaryPacket.h, PacketHandler, encodeBundlePayload() |
-| Delta frames | **Done** | Reference + 7 DeltaPayloads per bundle |
-| GPS one-shot packet (PKT_GPS) | **Done** | PacketHandler::gpsPacketReady() / takeGpsPacket() / resetGpsSession() |
+| Delta frames | **Done** | Reference + 14 DeltaPayloads per bundle (12-byte compact delta) |
+| PKT_STATUS periodic packet | **Done** | GPS + battery every 15 min; PacketHandler::statusPacketReady() / takeStatusPacket() / resetStatusTimer() |
+| AWAKEN boot handshake | **Done** | Node broadcasts PKT_AWAKEN every 5 s until TIME_SYNC received; sensors withheld until synced |
+| uptime_ms removed | **Done** | FullStatePayload is now 20 bytes; all timestamps from TdmaClock::sessionNowMs() |
 | SHT31 sensor wired end-to-end | **Done** | fillSnapshot() implemented |
 | TDMA clock + slot gating | **Done** | TdmaClock, TdmaRadioService |
-| TIME_SYNC binary decode in driver | **Pending** | RadioHeadTdmaDriver uses text placeholder; needs BinaryPacket::decodeTimeSync() |
+| TIME_SYNC binary decode | **Done** | TdmaRadioService uses BinaryPacket::decodeTimeSync() |
 | Base station port | **Pending** | feather_m0_lora env exists but firmware not ported to new class structure |
 | Remaining sensors | **Pending** | Wind, GPS, SPS30, IMU — implement fillSnapshot() as each is wired in |
-| Battery + GPS session packet | **Pending** | PKT_SESSION_INFO combining GPS + battery_mv/pct — see BINARY_PACKET_PIPELINE.md |
-| edge/packet.py bundle decode | **Pending** | Needs update for PKT_BUNDLE delta expansion and 24-byte FullStatePayload |
-| uptime_ms deprecation | **Pending** | Remove once startup TIME_SYNC is guaranteed; saves 4 bytes/bundle |
+| edge/packet.py bundle decode | **Done** | Updated for 20-byte FullStatePayload + compact 12-byte deltas |
 
 Full details and design notes in `documentation/BINARY_PACKET_PIPELINE.md`.
 
@@ -364,11 +374,11 @@ Full details and design notes in `documentation/BINARY_PACKET_PIPELINE.md`.
 ```bash
 pip install -r edge/requirements.txt
 python3 edge/receiver.py --output telemetry.csv   # default port /dev/ttyTHS1
-python3 edge/receiver.py --sync-interval 10       # faster sync for testing
+python3 edge/receiver.py --sync-interval 600      # 10-min sync interval
 ```
 
-`edge/packet.py` is a Python mirror of `BinaryPacket.h` — currently out of date with
-the bundle format and needs to be updated before end-to-end testing.
+`edge/packet.py` mirrors `BinaryPacket.h` for STATUS/FULL_STATE/BUNDLE parsing and
+bundle delta expansion.
 
 Jetson UART setup (one-time):
 1. `sudo /opt/nvidia/jetson-io/jetson-io.py` — enable the UART pin group
@@ -380,12 +390,13 @@ Jetson UART setup (one-time):
 ## Key Design Decisions
 
 - **Single-board node:** Feather M0 owns both sensing and LoRa. No separate ESP32. Simplifies firmware, eliminates UART bridge between boards.
-- **Binary not text:** text CSV was ~90 bytes/packet; binary bundle ≤141 bytes carries 8 samples. Effective per-sample cost ~18 bytes vs ~90 bytes.
+- **Binary not text:** text CSV was ~90 bytes/packet; binary bundle ≤193 bytes carries 15 samples. Effective per-sample cost ~13 bytes vs ~90 bytes.
 - **Fixed-point integers on the wire:** no floats — deterministic size, no locale/printf issues on MCUs. `SensorSnapshot` uses floats internally; `PacketHandler::quantize()` converts.
-- **SensorSnapshot as internal currency:** sensors write float readings into `SensorSnapshot` via `ISensor::fillSnapshot()`. `PacketHandler` owns all quantization and encoding — sensors never touch wire format.
-- **GPS one-shot per session:** `PKT_GPS` is sent once on first valid fix. Suppressed until `PacketHandler::resetGpsSession()` is called on new `session_id`. Saves 8 bytes per bundle.
+- **SensorSnapshot as internal currency:** sensors write float readings into `SensorSnapshot` via `ISensor::fillSnapshot()`. Battery data is also written into the snapshot by `SmartFiresNodeApp`. `PacketHandler` owns all quantization and encoding — sensors never touch wire format.
+- **AWAKEN boot handshake:** node withholds sensing until it receives a TIME_SYNC from the base. This ensures `session_time` in every bundle is valid from the first sample. Node re-broadcasts AWAKEN every 5 s until synced.
+- **PKT_STATUS every 15 min:** replaces the old one-shot PKT_GPS. Carries GPS position + battery level with validity flags so the receiver always knows what's populated. First STATUS goes out on the first sensing cycle after sync.
 - **TDMA slot assignment is compile-time:** `slot = (NODE_ID - 1) % NUM_SLOTS`. No runtime negotiation. Adding a node = change `NUM_SLOTS` in platformio.ini, reflash all Feathers.
 - **`NUM_SLOTS` must match across all node Feathers.** Mismatch causes slot collisions. Only node Feathers enforce TDMA — base station is unaware.
 - **Drop-oldest queue:** `TdmaTxQueue` always holds the freshest data. No blocking between sensing and TX.
-- **Stale-sync fallback:** if no TIME_SYNC for 5 min, `TdmaClock::myTurn()` returns true unconditionally — node transmits immediately rather than going silent.
-- **TIME_SYNC driven by Jetson NTP, not GPS.** GPS PPS sync deferred; current ≤1.5 ms relative drift between synced nodes is within the 20 ms guard band.
+- **Stale-sync fallback:** if no TIME_SYNC for 22 min (2× the 10-min broadcast interval), `TdmaClock::myTurn()` returns true unconditionally — node transmits immediately rather than going silent.
+- **TIME_SYNC driven by Jetson NTP, not GPS.** GPS PPS sync deferred; current crystal drift between synced nodes is within the 20 ms guard band.
