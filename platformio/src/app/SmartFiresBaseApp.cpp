@@ -256,7 +256,10 @@ bool SmartFiresBaseApp::pushJetsonUartByte(uint8_t b,
 
   switch (_uartRx.stage) {
     case UartRxState::Stage::WaitM0:
-      if (b == 0) {
+      if (b == BinaryPacket::FRAME_M0) {
+        _uartRx.stage = UartRxState::Stage::WaitM1;
+      }
+      return false;
 
     case UartRxState::Stage::WaitM1:
       _uartRx.stage = (b == BinaryPacket::FRAME_M1)
@@ -265,14 +268,7 @@ bool SmartFiresBaseApp::pushJetsonUartByte(uint8_t b,
       return false;
 
     case UartRxState::Stage::WaitLen:
-<<<<<<< HEAD
-      // `b` is uint8_t (0..255). Only apply upper-bound check when buffer < 255.
-      if (b == 0 ||
-          (sizeof(_uartRx.data) < 0xFFu &&
-           static_cast<size_t>(b) > sizeof(_uartRx.data))) {
-=======
       if (b == 0) {
->>>>>>> 96084e0 (Add direct base AWAKEN-to-TIME_SYNC response)
         _uartFrameErrorCount++;
         resetJetsonUartRx();
         return false;
