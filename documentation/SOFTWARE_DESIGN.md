@@ -75,7 +75,7 @@ SmartFires_IoT/
 │   └── test/
 ├── edge/
 │   ├── anemometer_read.py
-│   └── edge-reciever/
+│   └── edge-receiver/
 ├── documentation/
 │   ├── BANDWIDTH_SCALING.md
 │   ├── BINARY_PACKET_PIPELINE.md
@@ -190,7 +190,7 @@ The base station deliberately does not decode the full telemetry payload beyond 
 
 ## Edge Receiver Architecture
 
-The Jetson-side Python package in `edge/edge-reciever/src/smartfires_edge/` is responsible for:
+The Jetson-side Python package in `edge/edge-receiver/src/smartfires_edge/` is responsible for:
 
 - reading UART frames from the base station
 - decoding binary payloads mirrored from `BinaryPacket.h`
@@ -311,7 +311,7 @@ When changing the protocol:
 
 1. update `BinaryPacket.h`
 2. update node-side encoding in `PacketHandler`
-3. update Python decode logic in `edge/edge-reciever/src/smartfires_edge/packet.py`
+3. update Python decode logic in `edge/edge-receiver/src/smartfires_edge/packet.py`
 4. update the design docs and bandwidth notes
 
 That preserves the current separation between sensing, transport, and ingest.

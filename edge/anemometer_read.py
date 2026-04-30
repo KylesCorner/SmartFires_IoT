@@ -8,7 +8,7 @@ from pathlib import Path
 import sys
 
 EDGE_RECEIVER_SRC = (
-    Path(__file__).resolve().parent / "edge-reciever" / "src"
+    Path(__file__).resolve().parent / "edge-receiver" / "src"
 )
 if str(EDGE_RECEIVER_SRC) not in sys.path:
     sys.path.insert(0, str(EDGE_RECEIVER_SRC))
