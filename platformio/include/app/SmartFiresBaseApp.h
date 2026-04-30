@@ -69,6 +69,9 @@ private:
   uint32_t _rxForwardCount = 0;
   uint32_t _cmdForwardCount = 0;
   uint32_t _uartFrameErrorCount = 0;
+  uint32_t _awakenRxCount = 0;
+  uint32_t _timeSyncTxCount = 0;
+  uint32_t _ackTxCount = 0;
 
   void processIncomingLoRa();
   void processIncomingJetsonUart();

@@ -49,6 +49,7 @@ private:
     BatteryMonitor *_battery;
 
     bool     _initialized    = false;
+    bool     _syncActive     = false;
     uint32_t _awakenLastSentMs = 0;
     uint8_t  _awakenSeq        = 0;
 

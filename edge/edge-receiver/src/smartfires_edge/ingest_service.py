@@ -12,6 +12,7 @@ import serial
 from smartfires_edge.anemometer import AnemometerPoller
 from smartfires_edge.csv_logger import DurableCsvLogger
 from smartfires_edge.packet import (
+    PKT_AWAKEN,
     PKT_BUNDLE,
     PKT_FULL_STATE,
     PKT_STATUS,
@@ -72,24 +73,69 @@ def _ack_state_mask(state: dict) -> int:
     return mask
 
 
+def _pkt_type_name(pkt_type: int | None) -> str:
+    if pkt_type == PKT_AWAKEN:
+        return "AWAKEN"
+    if pkt_type == PKT_FULL_STATE:
+        return "FULL_STATE"
+    if pkt_type == PKT_BUNDLE:
+        return "BUNDLE"
+    if pkt_type == PKT_STATUS:
+        return "STATUS"
+    return f"0x{(pkt_type or 0):02x}"
+
+
+def _send_time_sync(
+    ser: serial.Serial,
+    write_lock: threading.Lock,
+    sync_state: dict,
+    session_id: int,
+    session_start: float,
+    reason: str,
+    trigger_node: int | None = None,
+    trigger_seq: int | None = None,
+) -> bool:
+    session_ms = int((time.time() - session_start) * 1000) & 0xFFFFFFFF
+    with write_lock:
+        seq = int(sync_state.setdefault("next_seq", 0)) & 0xFF
+        frame = encode_time_sync_frame(session_id, session_ms, seq)
+        try:
+            ser.write(frame)
+        except serial.SerialException as exc:
+            print(f"[EDGE][SYNC] write error reason={reason}: {exc}", file=sys.stderr)
+            return False
+        sync_state["next_seq"] = (seq + 1) & 0xFF
+
+    msg = (
+        f"[EDGE][SYNC-TX#{seq:03d}] reason={reason} session_id=0x{session_id:08x} "
+        f"session_ms={session_ms} bytes={len(frame)}"
+    )
+    if trigger_node is not None:
+        msg += f" trigger_node={trigger_node}"
+    if trigger_seq is not None:
+        msg += f" trigger_seq={trigger_seq}"
+    print(msg)
+    return True
+
+
 def _time_sync_sender(
     ser: serial.Serial,
     write_lock: threading.Lock,
+    sync_state: dict,
     session_id: int,
     session_start: float,
     interval_s: int,
 ) -> None:
-    seq = 1
     while True:
         time.sleep(interval_s)
-        session_ms = int((time.time() - session_start) * 1000) & 0xFFFFFFFF
-        frame = encode_time_sync_frame(session_id, session_ms, seq)
-        with write_lock:
-            try:
-                ser.write(frame)
-            except serial.SerialException as exc:
-                print(f"[TIME_SYNC] write error: {exc}", file=sys.stderr)
-        seq = (seq + 1) & 0xFF
+        _send_time_sync(
+            ser=ser,
+            write_lock=write_lock,
+            sync_state=sync_state,
+            session_id=session_id,
+            session_start=session_start,
+            reason="periodic",
+        )
 
 
 def run_receive(
@@ -117,6 +163,7 @@ def run_receive(
     ack_state: dict[int, dict] = {}
     ack_seq = 0
     next_ack_at = time.time() + ack_interval_s
+    sync_state = {"next_seq": 0}
 
     session_id = random.randint(1, 0xFFFFFFFF)
     session_start = time.time()
@@ -153,11 +200,9 @@ def run_receive(
 
         for event, receiver, ser in iter_packets(port, baud):
             if not sync_thread_started:
-                with write_lock:
-                    ser.write(encode_time_sync_frame(session_id, 0, seq=0))
                 sync_thread = threading.Thread(
                     target=_time_sync_sender,
-                    args=(ser, write_lock, session_id, session_start, sync_interval_s),
+                    args=(ser, write_lock, sync_state, session_id, session_start, sync_interval_s),
                     daemon=True,
                 )
                 sync_thread.start()
@@ -165,6 +210,42 @@ def run_receive(
 
             tracker.crc_failures = receiver.crc_failures
             tracker.length_failures = receiver.length_failures
+
+            hdr_node = event.get("node_id")
+            hdr_seq = event.get("seq")
+            pkt_type = event.get("pkt_type")
+
+            print(
+                f"[EDGE][LORA-RX] type={_pkt_type_name(pkt_type)} node={hdr_node} "
+                f"seq={hdr_seq} rssi={event.get('rssi')}"
+            )
+
+            if hdr_node is not None and hdr_seq is not None and pkt_type == PKT_AWAKEN:
+                print(
+                    f"[EDGE][AWAKEN] node={hdr_node} seq={hdr_seq} "
+                    f"action=send_time_sync"
+                )
+                _send_time_sync(
+                    ser=ser,
+                    write_lock=write_lock,
+                    sync_state=sync_state,
+                    session_id=session_id,
+                    session_start=session_start,
+                    reason="awaken",
+                    trigger_node=int(hdr_node),
+                    trigger_seq=int(hdr_seq),
+                )
+            elif hdr_node is not None and hdr_seq is not None and pkt_type is not None:
+                _send_time_sync(
+                    ser=ser,
+                    write_lock=write_lock,
+                    sync_state=sync_state,
+                    session_id=session_id,
+                    session_start=session_start,
+                    reason="receiver_start",
+                    trigger_node=int(hdr_node),
+                    trigger_seq=int(hdr_seq),
+                ) if sync_state["next_seq"] == 0 else None
 
             gps = event.get("gps")
             if gps:
@@ -204,9 +285,6 @@ def run_receive(
                     f"rssi={pkt['rssi']:4d}"
                 )
 
-            hdr_node = event.get("node_id")
-            hdr_seq = event.get("seq")
-            pkt_type = event.get("pkt_type")
             if (
                 hdr_node is not None
                 and hdr_seq is not None
@@ -231,6 +309,12 @@ def run_receive(
                             ser.write(frame)
                         except serial.SerialException as exc:
                             print(f"[ACK_SUM] write error: {exc}", file=sys.stderr)
+                        else:
+                            print(
+                                f"[EDGE][ACK-TX#{ack_seq:03d}] node={node_id} "
+                                f"base_seq={st['base']} mask=0x{_ack_state_mask(st):04x} "
+                                f"bytes={len(frame)}"
+                            )
                     ack_seq = (ack_seq + 1) & 0xFF
                 next_ack_at = now + ack_interval_s
 
