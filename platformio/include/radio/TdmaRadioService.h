@@ -69,7 +69,12 @@ private:
   TdmaRadioError _error = TdmaRadioError::None;
 
   uint32_t _sentCount = 0;
+  uint32_t _enqueuedCount = 0;
   uint32_t _failedSendCount = 0;
+  uint32_t _retransmitCount = 0;
+  uint32_t _ackSummaryCount = 0;
+  uint32_t _timeSyncCount = 0;
+  uint32_t _pendingDropCount = 0;
   uint32_t _lastTxSlotIndex = 0xFFFFFFFFu;
 
   void drainTxQueue();

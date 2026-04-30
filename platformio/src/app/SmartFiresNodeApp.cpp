@@ -52,15 +52,31 @@ void SmartFiresNodeApp::update() {
   // Always poll radio so TIME_SYNC packets are processed.
   _radio.update();
 
+  const bool hasFreshSync = _tdmaClock.hasSync() && !_tdmaClock.syncStale();
+  if (hasFreshSync && !_syncActive) {
+    _syncActive = true;
+    _packetHandler.resetStatusTimer();
+    Serial.print("[App] TIME_SYNC acquired sessionMs=");
+    Serial.print(_tdmaClock.sessionNowMs());
+    Serial.print(" current_slot=");
+    Serial.print(_tdmaClock.currentSlotNumber());
+    Serial.print(" my_slot=");
+    Serial.println(_tdmaClock.mySlot());
+  } else if (!hasFreshSync && _syncActive) {
+    _syncActive = false;
+    APP_LOG("[App] TIME_SYNC stale/lost -- resuming AWAKEN retry");
+  }
+
   // Hold off sensing until the base station has provided the session clock.
-  // if (!_tdmaClock.hasSync()) {
-  //   const uint32_t now = _clock.millis();
-  //   if (now - _awakenLastSentMs >= kAwakenIntervalMs) {
-  //     sendAwakenPacket();
-  //     _awakenLastSentMs = now;
-  //   }
-  //   return;
-  // }
+  if (!hasFreshSync) {
+    const uint32_t now = _clock.millis();
+    if (now - _awakenLastSentMs >= kAwakenIntervalMs) {
+      sendAwakenPacket();
+      _awakenLastSentMs = now;
+      APP_LOG("[App] Waiting for TIME_SYNC -- AWAKEN retried");
+    }
+    return;
+  }
 
   _duty.update();
 

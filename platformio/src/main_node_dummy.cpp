@@ -91,17 +91,7 @@ DutyCycleController duty(dutyCfg, sht31, sensors, sensorCount, clock);
 PacketHandler::Config packetHandlerCfg = PacketHandler::Config::make(NODE_ID);
 PacketHandler packetHandler(packetHandlerCfg);
 
-TdmaConfig tdmaCfg = TdmaConfig::tdmaCfg(
-    NODE_ID,
-    0x01,
-    NUM_SLOTS,
-    900,
-    20,
-    1320000,
-    4,
-    1,
-    100,
-    false);
+TdmaConfig tdmaCfg = TdmaConfig::tdmaCfg(NODE_ID, 0x01, NUM_SLOTS);
 TdmaClock tdmaClock(tdmaCfg, clock);
 TdmaTxQueue tdmaQueue(tdmaCfg.queueDepth);
 
@@ -136,7 +126,6 @@ void setup() {
     Serial.print("[DUMMY] GUARD        = "); Serial.print(tdmaCfg.guardMs);      Serial.println(" ms");
     Serial.print("[DUMMY] SYNC_STALE   = "); Serial.print(tdmaCfg.syncStaleMs / 1000); Serial.println(" s");
     Serial.print("[DUMMY] APP_RELIAB   = "); Serial.println(tdmaCfg.enableAppReliability ? "ON" : "OFF");
-    Serial.println("[DUMMY] LINK_ACK     = ON (send succeeds only if base acks)");
     Serial.print("[DUMMY] RETX_WINDOW  = "); Serial.println(tdmaCfg.reliabilityWindowDepth);
     Serial.print("[DUMMY] RETX_MAX_ATT = "); Serial.println(tdmaCfg.reliabilityMaxAttempts);
     Serial.println("========================================");

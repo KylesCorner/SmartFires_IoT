@@ -87,6 +87,17 @@ void SmartFiresBaseApp::processIncomingLoRa() {
     _debugUart.print(" rssi=");
     _debugUart.println(pkt.rssi);
 
+    if (validHeader && hdr.pkt_type == BinaryPacket::PKT_AWAKEN) {
+      _awakenRxCount++;
+      _debugUart.print("[BaseApp][AWAKEN#");
+      _debugUart.print(_awakenRxCount);
+      _debugUart.print("] node=");
+      _debugUart.print(hdr.node_id);
+      _debugUart.print(" seq=");
+      _debugUart.print(hdr.seq);
+      _debugUart.println(" action=forward_to_edge awaiting_time_sync");
+    }
+
     uint8_t frame[2 + 1 + 1 + 255 + 1] = {};
     const size_t outLen =
         BinaryPacket::encodeBaseFrame(pkt.rssi, pkt.data, pkt.len, frame, sizeof(frame));
@@ -96,6 +107,13 @@ void SmartFiresBaseApp::processIncomingLoRa() {
 
     _jetsonUart.write(frame, outLen);
     _rxForwardCount++;
+
+    if (validHeader && hdr.pkt_type == BinaryPacket::PKT_AWAKEN) {
+      _debugUart.print("[BaseApp][AWAKEN#");
+      _debugUart.print(_awakenRxCount);
+      _debugUart.print("] forwarded bytes=");
+      _debugUart.println(outLen);
+    }
   }
 }
 
@@ -110,6 +128,20 @@ void SmartFiresBaseApp::processIncomingJetsonUart() {
     }
 
     if (pushJetsonUartByte(static_cast<uint8_t>(raw), payload, len)) {
+      BinaryPacket::PktHeader hdr = {};
+      const bool validHeader =
+          len >= sizeof(BinaryPacket::PktHeader) &&
+          (memcpy(&hdr, payload, sizeof(BinaryPacket::PktHeader)),
+           hdr.magic == BinaryPacket::PKT_MAGIC);
+      if (validHeader) {
+        _debugUart.print("[BaseApp] UART_CMD type=");
+        _debugUart.print(pktTypeName(hdr.pkt_type));
+        _debugUart.print(" seq=");
+        _debugUart.print(hdr.seq);
+        _debugUart.print(" len=");
+        _debugUart.println(len);
+      }
+
       if (handleJetsonCommandPayload(payload, len)) {
         _cmdForwardCount++;
       }
@@ -130,7 +162,23 @@ bool SmartFiresBaseApp::handleJetsonCommandPayload(const uint8_t *payload, uint8
   }
 
   if (hdr.pkt_type == BinaryPacket::PKT_TIME_SYNC) {
-    return _radio.send(payload, len, _cfg.timeSyncBroadcastAddr);
+    BinaryPacket::TimeSyncPayload ts = {};
+    BinaryPacket::PktHeader ignored = {};
+    if (!BinaryPacket::decodeTimeSync(payload, len, ignored, ts)) {
+      return false;
+    }
+
+    const bool ok = _radio.send(payload, len, _cfg.timeSyncBroadcastAddr);
+    _timeSyncTxCount += ok ? 1u : 0u;
+    _debugUart.print("[BaseApp] TX TIME_SYNC seq=");
+    _debugUart.print(hdr.seq);
+    _debugUart.print(" sessionMs=");
+    _debugUart.print(ts.session_time_ms);
+    _debugUart.print(" to=");
+    _debugUart.print(_cfg.timeSyncBroadcastAddr);
+    _debugUart.print(" result=");
+    _debugUart.println(ok ? "OK" : "FAIL");
+    return ok;
   }
 
   if (hdr.pkt_type == BinaryPacket::PKT_ACK_SUMMARY) {
@@ -139,7 +187,19 @@ bool SmartFiresBaseApp::handleJetsonCommandPayload(const uint8_t *payload, uint8
     if (!BinaryPacket::decodeAckSummary(payload, len, ignored, ack)) {
       return false;
     }
-    return _radio.send(payload, len, ack.node_id);
+    const bool ok = _radio.send(payload, len, ack.node_id);
+    _ackTxCount += ok ? 1u : 0u;
+    _debugUart.print("[BaseApp] TX ACK_SUMMARY seq=");
+    _debugUart.print(hdr.seq);
+    _debugUart.print(" node=");
+    _debugUart.print(ack.node_id);
+    _debugUart.print(" base_seq=");
+    _debugUart.print(ack.ack_base_seq);
+    _debugUart.print(" mask=0x");
+    _debugUart.print(ack.ack_mask, HEX);
+    _debugUart.print(" result=");
+    _debugUart.println(ok ? "OK" : "FAIL");
+    return ok;
   }
 
   return false;
@@ -225,6 +285,12 @@ void SmartFiresBaseApp::maybeLogHealth() {
   _debugUart.print(_rxForwardCount);
   _debugUart.print(" cmd_fwd=");
   _debugUart.print(_cmdForwardCount);
+  _debugUart.print(" awaken_rx=");
+  _debugUart.print(_awakenRxCount);
+  _debugUart.print(" sync_tx=");
+  _debugUart.print(_timeSyncTxCount);
+  _debugUart.print(" ack_tx=");
+  _debugUart.print(_ackTxCount);
   _debugUart.print(" uart_err=");
   _debugUart.println(_uartFrameErrorCount);
 

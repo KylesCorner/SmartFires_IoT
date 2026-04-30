@@ -176,15 +176,6 @@ void DutyCycleController::updateSampling() {
       if (sensor->ready()) {
         if (sensor->sample()) {
           sampledAny = true;
-          Serial.print(sensor->name());
-          Serial.println(" Sampled");
-          // char buf[180];
-          // sensor->writeTelemetry(buf, sizeof(buf));
-          // Serial.println(buf);
-
-        } else {
-          Serial.print(sensor->name());
-          Serial.println(" Sampled Failed!");
         }
       }
 
