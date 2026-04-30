@@ -69,7 +69,19 @@ BatteryMonitor battery(batteryCfg, analog, clock);
 // Duty cycle
 // -----------------------------------------------------------------------------
 
-DutyCycleConfig dutyCfg = DutyCycleConfig::dutyCycleCfg();
+// Keep the dummy node streaming for long monitor sessions. The dummy SHT31
+// trigger reading is intentionally static, so the default duty-cycle config
+// would sample once, go back to sleep, and never cross the wake threshold
+// again.
+DutyCycleConfig dutyCfg = DutyCycleConfig::dutyCycleCfg(
+    3000,        // minSleepMs
+    1000,        // maxWakeMs
+    86400000UL,  // activeSampleMs (24 h)
+    500,         // samplePeriodMs
+    250,         // warmupMs
+    1.0f,        // tempDeltaThresholdC
+    5.0f,        // humidityDeltaThresholdPct
+    false);
 DutyCycleController duty(dutyCfg, sht31, sensors, sensorCount, clock);
 
 // -----------------------------------------------------------------------------

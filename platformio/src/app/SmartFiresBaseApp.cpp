@@ -2,6 +2,29 @@
 
 #include <Arduino.h>
 
+namespace {
+
+const char *pktTypeName(uint8_t pktType) {
+  switch (pktType) {
+    case BinaryPacket::PKT_AWAKEN:
+      return "AWAKEN";
+    case BinaryPacket::PKT_BUNDLE:
+      return "BUNDLE";
+    case BinaryPacket::PKT_STATUS:
+      return "STATUS";
+    case BinaryPacket::PKT_FULL_STATE:
+      return "FULL_STATE";
+    case BinaryPacket::PKT_TIME_SYNC:
+      return "TIME_SYNC";
+    case BinaryPacket::PKT_ACK_SUMMARY:
+      return "ACK_SUMMARY";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+}
+
 SmartFiresBaseApp::SmartFiresBaseApp(const Config &cfg,
                                      IClock &clock,
                                      ITdmaRadioDriver &radio,
@@ -44,6 +67,25 @@ void SmartFiresBaseApp::processIncomingLoRa() {
     if (!_radio.receive(pkt)) {
       return;
     }
+
+    BinaryPacket::PktHeader hdr = {};
+    const bool hasHeader = pkt.len >= sizeof(BinaryPacket::PktHeader);
+    const bool validHeader = hasHeader &&
+                             (memcpy(&hdr, pkt.data, sizeof(BinaryPacket::PktHeader)),
+                              hdr.magic == BinaryPacket::PKT_MAGIC);
+
+    _debugUart.print("[BaseApp] RX from=");
+    _debugUart.print(pkt.from);
+    _debugUart.print(" type=");
+    _debugUart.print(validHeader ? pktTypeName(hdr.pkt_type) : "RAW");
+    _debugUart.print(" seq=");
+    _debugUart.print(validHeader ? hdr.seq : 0);
+    _debugUart.print(" node=");
+    _debugUart.print(validHeader ? hdr.node_id : pkt.from);
+    _debugUart.print(" len=");
+    _debugUart.print(pkt.len);
+    _debugUart.print(" rssi=");
+    _debugUart.println(pkt.rssi);
 
     uint8_t frame[2 + 1 + 1 + 255 + 1] = {};
     const size_t outLen =
