@@ -142,7 +142,7 @@ bool SmartFiresBaseApp::sendDirectTimeSync(uint8_t nodeId,
     return false;
   }
 
-  const bool ok = _radio.send(payload, len, nodeId);
+  const bool ok = _radio.sendToWait(payload, len, nodeId);
   _timeSyncTxCount += ok ? 1u : 0u;
   _debugUart.print("[BaseApp] TX TIME_SYNC_LOCAL seq=");
   _debugUart.print(seq);
@@ -156,6 +156,8 @@ bool SmartFiresBaseApp::sendDirectTimeSync(uint8_t nodeId,
   _debugUart.print(reason ? reason : "unknown");
   _debugUart.print(" trigger_seq=");
   _debugUart.print(triggerSeq);
+  _debugUart.print(" link_ack=");
+  _debugUart.print(ok ? "OK" : "NO");
   _debugUart.print(" result=");
   _debugUart.println(ok ? "OK" : "FAIL");
   return ok;
