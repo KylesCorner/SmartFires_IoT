@@ -70,8 +70,14 @@ private:
   uint32_t _cmdForwardCount = 0;
   uint32_t _uartFrameErrorCount = 0;
   uint32_t _awakenRxCount = 0;
+  uint32_t _bundleRxCount = 0;
+  uint32_t _statusRxCount = 0;
+  uint32_t _fullStateRxCount = 0;
+  uint32_t _rawRxCount = 0;
   uint32_t _timeSyncTxCount = 0;
   uint32_t _ackTxCount = 0;
+  uint32_t _radioReceiveFailCount = 0;
+  uint32_t _lastRxMs = 0;
   uint32_t _sessionId = 0;
   uint8_t _timeSyncSeq = 0;
 

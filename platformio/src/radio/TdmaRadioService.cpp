@@ -253,21 +253,15 @@ void TdmaRadioService::drainTxQueue() {
       memcpy(&hdr, payload, sizeof(BinaryPacket::PktHeader));
     }
 
-    const bool useLinkAck = hdr.pkt_type == BinaryPacket::PKT_AWAKEN;
+    const bool useLinkAck = true;
 
-    const bool ok = useLinkAck
-                        ? _driver.sendToWait(payload, len, _cfg.baseAddr)
-                        : (_cfg.enableAppReliability
-                               ? _driver.send(payload, len, _cfg.baseAddr)
-                               : _driver.sendToWait(payload, len, _cfg.baseAddr));
+    const bool ok = _driver.sendToWait(payload, len, _cfg.baseAddr);
 
     if (ok) {
       _sentCount++;
       if (_cfg.enableAppReliability) {
         if (fromQueue) {
-          if (!useLinkAck) {
-            rememberSentTelemetry(payload, len);
-          }
+          rememberSentTelemetry(payload, len);
           Serial.print("[Radio][TX#");
           Serial.print(_sentCount);
           Serial.print("] SENT ");
@@ -276,9 +270,7 @@ void TdmaRadioService::drainTxQueue() {
           Serial.print(hdr.seq);
           Serial.print(" slot=");
           Serial.print(slotIndex);
-          if (useLinkAck) {
-            Serial.print(" link_ack=OK");
-          }
+          Serial.print(" link_ack=OK");
           printQueueSnapshot(_queue.count(), _queue.capacity(), _pendingCount,
                              _queue.droppedOldestCount());
           Serial.println();
@@ -321,9 +313,7 @@ void TdmaRadioService::drainTxQueue() {
       Serial.print(pktTypeName(hdr.pkt_type));
       Serial.print(" seq=");
       Serial.print(hdr.seq);
-      if (useLinkAck) {
-        Serial.print(" link_ack=NO");
-      }
+      Serial.print(" link_ack=NO");
       if (!fromQueue && _cfg.enableAppReliability && pendingIndex < kMaxReliabilityWindow &&
           _pending[pendingIndex].inUse) {
         Serial.print(" attempt=");

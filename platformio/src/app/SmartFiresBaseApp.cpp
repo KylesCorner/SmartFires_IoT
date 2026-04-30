@@ -68,14 +68,31 @@ void SmartFiresBaseApp::processIncomingLoRa() {
   while (_radio.available()) {
     ITdmaRadioDriver::ReceivedPacket pkt;
     if (!_radio.receive(pkt)) {
+      _radioReceiveFailCount++;
+      _debugUart.print("[BaseApp] RX_FAIL count=");
+      _debugUart.println(_radioReceiveFailCount);
       return;
     }
+
+    _lastRxMs = _clock.millis();
 
     BinaryPacket::PktHeader hdr = {};
     const bool hasHeader = pkt.len >= sizeof(BinaryPacket::PktHeader);
     const bool validHeader = hasHeader &&
                              (memcpy(&hdr, pkt.data, sizeof(BinaryPacket::PktHeader)),
                               hdr.magic == BinaryPacket::PKT_MAGIC);
+
+    if (!validHeader) {
+      _rawRxCount++;
+    } else if (hdr.pkt_type == BinaryPacket::PKT_AWAKEN) {
+      _awakenRxCount++;
+    } else if (hdr.pkt_type == BinaryPacket::PKT_BUNDLE) {
+      _bundleRxCount++;
+    } else if (hdr.pkt_type == BinaryPacket::PKT_STATUS) {
+      _statusRxCount++;
+    } else if (hdr.pkt_type == BinaryPacket::PKT_FULL_STATE) {
+      _fullStateRxCount++;
+    }
 
     _debugUart.print("[BaseApp] RX from=");
     _debugUart.print(pkt.from);
@@ -91,7 +108,6 @@ void SmartFiresBaseApp::processIncomingLoRa() {
     _debugUart.println(pkt.rssi);
 
     if (validHeader && hdr.pkt_type == BinaryPacket::PKT_AWAKEN) {
-      _awakenRxCount++;
       _debugUart.print("[BaseApp][AWAKEN#");
       _debugUart.print(_awakenRxCount);
       _debugUart.print("] node=");
@@ -327,16 +343,34 @@ void SmartFiresBaseApp::maybeLogHealth() {
     return;
   }
 
+  const uint32_t lastRxAgoMs = (_lastRxMs == 0) ? 0xFFFFFFFFu : (now - _lastRxMs);
+
   _debugUart.print("[BaseApp] rx_fwd=");
   _debugUart.print(_rxForwardCount);
   _debugUart.print(" cmd_fwd=");
   _debugUart.print(_cmdForwardCount);
   _debugUart.print(" awaken_rx=");
   _debugUart.print(_awakenRxCount);
+  _debugUart.print(" bundle_rx=");
+  _debugUart.print(_bundleRxCount);
+  _debugUart.print(" status_rx=");
+  _debugUart.print(_statusRxCount);
+  _debugUart.print(" full_rx=");
+  _debugUart.print(_fullStateRxCount);
+  _debugUart.print(" raw_rx=");
+  _debugUart.print(_rawRxCount);
   _debugUart.print(" sync_tx=");
   _debugUart.print(_timeSyncTxCount);
   _debugUart.print(" ack_tx=");
   _debugUart.print(_ackTxCount);
+  _debugUart.print(" rx_fail=");
+  _debugUart.print(_radioReceiveFailCount);
+  _debugUart.print(" last_rx_ms_ago=");
+  if (lastRxAgoMs == 0xFFFFFFFFu) {
+    _debugUart.print("never");
+  } else {
+    _debugUart.print(lastRxAgoMs);
+  }
   _debugUart.print(" uart_err=");
   _debugUart.println(_uartFrameErrorCount);
 
