@@ -79,7 +79,7 @@ DutyCycleController duty(dutyCfg, sht31, sensors, sensorCount, clock);
 PacketHandler::Config packetHandlerCfg = PacketHandler::Config::make(NODE_ID);
 PacketHandler packetHandler(packetHandlerCfg);
 
-TdmaConfig tdmaCfg = TdmaConfig::tdmaCfg();
+TdmaConfig tdmaCfg = TdmaConfig::tdmaCfg(NODE_ID, 0x01, NUM_SLOTS);
 TdmaClock tdmaClock(tdmaCfg, clock);
 TdmaTxQueue tdmaQueue(tdmaCfg.queueDepth);
 
