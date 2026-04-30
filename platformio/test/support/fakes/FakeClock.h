@@ -1,8 +1,10 @@
 #pragma once
 
+#include <Arduino.h>
+
 #include "interfaces/IClock.h"
 
-class FakeClock final : public IClock {
+class FakeClock : public IClock {
 public:
   uint32_t nowMs = 0;
 
@@ -10,11 +12,11 @@ public:
     return nowMs;
   }
 
-  void advance(uint32_t ms) {
-    nowMs += ms;
-  }
-
   void set(uint32_t ms) {
     nowMs = ms;
+  }
+
+  void advance(uint32_t ms) {
+    nowMs += ms;
   }
 };

@@ -2,36 +2,38 @@
 
 #include "drivers/ISht31Driver.h"
 
-#include <math.h>
 #include <stdint.h>
 
 class FakeSht31Driver final : public ISht31Driver {
 public:
   bool beginOk = true;
-  uint8_t lastBeginAddress = 0;
+
+  uint8_t lastAddress = 0;
+  uint32_t beginCount = 0;
+  uint32_t readTempCount = 0;
+  uint32_t readHumidityCount = 0;
 
   float tempC = 22.5f;
-  float humidityPct = 40.0f;
-
-  bool beginCalled = false;
-  uint32_t beginCount = 0;
-  uint32_t tempReadCount = 0;
-  uint32_t humidityReadCount = 0;
+  float humidityPct = 45.0f;
 
   bool begin(uint8_t address) override {
-    beginCalled = true;
     beginCount++;
-    lastBeginAddress = address;
+    lastAddress = address;
     return beginOk;
   }
 
   float readTemperatureC() override {
-    tempReadCount++;
+    readTempCount++;
     return tempC;
   }
 
   float readHumidityPct() override {
-    humidityReadCount++;
+    readHumidityCount++;
     return humidityPct;
+  }
+
+  void setReading(float tempC_, float humidityPct_) {
+    tempC = tempC_;
+    humidityPct = humidityPct_;
   }
 };

@@ -2,19 +2,16 @@
 #include <Arduino.h>
 #include <stdio.h>
 
-Sht31Sensor::Sht31Sensor(const Config &cfg, ISht31Driver &driver,
-                         IClock &clock)
+Sht31Sensor::Sht31Sensor(const Config &cfg, ISht31Driver &driver, IClock &clock)
     : _cfg(cfg), _driver(driver), _clock(clock) {}
 
-const char *Sht31Sensor::name() const {
-  return "sht31";
-}
+const char *Sht31Sensor::name() const { return "sht31"; }
 
 bool Sht31Sensor::begin() {
   _healthy = _driver.begin(_cfg.address);
   if (!_healthy) {
     Serial.println("SHT31 is not healthy!");
-  
+
     _state = SensorPowerState::Error;
     return false;
   }
@@ -77,6 +74,10 @@ bool Sht31Sensor::sample() {
   _reading.valid = !isnan(tempC) && !isnan(humidityPct);
   _reading.timestampMs = _clock.millis();
 
+  _triggerReading.valid = _reading.valid;
+  _triggerReading.tempC = _reading.tempC;
+  _triggerReading.humidityPct = _reading.humidityPct;
+
   _lastSampleMs = _clock.millis();
 
   if (!_reading.valid) {
@@ -87,6 +88,9 @@ bool Sht31Sensor::sample() {
 
   return true;
 }
+const ITriggerSensor::Reading &Sht31Sensor::triggerReading() const {
+  return _triggerReading;
+}
 
 bool Sht31Sensor::ready() const {
   if (!_healthy || _state != SensorPowerState::Ready) {
@@ -96,35 +100,24 @@ bool Sht31Sensor::ready() const {
   return _clock.millis() - _lastSampleMs >= _cfg.minSamplePeriodMs;
 }
 
-bool Sht31Sensor::healthy() const {
-  return _healthy;
-}
+bool Sht31Sensor::healthy() const { return _healthy; }
 
-SensorPowerState Sht31Sensor::powerState() const {
-  return _state;
-}
+SensorPowerState Sht31Sensor::powerState() const { return _state; }
 
-SensorDutyClass Sht31Sensor::dutyClass() const {
-  return _cfg.dutyClass;
-}
+SensorDutyClass Sht31Sensor::dutyClass() const { return _cfg.dutyClass; }
 
-const Sht31Sensor::Reading &Sht31Sensor::reading() const {
-  return _reading;
-}
+const Sht31Sensor::Reading &Sht31Sensor::reading() const { return _reading; }
 
-const void *Sht31Sensor::readingData() const {
-  return &_reading;
-}
+const void *Sht31Sensor::readingData() const { return &_reading; }
 
-size_t Sht31Sensor::readingSize() const {
-  return sizeof(Reading);
-}
+size_t Sht31Sensor::readingSize() const { return sizeof(Reading); }
 
 void Sht31Sensor::fillSnapshot(SensorSnapshot &snap) const {
-  if (!_reading.valid) return;
-  snap.tempC        = _reading.tempC;
-  snap.humidityPct  = _reading.humidityPct;
-  snap.sensorFlags |= 0x02;  // SHT31
+  if (!_reading.valid)
+    return;
+  snap.tempC = _reading.tempC;
+  snap.humidityPct = _reading.humidityPct;
+  snap.sensorFlags |= 0x02; // SHT31
 }
 
 size_t Sht31Sensor::writeTelemetry(char *out, size_t maxLen) const {
@@ -133,11 +126,8 @@ size_t Sht31Sensor::writeTelemetry(char *out, size_t maxLen) const {
   }
 
   const int n = snprintf(
-      out, maxLen,
-      "sht31,temp_c=%.2f,humidity_pct=%.2f,valid=%u,t_ms=%lu",
-      _reading.tempC,
-      _reading.humidityPct,
-      _reading.valid ? 1 : 0,
+      out, maxLen, "sht31,temp_c=%.2f,humidity_pct=%.2f,valid=%u,t_ms=%lu",
+      _reading.tempC, _reading.humidityPct, _reading.valid ? 1 : 0,
       static_cast<unsigned long>(_reading.timestampMs));
 
   if (n < 0) {

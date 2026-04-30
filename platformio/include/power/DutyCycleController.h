@@ -3,7 +3,7 @@
 #include "interfaces/IClock.h"
 #include "interfaces/ISensor.h"
 
-#include "sensors/Sht31Sensor.h"
+#include "sensors/ITriggerSensor.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -60,7 +60,7 @@ struct DutyCycleConfig {
 
 class DutyCycleController {
 public:
-  DutyCycleController(const DutyCycleConfig &cfg, Sht31Sensor &triggerSensor,
+  DutyCycleController(const DutyCycleConfig &cfg, ITriggerSensor &triggerSensor,
                       ISensor **sensors, size_t sensorCount, IClock &clock);
 
   bool begin();
@@ -84,7 +84,7 @@ private:
   DutyCyclePhase _phase = DutyCyclePhase::NotStarted;
   DutyCycleError _error = DutyCycleError::None;
 
-  Sht31Sensor &_triggerSensor;
+  ITriggerSensor &_triggerSensor;
 
   float _baselineTempC = NAN;
   float _baselineHumidityPct = NAN;
@@ -94,7 +94,7 @@ private:
 
   void transitionTo(DutyCyclePhase next);
 
-  bool thresholdCrossed(const Sht31Sensor::Reading &r) const;
+  bool thresholdCrossed(const ITriggerSensor::Reading &r) const;
   void updateSleeping();
   void updateWakingSensors();
   void updateSampling();

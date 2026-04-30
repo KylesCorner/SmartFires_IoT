@@ -3,12 +3,13 @@
 #include "drivers/ISht31Driver.h"
 #include "interfaces/IClock.h"
 #include "interfaces/ISensor.h"
+#include "sensors/ITriggerSensor.h"
 
 #include <math.h>
 #include <stddef.h>
 #include <stdint.h>
 
-class Sht31Sensor final : public ISensor {
+class Sht31Sensor final : public ISensor , public ITriggerSensor{
 public:
   struct Config {
     uint8_t address;
@@ -55,6 +56,7 @@ public:
 
   const void *readingData() const override;
   size_t readingSize() const override;
+  const ITriggerSensor::Reading &triggerReading() const override;
 
   size_t writeTelemetry(char *out, size_t maxLen) const override;
   void fillSnapshot(SensorSnapshot &snap) const override;
@@ -65,6 +67,7 @@ private:
   IClock &_clock;
 
   Reading _reading;
+  ITriggerSensor::Reading _triggerReading;
 
   bool _healthy = false;
   SensorPowerState _state = SensorPowerState::Off;
