@@ -3,12 +3,14 @@
 // Binary wire format for SmartFires telemetry.
 //
 // LoRa payloads — node -> base:
-//   AWAKEN:     [PktHeader:4]                                                    =  4 bytes
-//   BUNDLE:     [PktHeader:4][FullStatePayload:20][n_deltas:1][DeltaPayload×n]  ≤ 193 bytes
-//   STATUS:     [PktHeader:4][StatusPayload:12]                                  = 16 bytes
+//   AWAKEN:     [PktHeader:4][crc8:1]                                                     =   5 bytes
+//   BUNDLE:     [PktHeader:4][FullStatePayload:20][n_deltas:1][DeltaPayload×n][crc8:1]  ≤ 194 bytes
+//   STATUS:     [PktHeader:4][StatusPayload:12][crc8:1]                                 =  17 bytes
 //
 // LoRa TIME_SYNC — base -> all nodes (broadcast):
-//   TIME_SYNC:  [PktHeader:4][TimeSyncPayload:8]                                 = 12 bytes
+//   TIME_SYNC:  [PktHeader:4][TimeSyncPayload:8][crc8:1]                                =  13 bytes
+//
+// CRC-8/MAXIM (polynomial 0x31) covers all preceding bytes in the LoRa payload.
 //
 // UART TIME_SYNC frame — Jetson -> base (16 bytes):
 //   [0xAA][0x55][len=12][PktHeader(PKT_TIME_SYNC):4][TimeSyncPayload:8][crc8]
@@ -115,20 +117,20 @@ static_assert(sizeof(DeltaPayload)     == 12, "DeltaPayload must be 12 bytes");
 
 static constexpr uint8_t kBundleMaxDeltas = 14;
 
-// LoRa payload sizes (no UART framing).
+// LoRa payload sizes (no UART framing). Each includes a trailing CRC-8 byte.
 static constexpr size_t kAwakenLoRaSize =
-    sizeof(PktHeader);                                                  //  4
+    sizeof(PktHeader) + 1;                                              //   5
 static constexpr size_t kStatusLoRaSize =
-    sizeof(PktHeader) + sizeof(StatusPayload);                          // 16
+    sizeof(PktHeader) + sizeof(StatusPayload) + 1;                      //  17
 static constexpr size_t kTimeSyncLoRaSize =
-    sizeof(PktHeader) + sizeof(TimeSyncPayload);                        // 12
+    sizeof(PktHeader) + sizeof(TimeSyncPayload) + 1;                    //  13
 static constexpr size_t kAckSummaryLoRaSize =
-    sizeof(PktHeader) + sizeof(AckSummaryPayload);                      // 8
+    sizeof(PktHeader) + sizeof(AckSummaryPayload) + 1;                  //   9
 static constexpr size_t kFullStateLoRaSize =
-    sizeof(PktHeader) + sizeof(FullStatePayload);                       // 24
+    sizeof(PktHeader) + sizeof(FullStatePayload) + 1;                   //  25
 static constexpr size_t kMaxBundleLoRaSize =
     sizeof(PktHeader) + sizeof(FullStatePayload) + 1 +
-    kBundleMaxDeltas * sizeof(DeltaPayload);                            // 193
+    kBundleMaxDeltas * sizeof(DeltaPayload) + 1;                        // 194
 
 // ---------- CRC-8/MAXIM (polynomial 0x31) ----------
 
@@ -157,6 +159,7 @@ inline uint8_t encodeAwakenPayload(
     hdr.node_id  = node_id;
     hdr.seq      = seq;
     memcpy(buf, &hdr, sizeof(PktHeader));
+    buf[sizeof(PktHeader)] = crc8(buf, sizeof(PktHeader));
     return static_cast<uint8_t>(kAwakenLoRaSize);
 }
 
@@ -175,6 +178,7 @@ inline uint8_t encodeStatusPayload(
     hdr.seq      = seq;
     memcpy(buf,                    &hdr, sizeof(PktHeader));
     memcpy(buf + sizeof(PktHeader), &sp,  sizeof(StatusPayload));
+    buf[sizeof(PktHeader) + sizeof(StatusPayload)] = crc8(buf, sizeof(PktHeader) + sizeof(StatusPayload));
     return static_cast<uint8_t>(kStatusLoRaSize);
 }
 
@@ -193,6 +197,7 @@ inline uint8_t encodeTimeSyncPayload(
     hdr.seq      = seq;
     memcpy(buf,                    &hdr, sizeof(PktHeader));
     memcpy(buf + sizeof(PktHeader), &ts,  sizeof(TimeSyncPayload));
+    buf[sizeof(PktHeader) + sizeof(TimeSyncPayload)] = crc8(buf, sizeof(PktHeader) + sizeof(TimeSyncPayload));
     return static_cast<uint8_t>(kTimeSyncLoRaSize);
 }
 
@@ -209,6 +214,7 @@ inline uint8_t encodeAckSummaryPayload(
     hdr.seq      = seq;
     memcpy(buf,                    &hdr, sizeof(PktHeader));
     memcpy(buf + sizeof(PktHeader), &as, sizeof(AckSummaryPayload));
+    buf[sizeof(PktHeader) + sizeof(AckSummaryPayload)] = crc8(buf, sizeof(PktHeader) + sizeof(AckSummaryPayload));
     return static_cast<uint8_t>(kAckSummaryLoRaSize);
 }
 
@@ -226,7 +232,7 @@ inline uint8_t encodeBundlePayload(
     if (n_deltas > kBundleMaxDeltas) return 0;
 
     const size_t len = sizeof(PktHeader) + sizeof(FullStatePayload)
-                     + 1 + static_cast<size_t>(n_deltas) * sizeof(DeltaPayload);
+                     + 1 + static_cast<size_t>(n_deltas) * sizeof(DeltaPayload) + 1; // +1 CRC
     if (buf_size < len) return 0;
 
     PktHeader hdr;
@@ -243,6 +249,7 @@ inline uint8_t encodeBundlePayload(
         memcpy(buf + off, &deltas[i], sizeof(DeltaPayload));
         off += sizeof(DeltaPayload);
     }
+    buf[off] = crc8(buf, off);
 
     return static_cast<uint8_t>(len);
 }
@@ -303,8 +310,12 @@ inline bool decodeBundle(
     PktHeader& hdr_out, FullStatePayload& ref_out,
     uint8_t& delta_count_out, DeltaPayload* deltas_out)
 {
-    const size_t kMin = sizeof(PktHeader) + sizeof(FullStatePayload) + 1;
+    // Minimum: header + FullState + n_deltas byte + CRC byte (0 deltas)
+    const size_t kMin = sizeof(PktHeader) + sizeof(FullStatePayload) + 1 + 1;
     if (len < kMin) return false;
+
+    // Verify CRC — covers all bytes except the trailing CRC byte
+    if (crc8(raw, len - 1) != raw[len - 1]) return false;
 
     size_t off = 0;
     memcpy(&hdr_out, raw + off, sizeof(PktHeader)); off += sizeof(PktHeader);
@@ -313,7 +324,8 @@ inline bool decodeBundle(
     memcpy(&ref_out, raw + off, sizeof(FullStatePayload)); off += sizeof(FullStatePayload);
     delta_count_out = raw[off++];
     if (delta_count_out > kBundleMaxDeltas) return false;
-    if (len < off + static_cast<size_t>(delta_count_out) * sizeof(DeltaPayload)) return false;
+    // Remaining data bytes: delta_count * sizeof(DeltaPayload), then 1 CRC byte
+    if (len < off + static_cast<size_t>(delta_count_out) * sizeof(DeltaPayload) + 1) return false;
 
     for (uint8_t i = 0; i < delta_count_out; ++i) {
         memcpy(&deltas_out[i], raw + off, sizeof(DeltaPayload));
@@ -327,6 +339,7 @@ inline bool decodeStatus(
     PktHeader& hdr_out, StatusPayload& sp_out)
 {
     if (len < kStatusLoRaSize) return false;
+    if (crc8(raw, len - 1) != raw[len - 1]) return false;
     memcpy(&hdr_out, raw,                    sizeof(PktHeader));
     memcpy(&sp_out,  raw + sizeof(PktHeader), sizeof(StatusPayload));
     return hdr_out.magic == PKT_MAGIC && hdr_out.pkt_type == PKT_STATUS;
@@ -337,6 +350,7 @@ inline bool decodeTimeSync(
     PktHeader& hdr_out, TimeSyncPayload& ts_out)
 {
     if (len < kTimeSyncLoRaSize) return false;
+    if (crc8(raw, len - 1) != raw[len - 1]) return false;
     memcpy(&hdr_out, raw,                    sizeof(PktHeader));
     memcpy(&ts_out,  raw + sizeof(PktHeader), sizeof(TimeSyncPayload));
     return hdr_out.magic == PKT_MAGIC && hdr_out.pkt_type == PKT_TIME_SYNC;
@@ -347,6 +361,7 @@ inline bool decodeAckSummary(
     PktHeader& hdr_out, AckSummaryPayload& as_out)
 {
     if (len < kAckSummaryLoRaSize) return false;
+    if (crc8(raw, len - 1) != raw[len - 1]) return false;
     memcpy(&hdr_out, raw,                    sizeof(PktHeader));
     memcpy(&as_out,  raw + sizeof(PktHeader), sizeof(AckSummaryPayload));
     return hdr_out.magic == PKT_MAGIC && hdr_out.pkt_type == PKT_ACK_SUMMARY;
