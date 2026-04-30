@@ -164,7 +164,10 @@ bool SmartFiresBaseApp::pushJetsonUartByte(uint8_t b,
       return false;
 
     case UartRxState::Stage::WaitLen:
-      if (b == 0 || b > sizeof(_uartRx.data)) {
+      // `b` is uint8_t (0..255). Only apply upper-bound check when buffer < 255.
+      if (b == 0 ||
+          (sizeof(_uartRx.data) < 0xFFu &&
+           static_cast<size_t>(b) > sizeof(_uartRx.data))) {
         _uartFrameErrorCount++;
         resetJetsonUartRx();
         return false;
