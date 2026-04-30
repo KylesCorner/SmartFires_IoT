@@ -58,10 +58,12 @@ void loop() {
 #include "platform/AdafruitSht31Driver.h"
 #include "platform/AdafruitGpsDriver.h"
 #include "platform/SparkfunIcm20948Driver.h"
+#include "platform/SensirionUartSps30Driver.h"
 
 #include "sensors/Icm20948Sensor.h"
 #include "sensors/Sht31Sensor.h"
 #include "sensors/Pa1010dGpsSensor.h"
+#include "sensors/Sps30Sensor.h"
 
 #ifndef NODE_ID
 #define NODE_ID 1
@@ -99,10 +101,15 @@ SparkfunIcm20948Driver imuDriver;
 Icm20948Sensor::Config imuCfg = Icm20948Sensor::Config::makeImuCfg();
 Icm20948Sensor imu(imuCfg, imuDriver, clock);
 
+Sps30Sensor::Config sps30Cfg = Sps30Sensor::Config::makeSps30Cfg();
+SensirionUartSps30Driver sps30Driver(Serial1);
+Sps30Sensor sps30(sps30Cfg, sps30Driver, clock);
+
 ISensor* sensors[] = {
     &sht31,
     &gps,
     &imu,
+    &sps30,
 };
 
 constexpr size_t sensorCount = sizeof(sensors) / sizeof(sensors[0]);
@@ -166,22 +173,24 @@ void scanI2C() {
 void setup() {
   delay(1000);
   Serial.begin(115200);
+  Serial1.begin(115200);
   while (!Serial && millis() < 3000) {
   }
 
   Wire.begin();
   scanI2C();
-  // if (!imu.begin()) {
-  //   Serial.println("IMU begin FAILED");
+
+  // if (!sps30.begin()) {
+  //   Serial.println("SPS begin FAILED");
   //   while (true) {
   //     delay(1000);
   //   }
   // }
   //
-  // Serial.println("IMU begin OK");
+  // Serial.println("SPS begin OK");
   //
-  // if (!imu.wake()) {
-  //   Serial.println("IMU wake FAILED");
+  // if (!sps30.wake()) {
+  //   Serial.println("SPS wake FAILED");
   // }
 
   Serial.println("SmartFires Feather TDMA node starting...");
@@ -197,19 +206,19 @@ void setup() {
 }
 
 void loop() {
-  // imu.service();
+  // sps30.service();
   //
-  // if (imu.ready()) {
-  //   if (imu.sample()) {
+  // if (sps30.ready()) {
+  //   if (sps30.sample()) {
   //     char buf[180];
-  //     imu.writeTelemetry(buf, sizeof(buf));
+  //     sps30.writeTelemetry(buf, sizeof(buf));
   //     Serial.println(buf);
   //   } else {
-  //     Serial.println("IMU sample failed");
+  //     Serial.println("SPS sample failed");
   //   }
   // }
   //
-  // delay(10);
+  // delay(1000);
   app.update();
   delay(25);
 }

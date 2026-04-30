@@ -1,6 +1,6 @@
 #include "power/DutyCycleController.h"
 #include "sensors/ITriggerSensor.h"
-// #include <Arduino.h>
+#include <Arduino.h>
 
 DutyCycleController::DutyCycleController(const DutyCycleConfig &cfg,
                                          ITriggerSensor &triggerSensor,
@@ -176,6 +176,15 @@ void DutyCycleController::updateSampling() {
       if (sensor->ready()) {
         if (sensor->sample()) {
           sampledAny = true;
+          Serial.print(sensor->name());
+          Serial.println(" Sampled");
+          // char buf[180];
+          // sensor->writeTelemetry(buf, sizeof(buf));
+          // Serial.println(buf);
+
+        } else {
+          Serial.print(sensor->name());
+          Serial.println(" Sampled Failed!");
         }
       }
 
