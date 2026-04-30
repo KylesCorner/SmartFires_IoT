@@ -69,7 +69,7 @@ When making changes:
 - node and base firmware composition: `platformio/src/main.cpp`
 - node application coordinator: `platformio/src/app/SmartFiresNodeApp.cpp`
 - base station coordinator: `platformio/src/app/SmartFiresBaseApp.cpp`
-- Jetson ingest service: `edge/edge-reciever/src/smartfires_edge/ingest_service.py`
+- Jetson ingest service: `edge/edge-receiver/src/smartfires_edge/ingest_service.py`
 
 ## License and Project Notes
 

@@ -29,7 +29,7 @@ Wildfire IoT sensor network. Remote drone nodes collect environmental data (temp
     |   Jetson → Feather: TIME_SYNC command frames (16 bytes, every 10 min)
     v
 [Jetson Orin Nano]
-  edge/edge-reciever/src/smartfires_edge/ingest_service.py → rotated telemetry CSV
+  edge/edge-receiver/src/smartfires_edge/ingest_service.py → rotated telemetry CSV
     optionally polls ES-W302 anemometer and logs local wind with node telemetry
     Sends periodic TIME_SYNC frames to keep all nodes on a common session clock.
 ```
@@ -102,7 +102,7 @@ SmartFires_IoT/
 │       └── test_*/                       Unity test suites (run on native)
 ├── edge/                          Jetson Python code
 │   ├── anemometer_read.py         Standalone ES-W302 reader (uses smartfires_edge module)
-│   └── edge-reciever/
+│   └── edge-receiver/
 │       ├── pyproject.toml         Package + dependencies (pyserial, minimalmodbus)
 │       ├── README.md
 │       └── src/smartfires_edge/
@@ -374,7 +374,7 @@ SmartFiresNodeApp::update() — sensing begins
 | TIME_SYNC binary decode | **Done** | TdmaRadioService uses BinaryPacket::decodeTimeSync() |
 | Base station port | **Pending** | feather_m0_lora env exists but firmware not ported to new class structure |
 | Remaining sensors | **Pending** | Wind, GPS, SPS30, IMU — implement fillSnapshot() as each is wired in |
-| edge-reciever packet bundle decode | **Done** | `smartfires_edge/packet.py` updated for 20-byte FullStatePayload + compact 12-byte deltas |
+| edge-receiver packet bundle decode | **Done** | `smartfires_edge/packet.py` updated for 20-byte FullStatePayload + compact 12-byte deltas |
 | Jetson anemometer integration | **Done** | `smartfires-edge receive` can poll ES-W302 and add `jetson_wind_mps` + `jetson_wind_dir_deg` to CSV rows |
 
 Full details and design notes in `documentation/BINARY_PACKET_PIPELINE.md`.
@@ -385,13 +385,13 @@ Sizing and scaling math tables are in `documentation/BANDWIDTH_SCALING.md`.
 ## Edge Receiver (Jetson)
 
 ```bash
-pip install -e edge/edge-reciever
+pip install -e edge/edge-receiver
 smartfires-edge receive --port /dev/ttyTHS1 --data-dir /mnt/nvme_drive/data
 smartfires-edge receive --sync-interval 600      # 10-min sync interval
 smartfires-edge receive --anemometer-port /dev/ttyUSB0 --anemometer-baud 9600 --anemometer-address 1
 ```
 
-`edge/edge-reciever/src/smartfires_edge/packet.py` mirrors `BinaryPacket.h` for STATUS/FULL_STATE/BUNDLE parsing and
+`edge/edge-receiver/src/smartfires_edge/packet.py` mirrors `BinaryPacket.h` for STATUS/FULL_STATE/BUNDLE parsing and
 bundle delta expansion.
 
 Jetson UART setup (one-time):

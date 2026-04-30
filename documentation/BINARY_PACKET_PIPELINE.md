@@ -148,7 +148,7 @@ Current compact delta encoding uses mixed precision to improve bundle density:
 
 ### 4. Edge receiver (Jetson)
 
-`edge/edge-reciever/src/smartfires_edge/packet.py` must stay aligned with `BinaryPacket.h` for delta expansion.
+`edge/edge-receiver/src/smartfires_edge/packet.py` must stay aligned with `BinaryPacket.h` for delta expansion.
 Current wire assumptions are FullStatePayload=20 bytes, DeltaPayload=12 bytes,
 and max deltas per bundle=14.
 
