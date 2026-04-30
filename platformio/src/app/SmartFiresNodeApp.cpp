@@ -71,12 +71,14 @@ void SmartFiresNodeApp::update() {
   if (_duty.telemetryReady()) {
     const SensorSnapshot snap = buildSnapshot();
     _packetHandler.push(snap);
+    APP_LOG("[App] Telemetry ready -- snapshot built");
 
     if (_packetHandler.statusPacketReady()) {
       uint8_t buf[BinaryPacket::kStatusLoRaSize];
       const uint8_t len = _packetHandler.takeStatusPacket(buf, sizeof(buf));
       if (len > 0) {
         _radio.enqueueTelemetry(buf, len);
+        APP_LOG("[App] STATUS enqueued");
       }
     }
 
@@ -85,6 +87,7 @@ void SmartFiresNodeApp::update() {
       const uint8_t len = _packetHandler.takeBundle(buf, sizeof(buf));
       if (len > 0) {
         _radio.enqueueTelemetry(buf, len);
+        APP_LOG("[App] BUNDLE enqueued");
       }
     }
 
@@ -94,10 +97,13 @@ void SmartFiresNodeApp::update() {
 
 void SmartFiresNodeApp::sendAwakenPacket() {
   uint8_t buf[BinaryPacket::kAwakenLoRaSize];
+  const uint8_t seqUsed = _awakenSeq;
   const uint8_t len = BinaryPacket::encodeAwakenPayload(
       _cfg.nodeId, _awakenSeq++, buf, sizeof(buf));
   if (len > 0) {
     _radio.enqueueTelemetry(buf, len);
+    Serial.print("[App] AWAKEN enqueued seq=");
+    Serial.println(seqUsed);
   }
 }
 

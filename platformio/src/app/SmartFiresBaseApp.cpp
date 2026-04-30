@@ -1,10 +1,12 @@
 #include "app/SmartFiresBaseApp.h"
 
+#include <Arduino.h>
+
 SmartFiresBaseApp::SmartFiresBaseApp(const Config &cfg,
                                      IClock &clock,
                                      ITdmaRadioDriver &radio,
                                      HardwareSerial &jetsonUart,
-                                     HardwareSerial &debugUart)
+                                     Print &debugUart)
     : _cfg(cfg),
       _clock(clock),
       _radio(radio),

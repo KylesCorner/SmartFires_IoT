@@ -4,20 +4,22 @@
 #include "radio/ITdmaRadioDriver.h"
 #include "telemetry/BinaryPacket.h"
 
-#include <Arduino.h>
 #include <stddef.h>
 #include <stdint.h>
+
+class HardwareSerial;
+class Print;
 
 class SmartFiresBaseApp {
 public:
   struct Config {
     uint8_t baseAddr = 0x01;
     uint8_t timeSyncBroadcastAddr = 0xFF;
-    uint16_t uartBaud = 115200;
+    uint32_t uartBaud = 115200;
 
     static Config baseCfg(uint8_t baseAddr_ = 0x01,
                           uint8_t timeSyncBroadcastAddr_ = 0xFF,
-                          uint16_t uartBaud_ = 115200) {
+                          uint32_t uartBaud_ = 115200) {
       Config cfg;
       cfg.baseAddr = baseAddr_;
       cfg.timeSyncBroadcastAddr = timeSyncBroadcastAddr_;
@@ -30,7 +32,7 @@ public:
                     IClock &clock,
                     ITdmaRadioDriver &radio,
                     HardwareSerial &jetsonUart,
-                    HardwareSerial &debugUart);
+                    Print &debugUart);
 
   bool begin();
   void update();
@@ -58,7 +60,7 @@ private:
   IClock &_clock;
   ITdmaRadioDriver &_radio;
   HardwareSerial &_jetsonUart;
-  HardwareSerial &_debugUart;
+  Print &_debugUart;
 
   UartRxState _uartRx;
   bool _initialized = false;

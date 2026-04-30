@@ -2,9 +2,22 @@
 
 #include "telemetry/BinaryPacket.h"
 
+#include <Arduino.h>
 #include <string.h>
 
 namespace {
+
+static const char* pktTypeName(uint8_t pktType) {
+  switch (pktType) {
+    case BinaryPacket::PKT_AWAKEN:      return "AWAKEN";
+    case BinaryPacket::PKT_BUNDLE:      return "BUNDLE";
+    case BinaryPacket::PKT_STATUS:      return "STATUS";
+    case BinaryPacket::PKT_FULL_STATE:  return "FULL_STATE";
+    case BinaryPacket::PKT_TIME_SYNC:   return "TIME_SYNC";
+    case BinaryPacket::PKT_ACK_SUMMARY: return "ACK_SUMMARY";
+    default:                            return "UNKNOWN";
+  }
+}
 
 // Conservative slot-budget estimates to prevent crossing slot boundaries.
 // Values include airtime plus software/radio overhead margin.
@@ -168,6 +181,11 @@ void TdmaRadioService::drainTxQueue() {
       }
     }
 
+    BinaryPacket::PktHeader hdr = {};
+    if (len >= sizeof(BinaryPacket::PktHeader)) {
+      memcpy(&hdr, payload, sizeof(BinaryPacket::PktHeader));
+    }
+
     const bool ok = _cfg.enableAppReliability
                         ? _driver.send(payload, len, _cfg.baseAddr)
                         : _driver.sendToWait(payload, len, _cfg.baseAddr);
@@ -177,13 +195,38 @@ void TdmaRadioService::drainTxQueue() {
       if (_cfg.enableAppReliability) {
         if (fromQueue) {
           rememberSentTelemetry(payload, len);
+          Serial.print("[Radio] SENT ");
+          Serial.print(pktTypeName(hdr.pkt_type));
+          Serial.print("  seq=");
+          Serial.print(hdr.seq);
+          Serial.print("  slot=");
+          Serial.println(slotIndex);
         } else {
+          Serial.print("[Radio] RETX ");
+          Serial.print(pktTypeName(hdr.pkt_type));
+          Serial.print("  seq=");
+          Serial.print(hdr.seq);
+          Serial.print("  attempt=");
+          Serial.print(_pending[pendingIndex].attempts + 1);
+          Serial.print("  slot=");
+          Serial.println(slotIndex);
           markRetransmitSent(pendingIndex);
         }
+      } else {
+        Serial.print("[Radio] SENT ");
+        Serial.print(pktTypeName(hdr.pkt_type));
+        Serial.print("  seq=");
+        Serial.print(hdr.seq);
+        Serial.print("  slot=");
+        Serial.println(slotIndex);
       }
     } else {
       _failedSendCount++;
       _error = TdmaRadioError::SendFailed;
+      Serial.print("[Radio] FAIL ");
+      Serial.print(pktTypeName(hdr.pkt_type));
+      Serial.print("  seq=");
+      Serial.println(hdr.seq);
 
       // Match original behavior for fresh telemetry: failed send is dropped, not requeued.
       // Retransmit entries are retained unless expired/attempt-limited.
@@ -210,10 +253,18 @@ void TdmaRadioService::checkIncomingTimeSync() {
 
     if (isTimeSyncPacket(packet, sessionMs)) {
       _tdmaClock.applySync(sessionMs);
+      Serial.print("[Radio] TIME_SYNC rcv  sessionMs=");
+      Serial.println(sessionMs);
       continue;
     }
 
     if (_cfg.enableAppReliability && isAckSummaryPacket(packet, ack)) {
+      Serial.print("[Radio] ACK_SUMMARY rcv  node=");
+      Serial.print(ack.node_id);
+      Serial.print("  base_seq=");
+      Serial.print(ack.ack_base_seq);
+      Serial.print("  mask=0x");
+      Serial.println(ack.ack_mask, HEX);
       applyAckSummary(ack);
     }
   }

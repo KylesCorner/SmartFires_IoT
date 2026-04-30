@@ -104,18 +104,26 @@ void setup() {
     Serial.begin(115200);
     while (!Serial && millis() < 3000) {}
 
-    Serial.println("[DUMMY] SmartFires node starting in synthetic data mode");
-    Serial.print("[DUMMY] NODE_ID=");
-    Serial.print(NODE_ID);
-    Serial.print("  NUM_SLOTS=");
-    Serial.println(NUM_SLOTS);
+    Serial.println("========================================");
+    Serial.println("[DUMMY] SmartFires node  --  synthetic data mode");
+    Serial.println("========================================");
+    Serial.print("[DUMMY] NODE_ID      = "); Serial.println(NODE_ID);
+    Serial.print("[DUMMY] MY_SLOT      = "); Serial.println((NODE_ID - 1) % NUM_SLOTS);
+    Serial.print("[DUMMY] NUM_SLOTS    = "); Serial.println(NUM_SLOTS);
+    Serial.print("[DUMMY] SLOT_WIDTH   = "); Serial.print(tdmaCfg.slotWidthMs); Serial.println(" ms");
+    Serial.print("[DUMMY] GUARD        = "); Serial.print(tdmaCfg.guardMs);      Serial.println(" ms");
+    Serial.print("[DUMMY] SYNC_STALE   = "); Serial.print(tdmaCfg.syncStaleMs / 1000); Serial.println(" s");
+    Serial.print("[DUMMY] APP_RELIAB   = "); Serial.println(tdmaCfg.enableAppReliability ? "ON" : "OFF");
+    Serial.print("[DUMMY] RETX_WINDOW  = "); Serial.println(tdmaCfg.reliabilityWindowDepth);
+    Serial.print("[DUMMY] RETX_MAX_ATT = "); Serial.println(tdmaCfg.reliabilityMaxAttempts);
+    Serial.println("========================================");
 
     if (!app.begin()) {
         Serial.println("[DUMMY] app begin failed");
         while (true) { delay(500); }
     }
 
-    Serial.println("[DUMMY] app ready — transmitting synthetic data");
+    Serial.println("[DUMMY] app ready  --  transmitting synthetic data");
 }
 
 void loop() {
