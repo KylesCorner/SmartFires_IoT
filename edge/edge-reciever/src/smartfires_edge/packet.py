@@ -51,10 +51,11 @@ TIME_SYNC_PAYLOAD_SIZE = struct.calcsize(TIME_SYNC_PAYLOAD_FMT)  # 8
 ACK_SUMMARY_PAYLOAD_FMT  = "<BBH"
 ACK_SUMMARY_PAYLOAD_SIZE = struct.calcsize(ACK_SUMMARY_PAYLOAD_FMT)  # 4
 
-STATUS_LORA_SIZE      = HEADER_SIZE + STATUS_PAYLOAD_SIZE
-LORA_PAYLOAD_SIZE     = HEADER_SIZE + FULL_STATE_SIZE
-LORA_BUNDLE_MAX_SIZE  = HEADER_SIZE + FULL_STATE_SIZE + 1 + BUNDLE_MAX_DELTAS * DELTA_SIZE
-TIME_SYNC_LORA_SIZE   = HEADER_SIZE + TIME_SYNC_PAYLOAD_SIZE
+STATUS_LORA_SIZE      = HEADER_SIZE + STATUS_PAYLOAD_SIZE + 1
+LORA_PAYLOAD_SIZE     = HEADER_SIZE + FULL_STATE_SIZE + 1
+LORA_BUNDLE_MAX_SIZE  = HEADER_SIZE + FULL_STATE_SIZE + 1 + BUNDLE_MAX_DELTAS * DELTA_SIZE + 1
+TIME_SYNC_LORA_SIZE   = HEADER_SIZE + TIME_SYNC_PAYLOAD_SIZE + 1
+ACK_SUMMARY_LORA_SIZE = HEADER_SIZE + ACK_SUMMARY_PAYLOAD_SIZE + 1
 
 BASE_FRAME_MIN_DATA_LEN = 5
 BASE_FRAME_MAX_DATA_LEN = 1 + LORA_BUNDLE_MAX_SIZE
@@ -77,16 +78,18 @@ def crc8(data: bytes) -> int:
 
 def encode_time_sync_frame(session_id: int, session_time_ms: int, seq: int = 0) -> bytes:
     """Encode a TIME_SYNC UART frame from Jetson to the base Feather."""
-    data_len = TIME_SYNC_DATA_LEN
     hdr = struct.pack(HEADER_FMT, PKT_MAGIC, PKT_TIME_SYNC, 0, seq & 0xFF)
     ts = struct.pack(
         TIME_SYNC_PAYLOAD_FMT,
         session_id & 0xFFFFFFFF,
         session_time_ms & 0xFFFFFFFF,
     )
-    payload = hdr + ts
-    frame_crc = crc8(bytes([data_len]) + payload)
-    return bytes([FRAME_M0, FRAME_M1, data_len]) + payload + bytes([frame_crc])
+    lora_payload_no_crc = hdr + ts
+    lora_crc = crc8(lora_payload_no_crc)
+    lora_payload = lora_payload_no_crc + bytes([lora_crc])
+    data_len = len(lora_payload)  # TIME_SYNC_LORA_SIZE = 13
+    frame_crc = crc8(bytes([data_len]) + lora_payload)
+    return bytes([FRAME_M0, FRAME_M1, data_len]) + lora_payload + bytes([frame_crc])
 
 
 def encode_ack_summary_frame(node_id: int, ack_base_seq: int, ack_mask: int, seq: int = 0) -> bytes:
@@ -98,10 +101,12 @@ def encode_ack_summary_frame(node_id: int, ack_base_seq: int, ack_mask: int, seq
         ack_base_seq & 0xFF,
         ack_mask & 0xFFFF,
     )
-    payload = hdr + ack
-    data_len = len(payload)
-    frame_crc = crc8(bytes([data_len]) + payload)
-    return bytes([FRAME_M0, FRAME_M1, data_len]) + payload + bytes([frame_crc])
+    lora_payload_no_crc = hdr + ack
+    lora_crc = crc8(lora_payload_no_crc)
+    lora_payload = lora_payload_no_crc + bytes([lora_crc])
+    data_len = len(lora_payload)  # ACK_SUMMARY_LORA_SIZE = 9
+    frame_crc = crc8(bytes([data_len]) + lora_payload)
+    return bytes([FRAME_M0, FRAME_M1, data_len]) + lora_payload + bytes([frame_crc])
 
 
 def _full_state_fields(
@@ -142,6 +147,8 @@ def decode_gps(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Optional[
     """Decode a raw LoRa STATUS payload and return GPS fields when valid."""
     if len(raw_lora_payload) < STATUS_LORA_SIZE:
         return None
+    if crc8(raw_lora_payload[:-1]) != raw_lora_payload[-1]:
+        return None
 
     magic, pkt_type, node_id, seq = struct.unpack_from(HEADER_FMT, raw_lora_payload, 0)
     if magic != PKT_MAGIC or pkt_type != PKT_STATUS:
@@ -170,7 +177,7 @@ def decode_full_state(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Op
     Parameters
     ----------
     raw_lora_payload : bytes
-        Exactly LORA_PAYLOAD_SIZE (31) bytes as received from the radio.
+        Exactly LORA_PAYLOAD_SIZE (25) bytes as received from the radio.
     rssi : int, optional
         RSSI value in dBm extracted from the UART frame.
 
@@ -179,6 +186,8 @@ def decode_full_state(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Op
     dict with decoded fields, or None if the payload is invalid.
     """
     if len(raw_lora_payload) < LORA_PAYLOAD_SIZE:
+        return None
+    if crc8(raw_lora_payload[:-1]) != raw_lora_payload[-1]:
         return None
 
     magic, pkt_type, node_id, seq = struct.unpack_from(HEADER_FMT, raw_lora_payload, 0)
@@ -209,8 +218,10 @@ def decode_full_state(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Op
 
 def decode_bundle(raw_lora_payload: bytes, rssi: Optional[int] = None) -> list[dict]:
     """Decode a PKT_BUNDLE LoRa payload into reference + expanded deltas."""
-    min_size = HEADER_SIZE + FULL_STATE_SIZE + 1
+    min_size = HEADER_SIZE + FULL_STATE_SIZE + 1 + 1  # +1 CRC
     if len(raw_lora_payload) < min_size:
+        return []
+    if crc8(raw_lora_payload[:-1]) != raw_lora_payload[-1]:
         return []
 
     magic, pkt_type, node_id, seq = struct.unpack_from(HEADER_FMT, raw_lora_payload, 0)
@@ -235,7 +246,7 @@ def decode_bundle(raw_lora_payload: bytes, rssi: Optional[int] = None) -> list[d
 
     if delta_count > BUNDLE_MAX_DELTAS:
         return []
-    if len(raw_lora_payload) < offset + delta_count * DELTA_SIZE:
+    if len(raw_lora_payload) < offset + delta_count * DELTA_SIZE + 1:  # +1 CRC byte at end
         return []
 
     results: list[dict] = [
