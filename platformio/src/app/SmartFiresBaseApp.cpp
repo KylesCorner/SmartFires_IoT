@@ -46,6 +46,9 @@ bool SmartFiresBaseApp::begin() {
 
   _initialized = true;
   _lastHealthLogMs = _clock.millis();
+  _sessionId = 0x53460000UL |
+               ((static_cast<uint32_t>(_cfg.baseAddr) & 0xFFu) << 8) |
+               (static_cast<uint32_t>(_clock.millis()) & 0xFFu);
 
   _debugUart.println("[BaseApp] Ready");
   return true;
@@ -95,7 +98,13 @@ void SmartFiresBaseApp::processIncomingLoRa() {
       _debugUart.print(hdr.node_id);
       _debugUart.print(" seq=");
       _debugUart.print(hdr.seq);
-      _debugUart.println(" action=forward_to_edge awaiting_time_sync");
+      _debugUart.println(" action=send_local_time_sync_and_forward_to_edge");
+
+      const bool syncOk = sendDirectTimeSync(hdr.node_id, "awaken", hdr.seq);
+      _debugUart.print("[BaseApp][AWAKEN#");
+      _debugUart.print(_awakenRxCount);
+      _debugUart.print("] local_time_sync_result=");
+      _debugUart.println(syncOk ? "OK" : "FAIL");
     }
 
     uint8_t frame[2 + 1 + 1 + 255 + 1] = {};
@@ -115,6 +124,41 @@ void SmartFiresBaseApp::processIncomingLoRa() {
       _debugUart.println(outLen);
     }
   }
+}
+
+bool SmartFiresBaseApp::sendDirectTimeSync(uint8_t nodeId,
+                                           const char *reason,
+                                           uint8_t triggerSeq) {
+  BinaryPacket::TimeSyncPayload ts = {};
+  ts.session_id = _sessionId;
+  ts.session_time_ms = _clock.millis();
+
+  uint8_t payload[BinaryPacket::kTimeSyncLoRaSize] = {};
+  const uint8_t seq = _timeSyncSeq++;
+  const uint8_t len =
+      BinaryPacket::encodeTimeSyncPayload(seq, ts, payload, sizeof(payload));
+  if (len == 0) {
+    _debugUart.println("[BaseApp] TX TIME_SYNC local encode failed");
+    return false;
+  }
+
+  const bool ok = _radio.send(payload, len, nodeId);
+  _timeSyncTxCount += ok ? 1u : 0u;
+  _debugUart.print("[BaseApp] TX TIME_SYNC_LOCAL seq=");
+  _debugUart.print(seq);
+  _debugUart.print(" node=");
+  _debugUart.print(nodeId);
+  _debugUart.print(" sessionId=0x");
+  _debugUart.print(ts.session_id, HEX);
+  _debugUart.print(" sessionMs=");
+  _debugUart.print(ts.session_time_ms);
+  _debugUart.print(" trigger=");
+  _debugUart.print(reason ? reason : "unknown");
+  _debugUart.print(" trigger_seq=");
+  _debugUart.print(triggerSeq);
+  _debugUart.print(" result=");
+  _debugUart.println(ok ? "OK" : "FAIL");
+  return ok;
 }
 
 void SmartFiresBaseApp::processIncomingJetsonUart() {
@@ -212,10 +256,7 @@ bool SmartFiresBaseApp::pushJetsonUartByte(uint8_t b,
 
   switch (_uartRx.stage) {
     case UartRxState::Stage::WaitM0:
-      if (b == BinaryPacket::FRAME_M0) {
-        _uartRx.stage = UartRxState::Stage::WaitM1;
-      }
-      return false;
+      if (b == 0) {
 
     case UartRxState::Stage::WaitM1:
       _uartRx.stage = (b == BinaryPacket::FRAME_M1)
@@ -224,10 +265,14 @@ bool SmartFiresBaseApp::pushJetsonUartByte(uint8_t b,
       return false;
 
     case UartRxState::Stage::WaitLen:
+<<<<<<< HEAD
       // `b` is uint8_t (0..255). Only apply upper-bound check when buffer < 255.
       if (b == 0 ||
           (sizeof(_uartRx.data) < 0xFFu &&
            static_cast<size_t>(b) > sizeof(_uartRx.data))) {
+=======
+      if (b == 0) {
+>>>>>>> 96084e0 (Add direct base AWAKEN-to-TIME_SYNC response)
         _uartFrameErrorCount++;
         resetJetsonUartRx();
         return false;

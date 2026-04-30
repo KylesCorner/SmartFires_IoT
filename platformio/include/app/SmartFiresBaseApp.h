@@ -72,10 +72,14 @@ private:
   uint32_t _awakenRxCount = 0;
   uint32_t _timeSyncTxCount = 0;
   uint32_t _ackTxCount = 0;
+  uint32_t _sessionId = 0;
+  uint8_t _timeSyncSeq = 0;
 
   void processIncomingLoRa();
   void processIncomingJetsonUart();
   bool handleJetsonCommandPayload(const uint8_t *payload, uint8_t len);
+  bool sendDirectTimeSync(uint8_t nodeId, const char *reason,
+                          uint8_t triggerSeq = 0);
 
   bool pushJetsonUartByte(uint8_t b, uint8_t *payloadOut, uint8_t &lenOut);
   void resetJetsonUartRx();
