@@ -122,7 +122,8 @@ RadioHeadTdmaDriver radioDriver(radioDriverCfg);
 TdmaRadioService tdmaRadio(tdmaCfg, tdmaClock, tdmaQueue, radioDriver);
 
 SmartFiresNodeApp::Config appCfg =
-    SmartFiresNodeApp::Config::appCfg(NODE_ID, false, true);
+//set third value here to true for awaken only mode in dummy mode
+    SmartFiresNodeApp::Config::appCfg(NODE_ID, false, false);
 
 // -----------------------------------------------------------------------------
 // App
@@ -157,7 +158,11 @@ void setup() {
         while (true) { delay(500); }
     }
 
-    Serial.println("[DUMMY] app ready  --  AWAKEN-only troubleshooting mode");
+    if (appCfg.awakenOnlyMode) {
+        Serial.println("[DUMMY] app ready  --  AWAKEN-only troubleshooting mode");
+    } else {
+        Serial.println("[DUMMY] app ready  --  normal telemetry mode after TIME_SYNC");
+    }
 }
 
 void loop() {
