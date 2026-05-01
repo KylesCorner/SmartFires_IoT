@@ -52,6 +52,7 @@ This avoids the circular dependency of needing a TDMA slot in order to request a
 - Phase 3 has started with a short retransmit holdoff after each fresh telemetry send so idle retry traffic does not immediately crowd out newly generated data.
 - When the app-layer pending window fills, the node now evicts the stalest retransmit candidate first rather than dropping the raw oldest pending packet.
 - Phase 4 has started: the base now coalesces `ACK_SUMMARY` emission per node and skips resending unchanged cumulative ACK state.
+- The base ACK-summary path is now also paced with a small minimum send interval and round-robin flush order, which starts the transition into a more controlled downlink budget.
 
 ## Source Layout
 

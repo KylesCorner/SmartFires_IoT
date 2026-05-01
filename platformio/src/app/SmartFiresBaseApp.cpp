@@ -62,6 +62,7 @@ bool SmartFiresBaseApp::begin() {
   _initialized = true;
   _lastHealthLogMs = _clock.millis();
   _lastPeriodicTimeSyncMs = _lastHealthLogMs;
+  _lastAckSummaryFlushMs = _lastHealthLogMs;
   _sessionId = 0x53460000UL |
                ((static_cast<uint32_t>(_cfg.baseAddr) & 0xFFu) << 8) |
                (static_cast<uint32_t>(_clock.millis()) & 0xFFu);
@@ -406,7 +407,15 @@ void SmartFiresBaseApp::updateTelemetryReceiptWindow(AckTracker &tracker,
 }
 
 void SmartFiresBaseApp::maybeSendPendingAckSummaries() {
-  for (uint8_t i = 0; i < kMaxAckTrackedNodes; ++i) {
+  const uint32_t now = _clock.millis();
+  if (_cfg.ackSummaryMinIntervalMs > 0 &&
+      (now - _lastAckSummaryFlushMs) < _cfg.ackSummaryMinIntervalMs) {
+    return;
+  }
+
+  for (uint8_t offset = 0; offset < kMaxAckTrackedNodes; ++offset) {
+    const uint8_t i = static_cast<uint8_t>((_nextAckTrackerFlushIndex + offset) %
+                                           kMaxAckTrackedNodes);
     AckTracker &tracker = _ackTrackers[i];
     if (!tracker.inUse || !tracker.initialized || !tracker.dirty) {
       continue;
@@ -433,6 +442,9 @@ void SmartFiresBaseApp::maybeSendPendingAckSummaries() {
     tracker.lastSentAckBaseSeq = tracker.ackBaseSeq;
     tracker.lastSentAckMask = tracker.ackMask;
     tracker.dirty = false;
+    _lastAckSummaryFlushMs = now;
+    _nextAckTrackerFlushIndex = static_cast<uint8_t>((i + 1u) % kMaxAckTrackedNodes);
+    return;
   }
 }
 

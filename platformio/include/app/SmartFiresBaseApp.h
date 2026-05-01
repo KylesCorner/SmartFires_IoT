@@ -16,14 +16,17 @@ public:
     uint8_t baseAddr = 0x01;
     uint8_t timeSyncBroadcastAddr = 0xFF;
     uint32_t uartBaud = 115200;
+    uint32_t ackSummaryMinIntervalMs = 25;
 
     static Config baseCfg(uint8_t baseAddr_ = 0x01,
                           uint8_t timeSyncBroadcastAddr_ = 0xFF,
-                          uint32_t uartBaud_ = 115200) {
+                          uint32_t uartBaud_ = 115200,
+                          uint32_t ackSummaryMinIntervalMs_ = 25) {
       Config cfg;
       cfg.baseAddr = baseAddr_;
       cfg.timeSyncBroadcastAddr = timeSyncBroadcastAddr_;
       cfg.uartBaud = uartBaud_;
+      cfg.ackSummaryMinIntervalMs = ackSummaryMinIntervalMs_;
       return cfg;
     }
   };
@@ -107,6 +110,7 @@ private:
   uint32_t _radioReceiveFailCount = 0;
   uint32_t _lastRxMs = 0;
   uint32_t _lastPeriodicTimeSyncMs = 0;
+  uint32_t _lastAckSummaryFlushMs = 0;
   uint32_t _sessionId = 0;
   uint8_t _timeSyncSeq = 0;
   bool _hasJetsonTime = false;
@@ -114,6 +118,7 @@ private:
   uint32_t _jetsonSessionMsAtUpdate = 0;
   uint32_t _localMsAtJetsonUpdate = 0;
   uint8_t _ackSummarySeq = 0;
+  uint8_t _nextAckTrackerFlushIndex = 0;
   NodeAssignment _nodeAssignments[kMaxAssignedNodes] = {};
   AckTracker _ackTrackers[kMaxAckTrackedNodes] = {};
 

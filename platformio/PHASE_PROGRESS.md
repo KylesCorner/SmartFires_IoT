@@ -8,7 +8,7 @@ This file tracks the staged rollout of TDMA telemetry reliability changes.
 - Phase 2: complete in code, ready for ongoing runtime validation
 - Phase 3: started in code
 - Phase 4: started in code
-- Phase 5: not started
+- Phase 5: started in code
 
 ## Phase 1
 
@@ -82,19 +82,25 @@ Delivered so far:
 - telemetry receive now marks per-node ACK state dirty instead of sending `ACK_SUMMARY` inline for each packet
 - base update loop flushes at most one current `ACK_SUMMARY` per dirty node each cycle
 - redundant summaries are skipped when the latest cumulative ACK state is unchanged from the last sent summary
+- base ACK-summary flush is now globally paced and round-robin across dirty nodes, so summary downlink is bounded instead of tracking the raw loop rate
 
 Remaining work:
 
-- track dirty per-node ACK state
-- send the latest cumulative summary instead of redundant summaries
+- tune pacing against observed node/base traffic if the current interval is still too chatty or too slow
 - keep link-layer reliability on `ACK_SUMMARY`
 
 ## Phase 5
 
-Planned goal:
+Goal:
 Evaluate moving `ACK_SUMMARY` emission into a stricter base-station TDMA downlink window if needed.
 
-Expected work:
+Delivered so far:
+
+- added a minimum base-side interval between ACK-summary sends
+- changed the base flush path to send at most one ACK summary per paced interval
+- rotated the starting tracker index so dirty nodes are served fairly instead of always favoring lower node IDs
+
+Remaining work:
 
 - verify downlink budget for multiple nodes
 - ensure one lost summary is harmless because the next summary supersedes it
