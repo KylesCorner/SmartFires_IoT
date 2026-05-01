@@ -71,6 +71,11 @@ private:
     uint8_t nodeId = 0;
     uint8_t ackBaseSeq = 0;
     uint16_t ackMask = 0;
+    bool dirty = false;
+    uint8_t dirtyTriggerSeq = 0;
+    bool lastSentInitialized = false;
+    uint8_t lastSentAckBaseSeq = 0;
+    uint16_t lastSentAckMask = 0;
     bool receiptWindowInitialized = false;
     uint8_t receiptWindowStartSeq = 0;
     uint32_t receiptWindowMask = 0;
@@ -122,6 +127,7 @@ private:
   AckTracker *findOrCreateAckTracker(uint8_t nodeId);
   void recordTelemetrySequence(AckTracker &tracker, uint8_t seq);
   void updateTelemetryReceiptWindow(AckTracker &tracker, uint8_t seq);
+  void maybeSendPendingAckSummaries();
   bool sendAckSummary(uint8_t nodeId, uint8_t ackBaseSeq, uint16_t ackMask,
                       const char *reason, uint8_t triggerSeq);
   void maybeSendPeriodicTimeSync();

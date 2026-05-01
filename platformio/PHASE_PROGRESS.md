@@ -7,7 +7,7 @@ This file tracks the staged rollout of TDMA telemetry reliability changes.
 - Phase 1: complete
 - Phase 2: complete in code, ready for ongoing runtime validation
 - Phase 3: started in code
-- Phase 4: not started
+- Phase 4: started in code
 - Phase 5: not started
 
 ## Phase 1
@@ -74,10 +74,16 @@ Remaining work:
 
 ## Phase 4
 
-Planned goal:
+Goal:
 Coalesce base-side `ACK_SUMMARY` emission so summaries are sent from current ack state rather than immediately on every qualifying packet.
 
-Expected work:
+Delivered so far:
+
+- telemetry receive now marks per-node ACK state dirty instead of sending `ACK_SUMMARY` inline for each packet
+- base update loop flushes at most one current `ACK_SUMMARY` per dirty node each cycle
+- redundant summaries are skipped when the latest cumulative ACK state is unchanged from the last sent summary
+
+Remaining work:
 
 - track dirty per-node ACK state
 - send the latest cumulative summary instead of redundant summaries

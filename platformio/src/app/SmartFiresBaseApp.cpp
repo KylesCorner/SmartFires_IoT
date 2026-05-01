@@ -76,6 +76,7 @@ void SmartFiresBaseApp::update() {
   }
 
   processIncomingLoRa();
+  maybeSendPendingAckSummaries();
   processIncomingJetsonUart();
   maybeSendPeriodicTimeSync();
   maybeLogHealth();
@@ -300,8 +301,9 @@ bool SmartFiresBaseApp::handleTelemetryAckSummary(uint8_t nodeId, uint8_t seq) {
 
   updateTelemetryReceiptWindow(*tracker, seq);
   recordTelemetrySequence(*tracker, seq);
-  return sendAckSummary(nodeId, tracker->ackBaseSeq, tracker->ackMask,
-                        "lora_rx", seq);
+  tracker->dirty = true;
+  tracker->dirtyTriggerSeq = seq;
+  return true;
 }
 
 SmartFiresBaseApp::AckTracker *SmartFiresBaseApp::findOrCreateAckTracker(
@@ -327,6 +329,11 @@ SmartFiresBaseApp::AckTracker *SmartFiresBaseApp::findOrCreateAckTracker(
   freeTracker->nodeId = nodeId;
   freeTracker->ackBaseSeq = 0;
   freeTracker->ackMask = 0;
+  freeTracker->dirty = false;
+  freeTracker->dirtyTriggerSeq = 0;
+  freeTracker->lastSentInitialized = false;
+  freeTracker->lastSentAckBaseSeq = 0;
+  freeTracker->lastSentAckMask = 0;
   return freeTracker;
 }
 
@@ -396,6 +403,37 @@ void SmartFiresBaseApp::updateTelemetryReceiptWindow(AckTracker &tracker,
   }
 
   tracker.receiptWindowMask |= (1UL << delta);
+}
+
+void SmartFiresBaseApp::maybeSendPendingAckSummaries() {
+  for (uint8_t i = 0; i < kMaxAckTrackedNodes; ++i) {
+    AckTracker &tracker = _ackTrackers[i];
+    if (!tracker.inUse || !tracker.initialized || !tracker.dirty) {
+      continue;
+    }
+
+    const bool unchangedFromLastSent =
+        tracker.lastSentInitialized &&
+        tracker.lastSentAckBaseSeq == tracker.ackBaseSeq &&
+        tracker.lastSentAckMask == tracker.ackMask;
+
+    if (unchangedFromLastSent) {
+      tracker.dirty = false;
+      continue;
+    }
+
+    const bool ok = sendAckSummary(tracker.nodeId, tracker.ackBaseSeq,
+                                   tracker.ackMask, "lora_rx_coalesced",
+                                   tracker.dirtyTriggerSeq);
+    if (!ok) {
+      continue;
+    }
+
+    tracker.lastSentInitialized = true;
+    tracker.lastSentAckBaseSeq = tracker.ackBaseSeq;
+    tracker.lastSentAckMask = tracker.ackMask;
+    tracker.dirty = false;
+  }
 }
 
 bool SmartFiresBaseApp::sendAckSummary(uint8_t nodeId, uint8_t ackBaseSeq,
