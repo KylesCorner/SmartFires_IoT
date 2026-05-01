@@ -17,16 +17,25 @@ public:
     uint8_t timeSyncBroadcastAddr = 0xFF;
     uint32_t uartBaud = 115200;
     uint32_t ackSummaryMinIntervalMs = 25;
+    uint8_t tdmaNumSlots = 4;
+    uint32_t tdmaSlotWidthMs = 900;
+    uint32_t tdmaGuardMs = 20;
 
     static Config baseCfg(uint8_t baseAddr_ = 0x01,
                           uint8_t timeSyncBroadcastAddr_ = 0xFF,
                           uint32_t uartBaud_ = 115200,
-                          uint32_t ackSummaryMinIntervalMs_ = 25) {
+                          uint32_t ackSummaryMinIntervalMs_ = 25,
+                          uint8_t tdmaNumSlots_ = 4,
+                          uint32_t tdmaSlotWidthMs_ = 900,
+                          uint32_t tdmaGuardMs_ = 20) {
       Config cfg;
       cfg.baseAddr = baseAddr_;
       cfg.timeSyncBroadcastAddr = timeSyncBroadcastAddr_;
       cfg.uartBaud = uartBaud_;
       cfg.ackSummaryMinIntervalMs = ackSummaryMinIntervalMs_;
+      cfg.tdmaNumSlots = tdmaNumSlots_;
+      cfg.tdmaSlotWidthMs = tdmaSlotWidthMs_;
+      cfg.tdmaGuardMs = tdmaGuardMs_;
       return cfg;
     }
   };
@@ -119,6 +128,7 @@ private:
   uint32_t _localMsAtJetsonUpdate = 0;
   uint8_t _ackSummarySeq = 0;
   uint8_t _nextAckTrackerFlushIndex = 0;
+  uint32_t _lastAckSummaryFlushSlotIndex = 0xFFFFFFFFu;
   NodeAssignment _nodeAssignments[kMaxAssignedNodes] = {};
   AckTracker _ackTrackers[kMaxAckTrackedNodes] = {};
 
@@ -133,6 +143,7 @@ private:
   void recordTelemetrySequence(AckTracker &tracker, uint8_t seq);
   void updateTelemetryReceiptWindow(AckTracker &tracker, uint8_t seq);
   void maybeSendPendingAckSummaries();
+  bool ackSummaryWindowOpen(uint32_t &slotIndexOut) const;
   bool sendAckSummary(uint8_t nodeId, uint8_t ackBaseSeq, uint16_t ackMask,
                       const char *reason, uint8_t triggerSeq);
   void maybeSendPeriodicTimeSync();

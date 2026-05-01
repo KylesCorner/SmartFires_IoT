@@ -407,6 +407,11 @@ void SmartFiresBaseApp::updateTelemetryReceiptWindow(AckTracker &tracker,
 }
 
 void SmartFiresBaseApp::maybeSendPendingAckSummaries() {
+  uint32_t slotIndex = 0;
+  if (!ackSummaryWindowOpen(slotIndex)) {
+    return;
+  }
+
   const uint32_t now = _clock.millis();
   if (_cfg.ackSummaryMinIntervalMs > 0 &&
       (now - _lastAckSummaryFlushMs) < _cfg.ackSummaryMinIntervalMs) {
@@ -443,9 +448,38 @@ void SmartFiresBaseApp::maybeSendPendingAckSummaries() {
     tracker.lastSentAckMask = tracker.ackMask;
     tracker.dirty = false;
     _lastAckSummaryFlushMs = now;
+    _lastAckSummaryFlushSlotIndex = slotIndex;
     _nextAckTrackerFlushIndex = static_cast<uint8_t>((i + 1u) % kMaxAckTrackedNodes);
     return;
   }
+}
+
+bool SmartFiresBaseApp::ackSummaryWindowOpen(uint32_t &slotIndexOut) const {
+  if (_cfg.tdmaNumSlots == 0 || _cfg.tdmaSlotWidthMs == 0) {
+    slotIndexOut = 0;
+    return true;
+  }
+
+  const BinaryPacket::TimeSyncPayload ts = currentTimeSyncPayload();
+  const uint32_t sessionMs = ts.session_time_ms;
+  const uint32_t slotIndex = sessionMs / _cfg.tdmaSlotWidthMs;
+  const uint32_t posInSlot = sessionMs % _cfg.tdmaSlotWidthMs;
+  slotIndexOut = slotIndex;
+
+  if (static_cast<uint8_t>(slotIndex % _cfg.tdmaNumSlots) != 0u) {
+    return false;
+  }
+
+  if (posInSlot < _cfg.tdmaGuardMs) {
+    return false;
+  }
+
+  if (_cfg.tdmaSlotWidthMs > _cfg.tdmaGuardMs &&
+      posInSlot >= (_cfg.tdmaSlotWidthMs - _cfg.tdmaGuardMs)) {
+    return false;
+  }
+
+  return true;
 }
 
 bool SmartFiresBaseApp::sendAckSummary(uint8_t nodeId, uint8_t ackBaseSeq,

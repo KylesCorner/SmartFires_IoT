@@ -99,6 +99,7 @@ Delivered so far:
 - added a minimum base-side interval between ACK-summary sends
 - changed the base flush path to send at most one ACK summary per paced interval
 - rotated the starting tracker index so dirty nodes are served fairly instead of always favoring lower node IDs
+- ACK-summary flushing is now constrained to the base station TDMA slot window using the shared session-time schedule
 
 Remaining work:
 
