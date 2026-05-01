@@ -36,6 +36,17 @@ bool DutyCycleController::begin() {
 
 void DutyCycleController::update() {
   if (!_cfg.enabled) {
+    switch (_phase) {
+    case DutyCyclePhase::WarmingUp:
+      // Serial.println("Duty cycle: waking");
+      updateWakingSensors();
+      break;
+
+    case DutyCyclePhase::ActiveSampling:
+      // Serial.println("Duty cycle: sampling");
+      updateSampling();
+      break;
+    }
     return;
   }
   switch (_phase) {
@@ -275,6 +286,6 @@ bool DutyCycleController::wakeDutyCycledSensors() {
   return true;
 }
 
-void DutyCycleController::changeEnableState(bool enabled){
+void DutyCycleController::changeEnableState(bool enabled) {
   _cfg.enabled = enabled;
 }

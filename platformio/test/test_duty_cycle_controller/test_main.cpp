@@ -16,6 +16,7 @@ static DutyCycleConfig makeTestConfig() {
 
   cfg.tempDeltaThresholdC = 1.0f;
   cfg.humidityDeltaThresholdPct = 5.0f;
+  cfg.enabled = true;
 
   return cfg;
 }
