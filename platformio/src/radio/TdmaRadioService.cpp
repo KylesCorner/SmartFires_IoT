@@ -183,6 +183,14 @@ bool TdmaRadioService::enqueueTelemetry(const uint8_t *payload, uint8_t len) {
   return true;
 }
 
+uint8_t TdmaRadioService::nodeId() const {
+  return _cfg.nodeId;
+}
+
+uint8_t TdmaRadioService::numSlots() const {
+  return _cfg.numSlots;
+}
+
 TdmaRadioState TdmaRadioService::state() const {
   return _state;
 }
@@ -455,15 +463,25 @@ void TdmaRadioService::checkIncomingTimeSync() {
     }
 
     uint32_t sessionMs = 0;
+    uint8_t assignedNodeId = 0;
     BinaryPacket::AckSummaryPayload ack = {};
 
-    if (isTimeSyncPacket(packet, sessionMs)) {
+    if (isTimeSyncPacket(packet, sessionMs, assignedNodeId)) {
+      if (assignedNodeId != 0 && !applyAssignedNodeId(assignedNodeId)) {
+        Serial.print("[Radio][SYNC] IGNORE node=");
+        Serial.print(assignedNodeId);
+        Serial.println(" reason=assignment_apply_failed");
+        continue;
+      }
+
       _tdmaClock.applySync(sessionMs);
       _timeSyncCount++;
       Serial.print("[Radio][SYNC#");
       Serial.print(_timeSyncCount);
       Serial.print("] TIME_SYNC rcv sessionMs=");
-      Serial.println(sessionMs);
+      Serial.print(sessionMs);
+      Serial.print(" node=");
+      Serial.println(_cfg.nodeId);
       continue;
     }
 
@@ -484,7 +502,8 @@ void TdmaRadioService::checkIncomingTimeSync() {
 
 bool TdmaRadioService::isTimeSyncPacket(
     const ITdmaRadioDriver::ReceivedPacket &packet,
-    uint32_t &sessionMsOut) const {
+    uint32_t &sessionMsOut,
+    uint8_t &assignedNodeIdOut) const {
   BinaryPacket::PktHeader hdr;
   BinaryPacket::TimeSyncPayload ts;
 
@@ -492,7 +511,37 @@ bool TdmaRadioService::isTimeSyncPacket(
     return false;
   }
 
+  if (_cfg.nodeId == 0) {
+    if (hdr.node_id == 0) {
+      return false;
+    }
+    assignedNodeIdOut = hdr.node_id;
+  } else {
+    if (hdr.node_id != 0 && hdr.node_id != _cfg.nodeId) {
+      return false;
+    }
+    assignedNodeIdOut = hdr.node_id;
+  }
+
   sessionMsOut = ts.session_time_ms;
+  return true;
+}
+
+bool TdmaRadioService::applyAssignedNodeId(uint8_t nodeId) {
+  if (nodeId == 0) {
+    return false;
+  }
+
+  if (_cfg.nodeId == nodeId) {
+    return true;
+  }
+
+  if (!_driver.setLocalAddress(nodeId)) {
+    return false;
+  }
+
+  _cfg.nodeId = nodeId;
+  _tdmaClock.applyAssignment(nodeId, _cfg.numSlots);
   return true;
 }
 

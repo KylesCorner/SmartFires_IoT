@@ -12,14 +12,17 @@ class SmartFiresNodeApp {
 public:
     struct Config {
         uint8_t nodeId;
+        uint32_t deviceUidHash;
         bool    enableBattery;
         bool    awakenOnlyMode;
 
-        static SmartFiresNodeApp::Config appCfg(uint8_t nodeId_ = 1,
+        static SmartFiresNodeApp::Config appCfg(uint8_t nodeId_ = 0,
+                                                uint32_t deviceUidHash_ = 0,
                                                 bool enableBattery_ = true,
                                                 bool awakenOnlyMode_ = true) {
             SmartFiresNodeApp::Config cfg;
             cfg.nodeId        = nodeId_;
+            cfg.deviceUidHash = deviceUidHash_;
             cfg.enableBattery = enableBattery_;
             cfg.awakenOnlyMode = awakenOnlyMode_;
             return cfg;

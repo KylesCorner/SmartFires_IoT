@@ -38,7 +38,16 @@ public:
   void update();
 
 private:
+  static constexpr uint8_t kTotalEntities = 4;
+  static constexpr uint8_t kMaxAssignedNodes = kTotalEntities - 1;
+  static constexpr uint8_t kFirstNodeId = 0x02;
   static constexpr uint8_t kMaxAckTrackedNodes = 16;
+
+  struct NodeAssignment {
+    bool inUse = false;
+    uint32_t uidHash = 0;
+    uint8_t nodeId = 0;
+  };
 
   struct UartRxState {
     enum class Stage : uint8_t {
@@ -97,13 +106,15 @@ private:
   uint32_t _jetsonSessionMsAtUpdate = 0;
   uint32_t _localMsAtJetsonUpdate = 0;
   uint8_t _ackSummarySeq = 0;
+  NodeAssignment _nodeAssignments[kMaxAssignedNodes] = {};
   AckTracker _ackTrackers[kMaxAckTrackedNodes] = {};
 
   void processIncomingLoRa();
   void processIncomingJetsonUart();
   bool handleJetsonCommandPayload(const uint8_t *payload, uint8_t len);
-  bool sendDirectTimeSync(uint8_t nodeId, const char *reason,
+  bool sendDirectTimeSync(uint8_t radioAddr, uint8_t nodeId, const char *reason,
                           uint8_t triggerSeq = 0);
+  NodeAssignment *findOrCreateNodeAssignment(uint32_t uidHash);
   bool handleTelemetryAckSummary(uint8_t nodeId, uint8_t seq);
   AckTracker *findOrCreateAckTracker(uint8_t nodeId);
   void recordTelemetrySequence(AckTracker &tracker, uint8_t seq);

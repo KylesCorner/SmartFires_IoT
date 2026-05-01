@@ -3,6 +3,11 @@
 TdmaClock::TdmaClock(const TdmaConfig &cfg, IClock &clock)
     : _cfg(cfg), _clock(clock) {}
 
+void TdmaClock::applyAssignment(uint8_t nodeId, uint8_t numSlots) {
+  _cfg.nodeId = nodeId;
+  _cfg.numSlots = numSlots;
+}
+
 void TdmaClock::applySync(uint32_t sessionTimeMs) {
   _syncSessionMs = sessionTimeMs;
   _syncLocalMs = _clock.millis();
@@ -42,6 +47,10 @@ uint32_t TdmaClock::positionInSlotMs() const {
 }
 
 uint8_t TdmaClock::mySlot() const {
+  if (_cfg.nodeId == 0 || _cfg.numSlots == 0) {
+    return 0xFF;
+  }
+
   return static_cast<uint8_t>((_cfg.nodeId - 1) % _cfg.numSlots);
 }
 
@@ -57,10 +66,11 @@ bool TdmaClock::myTurn(uint32_t &slotIndexOut) const {
   const uint32_t slotIndex = sessionMs / _cfg.slotWidthMs;
   const uint32_t posInSlot = sessionMs % _cfg.slotWidthMs;
   const uint8_t whichSlot = static_cast<uint8_t>(slotIndex % _cfg.numSlots);
+  const uint8_t mySlotNumber = mySlot();
 
   slotIndexOut = slotIndex;
 
-  if (whichSlot != mySlot()) {
+  if (mySlotNumber == 0xFF || whichSlot != mySlotNumber) {
     return false;
   }
 

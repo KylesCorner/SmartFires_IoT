@@ -7,7 +7,7 @@ struct TdmaConfig {
   uint8_t nodeId = 1;
   uint8_t baseAddr = 0x01;
 
-  uint8_t numSlots = 2;
+  uint8_t numSlots = 4;
   uint32_t slotWidthMs = 900;
   uint32_t guardMs = 20;
   uint32_t syncStaleMs = 1320000;
@@ -24,7 +24,7 @@ struct TdmaConfig {
   uint32_t reliabilityMinRetryGapMs = 2000;
 
   static TdmaConfig tdmaCfg(uint8_t nodeId_ = 1, uint8_t baseAddr_ = 0x01,
-                            uint8_t numSlots_ = 2, uint32_t slotWidthMs_ = 900,
+                            uint8_t numSlots_ = 4, uint32_t slotWidthMs_ = 900,
                             uint32_t guardMs_ = 20,
                             uint32_t syncStaleMs_ = 1320000,  // 22 min
                             uint8_t queueDepth_ = 4,

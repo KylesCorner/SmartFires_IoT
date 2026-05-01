@@ -71,23 +71,34 @@ void loop() {
 // #endif
 
 #ifndef NUM_SLOTS
-#define NUM_SLOTS 2
+#define NUM_SLOTS 4
 #endif
 
 namespace {
 
-TdmaConfig makeNodeTdmaCfg(uint8_t nodeId, uint8_t numSlots) {
-  TdmaConfig cfg = TdmaConfig::tdmaCfg(nodeId, 0x01, numSlots);
+constexpr uint8_t kBaseRadioAddr = 0x01;
+constexpr uint8_t kUnassignedNodeId = 0x00;
+
+uint8_t makeInitialRadioAddr(uint32_t uidHash) {
+  uint8_t addr = static_cast<uint8_t>(0x80u | (uidHash & 0x3Fu));
+  if (addr == 0xFFu) {
+    addr = 0x80u;
+  }
+  return addr;
+}
+
+TdmaConfig makeNodeTdmaCfg(uint8_t numSlots) {
+  TdmaConfig cfg = TdmaConfig::tdmaCfg(kUnassignedNodeId, kBaseRadioAddr, numSlots);
   cfg.enableLinkAck = true;
   cfg.maxRetries = 3;
   cfg.ackTimeoutMs = 250;
   return cfg;
 }
 
-RadioHeadTdmaDriver::Config makeNodeRadioCfg(uint8_t nodeId,
+RadioHeadTdmaDriver::Config makeNodeRadioCfg(uint8_t radioAddr,
                                              uint16_t ackTimeoutMs) {
   RadioHeadTdmaDriver::Config cfg =
-      RadioHeadTdmaDriver::Config::radioHeadCfg(nodeId);
+      RadioHeadTdmaDriver::Config::radioHeadCfg(radioAddr);
   cfg.timeoutMs = ackTimeoutMs;
   return cfg;
 }
@@ -154,23 +165,25 @@ DutyCycleController duty(dutyCfg, sht31, sensors, sensorCount, clock);
 // -----------------------------------------------------------------------------
 
 constexpr uint8_t numSlots = NUM_SLOTS;
-const uint8_t nodeId = BoardIdentity::smallId(1, numSlots);
+const uint32_t nodeUidHash = BoardIdentity::hash32();
+const uint8_t initialRadioAddr = makeInitialRadioAddr(nodeUidHash);
 
-PacketHandler::Config packetHandlerCfg = PacketHandler::Config::make(nodeId);
+PacketHandler::Config packetHandlerCfg =
+    PacketHandler::Config::make(kUnassignedNodeId);
 PacketHandler packetHandler(packetHandlerCfg);
 
-TdmaConfig tdmaCfg = makeNodeTdmaCfg(nodeId, numSlots);
+TdmaConfig tdmaCfg = makeNodeTdmaCfg(numSlots);
 TdmaClock tdmaClock(tdmaCfg, clock);
 TdmaTxQueue tdmaQueue(tdmaCfg.queueDepth);
 
 RadioHeadTdmaDriver::Config radioDriverCfg =
-  makeNodeRadioCfg(nodeId, tdmaCfg.ackTimeoutMs);
+  makeNodeRadioCfg(initialRadioAddr, tdmaCfg.ackTimeoutMs);
 RadioHeadTdmaDriver radioDriver(radioDriverCfg);
 
 TdmaRadioService tdmaRadio(tdmaCfg, tdmaClock, tdmaQueue, radioDriver);
 
 SmartFiresNodeApp::Config appCfg =
-  SmartFiresNodeApp::Config::appCfg(nodeId, false, false);
+  SmartFiresNodeApp::Config::appCfg(kUnassignedNodeId, nodeUidHash, false, false);
 
 // -----------------------------------------------------------------------------
 // App
@@ -218,11 +231,11 @@ void setup() {
   // }
 
   Serial.println("SmartFires Feather TDMA node starting...");
-  Serial.print("Board ID: ");
-  Serial.println(nodeId);
-  Serial.print("MY_SLOT: ");
-  Serial.println((nodeId - 1) % numSlots);
-  Serial.print("NUM_SLOTS: ");
+  Serial.print("UID_HASH: 0x");
+  Serial.println(nodeUidHash, HEX);
+  Serial.print("RADIO_ADDR_INIT: ");
+  Serial.println(initialRadioAddr);
+  Serial.print("TDMA_ENTITIES: ");
   Serial.println(numSlots);
   Serial.print("SLOT_WIDTH: ");
   Serial.print(tdmaCfg.slotWidthMs);

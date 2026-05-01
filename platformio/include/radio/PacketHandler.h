@@ -58,6 +58,7 @@ public:
 
     // Force STATUS to be sent on the next push (call on new session_id from TIME_SYNC).
     void resetStatusTimer();
+    void setNodeId(uint8_t nodeId);
 
     // Full reset (new node session / reboot).
     void reset();

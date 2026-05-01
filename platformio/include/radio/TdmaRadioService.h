@@ -34,6 +34,8 @@ public:
 
   bool sendAwakenHandshake(const uint8_t *payload, uint8_t len);
   bool enqueueTelemetry(const uint8_t *payload, uint8_t len);
+  uint8_t nodeId() const;
+  uint8_t numSlots() const;
 
   TdmaRadioState state() const;
   TdmaRadioError error() const;
@@ -82,9 +84,11 @@ private:
   void checkIncomingTimeSync();
 
   bool isTimeSyncPacket(const ITdmaRadioDriver::ReceivedPacket &packet,
-                        uint32_t &sessionMsOut) const;
+                        uint32_t &sessionMsOut,
+                        uint8_t &assignedNodeIdOut) const;
   bool isAckSummaryPacket(const ITdmaRadioDriver::ReceivedPacket &packet,
                           BinaryPacket::AckSummaryPayload &ackOut) const;
+  bool applyAssignedNodeId(uint8_t nodeId);
 
   bool isTelemetryPacketForNode(const uint8_t *payload, uint8_t len,
                                 uint8_t &seqOut) const;

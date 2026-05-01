@@ -9,6 +9,7 @@ class TdmaClock {
 public:
   explicit TdmaClock(const TdmaConfig &cfg, IClock &clock);
 
+  void applyAssignment(uint8_t nodeId, uint8_t numSlots);
   void applySync(uint32_t sessionTimeMs);
   bool hasSync() const;
   bool syncStale() const;

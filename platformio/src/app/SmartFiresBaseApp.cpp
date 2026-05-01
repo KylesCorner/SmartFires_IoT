@@ -89,7 +89,7 @@ void SmartFiresBaseApp::maybeSendPeriodicTimeSync() {
   uint8_t payload[BinaryPacket::kTimeSyncLoRaSize] = {};
   const uint8_t seq = _timeSyncSeq++;
   const uint8_t len =
-      BinaryPacket::encodeTimeSyncPayload(seq, ts, payload, sizeof(payload));
+      BinaryPacket::encodeTimeSyncPayload(0, seq, ts, payload, sizeof(payload));
   if (len == 0) {
     _debugUart.println("[BaseApp] TX TIME_SYNC periodic encode failed");
     _lastPeriodicTimeSyncMs = now;
@@ -159,15 +159,32 @@ void SmartFiresBaseApp::processIncomingLoRa() {
     _debugUart.println(pkt.rssi);
 
     if (validHeader && hdr.pkt_type == BinaryPacket::PKT_AWAKEN) {
+      BinaryPacket::AwakenPayload awaken = {};
+      if (!BinaryPacket::decodeAwaken(pkt.data, pkt.len, hdr, awaken)) {
+        _debugUart.print("[BaseApp][AWAKEN#");
+        _debugUart.print(_awakenRxCount);
+        _debugUart.println("] decode_failed");
+        continue;
+      }
+
+      NodeAssignment *assignment = findOrCreateNodeAssignment(awaken.uid_hash);
       _debugUart.print("[BaseApp][AWAKEN#");
       _debugUart.print(_awakenRxCount);
-      _debugUart.print("] node=");
-      _debugUart.print(hdr.node_id);
+      _debugUart.print("] uid=0x");
+      _debugUart.print(awaken.uid_hash, HEX);
+      _debugUart.print(" from=");
+      _debugUart.print(pkt.from);
+      _debugUart.print(" assigned_node=");
+      _debugUart.print(assignment ? assignment->nodeId : 0);
+      _debugUart.print(" assigned_slot=");
+      _debugUart.print(assignment ? static_cast<uint8_t>(assignment->nodeId - 1u) : 0xFFu);
       _debugUart.print(" seq=");
       _debugUart.print(hdr.seq);
       _debugUart.println(" action=send_local_time_sync_and_forward_to_edge");
 
-      const bool syncOk = sendDirectTimeSync(hdr.node_id, "awaken", hdr.seq);
+      const bool syncOk = assignment &&
+                          sendDirectTimeSync(pkt.from, assignment->nodeId,
+                                             "awaken", hdr.seq);
       _debugUart.print("[BaseApp][AWAKEN#");
       _debugUart.print(_awakenRxCount);
       _debugUart.print("] local_time_sync_result=");
@@ -195,7 +212,8 @@ void SmartFiresBaseApp::processIncomingLoRa() {
   }
 }
 
-bool SmartFiresBaseApp::sendDirectTimeSync(uint8_t nodeId,
+bool SmartFiresBaseApp::sendDirectTimeSync(uint8_t radioAddr,
+                                           uint8_t nodeId,
                                            const char *reason,
                                            uint8_t triggerSeq) {
   const BinaryPacket::TimeSyncPayload ts = currentTimeSyncPayload();
@@ -203,18 +221,22 @@ bool SmartFiresBaseApp::sendDirectTimeSync(uint8_t nodeId,
   uint8_t payload[BinaryPacket::kTimeSyncLoRaSize] = {};
   const uint8_t seq = _timeSyncSeq++;
   const uint8_t len =
-      BinaryPacket::encodeTimeSyncPayload(seq, ts, payload, sizeof(payload));
+      BinaryPacket::encodeTimeSyncPayload(nodeId, seq, ts, payload, sizeof(payload));
   if (len == 0) {
     _debugUart.println("[BaseApp] TX TIME_SYNC local encode failed");
     return false;
   }
 
-  const bool ok = _radio.sendToWait(payload, len, nodeId);
+  const bool ok = _radio.sendToWait(payload, len, radioAddr);
   _timeSyncTxCount += ok ? 1u : 0u;
   _debugUart.print("[BaseApp] TX TIME_SYNC_LOCAL seq=");
   _debugUart.print(seq);
-  _debugUart.print(" node=");
+  _debugUart.print(" to_radio=");
+  _debugUart.print(radioAddr);
+  _debugUart.print(" assigned_node=");
   _debugUart.print(nodeId);
+  _debugUart.print(" assigned_slot=");
+  _debugUart.print(static_cast<uint8_t>(nodeId - 1u));
   _debugUart.print(" sessionId=0x");
   _debugUart.print(ts.session_id, HEX);
   _debugUart.print(" sessionMs=");
@@ -230,6 +252,32 @@ bool SmartFiresBaseApp::sendDirectTimeSync(uint8_t nodeId,
   _debugUart.print(" result=");
   _debugUart.println(ok ? "OK" : "FAIL");
   return ok;
+}
+
+SmartFiresBaseApp::NodeAssignment *SmartFiresBaseApp::findOrCreateNodeAssignment(
+    uint32_t uidHash) {
+  NodeAssignment *freeAssignment = nullptr;
+
+  for (uint8_t i = 0; i < kMaxAssignedNodes; ++i) {
+    NodeAssignment &assignment = _nodeAssignments[i];
+    if (assignment.inUse && assignment.uidHash == uidHash) {
+      return &assignment;
+    }
+    if (!assignment.inUse && !freeAssignment) {
+      freeAssignment = &assignment;
+    }
+  }
+
+  if (!freeAssignment) {
+    return nullptr;
+  }
+
+  const uint8_t slotIndex =
+      static_cast<uint8_t>(freeAssignment - _nodeAssignments);
+  freeAssignment->inUse = true;
+  freeAssignment->uidHash = uidHash;
+  freeAssignment->nodeId = static_cast<uint8_t>(kFirstNodeId + slotIndex);
+  return freeAssignment;
 }
 
 bool SmartFiresBaseApp::handleTelemetryAckSummary(uint8_t nodeId, uint8_t seq) {

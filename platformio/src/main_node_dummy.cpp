@@ -31,13 +31,28 @@
 #endif
 
 #ifndef NUM_SLOTS
-#define NUM_SLOTS 2
+#define NUM_SLOTS 4
 #endif
 
 namespace {
 
+constexpr uint8_t kBaseRadioAddr = 0x01;
+constexpr uint8_t kUnassignedNodeId = 0x00;
+
+uint8_t makeInitialRadioAddr(uint32_t uidHash) {
+    uint8_t addr = static_cast<uint8_t>(0x80u | (uidHash & 0x3Fu));
+    if (addr == 0xFFu) {
+        addr = 0x80u;
+    }
+    return addr;
+}
+
+constexpr uint32_t makeDummyUidHash() {
+    return 0xD00D0000UL | static_cast<uint32_t>(NODE_ID);
+}
+
 TdmaConfig makeDummyTdmaCfg() {
-    TdmaConfig cfg = TdmaConfig::tdmaCfg(NODE_ID, 0x01, NUM_SLOTS);
+    TdmaConfig cfg = TdmaConfig::tdmaCfg(kUnassignedNodeId, kBaseRadioAddr, NUM_SLOTS);
     // Toggle normal telemetry between sendToWait(true) and fire-and-forget(false).
     cfg.enableLinkAck = true;
     // Keep retries visible in logs during packet-transmission isolation.
@@ -46,9 +61,10 @@ TdmaConfig makeDummyTdmaCfg() {
     return cfg;
 }
 
-RadioHeadTdmaDriver::Config makeDummyRadioCfg(uint16_t ackTimeoutMs) {
+RadioHeadTdmaDriver::Config makeDummyRadioCfg(uint8_t radioAddr,
+                          uint16_t ackTimeoutMs) {
     RadioHeadTdmaDriver::Config cfg =
-            RadioHeadTdmaDriver::Config::radioHeadCfg(NODE_ID);
+        RadioHeadTdmaDriver::Config::radioHeadCfg(radioAddr);
     // Disable RadioHead internal retry loop so TdmaRadioService logs each ack attempt.
     cfg.retries = 0;
     cfg.timeoutMs = ackTimeoutMs;
@@ -111,21 +127,26 @@ DutyCycleController duty(dutyCfg, sht31, sensors, sensorCount, clock);
 // Networking
 // -----------------------------------------------------------------------------
 
-PacketHandler::Config packetHandlerCfg = PacketHandler::Config::make(NODE_ID);
+constexpr uint32_t dummyUidHash = makeDummyUidHash();
+const uint8_t initialRadioAddr = makeInitialRadioAddr(dummyUidHash);
+
+PacketHandler::Config packetHandlerCfg =
+    PacketHandler::Config::make(kUnassignedNodeId);
 PacketHandler packetHandler(packetHandlerCfg);
 
 TdmaConfig tdmaCfg = makeDummyTdmaCfg();
 TdmaClock tdmaClock(tdmaCfg, clock);
 TdmaTxQueue tdmaQueue(tdmaCfg.queueDepth);
 
-RadioHeadTdmaDriver::Config radioDriverCfg = makeDummyRadioCfg(tdmaCfg.ackTimeoutMs);
+RadioHeadTdmaDriver::Config radioDriverCfg =
+    makeDummyRadioCfg(initialRadioAddr, tdmaCfg.ackTimeoutMs);
 RadioHeadTdmaDriver radioDriver(radioDriverCfg);
 
 TdmaRadioService tdmaRadio(tdmaCfg, tdmaClock, tdmaQueue, radioDriver);
 
 SmartFiresNodeApp::Config appCfg =
 //set third value here to true for awaken only mode in dummy mode
-    SmartFiresNodeApp::Config::appCfg(NODE_ID, false, false);
+    SmartFiresNodeApp::Config::appCfg(kUnassignedNodeId, dummyUidHash, false, false);
 
 // -----------------------------------------------------------------------------
 // App
@@ -142,9 +163,9 @@ void setup() {
     Serial.println("========================================");
     Serial.println("[DUMMY] SmartFires node  --  synthetic data mode");
     Serial.println("========================================");
-    Serial.print("[DUMMY] NODE_ID      = "); Serial.println(NODE_ID);
-    Serial.print("[DUMMY] MY_SLOT      = "); Serial.println((NODE_ID - 1) % NUM_SLOTS);
-    Serial.print("[DUMMY] NUM_SLOTS    = "); Serial.println(NUM_SLOTS);
+    Serial.print("[DUMMY] UID_HASH     = 0x"); Serial.println(dummyUidHash, HEX);
+    Serial.print("[DUMMY] RADIO_INIT   = "); Serial.println(initialRadioAddr);
+    Serial.print("[DUMMY] TDMA_ENTS    = "); Serial.println(NUM_SLOTS);
     Serial.print("[DUMMY] SLOT_WIDTH   = "); Serial.print(tdmaCfg.slotWidthMs); Serial.println(" ms");
     Serial.print("[DUMMY] GUARD        = "); Serial.print(tdmaCfg.guardMs);      Serial.println(" ms");
     Serial.print("[DUMMY] SYNC_STALE   = "); Serial.print(tdmaCfg.syncStaleMs / 1000); Serial.println(" s");

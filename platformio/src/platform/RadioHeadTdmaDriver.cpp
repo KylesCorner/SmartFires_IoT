@@ -64,6 +64,16 @@ bool RadioHeadTdmaDriver::sendToWait(const uint8_t *data,
   return _manager.sendtoWait(const_cast<uint8_t *>(data), len, to);
 }
 
+bool RadioHeadTdmaDriver::setLocalAddress(uint8_t address) {
+  if (!_healthy) {
+    return false;
+  }
+
+  _cfg.address = address;
+  _manager.setThisAddress(address);
+  return true;
+}
+
 bool RadioHeadTdmaDriver::available() {
   return _healthy && _manager.available();
 }

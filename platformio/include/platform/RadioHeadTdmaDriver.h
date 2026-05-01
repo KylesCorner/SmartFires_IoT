@@ -43,6 +43,7 @@ public:
   bool begin() override;
   bool send(const uint8_t *data, uint8_t len, uint8_t to) override;
   bool sendToWait(const uint8_t *data, uint8_t len, uint8_t to) override;
+  bool setLocalAddress(uint8_t address) override;
   bool available() override;
   bool receive(ReceivedPacket &out) override;
   bool healthy() const override;
