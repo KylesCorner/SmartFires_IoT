@@ -36,17 +36,23 @@ bool DutyCycleController::begin() {
 
 void DutyCycleController::update() {
   if (!_cfg.enabled) {
-    switch (_phase) {
-    case DutyCyclePhase::WarmingUp:
-      // Serial.println("Duty cycle: waking");
+    if (_phase == DutyCyclePhase::WarmingUp ||
+        _phase == DutyCyclePhase::IdleSleeping ||
+        _phase == DutyCyclePhase::NotStarted) {
       updateWakingSensors();
-      break;
-
-    case DutyCyclePhase::ActiveSampling:
-      // Serial.println("Duty cycle: sampling");
-      updateSampling();
-      break;
+      return;
     }
+
+    if (_phase == DutyCyclePhase::ActiveSampling) {
+      updateSampling();
+      return;
+    }
+
+    if (_phase == DutyCyclePhase::CooldownSleeping) {
+      transitionTo(DutyCyclePhase::ActiveSampling);
+      return;
+    }
+
     return;
   }
   switch (_phase) {
@@ -207,6 +213,10 @@ void DutyCycleController::updateSampling() {
     if (sampledAny) {
       _freshSampleReady = true;
     }
+  }
+
+  if (!_cfg.enabled) {
+    return;
   }
 
   if (phaseElapsedMs() >= _cfg.activeSampleMs) {

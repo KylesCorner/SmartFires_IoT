@@ -253,6 +253,44 @@ void test_active_sampling_does_not_sample_unready_sensor() {
   TEST_ASSERT_FALSE(duty.telemetryReady());
 }
 
+void test_disabled_duty_cycle_continues_sampling_past_active_window() {
+  FakeClock clock;
+  FakeTriggerSensor trigger;
+
+  FakeSensor imu("imu", SensorDutyClass::DutyCycled);
+  imu.readyValue = true;
+
+  ISensor *sensors[] = {
+      &imu,
+  };
+
+  DutyCycleConfig cfg = makeTestConfig();
+  cfg.enabled = false;
+  DutyCycleController duty(cfg, trigger, sensors, 1, clock);
+
+  TEST_ASSERT_TRUE(duty.begin());
+
+  moveFromWarmingToActive(duty, clock, cfg);
+
+  clock.advance(cfg.activeSampleMs + 1);
+  duty.update();
+
+  TEST_ASSERT_EQUAL(DutyCyclePhase::ActiveSampling, duty.phase());
+  TEST_ASSERT_TRUE(duty.telemetryReady());
+
+  duty.markTelemetrySent();
+  TEST_ASSERT_FALSE(duty.telemetryReady());
+
+  const uint16_t sampleBefore = imu.sampleCount;
+
+  clock.advance(cfg.samplePeriodMs + 1);
+  duty.update();
+
+  TEST_ASSERT_EQUAL(DutyCyclePhase::ActiveSampling, duty.phase());
+  TEST_ASSERT_EQUAL(sampleBefore + 1, imu.sampleCount);
+  TEST_ASSERT_TRUE(duty.telemetryReady());
+}
+
 void test_mark_telemetry_sent_clears_telemetry_ready() {
   FakeClock clock;
   FakeTriggerSensor trigger;
@@ -701,6 +739,7 @@ int main() {
 
   RUN_TEST(test_active_sampling_samples_ready_sensors_and_sets_telemetry_ready);
   RUN_TEST(test_active_sampling_does_not_sample_unready_sensor);
+  RUN_TEST(test_disabled_duty_cycle_continues_sampling_past_active_window);
   RUN_TEST(test_mark_telemetry_sent_clears_telemetry_ready);
   RUN_TEST(test_active_sampling_enters_cooldown_after_active_sample_time);
 
