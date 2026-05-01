@@ -92,11 +92,17 @@ PacketHandler::Config packetHandlerCfg = PacketHandler::Config::make(NODE_ID);
 PacketHandler packetHandler(packetHandlerCfg);
 
 TdmaConfig tdmaCfg = TdmaConfig::tdmaCfg(NODE_ID, 0x01, NUM_SLOTS);
+// Keep retries visible in logs during packet-transmission isolation.
+tdmaCfg.maxRetries = 3;
+tdmaCfg.ackTimeoutMs = 250;
 TdmaClock tdmaClock(tdmaCfg, clock);
 TdmaTxQueue tdmaQueue(tdmaCfg.queueDepth);
 
 RadioHeadTdmaDriver::Config radioDriverCfg =
     RadioHeadTdmaDriver::Config::radioHeadCfg(NODE_ID);
+// Disable RadioHead internal retry loop so TdmaRadioService logs each ack attempt.
+radioDriverCfg.retries = 0;
+radioDriverCfg.timeoutMs = tdmaCfg.ackTimeoutMs;
 RadioHeadTdmaDriver radioDriver(radioDriverCfg);
 
 TdmaRadioService tdmaRadio(tdmaCfg, tdmaClock, tdmaQueue, radioDriver);
@@ -128,6 +134,8 @@ void setup() {
     Serial.print("[DUMMY] APP_RELIAB   = "); Serial.println(tdmaCfg.enableAppReliability ? "ON" : "OFF");
     Serial.print("[DUMMY] RETX_WINDOW  = "); Serial.println(tdmaCfg.reliabilityWindowDepth);
     Serial.print("[DUMMY] RETX_MAX_ATT = "); Serial.println(tdmaCfg.reliabilityMaxAttempts);
+    Serial.print("[DUMMY] LINK_RETRIES = "); Serial.println(tdmaCfg.maxRetries);
+    Serial.print("[DUMMY] ACK_TIMEOUT  = "); Serial.print(tdmaCfg.ackTimeoutMs); Serial.println(" ms");
     Serial.println("========================================");
 
     if (!app.begin()) {

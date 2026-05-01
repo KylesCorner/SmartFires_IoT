@@ -183,7 +183,8 @@ void TdmaRadioService::drainTxQueue() {
 
   const bool useSlotBudget = _tdmaClock.hasSync() && !_tdmaClock.syncStale();
   const uint32_t slotEndMs = (_cfg.slotWidthMs > _cfg.guardMs) ? (_cfg.slotWidthMs - _cfg.guardMs) : _cfg.slotWidthMs;
-  const uint8_t kMaxSendsPerUpdate = 6;
+  // For transmission debugging, keep sends serialized so every ACK exchange is easy to follow.
+  const uint8_t kMaxSendsPerUpdate = 1;
 
   uint8_t sendsThisUpdate = 0;
 
@@ -255,7 +256,46 @@ void TdmaRadioService::drainTxQueue() {
 
     const bool useLinkAck = true;
 
-    const bool ok = _driver.sendToWait(payload, len, _cfg.baseAddr);
+    const uint16_t attemptCountWide = static_cast<uint16_t>(_cfg.maxRetries) + 1u;
+    const uint8_t maxAttempts =
+        attemptCountWide > 0xFFu ? 0xFFu : static_cast<uint8_t>(attemptCountWide);
+    bool ok = false;
+    uint8_t attemptsUsed = 0;
+
+    for (uint8_t attempt = 1; useLinkAck && attempt <= maxAttempts; ++attempt) {
+      attemptsUsed = attempt;
+      Serial.print("[Radio][ACK_TX] ");
+      Serial.print(pktTypeName(hdr.pkt_type));
+      Serial.print(" seq=");
+      Serial.print(hdr.seq);
+      Serial.print(" slot=");
+      Serial.print(slotIndex);
+      Serial.print(" attempt=");
+      Serial.print(attempt);
+      Serial.print('/');
+      Serial.print(maxAttempts);
+      Serial.print(" timeout_ms=");
+      Serial.print(_cfg.ackTimeoutMs);
+      Serial.println();
+
+      if (_driver.sendToWait(payload, len, _cfg.baseAddr)) {
+        ok = true;
+        Serial.print("[Radio][ACK_RX] ACK_OK seq=");
+        Serial.print(hdr.seq);
+        Serial.print(" attempt=");
+        Serial.print(attempt);
+        Serial.print(" retries_used=");
+        Serial.println(attempt - 1);
+        break;
+      }
+
+      Serial.print("[Radio][ACK_RX] ACK_TIMEOUT seq=");
+      Serial.print(hdr.seq);
+      Serial.print(" attempt=");
+      Serial.print(attempt);
+      Serial.print(" retries_remaining=");
+      Serial.println(maxAttempts - attempt);
+    }
 
     if (ok) {
       _sentCount++;
@@ -271,6 +311,8 @@ void TdmaRadioService::drainTxQueue() {
           Serial.print(" slot=");
           Serial.print(slotIndex);
           Serial.print(" link_ack=OK");
+          Serial.print(" retries_used=");
+          Serial.print(attemptsUsed > 0 ? attemptsUsed - 1 : 0);
           printQueueSnapshot(_queue.count(), _queue.capacity(), _pendingCount,
                              _queue.droppedOldestCount());
           Serial.println();
@@ -286,6 +328,8 @@ void TdmaRadioService::drainTxQueue() {
           Serial.print(_pending[pendingIndex].attempts + 1);
           Serial.print(" slot=");
           Serial.print(slotIndex);
+          Serial.print(" retries_used=");
+          Serial.print(attemptsUsed > 0 ? attemptsUsed - 1 : 0);
           printQueueSnapshot(_queue.count(), _queue.capacity(), _pendingCount,
                              _queue.droppedOldestCount());
           Serial.println();
@@ -314,6 +358,8 @@ void TdmaRadioService::drainTxQueue() {
       Serial.print(" seq=");
       Serial.print(hdr.seq);
       Serial.print(" link_ack=NO");
+      Serial.print(" retries_used=");
+      Serial.print(attemptsUsed > 0 ? attemptsUsed - 1 : _cfg.maxRetries);
       if (!fromQueue && _cfg.enableAppReliability && pendingIndex < kMaxReliabilityWindow &&
           _pending[pendingIndex].inUse) {
         Serial.print(" attempt=");
