@@ -16,6 +16,30 @@ At the end of this session:
 
 This means the control-plane handshake is working.
 
+## AWAKEN Sequence (Current)
+
+This is the intended control-plane flow today:
+
+1. Node boots and enqueues `AWAKEN`.
+2. Node transmits `AWAKEN` with link-layer ACK waits (`sendToWait`) and retries.
+3. Base receives `AWAKEN` and immediately sends direct `TIME_SYNC` back to that node.
+4. Node applies `TIME_SYNC` and exits AWAKEN-only mode.
+5. Node enters normal telemetry flow.
+
+## Time Source Policy (Current)
+
+- LoRa `TIME_SYNC` packets are transmitted by the base Feather.
+- Base sends `TIME_SYNC` in two cases:
+  - direct reply to node `AWAKEN`
+  - periodic broadcast to keep nodes aligned
+- Time value selection for both cases:
+  - if Jetson sync has been received recently, base projects Jetson time using
+    local elapsed milliseconds
+  - otherwise base falls back to its own local session clock
+
+This keeps the base in control of radio timing while still honoring Jetson time
+as preferred authority when available.
+
 ## Key Finding
 
 The link behaved much more reliably when packets were sent with RadioHead

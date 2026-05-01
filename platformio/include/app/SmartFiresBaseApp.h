@@ -55,6 +55,7 @@ private:
   };
 
   static constexpr uint32_t kHealthLogPeriodMs = 5000;
+  static constexpr uint32_t kPeriodicTimeSyncMs = 5000;
 
   Config _cfg;
   IClock &_clock;
@@ -78,14 +79,23 @@ private:
   uint32_t _ackTxCount = 0;
   uint32_t _radioReceiveFailCount = 0;
   uint32_t _lastRxMs = 0;
+  uint32_t _lastPeriodicTimeSyncMs = 0;
   uint32_t _sessionId = 0;
   uint8_t _timeSyncSeq = 0;
+  bool _hasJetsonTime = false;
+  uint32_t _jetsonSessionId = 0;
+  uint32_t _jetsonSessionMsAtUpdate = 0;
+  uint32_t _localMsAtJetsonUpdate = 0;
 
   void processIncomingLoRa();
   void processIncomingJetsonUart();
   bool handleJetsonCommandPayload(const uint8_t *payload, uint8_t len);
   bool sendDirectTimeSync(uint8_t nodeId, const char *reason,
                           uint8_t triggerSeq = 0);
+  void maybeSendPeriodicTimeSync();
+  BinaryPacket::TimeSyncPayload baseLocalTimeSyncPayload() const;
+  void updateJetsonTimeSource(const BinaryPacket::TimeSyncPayload &ts);
+  BinaryPacket::TimeSyncPayload currentTimeSyncPayload() const;
 
   bool pushJetsonUartByte(uint8_t b, uint8_t *payloadOut, uint8_t &lenOut);
   void resetJetsonUartRx();

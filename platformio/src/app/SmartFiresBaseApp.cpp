@@ -46,6 +46,7 @@ bool SmartFiresBaseApp::begin() {
 
   _initialized = true;
   _lastHealthLogMs = _clock.millis();
+  _lastPeriodicTimeSyncMs = _lastHealthLogMs;
   _sessionId = 0x53460000UL |
                ((static_cast<uint32_t>(_cfg.baseAddr) & 0xFFu) << 8) |
                (static_cast<uint32_t>(_clock.millis()) & 0xFFu);
@@ -61,7 +62,51 @@ void SmartFiresBaseApp::update() {
 
   processIncomingLoRa();
   processIncomingJetsonUart();
+  maybeSendPeriodicTimeSync();
   maybeLogHealth();
+}
+
+BinaryPacket::TimeSyncPayload SmartFiresBaseApp::baseLocalTimeSyncPayload() const {
+  BinaryPacket::TimeSyncPayload ts = {};
+  ts.session_id = _sessionId;
+  ts.session_time_ms = _clock.millis();
+  return ts;
+}
+
+void SmartFiresBaseApp::maybeSendPeriodicTimeSync() {
+  const uint32_t now = _clock.millis();
+  if (now - _lastPeriodicTimeSyncMs < kPeriodicTimeSyncMs) {
+    return;
+  }
+
+  const BinaryPacket::TimeSyncPayload ts = currentTimeSyncPayload();
+  uint8_t payload[BinaryPacket::kTimeSyncLoRaSize] = {};
+  const uint8_t seq = _timeSyncSeq++;
+  const uint8_t len =
+      BinaryPacket::encodeTimeSyncPayload(seq, ts, payload, sizeof(payload));
+  if (len == 0) {
+    _debugUart.println("[BaseApp] TX TIME_SYNC periodic encode failed");
+    _lastPeriodicTimeSyncMs = now;
+    return;
+  }
+
+  const bool ok = _radio.send(payload, len, _cfg.timeSyncBroadcastAddr);
+  if (ok) {
+    _timeSyncTxCount++;
+  }
+
+  _debugUart.print("[BaseApp] TX TIME_SYNC_PERIODIC seq=");
+  _debugUart.print(seq);
+  _debugUart.print(" source=");
+  _debugUart.print(_hasJetsonTime ? "jetson" : "base_local");
+  _debugUart.print(" sessionMs=");
+  _debugUart.print(ts.session_time_ms);
+  _debugUart.print(" to=");
+  _debugUart.print(_cfg.timeSyncBroadcastAddr);
+  _debugUart.print(" result=");
+  _debugUart.println(ok ? "OK" : "FAIL");
+
+  _lastPeriodicTimeSyncMs = now;
 }
 
 void SmartFiresBaseApp::processIncomingLoRa() {
@@ -145,9 +190,7 @@ void SmartFiresBaseApp::processIncomingLoRa() {
 bool SmartFiresBaseApp::sendDirectTimeSync(uint8_t nodeId,
                                            const char *reason,
                                            uint8_t triggerSeq) {
-  BinaryPacket::TimeSyncPayload ts = {};
-  ts.session_id = _sessionId;
-  ts.session_time_ms = _clock.millis();
+  const BinaryPacket::TimeSyncPayload ts = currentTimeSyncPayload();
 
   uint8_t payload[BinaryPacket::kTimeSyncLoRaSize] = {};
   const uint8_t seq = _timeSyncSeq++;
@@ -172,11 +215,36 @@ bool SmartFiresBaseApp::sendDirectTimeSync(uint8_t nodeId,
   _debugUart.print(reason ? reason : "unknown");
   _debugUart.print(" trigger_seq=");
   _debugUart.print(triggerSeq);
+  _debugUart.print(" source=");
+  _debugUart.print(_hasJetsonTime ? "jetson" : "base_local");
   _debugUart.print(" link_ack=");
   _debugUart.print(ok ? "OK" : "NO");
   _debugUart.print(" result=");
   _debugUart.println(ok ? "OK" : "FAIL");
   return ok;
+}
+
+void SmartFiresBaseApp::updateJetsonTimeSource(
+    const BinaryPacket::TimeSyncPayload &ts) {
+  _hasJetsonTime = true;
+  _jetsonSessionId = ts.session_id;
+  _jetsonSessionMsAtUpdate = ts.session_time_ms;
+  _localMsAtJetsonUpdate = _clock.millis();
+}
+
+BinaryPacket::TimeSyncPayload SmartFiresBaseApp::currentTimeSyncPayload() const {
+  BinaryPacket::TimeSyncPayload ts = {};
+
+  if (_hasJetsonTime) {
+    const uint32_t elapsedMs = _clock.millis() - _localMsAtJetsonUpdate;
+    ts.session_id = _jetsonSessionId;
+    ts.session_time_ms = _jetsonSessionMsAtUpdate + elapsedMs;
+    return ts;
+  }
+
+  ts.session_id = _sessionId;
+  ts.session_time_ms = _clock.millis();
+  return ts;
 }
 
 void SmartFiresBaseApp::processIncomingJetsonUart() {
@@ -230,17 +298,15 @@ bool SmartFiresBaseApp::handleJetsonCommandPayload(const uint8_t *payload, uint8
       return false;
     }
 
-    const bool ok = _radio.send(payload, len, _cfg.timeSyncBroadcastAddr);
-    _timeSyncTxCount += ok ? 1u : 0u;
-    _debugUart.print("[BaseApp] TX TIME_SYNC seq=");
+    updateJetsonTimeSource(ts);
+
+    _debugUart.print("[BaseApp] RX TIME_SYNC_UART seq=");
     _debugUart.print(hdr.seq);
+    _debugUart.print(" source=jetson");
     _debugUart.print(" sessionMs=");
     _debugUart.print(ts.session_time_ms);
-    _debugUart.print(" to=");
-    _debugUart.print(_cfg.timeSyncBroadcastAddr);
-    _debugUart.print(" result=");
-    _debugUart.println(ok ? "OK" : "FAIL");
-    return ok;
+    _debugUart.println(" action=cache_only_not_forwarded");
+    return true;
   }
 
   if (hdr.pkt_type == BinaryPacket::PKT_ACK_SUMMARY) {
@@ -363,6 +429,14 @@ void SmartFiresBaseApp::maybeLogHealth() {
   _debugUart.print(_timeSyncTxCount);
   _debugUart.print(" ack_tx=");
   _debugUart.print(_ackTxCount);
+  _debugUart.print(" time_src=");
+  _debugUart.print(_hasJetsonTime ? "jetson" : "base_local");
+  _debugUart.print(" jetson_sync_age_ms=");
+  if (_hasJetsonTime) {
+    _debugUart.print(now - _localMsAtJetsonUpdate);
+  } else {
+    _debugUart.print("n/a");
+  }
   _debugUart.print(" rx_fail=");
   _debugUart.print(_radioReceiveFailCount);
   _debugUart.print(" last_rx_ms_ago=");

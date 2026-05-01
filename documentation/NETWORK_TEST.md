@@ -31,10 +31,10 @@ binary packet encoding, same AWAKEN handshake, same STATUS + BUNDLE sequence.
 | UART cable | 1 | Feather base → Jetson (Serial1 / `/dev/ttyTHS1`) |
 
 > **TIME_SYNC dependency:** The node withholds all sensing until it receives a
-> TIME_SYNC broadcast from the base station.  The base station only broadcasts
-> TIME_SYNC when it receives one from the Jetson over UART.  The Jetson must be
-> running `smartfires-edge receive` for the node to progress past the AWAKEN
-> phase and begin transmitting BUNDLE and STATUS packets.
+> TIME_SYNC packet from the base station. The base station originates LoRa
+> TIME_SYNC transmissions (AWAKEN reply + periodic broadcast). If Jetson sync
+> is available over UART, the base uses Jetson-derived time; otherwise it falls
+> back to base-local session time.
 
 ---
 
@@ -63,8 +63,9 @@ Connect the base station Feather to the Jetson via Serial1 (`/dev/ttyTHS1`).
 smartfires-edge receive --port /dev/ttyTHS1 --data-dir /mnt/nvme_drive/data
 ```
 
-This starts the session clock and begins sending TIME_SYNC frames to the base
-every 10 minutes (first one is sent immediately on startup).
+This starts the session clock and sends periodic TIME_SYNC updates to the base
+over UART. The base uses these updates as preferred time authority for its own
+LoRa TIME_SYNC transmissions.
 
 ### 4 — Open serial monitors
 
@@ -81,6 +82,13 @@ pio device monitor -e feather_m0_lora_node_dummy
 ---
 
 ## Expected Behaviour
+
+### AWAKEN sequence
+
+1. Node boots and sends AWAKEN.
+2. Base receives AWAKEN and sends direct TIME_SYNC to that node.
+3. Node applies TIME_SYNC and exits AWAKEN-only behavior.
+4. Base continues periodic TIME_SYNC broadcasts.
 
 ### Phase 1 — AWAKEN (before TIME_SYNC)
 
@@ -101,7 +109,7 @@ received. No sensor activity yet.
 
 ### Phase 2 — TIME_SYNC received
 
-The Jetson sends a TIME_SYNC UART frame; the base relays it over LoRa.
+The base sends TIME_SYNC over LoRa (direct reply and periodic maintenance).
 The node's `TdmaClock::applySync()` fires, `hasSync()` becomes true, and
 sensing begins immediately.
 
@@ -129,7 +137,7 @@ and 25 °C / 50 %RH from the dummy SHT31.
 | Check | Indicator |
 |---|---|
 | LoRa link alive | Base `rx_fwd` increments (even in AWAKEN phase) |
-| TIME_SYNC flows | Base `cmd_fwd` = 1 after Jetson starts |
+| TIME_SYNC flows | Base monitor shows `TX TIME_SYNC_LOCAL` and/or `TX TIME_SYNC_PERIODIC` |
 | Node synced and sensing | `rx_fwd` increases by ≥1 every ~15 s (one BUNDLE per duty cycle) |
 | STATUS packets relayed | Jetson CSV contains non-zero `lat_deg` / `lon_deg` (37.7456 / −119.5936) |
 | Delta encoding works | BUNDLE packets arrive at ~194 bytes max; Jetson CSV shows smoothly varying values |
