@@ -109,6 +109,15 @@ bool TdmaRadioService::sendAwakenHandshake(const uint8_t *payload, uint8_t len) 
 
   BinaryPacket::PktHeader hdr = {};
   const bool hasHdr = decodeHeader(payload, len, hdr);
+  if (!hasHdr || hdr.pkt_type != BinaryPacket::PKT_AWAKEN) {
+    Serial.print("[Radio][AWAKEN_DIRECT] REJECT ");
+    Serial.print(hasHdr ? pktTypeName(hdr.pkt_type) : "RAW");
+    Serial.print(" seq=");
+    Serial.print(hasHdr ? hdr.seq : 0);
+    Serial.println(" reason=not_awaken_packet");
+    return false;
+  }
+
   const bool ok = _driver.sendToWait(payload, len, _cfg.baseAddr);
 
   if (!ok) {
@@ -132,6 +141,15 @@ bool TdmaRadioService::enqueueTelemetry(const uint8_t *payload, uint8_t len) {
 
   BinaryPacket::PktHeader hdr = {};
   const bool hasHdr = decodeHeader(payload, len, hdr);
+  if (hasHdr && hdr.pkt_type == BinaryPacket::PKT_AWAKEN) {
+    Serial.print("[Radio][ENQ_REJECT] ");
+    Serial.print(hasHdr ? pktTypeName(hdr.pkt_type) : "RAW");
+    Serial.print(" seq=");
+    Serial.print(hasHdr ? hdr.seq : 0);
+    Serial.println(" reason=awaken_handshake_only");
+    return false;
+  }
+
   const uint32_t droppedBefore = _queue.droppedOldestCount();
   if (!_queue.enqueue(payload, len)) {
     _error = TdmaRadioError::EnqueueFailed;
