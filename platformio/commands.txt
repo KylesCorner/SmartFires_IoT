@@ -1,0 +1,1 @@
+platformio run -e feather_m0_lora_node_dummy --target upload

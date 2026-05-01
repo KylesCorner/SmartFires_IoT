@@ -55,6 +55,7 @@ void SmartFiresNodeApp::update() {
   const bool hasFreshSync = _tdmaClock.hasSync() && !_tdmaClock.syncStale();
   if (hasFreshSync && !_syncActive) {
     _syncActive = true;
+    _awakenOnlyNotified = false;
     _packetHandler.resetStatusTimer();
     Serial.print("[App] TIME_SYNC acquired sessionMs=");
     Serial.print(_tdmaClock.sessionNowMs());
@@ -64,6 +65,7 @@ void SmartFiresNodeApp::update() {
     Serial.println(_tdmaClock.mySlot());
   } else if (!hasFreshSync && _syncActive) {
     _syncActive = false;
+    _awakenOnlyNotified = false;
     APP_LOG("[App] TIME_SYNC stale/lost -- resuming AWAKEN retry");
   }
 
@@ -74,6 +76,14 @@ void SmartFiresNodeApp::update() {
       sendAwakenPacket();
       _awakenLastSentMs = now;
       APP_LOG("[App] Waiting for TIME_SYNC -- AWAKEN retried");
+    }
+    return;
+  }
+
+  if (_cfg.awakenOnlyMode) {
+    if (!_awakenOnlyNotified) {
+      APP_LOG("[App] AWAKEN_ONLY mode -- telemetry suppressed");
+      _awakenOnlyNotified = true;
     }
     return;
   }

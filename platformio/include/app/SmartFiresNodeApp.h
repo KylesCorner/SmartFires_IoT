@@ -13,12 +13,15 @@ public:
     struct Config {
         uint8_t nodeId;
         bool    enableBattery;
+        bool    awakenOnlyMode;
 
         static SmartFiresNodeApp::Config appCfg(uint8_t nodeId_ = 1,
-                                                bool enableBattery_ = true) {
+                                                bool enableBattery_ = true,
+                                                bool awakenOnlyMode_ = false) {
             SmartFiresNodeApp::Config cfg;
             cfg.nodeId        = nodeId_;
             cfg.enableBattery = enableBattery_;
+            cfg.awakenOnlyMode = awakenOnlyMode_;
             return cfg;
         }
     };
@@ -50,6 +53,7 @@ private:
 
     bool     _initialized    = false;
     bool     _syncActive     = false;
+    bool     _awakenOnlyNotified = false;
     uint32_t _awakenLastSentMs = 0;
     uint8_t  _awakenSeq        = 0;
 

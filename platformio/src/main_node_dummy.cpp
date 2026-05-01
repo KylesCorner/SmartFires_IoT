@@ -34,6 +34,27 @@
 #define NUM_SLOTS 2
 #endif
 
+namespace {
+
+TdmaConfig makeDummyTdmaCfg() {
+    TdmaConfig cfg = TdmaConfig::tdmaCfg(NODE_ID, 0x01, NUM_SLOTS);
+    // Keep retries visible in logs during packet-transmission isolation.
+    cfg.maxRetries = 3;
+    cfg.ackTimeoutMs = 250;
+    return cfg;
+}
+
+RadioHeadTdmaDriver::Config makeDummyRadioCfg(uint16_t ackTimeoutMs) {
+    RadioHeadTdmaDriver::Config cfg =
+            RadioHeadTdmaDriver::Config::radioHeadCfg(NODE_ID);
+    // Disable RadioHead internal retry loop so TdmaRadioService logs each ack attempt.
+    cfg.retries = 0;
+    cfg.timeoutMs = ackTimeoutMs;
+    return cfg;
+}
+
+} // namespace
+
 // -----------------------------------------------------------------------------
 // Platform
 // -----------------------------------------------------------------------------
@@ -91,24 +112,17 @@ DutyCycleController duty(dutyCfg, sht31, sensors, sensorCount, clock);
 PacketHandler::Config packetHandlerCfg = PacketHandler::Config::make(NODE_ID);
 PacketHandler packetHandler(packetHandlerCfg);
 
-TdmaConfig tdmaCfg = TdmaConfig::tdmaCfg(NODE_ID, 0x01, NUM_SLOTS);
-// Keep retries visible in logs during packet-transmission isolation.
-tdmaCfg.maxRetries = 3;
-tdmaCfg.ackTimeoutMs = 250;
+TdmaConfig tdmaCfg = makeDummyTdmaCfg();
 TdmaClock tdmaClock(tdmaCfg, clock);
 TdmaTxQueue tdmaQueue(tdmaCfg.queueDepth);
 
-RadioHeadTdmaDriver::Config radioDriverCfg =
-    RadioHeadTdmaDriver::Config::radioHeadCfg(NODE_ID);
-// Disable RadioHead internal retry loop so TdmaRadioService logs each ack attempt.
-radioDriverCfg.retries = 0;
-radioDriverCfg.timeoutMs = tdmaCfg.ackTimeoutMs;
+RadioHeadTdmaDriver::Config radioDriverCfg = makeDummyRadioCfg(tdmaCfg.ackTimeoutMs);
 RadioHeadTdmaDriver radioDriver(radioDriverCfg);
 
 TdmaRadioService tdmaRadio(tdmaCfg, tdmaClock, tdmaQueue, radioDriver);
 
 SmartFiresNodeApp::Config appCfg =
-    SmartFiresNodeApp::Config::appCfg(NODE_ID, false);
+    SmartFiresNodeApp::Config::appCfg(NODE_ID, false, true);
 
 // -----------------------------------------------------------------------------
 // App
@@ -143,7 +157,7 @@ void setup() {
         while (true) { delay(500); }
     }
 
-    Serial.println("[DUMMY] app ready  --  transmitting synthetic data");
+    Serial.println("[DUMMY] app ready  --  AWAKEN-only troubleshooting mode");
 }
 
 void loop() {
