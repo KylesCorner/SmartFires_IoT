@@ -74,6 +74,26 @@ void loop() {
 #define NUM_SLOTS 2
 #endif
 
+namespace {
+
+TdmaConfig makeNodeTdmaCfg(uint8_t nodeId, uint8_t numSlots) {
+  TdmaConfig cfg = TdmaConfig::tdmaCfg(nodeId, 0x01, numSlots);
+  cfg.enableLinkAck = true;
+  cfg.maxRetries = 3;
+  cfg.ackTimeoutMs = 250;
+  return cfg;
+}
+
+RadioHeadTdmaDriver::Config makeNodeRadioCfg(uint8_t nodeId,
+                                             uint16_t ackTimeoutMs) {
+  RadioHeadTdmaDriver::Config cfg =
+      RadioHeadTdmaDriver::Config::radioHeadCfg(nodeId);
+  cfg.timeoutMs = ackTimeoutMs;
+  return cfg;
+}
+
+}  // namespace
+
 // -----------------------------------------------------------------------------
 // Platform
 // -----------------------------------------------------------------------------
@@ -139,18 +159,18 @@ const uint8_t nodeId = BoardIdentity::smallId(1, numSlots);
 PacketHandler::Config packetHandlerCfg = PacketHandler::Config::make(nodeId);
 PacketHandler packetHandler(packetHandlerCfg);
 
-TdmaConfig tdmaCfg = TdmaConfig::tdmaCfg(nodeId, 0x01, numSlots);
+TdmaConfig tdmaCfg = makeNodeTdmaCfg(nodeId, numSlots);
 TdmaClock tdmaClock(tdmaCfg, clock);
 TdmaTxQueue tdmaQueue(tdmaCfg.queueDepth);
 
 RadioHeadTdmaDriver::Config radioDriverCfg =
-    RadioHeadTdmaDriver::Config::radioHeadCfg(nodeId);
+  makeNodeRadioCfg(nodeId, tdmaCfg.ackTimeoutMs);
 RadioHeadTdmaDriver radioDriver(radioDriverCfg);
 
 TdmaRadioService tdmaRadio(tdmaCfg, tdmaClock, tdmaQueue, radioDriver);
 
 SmartFiresNodeApp::Config appCfg =
-    SmartFiresNodeApp::Config::appCfg(nodeId, false);
+  SmartFiresNodeApp::Config::appCfg(nodeId, false, false);
 
 // -----------------------------------------------------------------------------
 // App
@@ -200,6 +220,32 @@ void setup() {
   Serial.println("SmartFires Feather TDMA node starting...");
   Serial.print("Board ID: ");
   Serial.println(nodeId);
+  Serial.print("MY_SLOT: ");
+  Serial.println((nodeId - 1) % numSlots);
+  Serial.print("NUM_SLOTS: ");
+  Serial.println(numSlots);
+  Serial.print("SLOT_WIDTH: ");
+  Serial.print(tdmaCfg.slotWidthMs);
+  Serial.println(" ms");
+  Serial.print("GUARD: ");
+  Serial.print(tdmaCfg.guardMs);
+  Serial.println(" ms");
+  Serial.print("SYNC_STALE: ");
+  Serial.print(tdmaCfg.syncStaleMs / 1000);
+  Serial.println(" s");
+  Serial.print("APP_RELIAB: ");
+  Serial.println(tdmaCfg.enableAppReliability ? "ON" : "OFF");
+  Serial.print("LINK_ACK: ");
+  Serial.println(tdmaCfg.enableLinkAck ? "WAIT_FOR_ACK" : "FIRE_AND_FORGET");
+  Serial.print("RETX_WINDOW: ");
+  Serial.println(tdmaCfg.reliabilityWindowDepth);
+  Serial.print("RETX_MAX_ATT: ");
+  Serial.println(tdmaCfg.reliabilityMaxAttempts);
+  Serial.print("LINK_RETRIES: ");
+  Serial.println(tdmaCfg.maxRetries);
+  Serial.print("ACK_TIMEOUT: ");
+  Serial.print(tdmaCfg.ackTimeoutMs);
+  Serial.println(" ms");
 
   if (!app.begin()) {
     Serial.println("SmartFires app begin failed");
