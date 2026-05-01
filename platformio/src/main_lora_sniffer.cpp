@@ -1,9 +1,9 @@
 #include <Arduino.h>
-#include <SPI.h>
 #include <RH_RF95.h>
+#include <SPI.h>
 
 // Adafruit Feather M0 with built-in RFM95 LoRa radio.
-#define RFM95_CS  8
+#define RFM95_CS 8
 #define RFM95_INT 3
 #define RFM95_RST 4
 
@@ -22,60 +22,6 @@ static uint32_t packetCount = 0;
 static uint32_t badCount = 0;
 static uint32_t lastPacketMs = 0;
 
-// SmartFires packet assumptions:
-// PktHeader is 4 bytes:
-//   magic, pkt_type, node_id, seq
-// with magic = 0xA5.
-//
-// FULL_STATE packet assumptions:
-//   bytes 0..3:   magic, pkt_type, node_id, seq
-//   bytes 4..7:   session_time_ms uint32 little-endian
-//   bytes 8..11:  uptime_ms uint32 little-endian
-//
-// If your actual packet format differs, only decodeSmartFiresPayload()
-// needs edits.
-static constexpr uint8_t SMARTFIRES_PKT_MAGIC = 0xA5;
-
-// static const char *packetTypeName(uint8_t pktType) {
-//   switch (pktType) {
-//   case 0x01:
-//     return "FULL_STATE";
-//   case 0x02:
-//     return "HEARTBEAT";
-//   case 0x03:
-//     return "TIME_SYNC";
-//   default:
-//     return "UNKNOWN";
-//   }
-// }
-static const char *packetTypeName(uint8_t pktType) {
-  switch (pktType) {
-  case 0x01:
-    return "FULL_STATE";
-  case 0x02:
-    return "HEARTBEAT";
-  case 0x03:
-    return "TIME_SYNC";
-  case 0x04:
-    return "BUNDLE";
-  case 0x05:
-    return "STATUS";
-  case 0x06:
-    return "AWAKEN";
-  case 0x07:
-    return "ACK_SUMMARY";
-  default:
-    return "UNKNOWN";
-  }
-}
-
-static uint32_t readLeU32(const uint8_t *buf) {
-  return static_cast<uint32_t>(buf[0]) |
-         (static_cast<uint32_t>(buf[1]) << 8) |
-         (static_cast<uint32_t>(buf[2]) << 16) |
-         (static_cast<uint32_t>(buf[3]) << 24);
-}
-
 static void printHexByte(uint8_t b) {
   if (b < 0x10) {
     Serial.print('0');
@@ -83,98 +29,59 @@ static void printHexByte(uint8_t b) {
   Serial.print(b, HEX);
 }
 
-static void printHexBuffer(const uint8_t *buf, uint8_t len) {
+static void printHexBufferCompact(const uint8_t *buf, uint8_t len) {
   for (uint8_t i = 0; i < len; ++i) {
     printHexByte(buf[i]);
-    if (i + 1 < len) {
-      Serial.print(' ');
+  }
+}
+
+static void printJsonString(const char *s) {
+  Serial.print('"');
+  while (*s) {
+    const char c = *s++;
+    switch (c) {
+    case '"':
+      Serial.print("\\\"");
+      break;
+    case '\\':
+      Serial.print("\\\\");
+      break;
+    case '\n':
+      Serial.print("\\n");
+      break;
+    case '\r':
+      Serial.print("\\r");
+      break;
+    case '\t':
+      Serial.print("\\t");
+      break;
+    default:
+      if (static_cast<uint8_t>(c) < 0x20) {
+        Serial.print("\\u00");
+        printHexByte(static_cast<uint8_t>(c));
+      } else {
+        Serial.print(c);
+      }
+      break;
     }
   }
+  Serial.print('"');
 }
 
-static void printAsciiPreview(const uint8_t *buf, uint8_t len) {
-  for (uint8_t i = 0; i < len; ++i) {
-    const char c = static_cast<char>(buf[i]);
-    if (c >= 32 && c <= 126) {
-      Serial.print(c);
-    } else {
-      Serial.print('.');
-    }
-  }
+static void emitStatus(const char *message) {
+  Serial.print("{\"event\":\"status\",\"t_ms\":");
+  Serial.print(millis());
+  Serial.print(",\"message\":");
+  printJsonString(message);
+  Serial.println("}");
 }
 
-static void decodeSmartFiresPayload(const uint8_t *buf, uint8_t len) {
-  if (len < 4) {
-    Serial.print(" decode=too_short");
-    return;
-  }
-
-  const uint8_t magic = buf[0];
-  const uint8_t pktType = buf[1];
-  const uint8_t nodeId = buf[2];
-  const uint8_t seq = buf[3];
-
-  if (magic != SMARTFIRES_PKT_MAGIC) {
-    Serial.print(" decode=not_smartfires");
-    Serial.print(" first_byte=0x");
-    printHexByte(magic);
-    return;
-  }
-
-  Serial.print(" decode=smartfires");
-
-  Serial.print(" type=");
-  Serial.print(packetTypeName(pktType));
-  Serial.print("(");
-  Serial.print(pktType);
-  Serial.print(")");
-
-  Serial.print(" node=");
-  Serial.print(nodeId);
-
-  Serial.print(" seq=");
-  Serial.print(seq);
-
-  Serial.print(" payload_len=");
-  Serial.print(len);
-
-  // Decode timing fields from FULL_STATE packets.
-  // This helps the Python dashboard classify packets into TDMA frames/slots
-  // using the SmartFires network clock instead of only the sniffer millis().
-  // if (pktType == 0x01 && len >= 12) {
-  //   const uint32_t sessionTimeMs = readLeU32(&buf[4]);
-  //   const uint32_t uptimeMs = readLeU32(&buf[8]);
-  //
-  //   Serial.print(" session_time_ms=");
-  //   Serial.print(sessionTimeMs);
-  //
-  //   Serial.print(" uptime_ms=");
-  //   Serial.print(uptimeMs);
-  // }
-  // Decode session time from FULL_STATE and BUNDLE packets.
-  // Current refactor/only-feather format:
-  //   bytes 0..3: magic, pkt_type, node_id, seq
-  //   bytes 4..7: FullStatePayload.session_time uint32 little-endian
-  if ((pktType == 0x01 || pktType == 0x04) && len >= 8) {
-    const uint32_t sessionTimeMs = readLeU32(&buf[4]);
-
-    Serial.print(" session_time_ms=");
-    Serial.print(sessionTimeMs);
-  }
-}
-
-static void printRadioHeadHeaders() {
-  Serial.print(" rh_to=");
-  Serial.print(rf95.headerTo());
-
-  Serial.print(" rh_from=");
-  Serial.print(rf95.headerFrom());
-
-  Serial.print(" rh_id=");
-  Serial.print(rf95.headerId());
-
-  Serial.print(" rh_flags=0x");
-  printHexByte(rf95.headerFlags());
+static void emitError(const char *message) {
+  Serial.print("{\"event\":\"error\",\"t_ms\":");
+  Serial.print(millis());
+  Serial.print(",\"message\":");
+  printJsonString(message);
+  Serial.println("}");
 }
 
 static void resetRadioModule() {
@@ -195,41 +102,42 @@ void setup() {
   while (!Serial && millis() < 3000) {
   }
 
-  Serial.println();
-  Serial.println("SmartFires passive LoRa sniffer starting...");
-  Serial.println("Mode: receive-only / no TDMA / no ACK / no transmit");
+  emitStatus("SmartFires passive LoRa sniffer starting");
+  emitStatus("Mode: receive-only/no-tdma/no-ack/no-transmit");
 
   resetRadioModule();
 
   if (!rf95.init()) {
-    Serial.println("ERROR: RFM95 init failed");
+    emitError("RFM95 init failed");
     while (true) {
       delay(1000);
     }
   }
 
   if (!rf95.setFrequency(SNIFFER_RF95_FREQ_MHZ)) {
-    Serial.println("ERROR: setFrequency failed");
+    emitError("setFrequency failed");
     while (true) {
       delay(1000);
     }
   }
 
-  // Promiscuous mode accepts packets regardless of RadioHead destination header.
-  // This makes the device useful as a passive monitor.
+  // Promiscuous mode accepts packets regardless of RadioHead destination
+  // header.
   rf95.setPromiscuous(true);
 
-  // Keep this matched to the real network if your driver changes these.
-  // RadioHead defaults are fine only if your main firmware also uses defaults.
-  //
-  // If your TDMA driver sets modem config explicitly, mirror it here.
+  // Keep this matched to the real network if your main firmware changes it.
   // Example:
   // rf95.setModemConfig(RH_RF95::Bw125Cr45Sf128);
 
-  Serial.print("Frequency MHz: ");
-  Serial.println(SNIFFER_RF95_FREQ_MHZ, 3);
+  Serial.print("{\"event\":\"config\",\"t_ms\":");
+  Serial.print(millis());
+  Serial.print(",\"rf95_freq_mhz\":");
+  Serial.print(SNIFFER_RF95_FREQ_MHZ, 3);
+  Serial.print(",\"max_packet_len\":");
+  Serial.print(SNIFFER_MAX_PACKET_LEN);
+  Serial.println("}");
 
-  Serial.println("Listening...");
+  emitStatus("Listening");
 }
 
 void loop() {
@@ -244,11 +152,13 @@ void loop() {
 
   if (!rf95.recv(buf, &len)) {
     ++badCount;
-    Serial.print("RX_FAIL");
-    Serial.print(" t_ms=");
+
+    Serial.print("{\"event\":\"rx_fail\",\"t_ms\":");
     Serial.print(now);
-    Serial.print(" bad_count=");
-    Serial.println(badCount);
+    Serial.print(",\"bad_count\":");
+    Serial.print(badCount);
+    Serial.println("}");
+
     return;
   }
 
@@ -257,38 +167,50 @@ void loop() {
   const uint32_t dt = (lastPacketMs == 0) ? 0 : (now - lastPacketMs);
   lastPacketMs = now;
 
-  Serial.print("RX");
-  Serial.print(" count=");
+  // NDJSON: one complete JSON object per line.
+  //
+  // Firmware intentionally does no SmartFires packet-name filtering.
+  // Python owns all packet decoding, packet naming, TDMA classification,
+  // and dashboard filtering.
+  Serial.print("{\"event\":\"rx\"");
+
+  Serial.print(",\"count\":");
   Serial.print(packetCount);
 
-  Serial.print(" t_ms=");
+  Serial.print(",\"t_ms\":");
   Serial.print(now);
 
-  Serial.print(" dt_ms=");
+  Serial.print(",\"dt_ms\":");
   Serial.print(dt);
 
-  Serial.print(" len=");
+  Serial.print(",\"len\":");
   Serial.print(len);
 
-  Serial.print(" rssi=");
+  Serial.print(",\"rssi\":");
   Serial.print(rf95.lastRssi());
 
+  Serial.print(",\"snr\":");
 #if defined(RH_RF95_REG_PKT_SNR_VALUE)
-  Serial.print(" snr=");
   Serial.print(rf95.lastSNR());
+#else
+  Serial.print("null");
 #endif
 
-  printRadioHeadHeaders();
+  Serial.print(",\"rh_to\":");
+  Serial.print(rf95.headerTo());
 
-  decodeSmartFiresPayload(buf, len);
+  Serial.print(",\"rh_from\":");
+  Serial.print(rf95.headerFrom());
 
-  Serial.print(" hex=[");
-  printHexBuffer(buf, len);
-  Serial.print("]");
+  Serial.print(",\"rh_id\":");
+  Serial.print(rf95.headerId());
 
-  Serial.print(" ascii=\"");
-  printAsciiPreview(buf, len);
+  Serial.print(",\"rh_flags\":");
+  Serial.print(rf95.headerFlags());
+
+  Serial.print(",\"payload_hex\":\"");
+  printHexBufferCompact(buf, len);
   Serial.print("\"");
 
-  Serial.println();
+  Serial.println("}");
 }
