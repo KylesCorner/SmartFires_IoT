@@ -1042,22 +1042,24 @@ def build_dashboard(
         pn.Row(
             total_packets,
             last_60s,
+            unique_sources,
             unique_nodes,
             avg_rssi,
             bad_slot_packets,
-            guard_zone_packets,
             sizing_mode="stretch_width",
         ),
         tabs,
         pn.Accordion(
             (
-                "Latest Packet / Packet Summary / TDMA Summary",
+                "Latest Packet / Decode Summary / TDMA Summary",
                 pn.Column(latest_packet, decode_summary, tdma_summary),
             ),
             active=[],
             sizing_mode="stretch_width",
         ),
         sizing_mode="stretch_width",
+        max_width=1200,
+        margin=(10, 20),
     )
 
     update()
