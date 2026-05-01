@@ -34,10 +34,29 @@
 #define NUM_SLOTS 4
 #endif
 
+#ifndef SMARTFIRES_TDMA_RELIABILITY_MODE
+#define SMARTFIRES_TDMA_RELIABILITY_MODE 0
+#endif
+
 namespace {
 
 constexpr uint8_t kBaseRadioAddr = 0x01;
 constexpr uint8_t kUnassignedNodeId = 0x00;
+
+TdmaReliabilityMode telemetryReliabilityMode() {
+    return tdmaReliabilityModeFromValue(SMARTFIRES_TDMA_RELIABILITY_MODE);
+}
+
+const char *reliabilityModeName(TdmaReliabilityMode mode) {
+    switch (mode) {
+        case TdmaReliabilityMode::StrictLinkAck:
+            return "STRICT_LINK_ACK";
+        case TdmaReliabilityMode::AppLayerAckSummary:
+            return "APP_ACK_SUMMARY";
+    }
+
+    return "UNKNOWN";
+}
 
 uint8_t makeInitialRadioAddr(uint32_t uidHash) {
     uint8_t addr = static_cast<uint8_t>(0x80u | (uidHash & 0x3Fu));
@@ -53,9 +72,9 @@ constexpr uint32_t makeDummyUidHash() {
 
 TdmaConfig makeDummyTdmaCfg() {
     TdmaConfig cfg = TdmaConfig::tdmaCfg(kUnassignedNodeId, kBaseRadioAddr, NUM_SLOTS);
-    cfg.reliabilityMode = TdmaReliabilityMode::StrictLinkAck;
+    cfg.reliabilityMode = telemetryReliabilityMode();
     // Toggle normal telemetry between sendToWait(true) and fire-and-forget(false).
-    cfg.enableLinkAck = true;
+    cfg.enableLinkAck = (cfg.reliabilityMode == TdmaReliabilityMode::StrictLinkAck);
     // Keep retries visible in logs during packet-transmission isolation.
     cfg.maxRetries = 3;
     cfg.ackTimeoutMs = 250;
@@ -176,6 +195,7 @@ void setup() {
     Serial.print("[DUMMY] RETX_MAX_ATT = "); Serial.println(tdmaCfg.reliabilityMaxAttempts);
     Serial.print("[DUMMY] LINK_RETRIES = "); Serial.println(tdmaCfg.maxRetries);
     Serial.print("[DUMMY] ACK_TIMEOUT  = "); Serial.print(tdmaCfg.ackTimeoutMs); Serial.println(" ms");
+    Serial.print("[DUMMY] TELEM_MODE   = "); Serial.println(reliabilityModeName(tdmaCfg.reliabilityMode));
     Serial.println("========================================");
 
     if (!app.begin()) {

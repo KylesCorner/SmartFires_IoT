@@ -79,6 +79,8 @@ private:
   uint32_t _timeSyncCount = 0;
   uint32_t _pendingDropCount = 0;
   uint32_t _lastTxSlotIndex = 0xFFFFFFFFu;
+  uint32_t _lastFreshTelemetrySentMs = 0;
+  bool _hasFreshTelemetrySent = false;
 
   void drainTxQueue();
   void checkIncomingTimeSync();

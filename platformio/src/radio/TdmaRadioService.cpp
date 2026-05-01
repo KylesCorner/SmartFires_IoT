@@ -18,6 +18,17 @@ bool telemetryUsesLinkAck(const TdmaConfig &cfg) {
   return cfg.enableLinkAck;
 }
 
+const char *telemetryModeName(const TdmaConfig &cfg) {
+  switch (cfg.reliabilityMode) {
+    case TdmaReliabilityMode::StrictLinkAck:
+      return "STRICT_LINK_ACK";
+    case TdmaReliabilityMode::AppLayerAckSummary:
+      return "APP_ACK_SUMMARY";
+  }
+
+  return "UNKNOWN";
+}
+
 static const char* pktTypeName(uint8_t pktType) {
   switch (pktType) {
     case BinaryPacket::PKT_AWAKEN:      return "AWAKEN";
@@ -374,6 +385,8 @@ void TdmaRadioService::drainTxQueue() {
       if (useAppReliability) {
         if (fromQueue) {
           rememberSentTelemetry(payload, len);
+          _lastFreshTelemetrySentMs = _tdmaClock.sessionNowMs();
+          _hasFreshTelemetrySent = true;
           Serial.print("[Radio][TX#");
           Serial.print(_sentCount);
           Serial.print("] SENT ");
@@ -382,9 +395,15 @@ void TdmaRadioService::drainTxQueue() {
           Serial.print(hdr.seq);
           Serial.print(" slot=");
           Serial.print(slotIndex);
-          Serial.print(" link_ack=OK");
-          Serial.print(" retries_used=");
-          Serial.print(attemptsUsed > 0 ? attemptsUsed - 1 : 0);
+          Serial.print(" mode=");
+          Serial.print(telemetryModeName(_cfg));
+          if (useLinkAck) {
+            Serial.print(" link_ack=OK");
+            Serial.print(" retries_used=");
+            Serial.print(attemptsUsed > 0 ? attemptsUsed - 1 : 0);
+          } else {
+            Serial.print(" link_ack=OFF");
+          }
           printQueueSnapshot(_queue.count(), _queue.capacity(), _pendingCount,
                              _queue.droppedOldestCount());
           Serial.println();
@@ -400,8 +419,14 @@ void TdmaRadioService::drainTxQueue() {
           Serial.print(_pending[pendingIndex].attempts + 1);
           Serial.print(" slot=");
           Serial.print(slotIndex);
-          Serial.print(" retries_used=");
-          Serial.print(attemptsUsed > 0 ? attemptsUsed - 1 : 0);
+          Serial.print(" mode=");
+          Serial.print(telemetryModeName(_cfg));
+          if (useLinkAck) {
+            Serial.print(" retries_used=");
+            Serial.print(attemptsUsed > 0 ? attemptsUsed - 1 : 0);
+          } else {
+            Serial.print(" link_ack=OFF");
+          }
           printQueueSnapshot(_queue.count(), _queue.capacity(), _pendingCount,
                              _queue.droppedOldestCount());
           Serial.println();
@@ -429,9 +454,15 @@ void TdmaRadioService::drainTxQueue() {
       Serial.print(pktTypeName(hdr.pkt_type));
       Serial.print(" seq=");
       Serial.print(hdr.seq);
-      Serial.print(" link_ack=NO");
-      Serial.print(" retries_used=");
-      Serial.print(attemptsUsed > 0 ? attemptsUsed - 1 : _cfg.maxRetries);
+      Serial.print(" mode=");
+      Serial.print(telemetryModeName(_cfg));
+      if (useLinkAck) {
+        Serial.print(" link_ack=NO");
+        Serial.print(" retries_used=");
+        Serial.print(attemptsUsed > 0 ? attemptsUsed - 1 : _cfg.maxRetries);
+      } else {
+        Serial.print(" link_ack=OFF");
+      }
         if (!fromQueue && useAppReliability && pendingIndex < kMaxReliabilityWindow &&
           _pending[pendingIndex].inUse) {
         Serial.print(" attempt=");
@@ -686,6 +717,14 @@ bool TdmaRadioService::pickRetransmitCandidate(uint8_t *payloadOut,
   }
 
   const uint32_t nowMs = _tdmaClock.sessionNowMs();
+
+  if (_cfg.reliabilityMode == TdmaReliabilityMode::AppLayerAckSummary &&
+      _cfg.reliabilityFreshTrafficHoldoffMs > 0 &&
+      _hasFreshTelemetrySent &&
+      (nowMs - _lastFreshTelemetrySentMs) < _cfg.reliabilityFreshTrafficHoldoffMs) {
+    lenOut = 0;
+    return false;
+  }
 
   int8_t bestIndex = -1;
   uint32_t oldestLastSentMs = 0;

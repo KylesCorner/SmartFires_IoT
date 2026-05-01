@@ -8,6 +8,16 @@ enum class TdmaReliabilityMode : uint8_t {
   AppLayerAckSummary = 1,
 };
 
+inline TdmaReliabilityMode tdmaReliabilityModeFromValue(uint8_t value) {
+  switch (value) {
+    case static_cast<uint8_t>(TdmaReliabilityMode::AppLayerAckSummary):
+      return TdmaReliabilityMode::AppLayerAckSummary;
+    case static_cast<uint8_t>(TdmaReliabilityMode::StrictLinkAck):
+    default:
+      return TdmaReliabilityMode::StrictLinkAck;
+  }
+}
+
 struct TdmaConfig {
   uint8_t nodeId = 1;
   uint8_t baseAddr = 0x01;
@@ -27,6 +37,7 @@ struct TdmaConfig {
   uint8_t reliabilityMaxAttempts = 3;
   uint32_t reliabilityMaxAgeMs = 15000;
   uint32_t reliabilityMinRetryGapMs = 2000;
+  uint32_t reliabilityFreshTrafficHoldoffMs = 2000;
   TdmaReliabilityMode reliabilityMode = TdmaReliabilityMode::StrictLinkAck;
 
   static TdmaConfig tdmaCfg(uint8_t nodeId_ = 1, uint8_t baseAddr_ = 0x01,
@@ -42,6 +53,7 @@ struct TdmaConfig {
                             uint8_t reliabilityMaxAttempts_ = 3,
                             uint32_t reliabilityMaxAgeMs_ = 15000,
                             uint32_t reliabilityMinRetryGapMs_ = 2000,
+                            uint32_t reliabilityFreshTrafficHoldoffMs_ = 2000,
                             TdmaReliabilityMode reliabilityMode_ =
                               TdmaReliabilityMode::StrictLinkAck) {
     TdmaConfig cfg;
@@ -60,6 +72,7 @@ struct TdmaConfig {
     cfg.reliabilityMaxAttempts = reliabilityMaxAttempts_;
     cfg.reliabilityMaxAgeMs = reliabilityMaxAgeMs_;
     cfg.reliabilityMinRetryGapMs = reliabilityMinRetryGapMs_;
+    cfg.reliabilityFreshTrafficHoldoffMs = reliabilityFreshTrafficHoldoffMs_;
     cfg.reliabilityMode = reliabilityMode_;
     return cfg;
   }

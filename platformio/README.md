@@ -2,6 +2,8 @@
 
 PlatformIO firmware for the SmartFires Feather M0 LoRa deployment.
 
+See `PHASE_PROGRESS.md` for the staged reliability rollout status.
+
 ## What This Project Builds
 
 This workspace contains three active firmware targets:
@@ -45,6 +47,9 @@ This avoids the circular dependency of needing a TDMA slot in order to request a
 - `ACK_SUMMARY` is the base-to-node app-layer reliability summary.
 - Telemetry bundling is intentionally buffered: one reference snapshot plus `kBundleMaxDeltas` delta samples are accumulated before a `BUNDLE` packet is emitted.
 - In the normal node build, duty cycling is disabled by default and the node should remain in continuous sampling mode once sync has been acquired.
+- The current node environments default to `AppLayerAckSummary` telemetry mode. Strict per-packet link ACK mode is still available via `SMARTFIRES_TDMA_RELIABILITY_MODE=0`.
+- The base now emits `[BaseApp][SEQ20]` debug summaries so you can see how many packets arrived in each 20-sequence receive window.
+- Phase 3 has started with a short retransmit holdoff after each fresh telemetry send so idle retry traffic does not immediately crowd out newly generated data.
 
 ## Source Layout
 
@@ -93,6 +98,16 @@ pio test -e native -f test_duty_cycle_controller
 ```
 
 If `pio` is not on the shell path, use `platformio` instead.
+
+## Reliability Mode Selection
+
+- `SMARTFIRES_TDMA_RELIABILITY_MODE=0`
+  Strict per-packet link ACK telemetry mode.
+
+- `SMARTFIRES_TDMA_RELIABILITY_MODE=1`
+  Fire-and-forget telemetry with app-layer `ACK_SUMMARY` reliability.
+
+The current `feather_m0_lora_node` and `feather_m0_lora_node_dummy` environments build with mode `1`.
 
 ## Current Debugging Expectations
 

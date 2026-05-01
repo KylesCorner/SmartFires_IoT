@@ -74,10 +74,29 @@ void loop() {
 #define NUM_SLOTS 4
 #endif
 
+#ifndef SMARTFIRES_TDMA_RELIABILITY_MODE
+#define SMARTFIRES_TDMA_RELIABILITY_MODE 0
+#endif
+
 namespace {
 
 constexpr uint8_t kBaseRadioAddr = 0x01;
 constexpr uint8_t kUnassignedNodeId = 0x00;
+
+TdmaReliabilityMode telemetryReliabilityMode() {
+  return tdmaReliabilityModeFromValue(SMARTFIRES_TDMA_RELIABILITY_MODE);
+}
+
+const char *reliabilityModeName(TdmaReliabilityMode mode) {
+  switch (mode) {
+    case TdmaReliabilityMode::StrictLinkAck:
+      return "STRICT_LINK_ACK";
+    case TdmaReliabilityMode::AppLayerAckSummary:
+      return "APP_ACK_SUMMARY";
+  }
+
+  return "UNKNOWN";
+}
 
 uint8_t makeInitialRadioAddr(uint32_t uidHash) {
   uint8_t addr = static_cast<uint8_t>(0x80u | (uidHash & 0x3Fu));
@@ -89,8 +108,8 @@ uint8_t makeInitialRadioAddr(uint32_t uidHash) {
 
 TdmaConfig makeNodeTdmaCfg(uint8_t numSlots) {
   TdmaConfig cfg = TdmaConfig::tdmaCfg(kUnassignedNodeId, kBaseRadioAddr, numSlots);
-  cfg.reliabilityMode = TdmaReliabilityMode::StrictLinkAck;
-  cfg.enableLinkAck = true;
+  cfg.reliabilityMode = telemetryReliabilityMode();
+  cfg.enableLinkAck = (cfg.reliabilityMode == TdmaReliabilityMode::StrictLinkAck);
   cfg.maxRetries = 3;
   cfg.ackTimeoutMs = 250;
   return cfg;
@@ -260,6 +279,8 @@ void setup() {
   Serial.print("ACK_TIMEOUT: ");
   Serial.print(tdmaCfg.ackTimeoutMs);
   Serial.println(" ms");
+  Serial.print("TELEM_REL_MODE: ");
+  Serial.println(reliabilityModeName(tdmaCfg.reliabilityMode));
 
   if (!app.begin()) {
     Serial.println("SmartFires app begin failed");

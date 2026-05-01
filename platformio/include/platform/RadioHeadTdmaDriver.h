@@ -53,6 +53,7 @@ private:
   RH_RF95 _rf95;
   RHReliableDatagram _manager;
   bool _healthy = false;
+  uint8_t _nextDatagramId = 0;
 
   void resetRadio();
 };

@@ -51,6 +51,8 @@ bool RadioHeadTdmaDriver::send(const uint8_t *data,
     return false;
   }
 
+  _manager.setHeaderId(++_nextDatagramId);
+  _manager.setHeaderFlags(RH_FLAGS_NONE, RH_FLAGS_ACK | RH_FLAGS_RETRY);
   return _manager.sendto(const_cast<uint8_t *>(data), len, to);
 }
 

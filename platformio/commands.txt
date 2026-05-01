@@ -23,4 +23,8 @@ pio test -e native -f test_imu_sensor
 pio test -e native -f test_gps_sensor
 pio test -e native -f test_sps30_sensor
 
+Reliability mode override
+SMARTFIRES_TDMA_RELIABILITY_MODE=0 pio run -e feather_m0_lora_node
+SMARTFIRES_TDMA_RELIABILITY_MODE=0 pio run -e feather_m0_lora_node_dummy
+
 If `pio` is not on your shell PATH, use `platformio` instead.

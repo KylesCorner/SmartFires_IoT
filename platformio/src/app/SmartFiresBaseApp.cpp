@@ -29,6 +29,15 @@ bool isTelemetryPacketType(uint8_t pktType) {
          pktType == BinaryPacket::PKT_FULL_STATE;
 }
 
+uint8_t countBits32(uint32_t value) {
+  uint8_t count = 0;
+  while (value != 0u) {
+    count = static_cast<uint8_t>(count + static_cast<uint8_t>(value & 0x01u));
+    value >>= 1;
+  }
+  return count;
+}
+
 }
 
 SmartFiresBaseApp::SmartFiresBaseApp(const Config &cfg,
@@ -289,6 +298,7 @@ bool SmartFiresBaseApp::handleTelemetryAckSummary(uint8_t nodeId, uint8_t seq) {
     return false;
   }
 
+  updateTelemetryReceiptWindow(*tracker, seq);
   recordTelemetrySequence(*tracker, seq);
   return sendAckSummary(nodeId, tracker->ackBaseSeq, tracker->ackMask,
                         "lora_rx", seq);
@@ -349,6 +359,43 @@ void SmartFiresBaseApp::recordTelemetrySequence(AckTracker &tracker, uint8_t seq
     tracker.ackBaseSeq = static_cast<uint8_t>(tracker.ackBaseSeq + 1u);
     tracker.ackMask >>= 1;
   }
+}
+
+void SmartFiresBaseApp::updateTelemetryReceiptWindow(AckTracker &tracker,
+                                                     uint8_t seq) {
+  if (!tracker.receiptWindowInitialized) {
+    tracker.receiptWindowInitialized = true;
+    tracker.receiptWindowStartSeq = seq;
+    tracker.receiptWindowMask = 0x01u;
+    return;
+  }
+
+  uint8_t delta = static_cast<uint8_t>(seq - tracker.receiptWindowStartSeq);
+  if (delta >= 128u) {
+    return;
+  }
+
+  while (delta >= 20u) {
+    const uint8_t receivedCount = countBits32(tracker.receiptWindowMask);
+    const uint8_t windowEndSeq =
+        static_cast<uint8_t>(tracker.receiptWindowStartSeq + 19u);
+    _debugUart.print("[BaseApp][SEQ20] node=");
+    _debugUart.print(tracker.nodeId);
+    _debugUart.print(" range=");
+    _debugUart.print(tracker.receiptWindowStartSeq);
+    _debugUart.print("-");
+    _debugUart.print(windowEndSeq);
+    _debugUart.print(" received=");
+    _debugUart.print(receivedCount);
+    _debugUart.println("/20");
+
+    tracker.receiptWindowStartSeq =
+        static_cast<uint8_t>(tracker.receiptWindowStartSeq + 20u);
+    tracker.receiptWindowMask = 0;
+    delta = static_cast<uint8_t>(seq - tracker.receiptWindowStartSeq);
+  }
+
+  tracker.receiptWindowMask |= (1UL << delta);
 }
 
 bool SmartFiresBaseApp::sendAckSummary(uint8_t nodeId, uint8_t ackBaseSeq,
