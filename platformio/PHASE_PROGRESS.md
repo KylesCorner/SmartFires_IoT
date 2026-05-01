@@ -64,6 +64,7 @@ Delivered so far:
 - added a short holdoff after each fresh telemetry send before idle retransmits are eligible again
 - kept queue-first behavior intact so fresh telemetry still wins whenever new payloads are available
 - added base-side `[BaseApp][SEQ20]` receipt summaries to make end-to-end sequence coverage easier to judge during runtime testing
+- changed pending-window replacement to evict the stalest retransmit candidate first, using retry attempts and age instead of raw oldest-first replacement
 
 Remaining work:
 

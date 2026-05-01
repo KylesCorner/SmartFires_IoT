@@ -638,8 +638,9 @@ void TdmaRadioService::rememberSentTelemetry(const uint8_t *payload, uint8_t len
   const uint32_t nowMs = _tdmaClock.sessionNowMs();
 
   int8_t freeIndex = -1;
-  int8_t oldestIndex = -1;
-  uint32_t oldestSentMs = 0;
+  int8_t replaceIndex = -1;
+  uint8_t replaceAttempts = 0;
+  uint32_t replaceAgeMs = 0;
   uint8_t replacedSeq = 0;
   bool replacingPending = false;
 
@@ -660,16 +661,19 @@ void TdmaRadioService::rememberSentTelemetry(const uint8_t *payload, uint8_t len
       return;
     }
 
-    if (oldestIndex < 0 || e.firstSentMs < oldestSentMs) {
-      oldestIndex = static_cast<int8_t>(i);
-      oldestSentMs = e.firstSentMs;
+    const uint32_t ageMs = nowMs - e.firstSentMs;
+    if (replaceIndex < 0 || e.attempts > replaceAttempts ||
+        (e.attempts == replaceAttempts && ageMs > replaceAgeMs)) {
+      replaceIndex = static_cast<int8_t>(i);
+      replaceAttempts = e.attempts;
+      replaceAgeMs = ageMs;
       replacedSeq = e.seq;
     }
   }
 
   int8_t slot = freeIndex;
   if (slot < 0) {
-    slot = oldestIndex;
+    slot = replaceIndex;
   }
   if (slot < 0) {
     return;
@@ -697,6 +701,10 @@ void TdmaRadioService::rememberSentTelemetry(const uint8_t *payload, uint8_t len
     Serial.print(replacedSeq);
     Serial.print(" new_seq=");
     Serial.print(seq);
+    Serial.print(" old_attempts=");
+    Serial.print(replaceAttempts);
+    Serial.print(" old_age_ms=");
+    Serial.print(replaceAgeMs);
     printQueueSnapshot(_queue.count(), _queue.capacity(), _pendingCount,
                        _queue.droppedOldestCount());
     Serial.println();

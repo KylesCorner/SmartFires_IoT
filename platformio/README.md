@@ -50,6 +50,7 @@ This avoids the circular dependency of needing a TDMA slot in order to request a
 - The current node environments default to `AppLayerAckSummary` telemetry mode. Strict per-packet link ACK mode is still available via `SMARTFIRES_TDMA_RELIABILITY_MODE=0`.
 - The base now emits `[BaseApp][SEQ20]` debug summaries so you can see how many packets arrived in each 20-sequence receive window.
 - Phase 3 has started with a short retransmit holdoff after each fresh telemetry send so idle retry traffic does not immediately crowd out newly generated data.
+- When the app-layer pending window fills, the node now evicts the stalest retransmit candidate first rather than dropping the raw oldest pending packet.
 
 ## Source Layout
 
