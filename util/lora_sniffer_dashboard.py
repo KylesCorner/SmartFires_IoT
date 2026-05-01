@@ -1181,6 +1181,7 @@ def main():
                 f"localhost:{args.web_port}",
                 f"127.0.0.1:{args.web_port}",
                 f"192.168.4.1:{args.web_port}",
+                f"10.8.184.94:{args.web_port}",
             ]
             show_browser = False
 
