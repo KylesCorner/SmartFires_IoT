@@ -1,1 +1,26 @@
-platformio run -e feather_m0_lora_node_dummy --target upload
+SmartFires PlatformIO command reference
+
+Build firmware
+pio run -e feather_m0_lora_base
+pio run -e feather_m0_lora_node
+pio run -e feather_m0_lora_node_dummy
+
+Upload firmware
+pio run -e feather_m0_lora_base --target upload
+pio run -e feather_m0_lora_node --target upload
+pio run -e feather_m0_lora_node_dummy --target upload
+
+Open serial monitor
+pio device monitor -e feather_m0_lora_base
+pio device monitor -e feather_m0_lora_node
+pio device monitor -e feather_m0_lora_node_dummy
+
+Run native tests
+pio test -e native
+pio test -e native -f test_duty_cycle_controller
+pio test -e native -f test_sht31_sensor
+pio test -e native -f test_imu_sensor
+pio test -e native -f test_gps_sensor
+pio test -e native -f test_sps30_sensor
+
+If `pio` is not on your shell PATH, use `platformio` instead.

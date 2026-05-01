@@ -25,6 +25,7 @@ Do not force every sensor to behave the same way. Some sensors are `AlwaysOn`, s
 - Prefer testing sensors through injected driver interfaces.
 - Test public behavior, not private internals.
 - Do not “fix” sensor behavior just because it differs from another sensor.
+- Keep the documented firmware behavior aligned with the current network model: 4 total TDMA entities, out-of-band `AWAKEN`, direct `TIME_SYNC` assignment, and continuous sampling when duty cycling is disabled.
 
 ---
 
@@ -45,9 +46,12 @@ build_flags =
   -Itest/support
 
 build_src_filter =
-  -<*>
   +<power/>
   +<sensors/>
+  -<main.cpp>
+  -<main_base.cpp>
+  -<main_node.cpp>
+  -<main_node_dummy.cpp>
 ```
 
 Run individual test suites like:
@@ -57,6 +61,7 @@ pio test -e native -f test_duty_cycle_controller
 pio test -e native -f test_sht31_sensor
 pio test -e native -f test_imu_sensor
 pio test -e native -f test_gps_sensor
+pio test -e native -f test_sps30_sensor
 ```
 
 ---
@@ -131,6 +136,12 @@ clock.advance(50);
 TEST_ASSERT_FALSE(sensor.ready());
 ```
 
+## Current Regression To Keep Covered
+
+The normal node build uses `DutyCycleConfig::dutyCycleCfg()` with duty cycling disabled. In that mode, the controller must stay in `ActiveSampling` and continue sampling instead of transitioning into cooldown after `activeSampleMs`.
+
+Any future change to `DutyCycleController` should preserve that behavior unless the runtime design is intentionally changed.
+
 ---
 
 ## Common Fake Gotcha
@@ -185,38 +196,25 @@ This is not a blocking test failure.
 
 ## Standard Unity Test Runner Pattern
 
-Each test file should use this cross-platform runner style:
+Most current SmartFires native tests use a simple `main()` runner:
 
 ```cpp
-void runSomeTests() {
+int main() {
+  delay(2000);
   UNITY_BEGIN();
 
   RUN_TEST(test_something);
 
   UNITY_END();
-}
-
-#ifdef ARDUINO
-void setup() {
-  delay(2000);
-  runSomeTests();
-}
-
-void loop() {}
-#else
-int main(int argc, char **argv) {
-  (void)argc;
-  (void)argv;
-
-  runSomeTests();
   return 0;
 }
-#endif
 ```
+
+Using the cross-platform `setup()` / `loop()` wrapper is still fine when needed, but keep the runner style consistent within a given test file.
 
 ---
 
-# Generic Sensor Test Pattern
+## Generic Sensor Test Pattern
 
 For each new sensor, create a test folder:
 
@@ -316,6 +314,11 @@ Most sensor tests should cover:
   - Some sensors stay healthy and Ready.
   - Do not assume all sensors handle read failure the same way.
 
+### Integration / State Machine Notes
+
+- `PacketHandler` bundle emission is buffered; repeated snapshot creation should not be interpreted as a bundle-per-sample contract.
+- `ACK_SUMMARY ack_base_seq=N mask=0x0` means contiguous acknowledgment through `N` with no additional out-of-order packets acknowledged above `N`.
+
 ### Reading Access
 
 - `reading()` returns the latest reading.
@@ -339,7 +342,7 @@ If the sensor implements snapshot behavior:
 
 ---
 
-# Generic Config Helper Pattern
+## Generic Config Helper Pattern
 
 Use small helpers in test files to keep tests readable.
 
@@ -377,7 +380,7 @@ Use the actual config factory name from the production sensor.
 
 ---
 
-# DutyCycleController Testing Context
+## DutyCycleController Testing Context
 
 The `DutyCycleController` tests use:
 
@@ -463,9 +466,9 @@ writeTelemetry(char *out, size_t maxLen) const
 
 ---
 
-# SHT31 Sensor Testing Context
+## SHT31 Sensor Testing Context
 
-## Test Files
+### SHT31 Test Files
 
 ```text
 test/test_sht31_sensor/test_main.cpp
@@ -523,9 +526,9 @@ Current behavior:
 
 ---
 
-# IMU Sensor Testing Context
+## IMU Sensor Testing Context
 
-## Test Files
+### IMU Test Files
 
 ```text
 test/test_imu_sensor/test_main.cpp
@@ -623,9 +626,9 @@ static void wakeAndService(Icm20948Sensor &sensor, FakeClock &clock,
 
 ---
 
-# GPS Sensor Testing Context
+## GPS Sensor Testing Context
 
-## Test Files
+### GPS Test Files
 
 ```text
 test/test_gps_sensor/test_main.cpp
@@ -867,7 +870,7 @@ static Pa1010dGpsSensor::Config makeDutyCycledCfg(
 
 ---
 
-# Recommended Process For Adding A New Sensor Test
+## Recommended Process For Adding A New Sensor Test
 
 ## 1. Identify the production driver interface
 
@@ -1002,7 +1005,7 @@ Finally test:
 
 ---
 
-# Future Test Guidance
+## Future Test Guidance
 
 When adding more sensor tests, keep this pattern:
 

@@ -1,46 +1,26 @@
+# Library Directory
 
-This directory is intended for project specific (private) libraries.
-PlatformIO will compile them to static libraries and link into the executable file.
+This directory is currently unused by the SmartFires firmware.
 
-The source code of each library should be placed in a separate directory
-("lib/your_library_name/[Code]").
+## When To Put Code Here
 
-For example, see the structure of the following example libraries `Foo` and `Bar`:
+Use `lib/` only when a module is truly reusable and should build as an internal PlatformIO library instead of as part of the application source tree.
 
-|--lib
-|  |
-|  |--Bar
-|  |  |--docs
-|  |  |--examples
-|  |  |--src
-|  |     |- Bar.c
-|  |     |- Bar.h
-|  |  |- library.json (optional. for custom build options, etc) https://docs.platformio.org/page/librarymanager/config.html
-|  |
-|  |--Foo
-|  |  |- Foo.c
-|  |  |- Foo.h
-|  |
-|  |- README --> THIS FILE
-|
-|- platformio.ini
-|--src
-   |- main.c
+Good candidates:
 
-Example contents of `src/main.c` using Foo and Bar:
-```
-#include <Foo.h>
-#include <Bar.h>
+- a protocol helper intended to be shared across multiple firmware workspaces
+- a hardware abstraction that needs its own `library.json`
+- a standalone utility with clear public headers and tests
 
-int main (void)
-{
-  ...
-}
+Keep code in `src/` instead when it is tightly coupled to the current SmartFires base/node firmware flow.
 
-```
+## Current Recommendation
 
-The PlatformIO Library Dependency Finder will find automatically dependent
-libraries by scanning project source files.
+For this project, new code usually belongs in one of these places first:
 
-More information about PlatformIO Library Dependency Finder
-- https://docs.platformio.org/page/librarymanager/ldf.html
+- `src/app` for base/node orchestration
+- `src/radio` for TDMA, join, ACK, or queue behavior
+- `src/sensors` for sensor wrappers
+- `src/power` for duty-cycle and battery behavior
+
+Promote code into `lib/` only after a clear reuse boundary appears.

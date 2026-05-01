@@ -1,11 +1,48 @@
+# Test Directory
 
-This directory is intended for PlatformIO Test Runner and project tests.
+SmartFires native unit tests live here.
 
-Unit Testing is a software testing method by which individual units of
-source code, sets of one or more MCU program modules together with associated
-control data, usage procedures, and operating procedures, are tested to
-determine whether they are fit for use. Unit testing finds problems early
-in the development cycle.
+## Current Test Suites
 
-More information about PlatformIO Unit Testing:
-- https://docs.platformio.org/en/latest/advanced/unit-testing/index.html
+- `test_duty_cycle_controller/`
+  Duty-cycle state machine and continuous-sampling behavior.
+
+- `test_gps_sensor/`
+  GPS wrapper behavior through a fake GPS driver.
+
+- `test_imu_sensor/`
+  ICM-20948 wrapper behavior through a fake IMU driver.
+
+- `test_sht31_sensor/`
+  SHT31 wrapper behavior through a fake SHT31 driver.
+
+- `test_sps30_sensor/`
+  SPS30 wrapper behavior through a fake SPS30 driver.
+
+- `support/`
+  Native Arduino shim, test context notes, and reusable fakes.
+
+## How Tests Run
+
+The project uses the PlatformIO `native` environment with Unity. These tests run on the host machine and avoid Arduino hardware dependencies by using:
+
+- `test/support/Arduino.h`
+- `test/support/Arduino.cpp`
+- fake drivers and clocks under `test/support/fakes/`
+
+## Useful Commands
+
+```bash
+pio test -e native
+pio test -e native -f test_duty_cycle_controller
+pio test -e native -f test_sht31_sensor
+pio test -e native -f test_imu_sensor
+pio test -e native -f test_gps_sensor
+pio test -e native -f test_sps30_sensor
+```
+
+## Current Behavior Worth Testing
+
+- disabled duty cycling should remain in continuous sampling mode
+- node join logic is out-of-band until `TIME_SYNC` assignment arrives
+- packet bundling is buffered and does not emit one bundle per snapshot
