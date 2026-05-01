@@ -297,14 +297,23 @@ void TdmaRadioService::drainTxQueue() {
     if (len >= sizeof(BinaryPacket::PktHeader)) {
       memcpy(&hdr, payload, sizeof(BinaryPacket::PktHeader));
     }
-
-    const bool useLinkAck = true;
+    const bool useLinkAck = _cfg.enableLinkAck;
 
     const uint16_t attemptCountWide = static_cast<uint16_t>(_cfg.maxRetries) + 1u;
     const uint8_t maxAttempts =
         attemptCountWide > 0xFFu ? 0xFFu : static_cast<uint8_t>(attemptCountWide);
     bool ok = false;
     uint8_t attemptsUsed = 0;
+
+    if (!useLinkAck) {
+      Serial.print("[Radio][TX_NOACK] ");
+      Serial.print(pktTypeName(hdr.pkt_type));
+      Serial.print(" seq=");
+      Serial.print(hdr.seq);
+      Serial.print(" slot=");
+      Serial.println(slotIndex);
+      ok = _driver.send(payload, len, _cfg.baseAddr);
+    }
 
     for (uint8_t attempt = 1; useLinkAck && attempt <= maxAttempts; ++attempt) {
       attemptsUsed = attempt;

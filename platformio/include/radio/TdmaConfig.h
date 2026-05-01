@@ -13,6 +13,7 @@ struct TdmaConfig {
   uint32_t syncStaleMs = 1320000;
 
   uint8_t queueDepth = 4;
+  bool enableLinkAck = true;
   uint8_t maxRetries = 1;
   uint16_t ackTimeoutMs = 100;
 
@@ -26,7 +27,9 @@ struct TdmaConfig {
                             uint8_t numSlots_ = 2, uint32_t slotWidthMs_ = 900,
                             uint32_t guardMs_ = 20,
                             uint32_t syncStaleMs_ = 1320000,  // 22 min
-                            uint8_t queueDepth_ = 4, uint8_t maxRetries_ = 1,
+                            uint8_t queueDepth_ = 4,
+                            bool enableLinkAck_ = true,
+                            uint8_t maxRetries_ = 1,
                             uint16_t ackTimeoutMs_ = 100,
                             bool enableAppReliability_ = true,
                             uint8_t reliabilityWindowDepth_ = 4,
@@ -41,6 +44,7 @@ struct TdmaConfig {
     cfg.guardMs = guardMs_;
     cfg.syncStaleMs = syncStaleMs_;
     cfg.queueDepth = queueDepth_;
+    cfg.enableLinkAck = enableLinkAck_;
     cfg.maxRetries = maxRetries_;
     cfg.ackTimeoutMs = ackTimeoutMs_;
     cfg.enableAppReliability = enableAppReliability_;

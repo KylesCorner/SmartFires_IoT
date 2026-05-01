@@ -38,6 +38,8 @@ namespace {
 
 TdmaConfig makeDummyTdmaCfg() {
     TdmaConfig cfg = TdmaConfig::tdmaCfg(NODE_ID, 0x01, NUM_SLOTS);
+    // Toggle normal telemetry between sendToWait(true) and fire-and-forget(false).
+    cfg.enableLinkAck = true;
     // Keep retries visible in logs during packet-transmission isolation.
     cfg.maxRetries = 3;
     cfg.ackTimeoutMs = 250;
@@ -147,6 +149,7 @@ void setup() {
     Serial.print("[DUMMY] GUARD        = "); Serial.print(tdmaCfg.guardMs);      Serial.println(" ms");
     Serial.print("[DUMMY] SYNC_STALE   = "); Serial.print(tdmaCfg.syncStaleMs / 1000); Serial.println(" s");
     Serial.print("[DUMMY] APP_RELIAB   = "); Serial.println(tdmaCfg.enableAppReliability ? "ON" : "OFF");
+    Serial.print("[DUMMY] LINK_ACK     = "); Serial.println(tdmaCfg.enableLinkAck ? "WAIT_FOR_ACK" : "FIRE_AND_FORGET");
     Serial.print("[DUMMY] RETX_WINDOW  = "); Serial.println(tdmaCfg.reliabilityWindowDepth);
     Serial.print("[DUMMY] RETX_MAX_ATT = "); Serial.println(tdmaCfg.reliabilityMaxAttempts);
     Serial.print("[DUMMY] LINK_RETRIES = "); Serial.println(tdmaCfg.maxRetries);
