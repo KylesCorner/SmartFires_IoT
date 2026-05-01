@@ -35,8 +35,10 @@ struct DutyCycleConfig {
   float tempDeltaThresholdC;
   float humidityDeltaThresholdPct;
   bool failOnSampleError;
+  bool enabled;
 
-  static DutyCycleConfig dutyCycleCfg(uint32_t minSleepMs_ = 3000,
+  static DutyCycleConfig dutyCycleCfg(
+                                      bool enabled_ = false,uint32_t minSleepMs_ = 3000,
                                       uint32_t maxWakeMs_ = 1000,
                                       uint32_t activeSampleMs_ = 10000,
                                       uint32_t samplePeriodMs_ = 500,
@@ -54,6 +56,7 @@ struct DutyCycleConfig {
     cfg.tempDeltaThresholdC = tempDeltaThresholdC_;
     cfg.humidityDeltaThresholdPct = humidityDeltaThresholdPct_;
     cfg.failOnSampleError = failOnSampleError_;
+    cfg.enabled = enabled_;
     return cfg;
   }
 };
@@ -73,6 +76,7 @@ public:
 
   bool telemetryReady() const;
   uint32_t phaseElapsedMs() const;
+  void changeEnableState(bool enabled);
 
 private:
   DutyCycleConfig _cfg;

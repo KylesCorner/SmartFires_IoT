@@ -35,6 +35,9 @@ bool DutyCycleController::begin() {
 }
 
 void DutyCycleController::update() {
+  if (!_cfg.enabled) {
+    return;
+  }
   switch (_phase) {
   case DutyCyclePhase::IdleSleeping:
     // Serial.println("Duty cycle: sleep");
@@ -270,4 +273,8 @@ bool DutyCycleController::wakeDutyCycledSensors() {
   }
 
   return true;
+}
+
+void DutyCycleController::changeEnableState(bool enabled){
+  _cfg.enabled = enabled;
 }
