@@ -17,7 +17,7 @@ public:
 
         static SmartFiresNodeApp::Config appCfg(uint8_t nodeId_ = 1,
                                                 bool enableBattery_ = true,
-                                                bool awakenOnlyMode_ = false) {
+                                                bool awakenOnlyMode_ = true) {
             SmartFiresNodeApp::Config cfg;
             cfg.nodeId        = nodeId_;
             cfg.enableBattery = enableBattery_;
@@ -57,6 +57,6 @@ private:
     uint32_t _awakenLastSentMs = 0;
     uint8_t  _awakenSeq        = 0;
 
-    void sendAwakenPacket();
+    void sendAwakenHandshake();
     SensorSnapshot buildSnapshot() const;
 };

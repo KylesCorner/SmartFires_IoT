@@ -36,7 +36,7 @@ bool SmartFiresNodeApp::begin() {
   _initialized = true;
 
   // Broadcast AWAKEN immediately — sensors stay idle until TIME_SYNC arrives.
-  sendAwakenPacket();
+  sendAwakenHandshake();
   _awakenLastSentMs = _clock.millis();
 
   APP_LOG("[App] Waiting for TIME_SYNC...");
@@ -73,7 +73,7 @@ void SmartFiresNodeApp::update() {
   if (!hasFreshSync) {
     const uint32_t now = _clock.millis();
     if (now - _awakenLastSentMs >= kAwakenIntervalMs) {
-      sendAwakenPacket();
+      sendAwakenHandshake();
       _awakenLastSentMs = now;
       APP_LOG("[App] Waiting for TIME_SYNC -- AWAKEN retried");
     }
@@ -121,15 +121,18 @@ void SmartFiresNodeApp::update() {
   }
 }
 
-void SmartFiresNodeApp::sendAwakenPacket() {
+void SmartFiresNodeApp::sendAwakenHandshake() {
   uint8_t buf[BinaryPacket::kAwakenLoRaSize];
   const uint8_t seqUsed = _awakenSeq;
   const uint8_t len = BinaryPacket::encodeAwakenPayload(
       _cfg.nodeId, _awakenSeq++, buf, sizeof(buf));
   if (len > 0) {
-    _radio.enqueueTelemetry(buf, len);
-    Serial.print("[App] AWAKEN enqueued seq=");
+    const bool ok = _radio.sendAwakenHandshake(buf, len);
+    Serial.print("[App] AWAKEN direct seq=");
     Serial.println(seqUsed);
+    if (!ok) {
+      APP_LOG("[App] AWAKEN direct send failed");
+    }
   }
 }
 

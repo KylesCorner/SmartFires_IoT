@@ -102,6 +102,29 @@ void TdmaRadioService::update() {
   drainTxQueue();
 }
 
+bool TdmaRadioService::sendAwakenHandshake(const uint8_t *payload, uint8_t len) {
+  if (_state != TdmaRadioState::Ready) {
+    return false;
+  }
+
+  BinaryPacket::PktHeader hdr = {};
+  const bool hasHdr = decodeHeader(payload, len, hdr);
+  const bool ok = _driver.sendToWait(payload, len, _cfg.baseAddr);
+
+  if (!ok) {
+    _error = TdmaRadioError::SendFailed;
+  }
+
+  Serial.print(ok ? "[Radio][AWAKEN_DIRECT] SENT " : "[Radio][AWAKEN_DIRECT] FAIL ");
+  Serial.print(hasHdr ? pktTypeName(hdr.pkt_type) : "RAW");
+  Serial.print(" seq=");
+  Serial.print(hasHdr ? hdr.seq : 0);
+  Serial.print(" link_ack=");
+  Serial.println(ok ? "OK" : "NO");
+
+  return ok;
+}
+
 bool TdmaRadioService::enqueueTelemetry(const uint8_t *payload, uint8_t len) {
   if (_state != TdmaRadioState::Ready) {
     return false;

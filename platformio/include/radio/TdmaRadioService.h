@@ -32,6 +32,7 @@ public:
   bool begin();
   void update();
 
+  bool sendAwakenHandshake(const uint8_t *payload, uint8_t len);
   bool enqueueTelemetry(const uint8_t *payload, uint8_t len);
 
   TdmaRadioState state() const;
