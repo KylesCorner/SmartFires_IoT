@@ -38,6 +38,8 @@ public:
   void update();
 
 private:
+  static constexpr uint8_t kMaxAckTrackedNodes = 16;
+
   struct UartRxState {
     enum class Stage : uint8_t {
       WaitM0,
@@ -52,6 +54,14 @@ private:
     uint8_t data[255] = {};
     uint8_t dataPos = 0;
     uint8_t crc = 0;
+  };
+
+  struct AckTracker {
+    bool inUse = false;
+    bool initialized = false;
+    uint8_t nodeId = 0;
+    uint8_t ackBaseSeq = 0;
+    uint16_t ackMask = 0;
   };
 
   static constexpr uint32_t kHealthLogPeriodMs = 5000;
@@ -86,12 +96,19 @@ private:
   uint32_t _jetsonSessionId = 0;
   uint32_t _jetsonSessionMsAtUpdate = 0;
   uint32_t _localMsAtJetsonUpdate = 0;
+  uint8_t _ackSummarySeq = 0;
+  AckTracker _ackTrackers[kMaxAckTrackedNodes] = {};
 
   void processIncomingLoRa();
   void processIncomingJetsonUart();
   bool handleJetsonCommandPayload(const uint8_t *payload, uint8_t len);
   bool sendDirectTimeSync(uint8_t nodeId, const char *reason,
                           uint8_t triggerSeq = 0);
+  bool handleTelemetryAckSummary(uint8_t nodeId, uint8_t seq);
+  AckTracker *findOrCreateAckTracker(uint8_t nodeId);
+  void recordTelemetrySequence(AckTracker &tracker, uint8_t seq);
+  bool sendAckSummary(uint8_t nodeId, uint8_t ackBaseSeq, uint16_t ackMask,
+                      const char *reason, uint8_t triggerSeq);
   void maybeSendPeriodicTimeSync();
   BinaryPacket::TimeSyncPayload baseLocalTimeSyncPayload() const;
   void updateJetsonTimeSource(const BinaryPacket::TimeSyncPayload &ts);
