@@ -3,6 +3,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
+enum class TdmaReliabilityMode : uint8_t {
+  StrictLinkAck = 0,
+  AppLayerAckSummary = 1,
+};
+
 struct TdmaConfig {
   uint8_t nodeId = 1;
   uint8_t baseAddr = 0x01;
@@ -22,6 +27,7 @@ struct TdmaConfig {
   uint8_t reliabilityMaxAttempts = 3;
   uint32_t reliabilityMaxAgeMs = 15000;
   uint32_t reliabilityMinRetryGapMs = 2000;
+  TdmaReliabilityMode reliabilityMode = TdmaReliabilityMode::StrictLinkAck;
 
   static TdmaConfig tdmaCfg(uint8_t nodeId_ = 1, uint8_t baseAddr_ = 0x01,
                             uint8_t numSlots_ = 4, uint32_t slotWidthMs_ = 900,
@@ -35,7 +41,9 @@ struct TdmaConfig {
                             uint8_t reliabilityWindowDepth_ = 4,
                             uint8_t reliabilityMaxAttempts_ = 3,
                             uint32_t reliabilityMaxAgeMs_ = 15000,
-                            uint32_t reliabilityMinRetryGapMs_ = 2000) {
+                            uint32_t reliabilityMinRetryGapMs_ = 2000,
+                            TdmaReliabilityMode reliabilityMode_ =
+                              TdmaReliabilityMode::StrictLinkAck) {
     TdmaConfig cfg;
     cfg.nodeId = nodeId_;
     cfg.baseAddr = baseAddr_;
@@ -52,6 +60,7 @@ struct TdmaConfig {
     cfg.reliabilityMaxAttempts = reliabilityMaxAttempts_;
     cfg.reliabilityMaxAgeMs = reliabilityMaxAgeMs_;
     cfg.reliabilityMinRetryGapMs = reliabilityMinRetryGapMs_;
+    cfg.reliabilityMode = reliabilityMode_;
     return cfg;
   }
 

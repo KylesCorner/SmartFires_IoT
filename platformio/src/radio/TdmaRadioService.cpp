@@ -7,6 +7,17 @@
 
 namespace {
 
+bool telemetryUsesLinkAck(const TdmaConfig &cfg) {
+  switch (cfg.reliabilityMode) {
+    case TdmaReliabilityMode::StrictLinkAck:
+      return cfg.enableLinkAck;
+    case TdmaReliabilityMode::AppLayerAckSummary:
+      return false;
+  }
+
+  return cfg.enableLinkAck;
+}
+
 static const char* pktTypeName(uint8_t pktType) {
   switch (pktType) {
     case BinaryPacket::PKT_AWAKEN:      return "AWAKEN";
@@ -305,7 +316,7 @@ void TdmaRadioService::drainTxQueue() {
     if (len >= sizeof(BinaryPacket::PktHeader)) {
       memcpy(&hdr, payload, sizeof(BinaryPacket::PktHeader));
     }
-    const bool useLinkAck = _cfg.enableLinkAck;
+    const bool useLinkAck = telemetryUsesLinkAck(_cfg);
 
     const uint16_t attemptCountWide = static_cast<uint16_t>(_cfg.maxRetries) + 1u;
     const uint8_t maxAttempts =

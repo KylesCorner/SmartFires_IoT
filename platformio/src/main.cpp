@@ -89,6 +89,7 @@ uint8_t makeInitialRadioAddr(uint32_t uidHash) {
 
 TdmaConfig makeNodeTdmaCfg(uint8_t numSlots) {
   TdmaConfig cfg = TdmaConfig::tdmaCfg(kUnassignedNodeId, kBaseRadioAddr, numSlots);
+  cfg.reliabilityMode = TdmaReliabilityMode::StrictLinkAck;
   cfg.enableLinkAck = true;
   cfg.maxRetries = 3;
   cfg.ackTimeoutMs = 250;

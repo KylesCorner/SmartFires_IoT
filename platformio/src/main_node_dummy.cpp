@@ -53,6 +53,7 @@ constexpr uint32_t makeDummyUidHash() {
 
 TdmaConfig makeDummyTdmaCfg() {
     TdmaConfig cfg = TdmaConfig::tdmaCfg(kUnassignedNodeId, kBaseRadioAddr, NUM_SLOTS);
+    cfg.reliabilityMode = TdmaReliabilityMode::StrictLinkAck;
     // Toggle normal telemetry between sendToWait(true) and fire-and-forget(false).
     cfg.enableLinkAck = true;
     // Keep retries visible in logs during packet-transmission isolation.
