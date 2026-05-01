@@ -23,6 +23,21 @@ const char *pktTypeName(uint8_t pktType) {
   }
 }
 
+bool isTelemetryPacketType(uint8_t pktType) {
+  return pktType == BinaryPacket::PKT_BUNDLE ||
+         pktType == BinaryPacket::PKT_STATUS ||
+         pktType == BinaryPacket::PKT_FULL_STATE;
+}
+
+uint8_t countBits32(uint32_t value) {
+  uint8_t count = 0;
+  while (value != 0u) {
+    count = static_cast<uint8_t>(count + static_cast<uint8_t>(value & 0x01u));
+    value >>= 1;
+  }
+  return count;
+}
+
 }
 
 SmartFiresBaseApp::SmartFiresBaseApp(const Config &cfg,
@@ -83,7 +98,7 @@ void SmartFiresBaseApp::maybeSendPeriodicTimeSync() {
   uint8_t payload[BinaryPacket::kTimeSyncLoRaSize] = {};
   const uint8_t seq = _timeSyncSeq++;
   const uint8_t len =
-      BinaryPacket::encodeTimeSyncPayload(seq, ts, payload, sizeof(payload));
+      BinaryPacket::encodeTimeSyncPayload(0, seq, ts, payload, sizeof(payload));
   if (len == 0) {
     _debugUart.println("[BaseApp] TX TIME_SYNC periodic encode failed");
     _lastPeriodicTimeSyncMs = now;
@@ -153,19 +168,38 @@ void SmartFiresBaseApp::processIncomingLoRa() {
     _debugUart.println(pkt.rssi);
 
     if (validHeader && hdr.pkt_type == BinaryPacket::PKT_AWAKEN) {
+      BinaryPacket::AwakenPayload awaken = {};
+      if (!BinaryPacket::decodeAwaken(pkt.data, pkt.len, hdr, awaken)) {
+        _debugUart.print("[BaseApp][AWAKEN#");
+        _debugUart.print(_awakenRxCount);
+        _debugUart.println("] decode_failed");
+        continue;
+      }
+
+      NodeAssignment *assignment = findOrCreateNodeAssignment(awaken.uid_hash);
       _debugUart.print("[BaseApp][AWAKEN#");
       _debugUart.print(_awakenRxCount);
-      _debugUart.print("] node=");
-      _debugUart.print(hdr.node_id);
+      _debugUart.print("] uid=0x");
+      _debugUart.print(awaken.uid_hash, HEX);
+      _debugUart.print(" from=");
+      _debugUart.print(pkt.from);
+      _debugUart.print(" assigned_node=");
+      _debugUart.print(assignment ? assignment->nodeId : 0);
+      _debugUart.print(" assigned_slot=");
+      _debugUart.print(assignment ? static_cast<uint8_t>(assignment->nodeId - 1u) : 0xFFu);
       _debugUart.print(" seq=");
       _debugUart.print(hdr.seq);
       _debugUart.println(" action=send_local_time_sync_and_forward_to_edge");
 
-      const bool syncOk = sendDirectTimeSync(hdr.node_id, "awaken", hdr.seq);
+      const bool syncOk = assignment &&
+                          sendDirectTimeSync(pkt.from, assignment->nodeId,
+                                             "awaken", hdr.seq);
       _debugUart.print("[BaseApp][AWAKEN#");
       _debugUart.print(_awakenRxCount);
       _debugUart.print("] local_time_sync_result=");
       _debugUart.println(syncOk ? "OK" : "FAIL");
+    } else if (validHeader && isTelemetryPacketType(hdr.pkt_type)) {
+      handleTelemetryAckSummary(hdr.node_id, hdr.seq);
     }
 
     uint8_t frame[2 + 1 + 1 + 255 + 1] = {};
@@ -187,7 +221,8 @@ void SmartFiresBaseApp::processIncomingLoRa() {
   }
 }
 
-bool SmartFiresBaseApp::sendDirectTimeSync(uint8_t nodeId,
+bool SmartFiresBaseApp::sendDirectTimeSync(uint8_t radioAddr,
+                                           uint8_t nodeId,
                                            const char *reason,
                                            uint8_t triggerSeq) {
   const BinaryPacket::TimeSyncPayload ts = currentTimeSyncPayload();
@@ -195,18 +230,22 @@ bool SmartFiresBaseApp::sendDirectTimeSync(uint8_t nodeId,
   uint8_t payload[BinaryPacket::kTimeSyncLoRaSize] = {};
   const uint8_t seq = _timeSyncSeq++;
   const uint8_t len =
-      BinaryPacket::encodeTimeSyncPayload(seq, ts, payload, sizeof(payload));
+      BinaryPacket::encodeTimeSyncPayload(nodeId, seq, ts, payload, sizeof(payload));
   if (len == 0) {
     _debugUart.println("[BaseApp] TX TIME_SYNC local encode failed");
     return false;
   }
 
-  const bool ok = _radio.sendToWait(payload, len, nodeId);
+  const bool ok = _radio.sendToWait(payload, len, radioAddr);
   _timeSyncTxCount += ok ? 1u : 0u;
   _debugUart.print("[BaseApp] TX TIME_SYNC_LOCAL seq=");
   _debugUart.print(seq);
-  _debugUart.print(" node=");
+  _debugUart.print(" to_radio=");
+  _debugUart.print(radioAddr);
+  _debugUart.print(" assigned_node=");
   _debugUart.print(nodeId);
+  _debugUart.print(" assigned_slot=");
+  _debugUart.print(static_cast<uint8_t>(nodeId - 1u));
   _debugUart.print(" sessionId=0x");
   _debugUart.print(ts.session_id, HEX);
   _debugUart.print(" sessionMs=");
@@ -217,6 +256,179 @@ bool SmartFiresBaseApp::sendDirectTimeSync(uint8_t nodeId,
   _debugUart.print(triggerSeq);
   _debugUart.print(" source=");
   _debugUart.print(_hasJetsonTime ? "jetson" : "base_local");
+  _debugUart.print(" link_ack=");
+  _debugUart.print(ok ? "OK" : "NO");
+  _debugUart.print(" result=");
+  _debugUart.println(ok ? "OK" : "FAIL");
+  return ok;
+}
+
+SmartFiresBaseApp::NodeAssignment *SmartFiresBaseApp::findOrCreateNodeAssignment(
+    uint32_t uidHash) {
+  NodeAssignment *freeAssignment = nullptr;
+
+  for (uint8_t i = 0; i < kMaxAssignedNodes; ++i) {
+    NodeAssignment &assignment = _nodeAssignments[i];
+    if (assignment.inUse && assignment.uidHash == uidHash) {
+      return &assignment;
+    }
+    if (!assignment.inUse && !freeAssignment) {
+      freeAssignment = &assignment;
+    }
+  }
+
+  if (!freeAssignment) {
+    return nullptr;
+  }
+
+  const uint8_t slotIndex =
+      static_cast<uint8_t>(freeAssignment - _nodeAssignments);
+  freeAssignment->inUse = true;
+  freeAssignment->uidHash = uidHash;
+  freeAssignment->nodeId = static_cast<uint8_t>(kFirstNodeId + slotIndex);
+  return freeAssignment;
+}
+
+bool SmartFiresBaseApp::handleTelemetryAckSummary(uint8_t nodeId, uint8_t seq) {
+  AckTracker *tracker = findOrCreateAckTracker(nodeId);
+  if (!tracker) {
+    _debugUart.print("[BaseApp] ACK_SUMMARY skip node=");
+    _debugUart.print(nodeId);
+    _debugUart.println(" reason=no_tracker_slot");
+    return false;
+  }
+
+  updateTelemetryReceiptWindow(*tracker, seq);
+  recordTelemetrySequence(*tracker, seq);
+  return sendAckSummary(nodeId, tracker->ackBaseSeq, tracker->ackMask,
+                        "lora_rx", seq);
+}
+
+SmartFiresBaseApp::AckTracker *SmartFiresBaseApp::findOrCreateAckTracker(
+    uint8_t nodeId) {
+  AckTracker *freeTracker = nullptr;
+
+  for (uint8_t i = 0; i < kMaxAckTrackedNodes; ++i) {
+    AckTracker &tracker = _ackTrackers[i];
+    if (tracker.inUse && tracker.nodeId == nodeId) {
+      return &tracker;
+    }
+    if (!tracker.inUse && !freeTracker) {
+      freeTracker = &tracker;
+    }
+  }
+
+  if (!freeTracker) {
+    return nullptr;
+  }
+
+  freeTracker->inUse = true;
+  freeTracker->initialized = false;
+  freeTracker->nodeId = nodeId;
+  freeTracker->ackBaseSeq = 0;
+  freeTracker->ackMask = 0;
+  return freeTracker;
+}
+
+void SmartFiresBaseApp::recordTelemetrySequence(AckTracker &tracker, uint8_t seq) {
+  if (!tracker.initialized) {
+    tracker.ackBaseSeq = seq;
+    tracker.ackMask = 0;
+    tracker.initialized = true;
+    return;
+  }
+
+  const uint8_t deltaFromBase = static_cast<uint8_t>(seq - tracker.ackBaseSeq);
+  if (deltaFromBase == 0) {
+    return;
+  }
+
+  if (deltaFromBase < 128u) {
+    if (deltaFromBase <= 16u) {
+      tracker.ackMask |= static_cast<uint16_t>(1u << (deltaFromBase - 1u));
+    } else {
+      tracker.ackBaseSeq = seq;
+      tracker.ackMask = 0;
+      return;
+    }
+  } else {
+    return;
+  }
+
+  while ((tracker.ackMask & 0x01u) != 0u) {
+    tracker.ackBaseSeq = static_cast<uint8_t>(tracker.ackBaseSeq + 1u);
+    tracker.ackMask >>= 1;
+  }
+}
+
+void SmartFiresBaseApp::updateTelemetryReceiptWindow(AckTracker &tracker,
+                                                     uint8_t seq) {
+  if (!tracker.receiptWindowInitialized) {
+    tracker.receiptWindowInitialized = true;
+    tracker.receiptWindowStartSeq = seq;
+    tracker.receiptWindowMask = 0x01u;
+    return;
+  }
+
+  uint8_t delta = static_cast<uint8_t>(seq - tracker.receiptWindowStartSeq);
+  if (delta >= 128u) {
+    return;
+  }
+
+  while (delta >= 20u) {
+    const uint8_t receivedCount = countBits32(tracker.receiptWindowMask);
+    const uint8_t windowEndSeq =
+        static_cast<uint8_t>(tracker.receiptWindowStartSeq + 19u);
+    _debugUart.print("[BaseApp][SEQ20] node=");
+    _debugUart.print(tracker.nodeId);
+    _debugUart.print(" range=");
+    _debugUart.print(tracker.receiptWindowStartSeq);
+    _debugUart.print("-");
+    _debugUart.print(windowEndSeq);
+    _debugUart.print(" received=");
+    _debugUart.print(receivedCount);
+    _debugUart.println("/20");
+
+    tracker.receiptWindowStartSeq =
+        static_cast<uint8_t>(tracker.receiptWindowStartSeq + 20u);
+    tracker.receiptWindowMask = 0;
+    delta = static_cast<uint8_t>(seq - tracker.receiptWindowStartSeq);
+  }
+
+  tracker.receiptWindowMask |= (1UL << delta);
+}
+
+bool SmartFiresBaseApp::sendAckSummary(uint8_t nodeId, uint8_t ackBaseSeq,
+                                       uint16_t ackMask, const char *reason,
+                                       uint8_t triggerSeq) {
+  BinaryPacket::AckSummaryPayload ack = {};
+  ack.node_id = nodeId;
+  ack.ack_base_seq = ackBaseSeq;
+  ack.ack_mask = ackMask;
+
+  uint8_t payload[BinaryPacket::kAckSummaryLoRaSize] = {};
+  const uint8_t seq = _ackSummarySeq++;
+  const uint8_t len =
+      BinaryPacket::encodeAckSummaryPayload(seq, ack, payload, sizeof(payload));
+  if (len == 0) {
+    _debugUart.println("[BaseApp] TX ACK_SUMMARY local encode failed");
+    return false;
+  }
+
+  const bool ok = _radio.sendToWait(payload, len, nodeId);
+  _ackTxCount += ok ? 1u : 0u;
+  _debugUart.print("[BaseApp] TX ACK_SUMMARY_LOCAL seq=");
+  _debugUart.print(seq);
+  _debugUart.print(" node=");
+  _debugUart.print(nodeId);
+  _debugUart.print(" ack_base=");
+  _debugUart.print(ackBaseSeq);
+  _debugUart.print(" mask=0x");
+  _debugUart.print(ackMask, HEX);
+  _debugUart.print(" trigger=");
+  _debugUart.print(reason ? reason : "unknown");
+  _debugUart.print(" trigger_seq=");
+  _debugUart.print(triggerSeq);
   _debugUart.print(" link_ack=");
   _debugUart.print(ok ? "OK" : "NO");
   _debugUart.print(" result=");

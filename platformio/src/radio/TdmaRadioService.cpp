@@ -7,6 +7,28 @@
 
 namespace {
 
+bool telemetryUsesLinkAck(const TdmaConfig &cfg) {
+  switch (cfg.reliabilityMode) {
+    case TdmaReliabilityMode::StrictLinkAck:
+      return cfg.enableLinkAck;
+    case TdmaReliabilityMode::AppLayerAckSummary:
+      return false;
+  }
+
+  return cfg.enableLinkAck;
+}
+
+const char *telemetryModeName(const TdmaConfig &cfg) {
+  switch (cfg.reliabilityMode) {
+    case TdmaReliabilityMode::StrictLinkAck:
+      return "STRICT_LINK_ACK";
+    case TdmaReliabilityMode::AppLayerAckSummary:
+      return "APP_ACK_SUMMARY";
+  }
+
+  return "UNKNOWN";
+}
+
 static const char* pktTypeName(uint8_t pktType) {
   switch (pktType) {
     case BinaryPacket::PKT_AWAKEN:      return "AWAKEN";
@@ -183,6 +205,14 @@ bool TdmaRadioService::enqueueTelemetry(const uint8_t *payload, uint8_t len) {
   return true;
 }
 
+uint8_t TdmaRadioService::nodeId() const {
+  return _cfg.nodeId;
+}
+
+uint8_t TdmaRadioService::numSlots() const {
+  return _cfg.numSlots;
+}
+
 TdmaRadioState TdmaRadioService::state() const {
   return _state;
 }
@@ -297,7 +327,7 @@ void TdmaRadioService::drainTxQueue() {
     if (len >= sizeof(BinaryPacket::PktHeader)) {
       memcpy(&hdr, payload, sizeof(BinaryPacket::PktHeader));
     }
-    const bool useLinkAck = _cfg.enableLinkAck;
+    const bool useLinkAck = telemetryUsesLinkAck(_cfg);
 
     const uint16_t attemptCountWide = static_cast<uint16_t>(_cfg.maxRetries) + 1u;
     const uint8_t maxAttempts =
@@ -355,6 +385,8 @@ void TdmaRadioService::drainTxQueue() {
       if (useAppReliability) {
         if (fromQueue) {
           rememberSentTelemetry(payload, len);
+          _lastFreshTelemetrySentMs = _tdmaClock.sessionNowMs();
+          _hasFreshTelemetrySent = true;
           Serial.print("[Radio][TX#");
           Serial.print(_sentCount);
           Serial.print("] SENT ");
@@ -363,9 +395,15 @@ void TdmaRadioService::drainTxQueue() {
           Serial.print(hdr.seq);
           Serial.print(" slot=");
           Serial.print(slotIndex);
-          Serial.print(" link_ack=OK");
-          Serial.print(" retries_used=");
-          Serial.print(attemptsUsed > 0 ? attemptsUsed - 1 : 0);
+          Serial.print(" mode=");
+          Serial.print(telemetryModeName(_cfg));
+          if (useLinkAck) {
+            Serial.print(" link_ack=OK");
+            Serial.print(" retries_used=");
+            Serial.print(attemptsUsed > 0 ? attemptsUsed - 1 : 0);
+          } else {
+            Serial.print(" link_ack=OFF");
+          }
           printQueueSnapshot(_queue.count(), _queue.capacity(), _pendingCount,
                              _queue.droppedOldestCount());
           Serial.println();
@@ -381,8 +419,14 @@ void TdmaRadioService::drainTxQueue() {
           Serial.print(_pending[pendingIndex].attempts + 1);
           Serial.print(" slot=");
           Serial.print(slotIndex);
-          Serial.print(" retries_used=");
-          Serial.print(attemptsUsed > 0 ? attemptsUsed - 1 : 0);
+          Serial.print(" mode=");
+          Serial.print(telemetryModeName(_cfg));
+          if (useLinkAck) {
+            Serial.print(" retries_used=");
+            Serial.print(attemptsUsed > 0 ? attemptsUsed - 1 : 0);
+          } else {
+            Serial.print(" link_ack=OFF");
+          }
           printQueueSnapshot(_queue.count(), _queue.capacity(), _pendingCount,
                              _queue.droppedOldestCount());
           Serial.println();
@@ -410,9 +454,15 @@ void TdmaRadioService::drainTxQueue() {
       Serial.print(pktTypeName(hdr.pkt_type));
       Serial.print(" seq=");
       Serial.print(hdr.seq);
-      Serial.print(" link_ack=NO");
-      Serial.print(" retries_used=");
-      Serial.print(attemptsUsed > 0 ? attemptsUsed - 1 : _cfg.maxRetries);
+      Serial.print(" mode=");
+      Serial.print(telemetryModeName(_cfg));
+      if (useLinkAck) {
+        Serial.print(" link_ack=NO");
+        Serial.print(" retries_used=");
+        Serial.print(attemptsUsed > 0 ? attemptsUsed - 1 : _cfg.maxRetries);
+      } else {
+        Serial.print(" link_ack=OFF");
+      }
         if (!fromQueue && useAppReliability && pendingIndex < kMaxReliabilityWindow &&
           _pending[pendingIndex].inUse) {
         Serial.print(" attempt=");
@@ -455,15 +505,25 @@ void TdmaRadioService::checkIncomingTimeSync() {
     }
 
     uint32_t sessionMs = 0;
+    uint8_t assignedNodeId = 0;
     BinaryPacket::AckSummaryPayload ack = {};
 
-    if (isTimeSyncPacket(packet, sessionMs)) {
+    if (isTimeSyncPacket(packet, sessionMs, assignedNodeId)) {
+      if (assignedNodeId != 0 && !applyAssignedNodeId(assignedNodeId)) {
+        Serial.print("[Radio][SYNC] IGNORE node=");
+        Serial.print(assignedNodeId);
+        Serial.println(" reason=assignment_apply_failed");
+        continue;
+      }
+
       _tdmaClock.applySync(sessionMs);
       _timeSyncCount++;
       Serial.print("[Radio][SYNC#");
       Serial.print(_timeSyncCount);
       Serial.print("] TIME_SYNC rcv sessionMs=");
-      Serial.println(sessionMs);
+      Serial.print(sessionMs);
+      Serial.print(" node=");
+      Serial.println(_cfg.nodeId);
       continue;
     }
 
@@ -484,7 +544,8 @@ void TdmaRadioService::checkIncomingTimeSync() {
 
 bool TdmaRadioService::isTimeSyncPacket(
     const ITdmaRadioDriver::ReceivedPacket &packet,
-    uint32_t &sessionMsOut) const {
+    uint32_t &sessionMsOut,
+    uint8_t &assignedNodeIdOut) const {
   BinaryPacket::PktHeader hdr;
   BinaryPacket::TimeSyncPayload ts;
 
@@ -492,7 +553,37 @@ bool TdmaRadioService::isTimeSyncPacket(
     return false;
   }
 
+  if (_cfg.nodeId == 0) {
+    if (hdr.node_id == 0) {
+      return false;
+    }
+    assignedNodeIdOut = hdr.node_id;
+  } else {
+    if (hdr.node_id != 0 && hdr.node_id != _cfg.nodeId) {
+      return false;
+    }
+    assignedNodeIdOut = hdr.node_id;
+  }
+
   sessionMsOut = ts.session_time_ms;
+  return true;
+}
+
+bool TdmaRadioService::applyAssignedNodeId(uint8_t nodeId) {
+  if (nodeId == 0) {
+    return false;
+  }
+
+  if (_cfg.nodeId == nodeId) {
+    return true;
+  }
+
+  if (!_driver.setLocalAddress(nodeId)) {
+    return false;
+  }
+
+  _cfg.nodeId = nodeId;
+  _tdmaClock.applyAssignment(nodeId, _cfg.numSlots);
   return true;
 }
 
@@ -626,6 +717,14 @@ bool TdmaRadioService::pickRetransmitCandidate(uint8_t *payloadOut,
   }
 
   const uint32_t nowMs = _tdmaClock.sessionNowMs();
+
+  if (_cfg.reliabilityMode == TdmaReliabilityMode::AppLayerAckSummary &&
+      _cfg.reliabilityFreshTrafficHoldoffMs > 0 &&
+      _hasFreshTelemetrySent &&
+      (nowMs - _lastFreshTelemetrySentMs) < _cfg.reliabilityFreshTrafficHoldoffMs) {
+    lenOut = 0;
+    return false;
+  }
 
   int8_t bestIndex = -1;
   uint32_t oldestLastSentMs = 0;

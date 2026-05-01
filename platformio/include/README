@@ -1,89 +1,52 @@
+# Include Directory
 
-This directory is intended for project header files.
+SmartFires public headers live here.
 
-A header file is a file containing C declarations and macro definitions
-to be shared between several project source files. You request the use of a
-header file in your project source file (C, C++, etc) located in `src` folder
-by including it, with the C preprocessing directive `#include'.
+## Header Layout
 
-```src/main.c
+- `app/`
+  Base and node application interfaces.
 
-#include "header.h"
+- `drivers/`
+  Small hardware-facing driver interfaces used to decouple sensors from vendor libraries.
 
-int main (void)
-{
- ...
-}
-```
+- `interfaces/`
+  Common abstractions such as `IClock`, `ISensor`, `IRadio`, and analog readers.
 
-Including a header file produces the same results as copying the header file
-into each source file that needs it. Such copying would be time-consuming
-and error-prone. With a header file, the related declarations appear
-in only one place. If they need to be changed, they can be changed in one
-place, and programs that include the header file will automatically use the
-new version when next recompiled. The header file eliminates the labor of
-finding and changing all the copies as well as the risk that a failure to
-find one copy will result in inconsistencies within a program.
+- `platform/`
+  Concrete hardware/platform adapter declarations.
 
-In C, the convention is to give header files names that end with `.h'.
+- `power/`
+  Battery and duty-cycle interfaces/configuration.
 
-Read more about using header files in official GCC documentation:
+- `radio/`
+  TDMA configuration, clocking, queueing, packet handling, and radio-service APIs.
 
-* Include Syntax
-* Include Operation
-* Once-Only Headers
-* Computed Includes
+- `sensors/`
+  Sensor wrappers and helper sensor interfaces such as `ITriggerSensor`.
 
-https://gcc.gnu.org/onlinedocs/cpp/Header-Files.html
+- `telemetry/`
+  Wire-format structs and telemetry data containers.
 
----
+## Important Interfaces
 
-# Sensor Interface (C++ / Arduino)
+- `interfaces/ISensor.h`
+  Common sensor lifecycle: `begin`, `wake`, `sleep`, `service`, `sample`, `ready`, `healthy`, and `fillSnapshot`.
 
-This project uses a small C++ interface (`ISensor`) to keep sensor code consistent and easy to extend. Each sensor (DHT, flame, etc.) implements the same lifecycle and sampling API, so the main loop can treat all sensors uniformly.
+- `radio/TdmaConfig.h`
+  Current TDMA defaults. The firmware is presently configured for 4 total TDMA entities: one base plus three assignable node slots.
 
-## Interface: `ISensor`
+- `telemetry/BinaryPacket.h`
+  On-air packet definitions. This now includes:
+  - `AWAKEN` carrying a UID hash payload
+  - `TIME_SYNC` used both for periodic sync and direct node assignment
+  - `ACK_SUMMARY` for app-layer reliability
 
-File: `include/ISensor.h`
+- `app/SmartFiresNodeApp.h`
+  Node application config includes the assigned node ID, device UID hash, battery enable flag, and awaken-only mode flag.
 
-Each sensor must implement:
+## Include Conventions
 
-* `const char* name() const`
-  Human-readable identifier for logs and debugging.
-
-* `bool begin()`
-  Initialize hardware/library state. Return `true` if initialization succeeds.
-
-* `bool ready() const`
-  Indicates whether the sensor is currently able to provide data (useful for warmup-time sensors).
-
-* `bool sample()`
-  Capture/update a reading. Return `true` if a new reading was produced.
-  Sensors should self-throttle internally if they require minimum read intervals (example: DHT).
-
-* `uint32_t ageMs() const`
-  Age of the last valid reading in milliseconds. Use `UINT32_MAX` if no reading has been captured yet.
-
-* `bool healthy() const`
-  `true` if the sensor is functioning normally; `false` after repeated read failures or detected faults.
-
-## Folder placement
-
-* `include/`
-  Shared headers and interfaces (`ISensor.h`, packet structs, pin maps)
-
-* `src/`
-  Application logic (state machine, scheduling, LoRa comms)
-
-* `lib/` (optional)
-  Reusable modules if we later want to share code across multiple firmware projects (drone node, base station)
-
-## Usage pattern
-
-Sensors are registered as `ISensor*` and sampled in a loop:
-
-* Call `begin()` once in `setup()`
-* Call `sample()` frequently in `loop()`
-* Print/log/transmit values at a slower cadence
-
-This keeps the main program simple while allowing each sensor implementation to manage its own timing and failure handling.
+- Headers in `include/` are the public interface for code under `src/`.
+- Keep hardware-specific third-party includes out of generic interfaces when possible.
+- Prefer depending on small interfaces from `include/interfaces/` or `include/drivers/` so native tests can use fakes.

@@ -4,6 +4,7 @@
 #include "app/SmartFiresNodeApp.h"
 
 #include "interfaces/ISensor.h"
+#include "platform/BoardIdentify.h"
 #include "platform/AdafruitGpsDriver.h"
 #include "platform/ArduinoAnalogReader.h"
 #include "platform/ArduinoClock.h"
@@ -28,8 +29,23 @@
 #endif
 
 #ifndef NUM_SLOTS
-#define NUM_SLOTS 2
+#define NUM_SLOTS 4
 #endif
+
+namespace {
+
+constexpr uint8_t kBaseRadioAddr = 0x01;
+constexpr uint8_t kUnassignedNodeId = 0x00;
+
+uint8_t makeInitialRadioAddr(uint32_t uidHash) {
+  uint8_t addr = static_cast<uint8_t>(0x80u | (uidHash & 0x3Fu));
+  if (addr == 0xFFu) {
+    addr = 0x80u;
+  }
+  return addr;
+}
+
+}  // namespace
 
 // -----------------------------------------------------------------------------
 // Platform
@@ -81,19 +97,23 @@ DutyCycleController duty(dutyCfg, sht31, sensors, sensorCount, clock);
 // Telemetry
 // -----------------------------------------------------------------------------
 
-PacketHandler::Config packetHandlerCfg = PacketHandler::Config::make(NODE_ID);
+const uint32_t nodeUidHash = BoardIdentity::hash32();
+const uint8_t initialRadioAddr = makeInitialRadioAddr(nodeUidHash);
+
+PacketHandler::Config packetHandlerCfg =
+  PacketHandler::Config::make(kUnassignedNodeId);
 PacketHandler packetHandler(packetHandlerCfg);
 
 // -----------------------------------------------------------------------------
 // TDMA LoRa
 // -----------------------------------------------------------------------------
 
-TdmaConfig tdmaCfg = TdmaConfig::tdmaCfg();
+TdmaConfig tdmaCfg = TdmaConfig::tdmaCfg(kUnassignedNodeId, kBaseRadioAddr, NUM_SLOTS);
 TdmaClock tdmaClock(tdmaCfg, clock);
 TdmaTxQueue tdmaQueue(tdmaCfg.queueDepth);
 
 RadioHeadTdmaDriver::Config radioDriverCfg =
-    RadioHeadTdmaDriver::Config::radioHeadCfg(NODE_ID);
+  RadioHeadTdmaDriver::Config::radioHeadCfg(initialRadioAddr);
 RadioHeadTdmaDriver radioDriver(radioDriverCfg);
 
 TdmaRadioService tdmaRadio(tdmaCfg, tdmaClock, tdmaQueue, radioDriver);
@@ -105,7 +125,7 @@ TdmaRadioService tdmaRadio(tdmaCfg, tdmaClock, tdmaQueue, radioDriver);
 // SmartFiresNodeApp::Config appCfg;
 // appCfg.enableBattery = true;
 SmartFiresNodeApp::Config appCfg =
-    SmartFiresNodeApp::Config::appCfg(NODE_ID, false);
+  SmartFiresNodeApp::Config::appCfg(kUnassignedNodeId, nodeUidHash, false);
 
 SmartFiresNodeApp app(appCfg, clock, duty, packetHandler, tdmaRadio, tdmaClock,
                       sensors, sensorCount, &battery);

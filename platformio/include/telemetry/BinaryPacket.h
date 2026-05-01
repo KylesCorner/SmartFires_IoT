@@ -3,11 +3,11 @@
 // Binary wire format for SmartFires telemetry.
 //
 // LoRa payloads — node -> base:
-//   AWAKEN:     [PktHeader:4][crc8:1]                                                     =   5 bytes
+//   AWAKEN:     [PktHeader:4][AwakenPayload:4][crc8:1]                                    =   9 bytes
 //   BUNDLE:     [PktHeader:4][FullStatePayload:20][n_deltas:1][DeltaPayload×n][crc8:1]  ≤ 194 bytes
 //   STATUS:     [PktHeader:4][StatusPayload:12][crc8:1]                                 =  17 bytes
 //
-// LoRa TIME_SYNC — base -> all nodes (broadcast):
+// LoRa TIME_SYNC — base -> node or all nodes:
 //   TIME_SYNC:  [PktHeader:4][TimeSyncPayload:8][crc8:1]                                =  13 bytes
 //
 // CRC-8/MAXIM (polynomial 0x31) covers all preceding bytes in the LoRa payload.
@@ -44,6 +44,10 @@ struct __attribute__((packed)) PktHeader {
     uint8_t pkt_type;
     uint8_t node_id;
     uint8_t seq;
+};
+
+struct __attribute__((packed)) AwakenPayload {
+    uint32_t uid_hash;
 };
 
 struct __attribute__((packed)) FullStatePayload {
@@ -109,6 +113,7 @@ static constexpr uint8_t DELTA_FLAG_PM4_CLAMPED      = 0x20;
 static constexpr uint8_t DELTA_FLAG_PM10_CLAMPED     = 0x40;
 
 static_assert(sizeof(PktHeader)        ==  4, "PktHeader must be 4 bytes");
+static_assert(sizeof(AwakenPayload)    ==  4, "AwakenPayload must be 4 bytes");
 static_assert(sizeof(FullStatePayload) == 20, "FullStatePayload must be 20 bytes");
 static_assert(sizeof(StatusPayload)    == 12, "StatusPayload must be 12 bytes");
 static_assert(sizeof(TimeSyncPayload)  ==  8, "TimeSyncPayload must be 8 bytes");
@@ -119,7 +124,7 @@ static constexpr uint8_t kBundleMaxDeltas = 14;
 
 // LoRa payload sizes (no UART framing). Each includes a trailing CRC-8 byte.
 static constexpr size_t kAwakenLoRaSize =
-    sizeof(PktHeader) + 1;                                              //   5
+    sizeof(PktHeader) + sizeof(AwakenPayload) + 1;                      //   9
 static constexpr size_t kStatusLoRaSize =
     sizeof(PktHeader) + sizeof(StatusPayload) + 1;                      //  17
 static constexpr size_t kTimeSyncLoRaSize =
@@ -150,6 +155,7 @@ inline uint8_t crc8(const uint8_t* data, size_t len) {
 
 inline uint8_t encodeAwakenPayload(
     uint8_t node_id, uint8_t seq,
+    const AwakenPayload& awaken,
     uint8_t* buf, size_t buf_size)
 {
     if (buf_size < kAwakenLoRaSize) return 0;
@@ -159,7 +165,9 @@ inline uint8_t encodeAwakenPayload(
     hdr.node_id  = node_id;
     hdr.seq      = seq;
     memcpy(buf, &hdr, sizeof(PktHeader));
-    buf[sizeof(PktHeader)] = crc8(buf, sizeof(PktHeader));
+    memcpy(buf + sizeof(PktHeader), &awaken, sizeof(AwakenPayload));
+    buf[sizeof(PktHeader) + sizeof(AwakenPayload)] =
+        crc8(buf, sizeof(PktHeader) + sizeof(AwakenPayload));
     return static_cast<uint8_t>(kAwakenLoRaSize);
 }
 
@@ -185,7 +193,7 @@ inline uint8_t encodeStatusPayload(
 // ---------- encode: raw LoRa TIME_SYNC payload (12 bytes, base -> nodes broadcast) ----------
 
 inline uint8_t encodeTimeSyncPayload(
-    uint8_t seq,
+    uint8_t node_id, uint8_t seq,
     const TimeSyncPayload& ts,
     uint8_t* buf, size_t buf_size)
 {
@@ -193,12 +201,20 @@ inline uint8_t encodeTimeSyncPayload(
     PktHeader hdr;
     hdr.magic    = PKT_MAGIC;
     hdr.pkt_type = PKT_TIME_SYNC;
-    hdr.node_id  = 0;
+    hdr.node_id  = node_id;
     hdr.seq      = seq;
     memcpy(buf,                    &hdr, sizeof(PktHeader));
     memcpy(buf + sizeof(PktHeader), &ts,  sizeof(TimeSyncPayload));
     buf[sizeof(PktHeader) + sizeof(TimeSyncPayload)] = crc8(buf, sizeof(PktHeader) + sizeof(TimeSyncPayload));
     return static_cast<uint8_t>(kTimeSyncLoRaSize);
+}
+
+inline uint8_t encodeTimeSyncPayload(
+    uint8_t seq,
+    const TimeSyncPayload& ts,
+    uint8_t* buf, size_t buf_size)
+{
+    return encodeTimeSyncPayload(0, seq, ts, buf, buf_size);
 }
 
 inline uint8_t encodeAckSummaryPayload(
@@ -343,6 +359,17 @@ inline bool decodeStatus(
     memcpy(&hdr_out, raw,                    sizeof(PktHeader));
     memcpy(&sp_out,  raw + sizeof(PktHeader), sizeof(StatusPayload));
     return hdr_out.magic == PKT_MAGIC && hdr_out.pkt_type == PKT_STATUS;
+}
+
+inline bool decodeAwaken(
+    const uint8_t* raw, size_t len,
+    PktHeader& hdr_out, AwakenPayload& awaken_out)
+{
+    if (len < kAwakenLoRaSize) return false;
+    if (crc8(raw, len - 1) != raw[len - 1]) return false;
+    memcpy(&hdr_out, raw, sizeof(PktHeader));
+    memcpy(&awaken_out, raw + sizeof(PktHeader), sizeof(AwakenPayload));
+    return hdr_out.magic == PKT_MAGIC && hdr_out.pkt_type == PKT_AWAKEN;
 }
 
 inline bool decodeTimeSync(

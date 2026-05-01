@@ -52,6 +52,15 @@ void SmartFiresNodeApp::update() {
   // Always poll radio so TIME_SYNC packets are processed.
   _radio.update();
 
+  if (_cfg.nodeId != _radio.nodeId()) {
+    _cfg.nodeId = _radio.nodeId();
+    _packetHandler.setNodeId(_cfg.nodeId);
+    Serial.print("[App] ASSIGNED node=");
+    Serial.print(_cfg.nodeId);
+    Serial.print(" slot=");
+    Serial.println(_tdmaClock.mySlot());
+  }
+
   const bool hasFreshSync = _tdmaClock.hasSync() && !_tdmaClock.syncStale();
   if (hasFreshSync && !_syncActive) {
     _syncActive = true;
@@ -123,13 +132,17 @@ void SmartFiresNodeApp::update() {
 
 void SmartFiresNodeApp::sendAwakenHandshake() {
   uint8_t buf[BinaryPacket::kAwakenLoRaSize];
+  BinaryPacket::AwakenPayload awaken = {};
+  awaken.uid_hash = _cfg.deviceUidHash;
   const uint8_t seqUsed = _awakenSeq;
   const uint8_t len = BinaryPacket::encodeAwakenPayload(
-      _cfg.nodeId, _awakenSeq++, buf, sizeof(buf));
+      _cfg.nodeId, _awakenSeq++, awaken, buf, sizeof(buf));
   if (len > 0) {
     const bool ok = _radio.sendAwakenHandshake(buf, len);
     Serial.print("[App] AWAKEN direct seq=");
-    Serial.println(seqUsed);
+    Serial.print(seqUsed);
+    Serial.print(" uid=0x");
+    Serial.println(_cfg.deviceUidHash, HEX);
     if (!ok) {
       APP_LOG("[App] AWAKEN direct send failed");
     }

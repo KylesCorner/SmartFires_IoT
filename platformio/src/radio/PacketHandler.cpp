@@ -105,6 +105,10 @@ void PacketHandler::resetStatusTimer() {
     _statusLen      = 0;
 }
 
+void PacketHandler::setNodeId(uint8_t nodeId) {
+    _cfg.nodeId = nodeId;
+}
+
 // --- full reset ---
 
 void PacketHandler::reset() {
