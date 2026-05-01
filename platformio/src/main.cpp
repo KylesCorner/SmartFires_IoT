@@ -35,11 +35,12 @@ void loop() {
   delay(5);
 }
 
-#else
+#elif defined(LORA_NODE)
 
 #include <Wire.h>
 
 #include "app/SmartFiresNodeApp.h"
+#include "platform/BoardIdentify.h"
 
 #include "interfaces/ISensor.h"
 #include "platform/ArduinoAnalogReader.h"
@@ -65,9 +66,9 @@ void loop() {
 #include "sensors/Pa1010dGpsSensor.h"
 #include "sensors/Sps30Sensor.h"
 
-#ifndef NODE_ID
-#define NODE_ID 1
-#endif
+// #ifndef nodeId
+// #define nodeId 1
+// #endif
 
 #ifndef NUM_SLOTS
 #define NUM_SLOTS 2
@@ -132,21 +133,24 @@ DutyCycleController duty(dutyCfg, sht31, sensors, sensorCount, clock);
 // Networking
 // -----------------------------------------------------------------------------
 
-PacketHandler::Config packetHandlerCfg = PacketHandler::Config::make(NODE_ID);
+constexpr uint8_t numSlots = NUM_SLOTS;
+const uint8_t nodeId = BoardIdentity::smallId(1, numSlots);
+
+PacketHandler::Config packetHandlerCfg = PacketHandler::Config::make(nodeId);
 PacketHandler packetHandler(packetHandlerCfg);
 
-TdmaConfig tdmaCfg = TdmaConfig::tdmaCfg(NODE_ID, 0x01, NUM_SLOTS);
+TdmaConfig tdmaCfg = TdmaConfig::tdmaCfg(nodeId, 0x01, numSlots);
 TdmaClock tdmaClock(tdmaCfg, clock);
 TdmaTxQueue tdmaQueue(tdmaCfg.queueDepth);
 
 RadioHeadTdmaDriver::Config radioDriverCfg =
-    RadioHeadTdmaDriver::Config::radioHeadCfg(NODE_ID);
+    RadioHeadTdmaDriver::Config::radioHeadCfg(nodeId);
 RadioHeadTdmaDriver radioDriver(radioDriverCfg);
 
 TdmaRadioService tdmaRadio(tdmaCfg, tdmaClock, tdmaQueue, radioDriver);
 
 SmartFiresNodeApp::Config appCfg =
-    SmartFiresNodeApp::Config::appCfg(NODE_ID, false);
+    SmartFiresNodeApp::Config::appCfg(nodeId, false);
 
 // -----------------------------------------------------------------------------
 // App
@@ -194,6 +198,8 @@ void setup() {
   // }
 
   Serial.println("SmartFires Feather TDMA node starting...");
+  Serial.print("Board ID: ");
+  Serial.println(nodeId);
 
   if (!app.begin()) {
     Serial.println("SmartFires app begin failed");
@@ -223,4 +229,6 @@ void loop() {
   delay(25);
 }
 
+#else
+#error "Define exactly one firmware role: LORA_BASE or LORA_NODE"
 #endif
