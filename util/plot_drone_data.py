@@ -11,7 +11,7 @@ import pandas as pd
 hv.extension("bokeh")
 
 
-DEFAULT_RSYNC_SOURCE = "jetson:/mnt/nvme_drive/data/"
+DEFAULT_RSYNC_SOURCE = "jetson-field:/mnt/nvme_drive/data/"
 DEFAULT_RSYNC_DEST = "/run/media/kyle/External/SmartFires/"
 
 
