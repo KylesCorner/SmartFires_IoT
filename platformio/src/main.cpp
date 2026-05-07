@@ -1,3 +1,4 @@
+#include "USB/USBAPI.h"
 #include <Arduino.h>
 
 #if defined(LORA_BASE)
@@ -56,15 +57,17 @@ void loop() {
 #include "radio/TdmaRadioService.h"
 #include "radio/TdmaTxQueue.h"
 
-#include "platform/AdafruitSht31Driver.h"
 #include "platform/AdafruitGpsDriver.h"
-#include "platform/SparkfunIcm20948Driver.h"
+#include "platform/AdafruitSht31Driver.h"
 #include "platform/SensirionUartSps30Driver.h"
+#include "platform/SparkfunIcm20948Driver.h"
+#include "platform/TPSDriver.h"
 
 #include "sensors/Icm20948Sensor.h"
-#include "sensors/Sht31Sensor.h"
 #include "sensors/Pa1010dGpsSensor.h"
+#include "sensors/Sht31Sensor.h"
 #include "sensors/Sps30Sensor.h"
+#include "sensors/WindSensorRevC.h"
 
 // #ifndef nodeId
 // #define nodeId 1
@@ -89,10 +92,10 @@ TdmaReliabilityMode telemetryReliabilityMode() {
 
 const char *reliabilityModeName(TdmaReliabilityMode mode) {
   switch (mode) {
-    case TdmaReliabilityMode::StrictLinkAck:
-      return "STRICT_LINK_ACK";
-    case TdmaReliabilityMode::AppLayerAckSummary:
-      return "APP_ACK_SUMMARY";
+  case TdmaReliabilityMode::StrictLinkAck:
+    return "STRICT_LINK_ACK";
+  case TdmaReliabilityMode::AppLayerAckSummary:
+    return "APP_ACK_SUMMARY";
   }
 
   return "UNKNOWN";
@@ -107,9 +110,11 @@ uint8_t makeInitialRadioAddr(uint32_t uidHash) {
 }
 
 TdmaConfig makeNodeTdmaCfg(uint8_t numSlots) {
-  TdmaConfig cfg = TdmaConfig::tdmaCfg(kUnassignedNodeId, kBaseRadioAddr, numSlots);
+  TdmaConfig cfg =
+      TdmaConfig::tdmaCfg(kUnassignedNodeId, kBaseRadioAddr, numSlots);
   cfg.reliabilityMode = telemetryReliabilityMode();
-  cfg.enableLinkAck = (cfg.reliabilityMode == TdmaReliabilityMode::StrictLinkAck);
+  cfg.enableLinkAck =
+      (cfg.reliabilityMode == TdmaReliabilityMode::StrictLinkAck);
   cfg.maxRetries = 3;
   cfg.ackTimeoutMs = 250;
   return cfg;
@@ -123,7 +128,7 @@ RadioHeadTdmaDriver::Config makeNodeRadioCfg(uint8_t radioAddr,
   return cfg;
 }
 
-}  // namespace
+} // namespace
 
 // -----------------------------------------------------------------------------
 // Platform
@@ -134,6 +139,29 @@ ArduinoAnalogReader analog;
 // -----------------------------------------------------------------------------
 // Sensors
 // -----------------------------------------------------------------------------
+
+constexpr uint8_t PIN_WIND_RV = A1;
+constexpr uint8_t PIN_WIND_TMP = A2;
+constexpr uint8_t PIN_WIND_ENABLE = A3;
+
+constexpr float WIND_DIVIDER_RATIO = 1.6818f;
+
+TPSDriver::Config windPowerCfg = TPSDriver::Config::make(PIN_WIND_ENABLE, true);
+
+TPSDriver windPower(windPowerCfg);
+
+WindSensorRevC::Config windCfg = WindSensorRevC::Config::makeRevCCfg(
+    PIN_WIND_RV, PIN_WIND_TMP,
+    3.3f,               // Feather ADC reference voltage
+    1023,               // 10-bit ADC by default
+    WIND_DIVIDER_RATIO, // RV divider reconstruction
+    WIND_DIVIDER_RATIO, // TMP divider reconstruction
+    -1.0f,              // zero-wind adjustment, calibrate later
+    10,                 // minSamplePeriodMs
+    10000,              // wakeDelayMs for hot-wire/TPS settling
+    SensorDutyClass::DutyCycled);
+
+WindSensorRevC wind(windCfg, analog, windPower, clock);
 
 AdafruitSht31Driver sht31Driver;
 
@@ -147,7 +175,7 @@ Sht31Sensor sht31(sht31Cfg, sht31Driver, clock);
 
 AdafruitGpsDriver gpsDriver;
 Pa1010dGpsSensor::Config gpsCfg = Pa1010dGpsSensor::Config::makeGpsCfg();
-Pa1010dGpsSensor gps(gpsCfg,gpsDriver,clock);
+Pa1010dGpsSensor gps(gpsCfg, gpsDriver, clock);
 
 SparkfunIcm20948Driver imuDriver;
 Icm20948Sensor::Config imuCfg = Icm20948Sensor::Config::makeImuCfg();
@@ -157,11 +185,8 @@ Sps30Sensor::Config sps30Cfg = Sps30Sensor::Config::makeSps30Cfg();
 SensirionUartSps30Driver sps30Driver(Serial1);
 Sps30Sensor sps30(sps30Cfg, sps30Driver, clock);
 
-ISensor* sensors[] = {
-    &sht31,
-    &gps,
-    &imu,
-    &sps30,
+ISensor *sensors[] = {
+    &sht31, &gps, &imu, &sps30, &wind,
 };
 
 constexpr size_t sensorCount = sizeof(sensors) / sizeof(sensors[0]);
@@ -174,7 +199,7 @@ BatteryMonitor::Config batteryCfg = BatteryMonitor::Config::makeBatConfig();
 BatteryMonitor battery(batteryCfg, analog, clock);
 
 // -----------------------------------------------------------------------------
-// Duty Cycle 
+// Duty Cycle
 // -----------------------------------------------------------------------------
 
 DutyCycleConfig dutyCfg = DutyCycleConfig::dutyCycleCfg();
@@ -197,13 +222,13 @@ TdmaClock tdmaClock(tdmaCfg, clock);
 TdmaTxQueue tdmaQueue(tdmaCfg.queueDepth);
 
 RadioHeadTdmaDriver::Config radioDriverCfg =
-  makeNodeRadioCfg(initialRadioAddr, tdmaCfg.ackTimeoutMs);
+    makeNodeRadioCfg(initialRadioAddr, tdmaCfg.ackTimeoutMs);
 RadioHeadTdmaDriver radioDriver(radioDriverCfg);
 
 TdmaRadioService tdmaRadio(tdmaCfg, tdmaClock, tdmaQueue, radioDriver);
 
-SmartFiresNodeApp::Config appCfg =
-  SmartFiresNodeApp::Config::appCfg(kUnassignedNodeId, nodeUidHash, false, false);
+SmartFiresNodeApp::Config appCfg = SmartFiresNodeApp::Config::appCfg(
+    kUnassignedNodeId, nodeUidHash, false, false);
 
 // -----------------------------------------------------------------------------
 // App
@@ -227,6 +252,44 @@ void scanI2C() {
   }
 }
 
+void testBeginSensors() {
+  for (int i = 0; i < sensorCount; ++i) {
+    Serial.print(sensors[i]->name());
+    if (!sensors[i]->begin()) {
+      Serial.print(" begin FAILED.");
+    } else {
+
+      Serial.print(" begin OK.");
+    }
+    delay(1000);
+
+    if (!sensors[i]->wake()) {
+      Serial.println(" wake FAILED");
+    } else {
+
+      Serial.println(" wake OK");
+    }
+  }
+}
+
+void testSampleSensors() {
+  for (int i = 0; i < sensorCount; ++i) {
+    sensors[i]->service();
+    if (sensors[i]->ready()) {
+      if (sensors[i]->sample()) {
+        char buf[180];
+        sensors[i]->writeTelemetry(buf, sizeof(buf));
+        Serial.println(buf);
+      } else {
+        Serial.print(sensors[i]->name());
+        Serial.println(" sample failed");
+      }
+    }
+
+    delay(1000);
+  }
+}
+
 void setup() {
   delay(1000);
   Serial.begin(115200);
@@ -236,19 +299,7 @@ void setup() {
 
   Wire.begin();
   scanI2C();
-
-  // if (!sps30.begin()) {
-  //   Serial.println("SPS begin FAILED");
-  //   while (true) {
-  //     delay(1000);
-  //   }
-  // }
-  //
-  // Serial.println("SPS begin OK");
-  //
-  // if (!sps30.wake()) {
-  //   Serial.println("SPS wake FAILED");
-  // }
+  // testBeginSensors();
 
   Serial.println("SmartFires Feather TDMA node starting...");
   Serial.print("UID_HASH: 0x");
@@ -293,18 +344,7 @@ void setup() {
 }
 
 void loop() {
-  // sps30.service();
-  //
-  // if (sps30.ready()) {
-  //   if (sps30.sample()) {
-  //     char buf[180];
-  //     sps30.writeTelemetry(buf, sizeof(buf));
-  //     Serial.println(buf);
-  //   } else {
-  //     Serial.println("SPS sample failed");
-  //   }
-  // }
-  //
+  // testSampleSensors();
   // delay(1000);
   app.update();
   delay(25);

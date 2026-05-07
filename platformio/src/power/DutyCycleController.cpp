@@ -196,6 +196,8 @@ void DutyCycleController::updateSampling() {
       if (sensor->ready()) {
         if (sensor->sample()) {
           sampledAny = true;
+          Serial.print(sensor->name());
+          Serial.println(" Sampled");
         }
       }
 

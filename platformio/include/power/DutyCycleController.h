@@ -38,7 +38,7 @@ struct DutyCycleConfig {
   bool enabled;
 
   static DutyCycleConfig dutyCycleCfg(
-                                      bool enabled_ = false,uint32_t minSleepMs_ = 3000,
+                                      bool enabled_ = true,uint32_t minSleepMs_ = 3000,
                                       uint32_t maxWakeMs_ = 1000,
                                       uint32_t activeSampleMs_ = 10000,
                                       uint32_t samplePeriodMs_ = 500,
