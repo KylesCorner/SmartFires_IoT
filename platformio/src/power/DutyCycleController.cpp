@@ -35,6 +35,8 @@ bool DutyCycleController::begin() {
 }
 
 void DutyCycleController::update() {
+  serviceAllSensors();
+
   if (!_cfg.enabled) {
     if (_phase == DutyCyclePhase::WarmingUp ||
         _phase == DutyCyclePhase::IdleSleeping ||
@@ -82,6 +84,7 @@ void DutyCycleController::update() {
   case DutyCyclePhase::NotStarted:
     // Serial.println("Duty cycle: NotStarted");
     break;
+
   default:
     break;
   }
@@ -133,7 +136,7 @@ bool DutyCycleController::thresholdCrossed(
 }
 
 void DutyCycleController::updateSleeping() {
-  _triggerSensor.service();
+  // _triggerSensor.service();
 
   if (_triggerSensor.ready()) {
     _triggerSensor.sample();
@@ -152,7 +155,7 @@ void DutyCycleController::updateSleeping() {
   }
 }
 void DutyCycleController::updateCooldownSleeping() {
-  _triggerSensor.service();
+  // _triggerSensor.service();
 
   if (_triggerSensor.ready()) {
     _triggerSensor.sample();
@@ -171,7 +174,7 @@ void DutyCycleController::updateWakingSensors() {
       continue;
     }
 
-    sensor->service();
+    // sensor->service();
   }
 
   if (phaseElapsedMs() >= _cfg.warmupMs) {
@@ -192,7 +195,7 @@ void DutyCycleController::updateSampling() {
         continue;
       }
 
-      sensor->service();
+      // sensor->service();
       if (sensor->ready()) {
         if (sensor->sample()) {
           sampledAny = true;
@@ -201,7 +204,6 @@ void DutyCycleController::updateSampling() {
           Serial.println(buf);
         }
       }
-
     }
     Serial.println("------------------------------------------\n");
 
@@ -293,4 +295,16 @@ bool DutyCycleController::wakeDutyCycledSensors() {
 
 void DutyCycleController::changeEnableState(bool enabled) {
   _cfg.enabled = enabled;
+}
+
+void DutyCycleController::serviceAllSensors() {
+  for (size_t i = 0; i < _sensorCount; ++i) {
+    ISensor *sensor = _sensors[i];
+
+    if (!sensor) {
+      continue;
+    }
+
+    sensor->service();
+  }
 }

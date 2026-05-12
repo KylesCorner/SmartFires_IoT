@@ -40,7 +40,7 @@ struct DutyCycleConfig {
   static DutyCycleConfig dutyCycleCfg(
                                       bool enabled_ = true,uint32_t minSleepMs_ = 3000,
                                       uint32_t maxWakeMs_ = 1000,
-                                      uint32_t activeSampleMs_ = 10000,
+                                      uint32_t activeSampleMs_ = 30000,
                                       uint32_t samplePeriodMs_ = 500,
                                       uint32_t warmupMs_ = 10000,
                                       float tempDeltaThresholdC_ = 1.0f,
@@ -107,6 +107,7 @@ private:
   bool beginSensors();
   bool sleepDutyCycledSensors();
   bool wakeDutyCycledSensors();
+  void serviceAllSensors();
 
 
 };
