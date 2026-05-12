@@ -17,7 +17,8 @@ enum class SensorDutyClass : uint8_t {
   AlwaysOn,
   DutyCycled,
   WarmupHeavy,
-  OnDemand
+  OnDemand,
+  Perodic,
 };
 
 class ISensor {

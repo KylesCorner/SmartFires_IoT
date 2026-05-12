@@ -196,21 +196,14 @@ void DutyCycleController::updateSampling() {
       if (sensor->ready()) {
         if (sensor->sample()) {
           sampledAny = true;
-          Serial.print(sensor->name());
-          Serial.println(" Sampled");
+          char buf[180];
+          sensor->writeTelemetry(buf, sizeof(buf));
+          Serial.println(buf);
         }
       }
 
-      // if (sensor->ready()) {
-      //   // Serial.print(sensor->name());
-      //   // Serial.println(" Sampled");
-      //   // sensor->sample();
-      //   sampledAny = true;
-      // } else {
-      //   // Serial.print(sensor->name());
-      //   // Serial.println(" Sample failed, not ready");
-      // }
     }
+    Serial.println("------------------------------------------\n");
 
     if (sampledAny) {
       _freshSampleReady = true;

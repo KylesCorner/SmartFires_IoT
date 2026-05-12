@@ -12,23 +12,55 @@
 static Pa1010dGpsSensor::Config makeAlwaysOnCfg(
     uint32_t minSamplePeriodMs = 100,
     uint32_t wakeDelayMs = 0,
-    uint8_t address = 0x10) {
+    uint8_t address = 0x10,
+    GpsPowerMode powerMode = GpsPowerMode::FullPowerContinuous) {
   return Pa1010dGpsSensor::Config::makeGpsCfg(
       minSamplePeriodMs,
       wakeDelayMs,
       SensorDutyClass::AlwaysOn,
-      address);
+      address,
+      powerMode);
 }
 
 static Pa1010dGpsSensor::Config makeDutyCycledCfg(
     uint32_t minSamplePeriodMs = 100,
     uint32_t wakeDelayMs = 50,
-    uint8_t address = 0x10) {
+    uint8_t address = 0x10,
+    GpsPowerMode powerMode = GpsPowerMode::FullPowerContinuous) {
   return Pa1010dGpsSensor::Config::makeGpsCfg(
       minSamplePeriodMs,
       wakeDelayMs,
       SensorDutyClass::DutyCycled,
-      address);
+      address,
+      powerMode);
+}
+
+static Pa1010dGpsSensor::Config makePeriodicDutyCycledCfg(
+    GpsPowerMode powerMode,
+    uint32_t minSamplePeriodMs = 100,
+    uint32_t wakeDelayMs = 50,
+    uint8_t address = 0x10) {
+  Pa1010dGpsSensor::Config cfg = makeDutyCycledCfg(
+      minSamplePeriodMs,
+      wakeDelayMs,
+      address,
+      powerMode);
+
+  cfg.periodic.runTimeMs = 4000;
+  cfg.periodic.sleepTimeMs = 15000;
+  cfg.periodic.secondRunTimeMs = 24000;
+  cfg.periodic.secondSleepTimeMs = 90000;
+
+  return cfg;
+}
+
+static void assertNoPowerModeCommandsWereSent(const FakeGpsDriver &driver) {
+  TEST_ASSERT_EQUAL_UINT32(0, driver.enterStandbyCount);
+  TEST_ASSERT_EQUAL_UINT32(0, driver.enterBackupCount);
+  TEST_ASSERT_EQUAL_UINT32(0, driver.enterPeriodicStandbyCount);
+  TEST_ASSERT_EQUAL_UINT32(0, driver.enterPeriodicBackupCount);
+  TEST_ASSERT_EQUAL_UINT32(0, driver.enterFullPowerCount);
+  TEST_ASSERT_EQUAL_UINT32(0, driver.wakeFromBackupCount);
 }
 
 static void test_begin_success_sets_ready_and_uses_configured_address() {
@@ -81,20 +113,24 @@ static void test_duty_class_matches_config() {
   TEST_ASSERT_EQUAL(SensorDutyClass::DutyCycled, sensor.dutyClass());
 }
 
-static void test_always_on_sleep_keeps_sensor_ready() {
+static void test_always_on_sleep_keeps_sensor_ready_and_sends_no_low_power_command() {
   FakeGpsDriver driver;
   FakeClock clock;
 
-  auto cfg = makeAlwaysOnCfg();
+  auto cfg = makeAlwaysOnCfg(100, 0, 0x10, GpsPowerMode::Backup);
   Pa1010dGpsSensor sensor(cfg, driver, clock);
 
   TEST_ASSERT_TRUE(sensor.begin());
   TEST_ASSERT_TRUE(sensor.sleep());
 
   TEST_ASSERT_EQUAL(SensorPowerState::Ready, sensor.powerState());
+
+  // AlwaysOn sensors should not actually be commanded into sleep,
+  // even if the configured GPS hardware mode is low power.
+  assertNoPowerModeCommandsWereSent(driver);
 }
 
-static void test_always_on_wake_keeps_sensor_ready() {
+static void test_always_on_wake_keeps_sensor_ready_and_enters_full_power() {
   FakeGpsDriver driver;
   FakeClock clock;
 
@@ -105,26 +141,43 @@ static void test_always_on_wake_keeps_sensor_ready() {
   TEST_ASSERT_TRUE(sensor.wake());
 
   TEST_ASSERT_EQUAL(SensorPowerState::Ready, sensor.powerState());
+  TEST_ASSERT_EQUAL_UINT32(1, driver.enterFullPowerCount);
+  TEST_ASSERT_EQUAL_UINT32(0, driver.wakeFromBackupCount);
 }
 
-static void test_duty_cycled_sleep_sets_sleeping() {
+static void test_duty_cycled_sleep_sets_sleeping_in_full_power_mode_without_low_power_command() {
   FakeGpsDriver driver;
   FakeClock clock;
 
-  auto cfg = makeDutyCycledCfg();
+  auto cfg = makeDutyCycledCfg(
+      100,
+      50,
+      0x10,
+      GpsPowerMode::FullPowerContinuous);
+
   Pa1010dGpsSensor sensor(cfg, driver, clock);
 
   TEST_ASSERT_TRUE(sensor.begin());
   TEST_ASSERT_TRUE(sensor.sleep());
 
   TEST_ASSERT_EQUAL(SensorPowerState::Sleeping, sensor.powerState());
+
+  TEST_ASSERT_EQUAL_UINT32(0, driver.enterStandbyCount);
+  TEST_ASSERT_EQUAL_UINT32(0, driver.enterBackupCount);
+  TEST_ASSERT_EQUAL_UINT32(0, driver.enterPeriodicStandbyCount);
+  TEST_ASSERT_EQUAL_UINT32(0, driver.enterPeriodicBackupCount);
 }
 
-static void test_duty_cycled_wake_sets_waking() {
+static void test_duty_cycled_wake_sets_waking_and_enters_full_power() {
   FakeGpsDriver driver;
   FakeClock clock;
 
-  auto cfg = makeDutyCycledCfg(100, 50);
+  auto cfg = makeDutyCycledCfg(
+      100,
+      50,
+      0x10,
+      GpsPowerMode::Standby);
+
   Pa1010dGpsSensor sensor(cfg, driver, clock);
 
   TEST_ASSERT_TRUE(sensor.begin());
@@ -134,6 +187,304 @@ static void test_duty_cycled_wake_sets_waking() {
   TEST_ASSERT_TRUE(sensor.wake());
 
   TEST_ASSERT_EQUAL(SensorPowerState::Waking, sensor.powerState());
+  TEST_ASSERT_EQUAL_UINT32(1, driver.enterStandbyCount);
+  TEST_ASSERT_EQUAL_UINT32(1, driver.enterFullPowerCount);
+  TEST_ASSERT_EQUAL_UINT32(0, driver.wakeFromBackupCount);
+}
+
+static void test_sleep_in_standby_mode_calls_enter_standby() {
+  FakeGpsDriver driver;
+  FakeClock clock;
+
+  auto cfg = makeDutyCycledCfg(
+      100,
+      50,
+      0x10,
+      GpsPowerMode::Standby);
+
+  Pa1010dGpsSensor sensor(cfg, driver, clock);
+
+  TEST_ASSERT_TRUE(sensor.begin());
+  TEST_ASSERT_TRUE(sensor.sleep());
+
+  TEST_ASSERT_EQUAL(SensorPowerState::Sleeping, sensor.powerState());
+  TEST_ASSERT_EQUAL_UINT32(1, driver.enterStandbyCount);
+  TEST_ASSERT_EQUAL_UINT32(0, driver.enterBackupCount);
+  TEST_ASSERT_EQUAL_UINT32(0, driver.enterPeriodicStandbyCount);
+  TEST_ASSERT_EQUAL_UINT32(0, driver.enterPeriodicBackupCount);
+}
+
+static void test_sleep_in_backup_mode_calls_enter_backup() {
+  FakeGpsDriver driver;
+  FakeClock clock;
+
+  auto cfg = makeDutyCycledCfg(
+      100,
+      50,
+      0x10,
+      GpsPowerMode::Backup);
+
+  Pa1010dGpsSensor sensor(cfg, driver, clock);
+
+  TEST_ASSERT_TRUE(sensor.begin());
+  TEST_ASSERT_TRUE(sensor.sleep());
+
+  TEST_ASSERT_EQUAL(SensorPowerState::Sleeping, sensor.powerState());
+  TEST_ASSERT_EQUAL_UINT32(0, driver.enterStandbyCount);
+  TEST_ASSERT_EQUAL_UINT32(1, driver.enterBackupCount);
+  TEST_ASSERT_EQUAL_UINT32(0, driver.enterPeriodicStandbyCount);
+  TEST_ASSERT_EQUAL_UINT32(0, driver.enterPeriodicBackupCount);
+}
+
+static void test_sleep_in_periodic_standby_mode_calls_enter_periodic_standby_and_forwards_config() {
+  FakeGpsDriver driver;
+  FakeClock clock;
+
+  auto cfg = makePeriodicDutyCycledCfg(GpsPowerMode::PeriodicStandby);
+  Pa1010dGpsSensor sensor(cfg, driver, clock);
+
+  TEST_ASSERT_TRUE(sensor.begin());
+  TEST_ASSERT_TRUE(sensor.sleep());
+
+  TEST_ASSERT_EQUAL(SensorPowerState::Sleeping, sensor.powerState());
+  TEST_ASSERT_EQUAL_UINT32(0, driver.enterStandbyCount);
+  TEST_ASSERT_EQUAL_UINT32(0, driver.enterBackupCount);
+  TEST_ASSERT_EQUAL_UINT32(1, driver.enterPeriodicStandbyCount);
+  TEST_ASSERT_EQUAL_UINT32(0, driver.enterPeriodicBackupCount);
+
+  TEST_ASSERT_EQUAL_UINT32(4000, driver.lastPeriodicCfg.runTimeMs);
+  TEST_ASSERT_EQUAL_UINT32(15000, driver.lastPeriodicCfg.sleepTimeMs);
+  TEST_ASSERT_EQUAL_UINT32(24000, driver.lastPeriodicCfg.secondRunTimeMs);
+  TEST_ASSERT_EQUAL_UINT32(90000, driver.lastPeriodicCfg.secondSleepTimeMs);
+}
+
+static void test_sleep_in_periodic_backup_mode_calls_enter_periodic_backup_and_forwards_config() {
+  FakeGpsDriver driver;
+  FakeClock clock;
+
+  auto cfg = makePeriodicDutyCycledCfg(GpsPowerMode::PeriodicBackup);
+  Pa1010dGpsSensor sensor(cfg, driver, clock);
+
+  TEST_ASSERT_TRUE(sensor.begin());
+  TEST_ASSERT_TRUE(sensor.sleep());
+
+  TEST_ASSERT_EQUAL(SensorPowerState::Sleeping, sensor.powerState());
+  TEST_ASSERT_EQUAL_UINT32(0, driver.enterStandbyCount);
+  TEST_ASSERT_EQUAL_UINT32(0, driver.enterBackupCount);
+  TEST_ASSERT_EQUAL_UINT32(0, driver.enterPeriodicStandbyCount);
+  TEST_ASSERT_EQUAL_UINT32(1, driver.enterPeriodicBackupCount);
+
+  TEST_ASSERT_EQUAL_UINT32(4000, driver.lastPeriodicCfg.runTimeMs);
+  TEST_ASSERT_EQUAL_UINT32(15000, driver.lastPeriodicCfg.sleepTimeMs);
+  TEST_ASSERT_EQUAL_UINT32(24000, driver.lastPeriodicCfg.secondRunTimeMs);
+  TEST_ASSERT_EQUAL_UINT32(90000, driver.lastPeriodicCfg.secondSleepTimeMs);
+}
+
+static void test_wake_from_standby_uses_enter_full_power() {
+  FakeGpsDriver driver;
+  FakeClock clock;
+
+  auto cfg = makeDutyCycledCfg(
+      100,
+      50,
+      0x10,
+      GpsPowerMode::Standby);
+
+  Pa1010dGpsSensor sensor(cfg, driver, clock);
+
+  TEST_ASSERT_TRUE(sensor.begin());
+  TEST_ASSERT_TRUE(sensor.sleep());
+
+  clock.set(1000);
+  TEST_ASSERT_TRUE(sensor.wake());
+
+  TEST_ASSERT_EQUAL(SensorPowerState::Waking, sensor.powerState());
+  TEST_ASSERT_EQUAL_UINT32(1, driver.enterFullPowerCount);
+  TEST_ASSERT_EQUAL_UINT32(0, driver.wakeFromBackupCount);
+}
+
+static void test_wake_from_periodic_standby_uses_enter_full_power() {
+  FakeGpsDriver driver;
+  FakeClock clock;
+
+  auto cfg = makePeriodicDutyCycledCfg(GpsPowerMode::PeriodicStandby);
+  Pa1010dGpsSensor sensor(cfg, driver, clock);
+
+  TEST_ASSERT_TRUE(sensor.begin());
+  TEST_ASSERT_TRUE(sensor.sleep());
+
+  clock.set(1000);
+  TEST_ASSERT_TRUE(sensor.wake());
+
+  TEST_ASSERT_EQUAL(SensorPowerState::Waking, sensor.powerState());
+  TEST_ASSERT_EQUAL_UINT32(1, driver.enterPeriodicStandbyCount);
+  TEST_ASSERT_EQUAL_UINT32(1, driver.enterFullPowerCount);
+  TEST_ASSERT_EQUAL_UINT32(0, driver.wakeFromBackupCount);
+}
+
+static void test_wake_from_backup_uses_wake_from_backup_not_enter_full_power() {
+  FakeGpsDriver driver;
+  FakeClock clock;
+
+  auto cfg = makeDutyCycledCfg(
+      100,
+      50,
+      0x10,
+      GpsPowerMode::Backup);
+
+  Pa1010dGpsSensor sensor(cfg, driver, clock);
+
+  TEST_ASSERT_TRUE(sensor.begin());
+  TEST_ASSERT_TRUE(sensor.sleep());
+
+  clock.set(1000);
+  TEST_ASSERT_TRUE(sensor.wake());
+
+  TEST_ASSERT_EQUAL(SensorPowerState::Waking, sensor.powerState());
+  TEST_ASSERT_EQUAL_UINT32(1, driver.enterBackupCount);
+  TEST_ASSERT_EQUAL_UINT32(1, driver.wakeFromBackupCount);
+  TEST_ASSERT_EQUAL_UINT32(0, driver.enterFullPowerCount);
+}
+
+static void test_wake_from_periodic_backup_uses_wake_from_backup_not_enter_full_power() {
+  FakeGpsDriver driver;
+  FakeClock clock;
+
+  auto cfg = makePeriodicDutyCycledCfg(GpsPowerMode::PeriodicBackup);
+  Pa1010dGpsSensor sensor(cfg, driver, clock);
+
+  TEST_ASSERT_TRUE(sensor.begin());
+  TEST_ASSERT_TRUE(sensor.sleep());
+
+  clock.set(1000);
+  TEST_ASSERT_TRUE(sensor.wake());
+
+  TEST_ASSERT_EQUAL(SensorPowerState::Waking, sensor.powerState());
+  TEST_ASSERT_EQUAL_UINT32(1, driver.enterPeriodicBackupCount);
+  TEST_ASSERT_EQUAL_UINT32(1, driver.wakeFromBackupCount);
+  TEST_ASSERT_EQUAL_UINT32(0, driver.enterFullPowerCount);
+}
+
+static void test_sleep_failure_sets_error_and_unhealthy_for_standby() {
+  FakeGpsDriver driver;
+  FakeClock clock;
+  driver.enterStandbyOk = false;
+
+  auto cfg = makeDutyCycledCfg(
+      100,
+      50,
+      0x10,
+      GpsPowerMode::Standby);
+
+  Pa1010dGpsSensor sensor(cfg, driver, clock);
+
+  TEST_ASSERT_TRUE(sensor.begin());
+  TEST_ASSERT_FALSE(sensor.sleep());
+
+  TEST_ASSERT_FALSE(sensor.healthy());
+  TEST_ASSERT_EQUAL(SensorPowerState::Error, sensor.powerState());
+  TEST_ASSERT_EQUAL_UINT32(1, driver.enterStandbyCount);
+}
+
+static void test_sleep_failure_sets_error_and_unhealthy_for_backup() {
+  FakeGpsDriver driver;
+  FakeClock clock;
+  driver.enterBackupOk = false;
+
+  auto cfg = makeDutyCycledCfg(
+      100,
+      50,
+      0x10,
+      GpsPowerMode::Backup);
+
+  Pa1010dGpsSensor sensor(cfg, driver, clock);
+
+  TEST_ASSERT_TRUE(sensor.begin());
+  TEST_ASSERT_FALSE(sensor.sleep());
+
+  TEST_ASSERT_FALSE(sensor.healthy());
+  TEST_ASSERT_EQUAL(SensorPowerState::Error, sensor.powerState());
+  TEST_ASSERT_EQUAL_UINT32(1, driver.enterBackupCount);
+}
+
+static void test_sleep_failure_sets_error_and_unhealthy_for_periodic_standby() {
+  FakeGpsDriver driver;
+  FakeClock clock;
+  driver.enterPeriodicStandbyOk = false;
+
+  auto cfg = makePeriodicDutyCycledCfg(GpsPowerMode::PeriodicStandby);
+  Pa1010dGpsSensor sensor(cfg, driver, clock);
+
+  TEST_ASSERT_TRUE(sensor.begin());
+  TEST_ASSERT_FALSE(sensor.sleep());
+
+  TEST_ASSERT_FALSE(sensor.healthy());
+  TEST_ASSERT_EQUAL(SensorPowerState::Error, sensor.powerState());
+  TEST_ASSERT_EQUAL_UINT32(1, driver.enterPeriodicStandbyCount);
+}
+
+static void test_sleep_failure_sets_error_and_unhealthy_for_periodic_backup() {
+  FakeGpsDriver driver;
+  FakeClock clock;
+  driver.enterPeriodicBackupOk = false;
+
+  auto cfg = makePeriodicDutyCycledCfg(GpsPowerMode::PeriodicBackup);
+  Pa1010dGpsSensor sensor(cfg, driver, clock);
+
+  TEST_ASSERT_TRUE(sensor.begin());
+  TEST_ASSERT_FALSE(sensor.sleep());
+
+  TEST_ASSERT_FALSE(sensor.healthy());
+  TEST_ASSERT_EQUAL(SensorPowerState::Error, sensor.powerState());
+  TEST_ASSERT_EQUAL_UINT32(1, driver.enterPeriodicBackupCount);
+}
+
+static void test_wake_failure_sets_error_and_unhealthy_for_full_power_wake_path() {
+  FakeGpsDriver driver;
+  FakeClock clock;
+  driver.enterFullPowerOk = false;
+
+  auto cfg = makeDutyCycledCfg(
+      100,
+      50,
+      0x10,
+      GpsPowerMode::Standby);
+
+  Pa1010dGpsSensor sensor(cfg, driver, clock);
+
+  TEST_ASSERT_TRUE(sensor.begin());
+  TEST_ASSERT_TRUE(sensor.sleep());
+
+  clock.set(1000);
+  TEST_ASSERT_FALSE(sensor.wake());
+
+  TEST_ASSERT_FALSE(sensor.healthy());
+  TEST_ASSERT_EQUAL(SensorPowerState::Error, sensor.powerState());
+  TEST_ASSERT_EQUAL_UINT32(1, driver.enterFullPowerCount);
+}
+
+static void test_wake_failure_sets_error_and_unhealthy_for_backup_wake_path() {
+  FakeGpsDriver driver;
+  FakeClock clock;
+  driver.wakeFromBackupOk = false;
+
+  auto cfg = makeDutyCycledCfg(
+      100,
+      50,
+      0x10,
+      GpsPowerMode::Backup);
+
+  Pa1010dGpsSensor sensor(cfg, driver, clock);
+
+  TEST_ASSERT_TRUE(sensor.begin());
+  TEST_ASSERT_TRUE(sensor.sleep());
+
+  clock.set(1000);
+  TEST_ASSERT_FALSE(sensor.wake());
+
+  TEST_ASSERT_FALSE(sensor.healthy());
+  TEST_ASSERT_EQUAL(SensorPowerState::Error, sensor.powerState());
+  TEST_ASSERT_EQUAL_UINT32(1, driver.wakeFromBackupCount);
 }
 
 static void test_service_polls_driver() {
@@ -450,10 +801,27 @@ void runGpsSensorTests() {
   RUN_TEST(test_name_is_gps);
   RUN_TEST(test_duty_class_matches_config);
 
-  RUN_TEST(test_always_on_sleep_keeps_sensor_ready);
-  RUN_TEST(test_always_on_wake_keeps_sensor_ready);
-  RUN_TEST(test_duty_cycled_sleep_sets_sleeping);
-  RUN_TEST(test_duty_cycled_wake_sets_waking);
+  RUN_TEST(test_always_on_sleep_keeps_sensor_ready_and_sends_no_low_power_command);
+  RUN_TEST(test_always_on_wake_keeps_sensor_ready_and_enters_full_power);
+  RUN_TEST(test_duty_cycled_sleep_sets_sleeping_in_full_power_mode_without_low_power_command);
+  RUN_TEST(test_duty_cycled_wake_sets_waking_and_enters_full_power);
+
+  RUN_TEST(test_sleep_in_standby_mode_calls_enter_standby);
+  RUN_TEST(test_sleep_in_backup_mode_calls_enter_backup);
+  RUN_TEST(test_sleep_in_periodic_standby_mode_calls_enter_periodic_standby_and_forwards_config);
+  RUN_TEST(test_sleep_in_periodic_backup_mode_calls_enter_periodic_backup_and_forwards_config);
+
+  RUN_TEST(test_wake_from_standby_uses_enter_full_power);
+  RUN_TEST(test_wake_from_periodic_standby_uses_enter_full_power);
+  RUN_TEST(test_wake_from_backup_uses_wake_from_backup_not_enter_full_power);
+  RUN_TEST(test_wake_from_periodic_backup_uses_wake_from_backup_not_enter_full_power);
+
+  RUN_TEST(test_sleep_failure_sets_error_and_unhealthy_for_standby);
+  RUN_TEST(test_sleep_failure_sets_error_and_unhealthy_for_backup);
+  RUN_TEST(test_sleep_failure_sets_error_and_unhealthy_for_periodic_standby);
+  RUN_TEST(test_sleep_failure_sets_error_and_unhealthy_for_periodic_backup);
+  RUN_TEST(test_wake_failure_sets_error_and_unhealthy_for_full_power_wake_path);
+  RUN_TEST(test_wake_failure_sets_error_and_unhealthy_for_backup_wake_path);
 
   RUN_TEST(test_service_polls_driver);
   RUN_TEST(test_service_returns_false_if_poll_fails);

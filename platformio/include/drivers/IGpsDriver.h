@@ -1,6 +1,21 @@
 #pragma once
 #include <stdint.h>
 
+enum class GpsPowerMode {
+  FullPowerContinuous,
+  Standby,
+  Backup,
+  PeriodicStandby,
+  PeriodicBackup,
+};
+
+struct GpsPeriodicConfig {
+  uint32_t runTimeMs = 4000;
+  uint32_t sleepTimeMs = 15000;
+  uint32_t secondRunTimeMs = 24000;
+  uint32_t secondSleepTimeMs = 90000;
+};
+
 class IGpsDriver {
 public:
   struct Data {
@@ -22,4 +37,11 @@ public:
   virtual bool begin(uint8_t address) = 0;
   virtual bool poll() = 0;
   virtual bool read(Data &out) = 0;
+
+  virtual bool enterStandby() = 0;
+  virtual bool enterBackup() = 0;
+  virtual bool enterPeriodicStandby(const GpsPeriodicConfig &cfg) = 0;
+  virtual bool enterPeriodicBackup(const GpsPeriodicConfig &cfg) = 0;
+  virtual bool enterFullPower() = 0;
+  virtual bool wakeFromBackup() = 0;
 };

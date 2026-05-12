@@ -18,6 +18,21 @@ bool Pa1010dGpsSensor::begin() {
 bool Pa1010dGpsSensor::wake() {
   if (!_healthy) return false;
 
+  bool ok = true;
+
+  if (_cfg.powerMode == GpsPowerMode::Backup ||
+      _cfg.powerMode == GpsPowerMode::PeriodicBackup) {
+    ok = _driver.wakeFromBackup();
+  } else {
+    ok = _driver.enterFullPower();
+  }
+
+  if (!ok) {
+    _state = SensorPowerState::Error;
+    _healthy = false;
+    return false;
+  }
+
   if (_cfg.dutyClass == SensorDutyClass::AlwaysOn) {
     _state = SensorPowerState::Ready;
     return true;
@@ -31,10 +46,42 @@ bool Pa1010dGpsSensor::wake() {
 bool Pa1010dGpsSensor::sleep() {
   if (!_healthy) return false;
 
-  _state = (_cfg.dutyClass == SensorDutyClass::AlwaysOn)
-               ? SensorPowerState::Ready
-               : SensorPowerState::Sleeping;
+  if (_cfg.dutyClass == SensorDutyClass::AlwaysOn) {
+    _state = SensorPowerState::Ready;
+    return true;
+  }
 
+  bool ok = true;
+
+  switch (_cfg.powerMode) {
+  case GpsPowerMode::FullPowerContinuous:
+    ok = true;
+    break;
+
+  case GpsPowerMode::Standby:
+    ok = _driver.enterStandby();
+    break;
+
+  case GpsPowerMode::Backup:
+    ok = _driver.enterBackup();
+    break;
+
+  case GpsPowerMode::PeriodicStandby:
+    ok = _driver.enterPeriodicStandby(_cfg.periodic);
+    break;
+
+  case GpsPowerMode::PeriodicBackup:
+    ok = _driver.enterPeriodicBackup(_cfg.periodic);
+    break;
+  }
+
+  if (!ok) {
+    _state = SensorPowerState::Error;
+    _healthy = false;
+    return false;
+  }
+
+  _state = SensorPowerState::Sleeping;
   return true;
 }
 

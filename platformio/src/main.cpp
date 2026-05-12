@@ -285,8 +285,13 @@ void testSampleSensors() {
         Serial.println(" sample failed");
       }
     }
+  }
+  Serial.println("-------------------------");
+}
 
-    delay(1000);
+void testServiceSensors() {
+  for (int i = 0; i < sensorCount; ++i) {
+    sensors[i]->service();
   }
 }
 
@@ -344,8 +349,8 @@ void setup() {
 }
 
 void loop() {
+  // testServiceSensors();
   // testSampleSensors();
-  // delay(1000);
   app.update();
   delay(25);
 }
