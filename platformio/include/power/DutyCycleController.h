@@ -41,10 +41,33 @@ struct DutyCycleConfig {
                                       bool enabled_ = true,uint32_t minSleepMs_ = 3000,
                                       uint32_t maxWakeMs_ = 1000,
                                       uint32_t activeSampleMs_ = 30000,
-                                      uint32_t samplePeriodMs_ = 500,
+                                      uint32_t samplePeriodMs_ = 250,
                                       uint32_t warmupMs_ = 10000,
                                       float tempDeltaThresholdC_ = 1.0f,
                                       float humidityDeltaThresholdPct_ = 5.0f,
+                                      bool failOnSampleError_ = false) {
+    DutyCycleConfig cfg;
+    cfg.minSleepMs = minSleepMs_;
+    cfg.maxWakeMs = maxWakeMs_;
+    cfg.failOnSampleError = failOnSampleError_;
+    cfg.activeSampleMs = activeSampleMs_;
+    cfg.samplePeriodMs = samplePeriodMs_;
+    cfg.warmupMs = warmupMs_;
+    cfg.tempDeltaThresholdC = tempDeltaThresholdC_;
+    cfg.humidityDeltaThresholdPct = humidityDeltaThresholdPct_;
+    cfg.failOnSampleError = failOnSampleError_;
+    cfg.enabled = enabled_;
+    return cfg;
+  }
+
+  static DutyCycleConfig dutyCycleCfgContinuous(
+                                      bool enabled_ = false ,uint32_t minSleepMs_ = 0,
+                                      uint32_t maxWakeMs_ = 0,
+                                      uint32_t activeSampleMs_ = 0,
+                                      uint32_t samplePeriodMs_ = 500,
+                                      uint32_t warmupMs_ = 10000,
+                                      float tempDeltaThresholdC_ = 0,
+                                      float humidityDeltaThresholdPct_ = 0,
                                       bool failOnSampleError_ = false) {
     DutyCycleConfig cfg;
     cfg.minSleepMs = minSleepMs_;

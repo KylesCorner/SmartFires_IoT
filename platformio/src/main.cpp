@@ -165,16 +165,12 @@ WindSensorRevC wind(windCfg, analog, windPower, clock);
 
 AdafruitSht31Driver sht31Driver;
 
-// makeSht31Cfg(uint8_t address_ = 0x45, uint32_t minSamplesPeriodMs_ = 1000,
-//              uint32_t wakeDelayMs_ = 15,
-//              SensorDutyClass dutyClass_ = SensorDutyClass::DutyCycled) {
-
 Sht31Sensor::Config sht31Cfg =
     Sht31Sensor::Config::makeSht31Cfg(0x45, 100, 0, SensorDutyClass::AlwaysOn);
 Sht31Sensor sht31(sht31Cfg, sht31Driver, clock);
 
 AdafruitGpsDriver gpsDriver;
-Pa1010dGpsSensor::Config gpsCfg = Pa1010dGpsSensor::Config::makeGpsCfg();
+Pa1010dGpsSensor::Config gpsCfg = Pa1010dGpsSensor::Config::makePeriodicBackupCfg();
 Pa1010dGpsSensor gps(gpsCfg, gpsDriver, clock);
 
 SparkfunIcm20948Driver imuDriver;
@@ -202,7 +198,7 @@ BatteryMonitor battery(batteryCfg, analog, clock);
 // Duty Cycle
 // -----------------------------------------------------------------------------
 
-DutyCycleConfig dutyCfg = DutyCycleConfig::dutyCycleCfg();
+DutyCycleConfig dutyCfg = DutyCycleConfig::dutyCycleCfgContinuous();
 DutyCycleController duty(dutyCfg, sht31, sensors, sensorCount, clock);
 
 // -----------------------------------------------------------------------------
@@ -296,7 +292,7 @@ void testServiceSensors() {
 }
 
 void setup() {
-  delay(1000);
+  delay(3000);
   Serial.begin(115200);
   Serial1.begin(115200);
   while (!Serial && millis() < 3000) {
@@ -348,9 +344,16 @@ void setup() {
   Serial.println("SmartFires app ready");
 }
 
+unsigned long previousMillis = 0; // Stores last time event triggered
+const long interval = 500;        // Interval (milliseconds)
+
 void loop() {
+  // unsigned long currentMillis = millis();
   // testServiceSensors();
-  // testSampleSensors();
+  // if (currentMillis - previousMillis >= interval) {
+  //   previousMillis = currentMillis;
+  //   // testSampleSensors();
+  // }
   app.update();
   delay(25);
 }

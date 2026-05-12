@@ -20,6 +20,9 @@ public:
   bool enterPeriodicBackup(const GpsPeriodicConfig &cfg) override;
   bool enterFullPower() override;
   bool wakeFromBackup() override;
+  
+  bool enterAlwaysLocateStandby() override;
+  bool enterAlwaysLocateBackup() override;
 
 private:
   bool sendPmtkPayload(const char *payload);

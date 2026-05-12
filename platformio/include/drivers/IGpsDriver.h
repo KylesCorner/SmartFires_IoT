@@ -7,6 +7,8 @@ enum class GpsPowerMode {
   Backup,
   PeriodicStandby,
   PeriodicBackup,
+  AlwaysLocateStandby,
+  AlwaysLocateBackup,
 };
 
 struct GpsPeriodicConfig {
@@ -44,4 +46,6 @@ public:
   virtual bool enterPeriodicBackup(const GpsPeriodicConfig &cfg) = 0;
   virtual bool enterFullPower() = 0;
   virtual bool wakeFromBackup() = 0;
+  virtual bool enterAlwaysLocateStandby() = 0;
+  virtual bool enterAlwaysLocateBackup() = 0;
 };

@@ -1,6 +1,7 @@
 #include "platform/AdafruitGpsDriver.h"
 
 #include <Adafruit_PMTK.h>
+#include <Arduino.h>
 
 AdafruitGpsDriver::AdafruitGpsDriver(TwoWire &wire, uint8_t wakePin)
     : _gps(&wire), _wakePin(wakePin) {}
@@ -36,7 +37,12 @@ bool AdafruitGpsDriver::poll() {
     }
 
     if (_gps.newNMEAreceived()) {
-      _gps.parse(_gps.lastNMEA());
+    char *sentence = _gps.lastNMEA();
+
+      // Serial.print("[GPS RAW] ");
+      // Serial.print(sentence);
+
+      _gps.parse(sentence);
     }
   }
 
@@ -77,28 +83,32 @@ bool AdafruitGpsDriver::read(Data &out) {
   return true;
 }
 bool AdafruitGpsDriver::enterStandby() {
-  if (!_begun) return false;
+  if (!_begun)
+    return false;
 
   _gps.sendCommand("$PMTK161,0*28");
   return true;
 }
 
 bool AdafruitGpsDriver::enterBackup() {
-  if (!_begun) return false;
+  if (!_begun)
+    return false;
 
   _gps.sendCommand("$PMTK225,4*2F");
   return true;
 }
 
 bool AdafruitGpsDriver::enterFullPower() {
-  if (!_begun) return false;
+  if (!_begun)
+    return false;
 
   _gps.sendCommand("$PMTK225,0*2B");
   return true;
 }
 
 bool AdafruitGpsDriver::wakeFromBackup() {
-  if (!_begun) return false;
+  if (!_begun)
+    return false;
 
   digitalWrite(_wakePin, HIGH);
   delay(100);
@@ -119,11 +129,11 @@ bool AdafruitGpsDriver::enterPeriodicBackup(const GpsPeriodicConfig &cfg) {
 
 bool AdafruitGpsDriver::enterPeriodic(uint8_t type,
                                       const GpsPeriodicConfig &cfg) {
-  if (!_begun) return false;
+  if (!_begun)
+    return false;
 
   char payload[96];
-  snprintf(payload, sizeof(payload),
-           "PMTK225,%u,%lu,%lu,%lu,%lu",
+  snprintf(payload, sizeof(payload), "PMTK225,%u,%lu,%lu,%lu,%lu",
            static_cast<unsigned>(type),
            static_cast<unsigned long>(cfg.runTimeMs),
            static_cast<unsigned long>(cfg.sleepTimeMs),
@@ -134,7 +144,8 @@ bool AdafruitGpsDriver::enterPeriodic(uint8_t type,
 }
 
 bool AdafruitGpsDriver::sendPmtkPayload(const char *payload) {
-  if (!_begun || payload == nullptr) return false;
+  if (!_begun || payload == nullptr)
+    return false;
 
   uint8_t checksum = 0;
   for (const char *p = payload; *p != '\0'; ++p) {
@@ -144,6 +155,17 @@ bool AdafruitGpsDriver::sendPmtkPayload(const char *payload) {
   char command[128];
   snprintf(command, sizeof(command), "$%s*%02X", payload, checksum);
 
+  // Serial.print("[GPS] PMTK command: ");
+  // Serial.println(command);
+
   _gps.sendCommand(command);
   return true;
+}
+
+bool AdafruitGpsDriver::enterAlwaysLocateStandby() {
+  return sendPmtkPayload("PMTK225,8");
+}
+
+bool AdafruitGpsDriver::enterAlwaysLocateBackup() {
+  return sendPmtkPayload("PMTK225,9");
 }
