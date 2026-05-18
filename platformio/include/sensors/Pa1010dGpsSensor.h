@@ -111,6 +111,8 @@ public:
 
   const Reading &reading() const;
 
+  void fillSnapshot(SensorSnapshot &snap) const override;
+
   const void *readingData() const override;
   size_t readingSize() const override;
   size_t writeTelemetry(char *out, size_t maxLen) const override;

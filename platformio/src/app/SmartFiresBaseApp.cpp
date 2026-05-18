@@ -200,6 +200,46 @@ void SmartFiresBaseApp::processIncomingLoRa() {
       _debugUart.print(_awakenRxCount);
       _debugUart.print("] local_time_sync_result=");
       _debugUart.println(syncOk ? "OK" : "FAIL");
+    } else if (validHeader && hdr.pkt_type == BinaryPacket::PKT_STATUS) {
+      BinaryPacket::PktHeader statusHdr = {};
+      BinaryPacket::StatusPayload status = {};
+      if (!BinaryPacket::decodeStatus(pkt.data, pkt.len, statusHdr, status)) {
+        _debugUart.print("[BaseApp][STATUS#");
+        _debugUart.print(_statusRxCount);
+        _debugUart.println("] decode_failed");
+      } else {
+        const bool gpsValid =
+            (status.flags & BinaryPacket::STATUS_GPS_VALID) != 0u;
+        const bool battValid =
+            (status.flags & BinaryPacket::STATUS_BATT_VALID) != 0u;
+
+        _debugUart.print("[BaseApp][STATUS#");
+        _debugUart.print(_statusRxCount);
+        _debugUart.print("] node=");
+        _debugUart.print(statusHdr.node_id);
+        _debugUart.print(" seq=");
+        _debugUart.print(statusHdr.seq);
+        _debugUart.print(" gps_valid=");
+        _debugUart.print(gpsValid ? 1 : 0);
+        _debugUart.print(" batt_valid=");
+        _debugUart.print(battValid ? 1 : 0);
+
+        if (gpsValid) {
+          _debugUart.print(" lat=");
+          _debugUart.print(static_cast<float>(status.lat_e7) / 10000000.0f, 6);
+          _debugUart.print(" lon=");
+          _debugUart.print(static_cast<float>(status.lon_e7) / 10000000.0f, 6);
+        }
+
+        if (battValid) {
+          _debugUart.print(" batt_mv=");
+          _debugUart.print(status.battery_mv);
+          _debugUart.print(" batt_pct=");
+          _debugUart.print(status.battery_pct);
+        }
+
+        _debugUart.println();
+      }
     } else if (validHeader && isTelemetryPacketType(hdr.pkt_type)) {
       handleTelemetryAckSummary(hdr.node_id, hdr.seq);
     }

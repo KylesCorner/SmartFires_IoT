@@ -231,7 +231,7 @@ RadioHeadTdmaDriver radioDriver(radioDriverCfg);
 TdmaRadioService tdmaRadio(tdmaCfg, tdmaClock, tdmaQueue, radioDriver);
 
 SmartFiresNodeApp::Config appCfg = SmartFiresNodeApp::Config::appCfg(
-    kUnassignedNodeId, nodeUidHash, false, false);
+  kUnassignedNodeId, nodeUidHash, true, false);
 
 // -----------------------------------------------------------------------------
 // App

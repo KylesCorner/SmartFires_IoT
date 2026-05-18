@@ -181,6 +181,16 @@ const Pa1010dGpsSensor::Reading &Pa1010dGpsSensor::reading() const {
   return _reading;
 }
 
+void Pa1010dGpsSensor::fillSnapshot(SensorSnapshot &snap) const {
+  if (!_reading.valid) {
+    return;
+  }
+
+  snap.latDeg = _reading.latitudeDeg;
+  snap.lonDeg = _reading.longitudeDeg;
+  snap.sensorFlags |= 0x04; // GPS
+}
+
 const void *Pa1010dGpsSensor::readingData() const { return &_reading; }
 
 size_t Pa1010dGpsSensor::readingSize() const { return sizeof(Reading); }
