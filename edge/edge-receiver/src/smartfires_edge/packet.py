@@ -38,6 +38,7 @@ FULL_STATE_SIZE = struct.calcsize(FULL_STATE_FMT)  # 20
 STATUS_PAYLOAD_FMT  = "<iiHBB"
 STATUS_PAYLOAD_SIZE = struct.calcsize(STATUS_PAYLOAD_FMT)  # 12
 STATUS_GPS_VALID = 0x01
+STATUS_BATT_VALID = 0x02
 
 # DeltaPayload (12-byte compact format)
 DELTA_FMT  = "<BHbbbhbhB"
@@ -169,6 +170,39 @@ def decode_gps(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Optional[
         "lat": round(lat_e7 / 1e7, 7),
         "lon": round(lon_e7 / 1e7, 7),
         "rssi": rssi,
+    }
+
+
+def decode_status(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Optional[dict]:
+    """Decode a raw LoRa STATUS payload into GPS + battery fields."""
+    if len(raw_lora_payload) < STATUS_LORA_SIZE:
+        return None
+    if crc8(raw_lora_payload[:-1]) != raw_lora_payload[-1]:
+        return None
+
+    magic, pkt_type, node_id, seq = struct.unpack_from(HEADER_FMT, raw_lora_payload, 0)
+    if magic != PKT_MAGIC or pkt_type != PKT_STATUS:
+        return None
+
+    lat_e7, lon_e7, battery_mv, battery_pct, flags = struct.unpack_from(
+        STATUS_PAYLOAD_FMT,
+        raw_lora_payload,
+        HEADER_SIZE,
+    )
+    gps_valid = (flags & STATUS_GPS_VALID) != 0
+    batt_valid = (flags & STATUS_BATT_VALID) != 0
+
+    return {
+        "node_id": node_id,
+        "seq": seq,
+        "rssi": rssi,
+        "flags": flags,
+        "gps_valid": gps_valid,
+        "battery_valid": batt_valid,
+        "lat": round(lat_e7 / 1e7, 7) if gps_valid else "",
+        "lon": round(lon_e7 / 1e7, 7) if gps_valid else "",
+        "battery_mv": battery_mv if batt_valid else "",
+        "battery_pct": battery_pct if batt_valid else "",
     }
 
 def decode_full_state(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Optional[dict]:

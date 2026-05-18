@@ -18,6 +18,7 @@ from smartfires_edge.packet import (
     decode_bundle,
     decode_full_state,
     decode_gps,
+    decode_status,
 )
 
 _ST_WAIT_M0 = 0
@@ -85,9 +86,11 @@ class FrameReceiver:
                     hdr_seq = seq
 
             gps = None
+            status = None
             packets: list[dict] = []
             if pkt_type == PKT_GPS or pkt_type == PKT_STATUS:
                 gps = decode_gps(raw_payload, rssi)
+                status = decode_status(raw_payload, rssi)
             elif pkt_type == PKT_FULL_STATE:
                 pkt = decode_full_state(raw_payload, rssi)
                 if pkt is not None:
@@ -105,6 +108,7 @@ class FrameReceiver:
                 "seq": hdr_seq,
                 "rssi": rssi,
                 "gps": gps,
+                "status": status,
                 "packets": packets,
             }
 

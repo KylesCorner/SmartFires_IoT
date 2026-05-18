@@ -156,6 +156,7 @@ def run_receive(
     telemetry_dir = data_dir / "telemetry"
     metrics_dir = data_dir / "metrics"
     raw_dir = data_dir / "raw"
+    status_dir = data_dir / "status"
 
     logger = DurableCsvLogger(telemetry_dir, fsync_every_row=fsync_every_row)
     tracker = PacketLossTracker(nodes)
@@ -250,6 +251,32 @@ def run_receive(
             gps = event.get("gps")
             if gps:
                 node_gps[int(gps["node_id"])] = (float(gps["lat"]), float(gps["lon"]))
+
+            status = event.get("status")
+            if status:
+                status_row = {
+                    "timestamp": datetime.utcnow().isoformat(timespec="milliseconds"),
+                    "node_id": status.get("node_id"),
+                    "seq": status.get("seq"),
+                    "rssi": status.get("rssi"),
+                    "flags": status.get("flags"),
+                    "gps_valid": status.get("gps_valid"),
+                    "battery_valid": status.get("battery_valid"),
+                    "lat": status.get("lat"),
+                    "lon": status.get("lon"),
+                    "battery_mv": status.get("battery_mv"),
+                    "battery_pct": status.get("battery_pct"),
+                }
+                status_path = (
+                    status_dir
+                    / f"status-{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.jsonl"
+                )
+                _append_jsonl(status_path, status_row)
+                print(
+                    f"[STATUS] node={status_row['node_id']} seq={status_row['seq']} "
+                    f"gps_valid={status_row['gps_valid']} batt_valid={status_row['battery_valid']} "
+                    f"batt_mv={status_row['battery_mv']} rssi={status_row['rssi']}"
+                )
 
             for pkt in event.get("packets", []):
                 gps_fix = node_gps.get(int(pkt["node_id"]))

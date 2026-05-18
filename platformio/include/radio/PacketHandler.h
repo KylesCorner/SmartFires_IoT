@@ -31,12 +31,15 @@ public:
     struct Config {
         uint8_t nodeId    = 1;
         uint8_t maxDeltas = BinaryPacket::kBundleMaxDeltas;
+        uint32_t statusIntervalMs = kStatusIntervalMs;
 
         static Config make(uint8_t nodeId_ = 1,
-                           uint8_t maxDeltas_ = BinaryPacket::kBundleMaxDeltas) {
+                           uint8_t maxDeltas_ = BinaryPacket::kBundleMaxDeltas,
+                           uint32_t statusIntervalMs_ = kStatusIntervalMs) {
             Config c;
             c.nodeId    = nodeId_;
             c.maxDeltas = maxDeltas_;
+            c.statusIntervalMs = statusIntervalMs_;
             return c;
         }
     };
@@ -45,14 +48,14 @@ public:
 
     // Add one sensor reading.
     // Returns true if a complete bundle is now ready (check bundleReady()).
-    // Also sets statusPacketReady() on first push and every kStatusIntervalMs after.
+    // Also sets statusPacketReady() on first push and every configured status interval after.
     bool push(const SensorSnapshot &snap);
 
     // --- bundle ---
     bool    bundleReady() const;
     uint8_t takeBundle(uint8_t *buf, size_t bufSize);
 
-    // --- STATUS (GPS + battery, every 15 min) ---
+    // --- STATUS (GPS + battery, interval from Config::statusIntervalMs) ---
     bool    statusPacketReady() const;
     uint8_t takeStatusPacket(uint8_t *buf, size_t bufSize);
 

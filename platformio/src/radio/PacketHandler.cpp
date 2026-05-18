@@ -129,7 +129,7 @@ void PacketHandler::reset() {
 void PacketHandler::tryEncodeStatus(const SensorSnapshot &snap) {
     const bool intervalElapsed =
         !_statusEverSent ||
-        (snap.sessionTimeMs - _lastStatusMs >= kStatusIntervalMs);
+        (snap.sessionTimeMs - _lastStatusMs >= _cfg.statusIntervalMs);
 
     if (!intervalElapsed) return;
 

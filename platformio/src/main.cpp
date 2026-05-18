@@ -81,6 +81,10 @@ void loop() {
 #define SMARTFIRES_TDMA_RELIABILITY_MODE 0
 #endif
 
+#ifndef SMARTFIRES_STATUS_INTERVAL_MS
+#define SMARTFIRES_STATUS_INTERVAL_MS (15UL * 60UL * 1000UL)
+#endif
+
 namespace {
 
 constexpr uint8_t kBaseRadioAddr = 0x01;
@@ -211,7 +215,9 @@ const uint32_t nodeUidHash = BoardIdentity::hash32();
 const uint8_t initialRadioAddr = makeInitialRadioAddr(nodeUidHash);
 
 PacketHandler::Config packetHandlerCfg =
-    PacketHandler::Config::make(kUnassignedNodeId);
+  PacketHandler::Config::make(kUnassignedNodeId,
+                BinaryPacket::kBundleMaxDeltas,
+                SMARTFIRES_STATUS_INTERVAL_MS);
 PacketHandler packetHandler(packetHandlerCfg);
 
 TdmaConfig tdmaCfg = makeNodeTdmaCfg(numSlots);
@@ -340,6 +346,12 @@ void setup() {
   Serial.println(" ms");
   Serial.print("TELEM_REL_MODE: ");
   Serial.println(reliabilityModeName(tdmaCfg.reliabilityMode));
+  Serial.print("STATUS_INTERVAL_MS: ");
+  Serial.println(packetHandlerCfg.statusIntervalMs);
+  Serial.print("STATUS_INTERVAL_S: ");
+  Serial.println(packetHandlerCfg.statusIntervalMs / 1000UL);
+  Serial.print("STATUS_INTERVAL_MIN: ");
+  Serial.println(packetHandlerCfg.statusIntervalMs / 60000UL);
 
   if (!app.begin()) {
     Serial.println("SmartFires app begin failed");
