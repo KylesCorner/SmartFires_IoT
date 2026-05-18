@@ -2,14 +2,17 @@
 
 #include "interfaces/IAnalogReader.h"
 #include "interfaces/IClock.h"
+#include <Arduino.h>
 
 #include <stddef.h>
 #include <stdint.h>
 
+#define PIN_BATTERY_ADC A7
+
 class BatteryMonitor {
 public:
   struct Config {
-    uint8_t pin;
+    int pin;
 
     float adcRefVolts;
     uint16_t adcMax;
@@ -26,12 +29,12 @@ public:
     uint32_t minSamplePeriodMs;
 
     static BatteryMonitor::Config
-    makeBatConfig(uint8_t pin_ = 0, float adcRefVolts_ = 3.3f,
+    makeBatConfig(float adcRefVolts_ = 3.3f,
                   uint16_t adcMax_ = 1023, float dividerRatio_ = 2.0f,
-                  float minVoltage_ = 3.2f, float maxVoltage_ = 3.7f,
+                  float minVoltage_ = 3.2f, float maxVoltage_ = 4.2f,
                   float lowVoltage_ = 3.5f, uint32_t minSamplePeriodMs_=1000) {
       BatteryMonitor::Config cfg;
-      cfg.pin = pin_;
+      cfg.pin = PIN_BATTERY_ADC;
       cfg.adcRefVolts = adcRefVolts_;
       cfg.adcMax = adcMax_;
       cfg.dividerRatio = dividerRatio_;

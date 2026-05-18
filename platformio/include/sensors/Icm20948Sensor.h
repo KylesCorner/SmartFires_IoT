@@ -15,7 +15,7 @@ public:
     static Icm20948Sensor::Config
     makeImuCfg(uint32_t minSamplePeriodMs_ = 10, uint32_t wakeDelayMs_ = 0,
                SensorDutyClass dutyClass_ = SensorDutyClass::DutyCycled,
-               uint8_t address_ = 0) {
+               uint8_t address_ = 1) {
       Icm20948Sensor::Config cfg;
       cfg.minSamplePeriodMs = minSamplePeriodMs_;
       cfg.wakeDelayMs = wakeDelayMs_;

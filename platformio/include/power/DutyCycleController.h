@@ -5,6 +5,8 @@
 
 #include "sensors/ITriggerSensor.h"
 
+#include "power/BatteryMonitor.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -87,7 +89,7 @@ struct DutyCycleConfig {
 class DutyCycleController {
 public:
   DutyCycleController(const DutyCycleConfig &cfg, ITriggerSensor &triggerSensor,
-                      ISensor **sensors, size_t sensorCount, IClock &clock);
+                      ISensor **sensors, size_t sensorCount, IClock &clock, BatteryMonitor &battery);
 
   bool begin();
   void update();
@@ -106,6 +108,7 @@ private:
   ISensor **_sensors;
   size_t _sensorCount;
   IClock &_clock;
+  BatteryMonitor &_battery;
   bool _freshSampleReady = false;
 
   DutyCyclePhase _phase = DutyCyclePhase::NotStarted;

@@ -1,31 +1,37 @@
 #include "power/DutyCycleController.h"
+#include "power/BatteryMonitor.h"
 #include "sensors/ITriggerSensor.h"
 #include <Arduino.h>
 
 DutyCycleController::DutyCycleController(const DutyCycleConfig &cfg,
                                          ITriggerSensor &triggerSensor,
                                          ISensor **sensors, size_t sensorCount,
-                                         IClock &clock)
+                                         IClock &clock, BatteryMonitor &battery)
     : _cfg(cfg), _sensors(sensors), _sensorCount(sensorCount), _clock(clock),
-      _triggerSensor(triggerSensor) {}
+      _triggerSensor(triggerSensor), _battery(battery) {}
 
 bool DutyCycleController::begin() {
   _error = DutyCycleError::None;
 
+  if (!_battery.begin()) {
+    transitionTo(DutyCyclePhase::Error);
+    Serial.println("Duty failed to begin battery");
+    return false;
+  }
   if (!beginSensors()) {
     transitionTo(DutyCyclePhase::Error);
-    // Serial.println("Duty failed to begin sensors");
+    Serial.println("Duty failed to begin sensors");
     return false;
   }
 
   if (!sleepDutyCycledSensors()) {
-    // Serial.println("Duty failed to begin sleep duty cycled sensors");
+    Serial.println("Duty failed to begin sleep duty cycled sensors");
     transitionTo(DutyCyclePhase::Error);
     return false;
   }
 
   if (!wakeDutyCycledSensors()) {
-    // Serial.println("Duty failed to wake duty cycled sensors");
+    Serial.println("Duty failed to wake duty cycled sensors");
     transitionTo(DutyCyclePhase::Error);
     return false;
   }
@@ -36,6 +42,7 @@ bool DutyCycleController::begin() {
 
 void DutyCycleController::update() {
   serviceAllSensors();
+  _battery.sample();
 
   if (!_cfg.enabled) {
     if (_phase == DutyCyclePhase::WarmingUp ||
@@ -139,7 +146,10 @@ void DutyCycleController::updateSleeping() {
   // _triggerSensor.service();
 
   if (_triggerSensor.ready()) {
-    _triggerSensor.sample();
+    if (!_triggerSensor.sample()) {
+      Serial.println("Trigger Sensor sample failed!");
+  
+    }
 
     const auto &r = _triggerSensor.triggerReading();
 
@@ -150,6 +160,7 @@ void DutyCycleController::updateSleeping() {
 
     if (r.valid && phaseElapsedMs() >= _cfg.minSleepMs && thresholdCrossed(r)) {
       wakeDutyCycledSensors();
+      Serial.println("Trigger Sensor triggered!");
       transitionTo(DutyCyclePhase::WarmingUp);
     }
   }
@@ -205,6 +216,11 @@ void DutyCycleController::updateSampling() {
         }
       }
     }
+
+    char buf[180];
+    _battery.writeTelemetry(buf, sizeof(buf));
+    Serial.println(buf);
+
     Serial.println("------------------------------------------\n");
 
     if (sampledAny) {

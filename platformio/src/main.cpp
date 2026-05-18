@@ -1,4 +1,3 @@
-#include "USB/USBAPI.h"
 #include <Arduino.h>
 
 #if defined(LORA_BASE)
@@ -68,6 +67,7 @@ void loop() {
 #include "sensors/Sht31Sensor.h"
 #include "sensors/Sps30Sensor.h"
 #include "sensors/WindSensorRevC.h"
+
 
 // #ifndef nodeId
 // #define nodeId 1
@@ -170,7 +170,8 @@ Sht31Sensor::Config sht31Cfg =
 Sht31Sensor sht31(sht31Cfg, sht31Driver, clock);
 
 AdafruitGpsDriver gpsDriver;
-Pa1010dGpsSensor::Config gpsCfg = Pa1010dGpsSensor::Config::makePeriodicBackupCfg();
+Pa1010dGpsSensor::Config gpsCfg =
+    Pa1010dGpsSensor::Config::makePeriodicBackupCfg();
 Pa1010dGpsSensor gps(gpsCfg, gpsDriver, clock);
 
 SparkfunIcm20948Driver imuDriver;
@@ -199,7 +200,7 @@ BatteryMonitor battery(batteryCfg, analog, clock);
 // -----------------------------------------------------------------------------
 
 DutyCycleConfig dutyCfg = DutyCycleConfig::dutyCycleCfgContinuous();
-DutyCycleController duty(dutyCfg, sht31, sensors, sensorCount, clock);
+DutyCycleController duty(dutyCfg, sht31, sensors, sensorCount, clock, battery);
 
 // -----------------------------------------------------------------------------
 // Networking
@@ -249,6 +250,7 @@ void scanI2C() {
 }
 
 void testBeginSensors() {
+  battery.begin();
   for (int i = 0; i < sensorCount; ++i) {
     Serial.print(sensors[i]->name());
     if (!sensors[i]->begin()) {
@@ -282,6 +284,11 @@ void testSampleSensors() {
       }
     }
   }
+
+  battery.sample();
+  char buf[180];
+  battery.writeTelemetry(buf, sizeof(buf));
+  Serial.println(buf);
   Serial.println("-------------------------");
 }
 
@@ -292,10 +299,10 @@ void testServiceSensors() {
 }
 
 void setup() {
-  delay(3000);
+  delay(5000);
   Serial.begin(115200);
   Serial1.begin(115200);
-  while (!Serial && millis() < 3000) {
+  while (!Serial1 && millis() < 3000) {
   }
 
   Wire.begin();
@@ -345,14 +352,14 @@ void setup() {
 }
 
 unsigned long previousMillis = 0; // Stores last time event triggered
-const long interval = 500;        // Interval (milliseconds)
+const long interval = 500;       // Interval (milliseconds)
 
 void loop() {
   // unsigned long currentMillis = millis();
   // testServiceSensors();
   // if (currentMillis - previousMillis >= interval) {
   //   previousMillis = currentMillis;
-  //   // testSampleSensors();
+  //     testSampleSensors();
   // }
   app.update();
   delay(25);

@@ -9,8 +9,7 @@ BatteryMonitor::BatteryMonitor(const Config &cfg, IAnalogReader &analog,
 
 bool BatteryMonitor::begin() {
   _healthy = _cfg.adcMax > 0 && _cfg.adcRefVolts > 0.0f &&
-             _cfg.dividerRatio > 0.0f &&
-             _cfg.maxVoltage > _cfg.minVoltage;
+             _cfg.dividerRatio > 0.0f && _cfg.maxVoltage > _cfg.minVoltage;
 
   return _healthy;
 }
@@ -31,16 +30,18 @@ bool BatteryMonitor::sample() {
     return false;
   }
 
-  _reading.adcVolts =
-      (static_cast<float>(raw) * _cfg.adcRefVolts) /
-      static_cast<float>(_cfg.adcMax);
+  // _reading.adcVolts = (static_cast<float>(raw) * _cfg.adcRefVolts) /
+  //                     static_cast<float>(_cfg.adcMax);
+  //
+  // _reading.batteryVolts = _reading.adcVolts * _cfg.dividerRatio;
+  _reading.adcVolts = (static_cast<float>(raw) * _cfg.adcRefVolts) /
+                      static_cast<float>(_cfg.adcMax + 1);
 
   _reading.batteryVolts = _reading.adcVolts * _cfg.dividerRatio;
 
-  const float pct =
-      ((_reading.batteryVolts - _cfg.minVoltage) /
-       (_cfg.maxVoltage - _cfg.minVoltage)) *
-      100.0f;
+  const float pct = ((_reading.batteryVolts - _cfg.minVoltage) /
+                     (_cfg.maxVoltage - _cfg.minVoltage)) *
+                    100.0f;
 
   _reading.percent = clampPercent(pct);
   _reading.low = _reading.batteryVolts <= _cfg.lowVoltage;
@@ -52,13 +53,10 @@ bool BatteryMonitor::sample() {
 }
 
 bool BatteryMonitor::ready() const {
-  return _healthy &&
-         _clock.millis() - _lastSampleMs >= _cfg.minSamplePeriodMs;
+  return _healthy && _clock.millis() - _lastSampleMs >= _cfg.minSamplePeriodMs;
 }
 
-bool BatteryMonitor::healthy() const {
-  return _healthy;
-}
+bool BatteryMonitor::healthy() const { return _healthy; }
 
 const BatteryMonitor::Reading &BatteryMonitor::reading() const {
   return _reading;
@@ -69,13 +67,19 @@ size_t BatteryMonitor::writeTelemetry(char *out, size_t maxLen) const {
     return 0;
   }
 
-  const int n = snprintf(out, maxLen,
-                         "battery,v=%.3f,pct=%.1f,low=%u,valid=%u,t_ms=%lu",
-                         _reading.batteryVolts,
-                         _reading.percent,
-                         _reading.low ? 1 : 0,
-                         _reading.valid ? 1 : 0,
-                         static_cast<unsigned long>(_reading.timestampMs));
+  // const int n = snprintf(out, maxLen,
+  //                        "battery,v=%.3f,pct=%.1f,low=%u,valid=%u,t_ms=%lu",
+  //                        _reading.batteryVolts,
+  //                        _reading.percent,
+  //                        _reading.low ? 1 : 0,
+  //                        _reading.valid ? 1 : 0,
+  //                        static_cast<unsigned long>(_reading.timestampMs));
+  const int n = snprintf(
+      out, maxLen,
+      "battery,raw=%d,adc_v=%.3f,v=%.3f,pct=%.1f,low=%u,valid=%u,t_ms=%lu",
+      _reading.raw, _reading.adcVolts, _reading.batteryVolts, _reading.percent,
+      _reading.low ? 1 : 0, _reading.valid ? 1 : 0,
+      static_cast<unsigned long>(_reading.timestampMs));
 
   if (n < 0) {
     return 0;
