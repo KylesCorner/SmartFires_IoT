@@ -148,7 +148,6 @@ void DutyCycleController::updateSleeping() {
   if (_triggerSensor.ready()) {
     if (!_triggerSensor.sample()) {
       Serial.println("Trigger Sensor sample failed!");
-  
     }
 
     const auto &r = _triggerSensor.triggerReading();
@@ -205,6 +204,14 @@ void DutyCycleController::updateSampling() {
       if (!sensor) {
         continue;
       }
+      Serial.print("[Duty] sensor=");
+      Serial.print(sensor->name());
+      Serial.print(" ready=");
+      Serial.print(sensor->ready() ? 1 : 0);
+      Serial.print(" healthy=");
+      Serial.print(sensor->healthy() ? 1 : 0);
+      Serial.print(" state=");
+      Serial.println(static_cast<int>(sensor->powerState()));
 
       // sensor->service();
       if (sensor->ready()) {

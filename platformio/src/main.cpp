@@ -68,7 +68,6 @@ void loop() {
 #include "sensors/Sps30Sensor.h"
 #include "sensors/WindSensorRevC.h"
 
-
 // #ifndef nodeId
 // #define nodeId 1
 // #endif
@@ -170,7 +169,7 @@ WindSensorRevC wind(windCfg, analog, windPower, clock);
 AdafruitSht31Driver sht31Driver;
 
 Sht31Sensor::Config sht31Cfg =
-    Sht31Sensor::Config::makeSht31Cfg(0x45, 100, 0, SensorDutyClass::AlwaysOn);
+    Sht31Sensor::Config::makeSht31Cfg();
 Sht31Sensor sht31(sht31Cfg, sht31Driver, clock);
 
 AdafruitGpsDriver gpsDriver;
@@ -190,6 +189,9 @@ ISensor *sensors[] = {
     &sht31, &gps, &imu, &sps30, &wind,
 };
 
+// ISensor *sensors[] = {
+//     &sht31, &imu,
+// };
 constexpr size_t sensorCount = sizeof(sensors) / sizeof(sensors[0]);
 
 // -----------------------------------------------------------------------------
@@ -214,10 +216,9 @@ constexpr uint8_t numSlots = NUM_SLOTS;
 const uint32_t nodeUidHash = BoardIdentity::hash32();
 const uint8_t initialRadioAddr = makeInitialRadioAddr(nodeUidHash);
 
-PacketHandler::Config packetHandlerCfg =
-  PacketHandler::Config::make(kUnassignedNodeId,
-                BinaryPacket::kBundleMaxDeltas,
-                SMARTFIRES_STATUS_INTERVAL_MS);
+PacketHandler::Config packetHandlerCfg = PacketHandler::Config::make(
+    kUnassignedNodeId, BinaryPacket::kBundleMaxDeltas,
+    SMARTFIRES_STATUS_INTERVAL_MS);
 PacketHandler packetHandler(packetHandlerCfg);
 
 TdmaConfig tdmaCfg = makeNodeTdmaCfg(numSlots);
@@ -231,7 +232,7 @@ RadioHeadTdmaDriver radioDriver(radioDriverCfg);
 TdmaRadioService tdmaRadio(tdmaCfg, tdmaClock, tdmaQueue, radioDriver);
 
 SmartFiresNodeApp::Config appCfg = SmartFiresNodeApp::Config::appCfg(
-  kUnassignedNodeId, nodeUidHash, true, false);
+    kUnassignedNodeId, nodeUidHash, true, false);
 
 // -----------------------------------------------------------------------------
 // App
@@ -287,7 +288,12 @@ void testSampleSensors() {
       } else {
         Serial.print(sensors[i]->name());
         Serial.println(" sample failed");
+        scanI2C();
       }
+    } else {
+      Serial.print(sensors[i]->name());
+      Serial.println(" not ready");
+      scanI2C();
     }
   }
 
@@ -364,14 +370,14 @@ void setup() {
 }
 
 unsigned long previousMillis = 0; // Stores last time event triggered
-const long interval = 500;       // Interval (milliseconds)
+const long interval = 500;        // Interval (milliseconds)
 
 void loop() {
   // unsigned long currentMillis = millis();
   // testServiceSensors();
   // if (currentMillis - previousMillis >= interval) {
   //   previousMillis = currentMillis;
-  //     testSampleSensors();
+  //   testSampleSensors();
   // }
   app.update();
   delay(25);

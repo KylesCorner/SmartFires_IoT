@@ -14,16 +14,13 @@ public:
   struct Config {
     uint8_t address;
     uint32_t minSamplePeriodMs;
-    uint32_t wakeDelayMs;
     SensorDutyClass dutyClass;
     static Sht31Sensor::Config
-    makeSht31Cfg(uint8_t address_ = 0x45, uint32_t minSamplesPeriodMs_ = 1000,
-                 uint32_t wakeDelayMs_ = 15,
+    makeSht31Cfg(uint8_t address_ = 0x45, uint32_t minSamplesPeriodMs_ = 100,
                  SensorDutyClass dutyClass_ = SensorDutyClass::AlwaysOn) {
       Sht31Sensor::Config cfg;
       cfg.address = address_;
       cfg.minSamplePeriodMs = minSamplesPeriodMs_;
-      cfg.wakeDelayMs = wakeDelayMs_;
       cfg.dutyClass = dutyClass_;
       return cfg;
     }
@@ -61,6 +58,8 @@ public:
   size_t writeTelemetry(char *out, size_t maxLen) const override;
   void fillSnapshot(SensorSnapshot &snap) const override;
 
+  void debugReady() const;
+
 private:
   Config _cfg;
   ISht31Driver &_driver;
@@ -72,6 +71,5 @@ private:
   bool _healthy = false;
   SensorPowerState _state = SensorPowerState::Off;
 
-  uint32_t _wakeStartMs = 0;
   uint32_t _lastSampleMs = 0;
 };

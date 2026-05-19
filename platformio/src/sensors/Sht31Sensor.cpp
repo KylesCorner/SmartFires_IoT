@@ -1,4 +1,5 @@
 #include "sensors/Sht31Sensor.h"
+#include "interfaces/ISensor.h"
 #include <Arduino.h>
 #include <stdio.h>
 
@@ -10,7 +11,7 @@ const char *Sht31Sensor::name() const { return "sht31"; }
 bool Sht31Sensor::begin() {
   _healthy = _driver.begin(_cfg.address);
   if (!_healthy) {
-    Serial.println("SHT31 is not healthy!");
+    Serial.println("SHT31 is not healthy! when begin");
 
     _state = SensorPowerState::Error;
     return false;
@@ -26,11 +27,11 @@ bool Sht31Sensor::begin() {
 bool Sht31Sensor::wake() {
   if (!_healthy) {
     _state = SensorPowerState::Error;
+    Serial.println("SHT31 is not healthy! when wake");
     return false;
   }
 
-  _wakeStartMs = _clock.millis();
-  _state = SensorPowerState::Waking;
+  _state = SensorPowerState::Ready;
   return true;
 }
 
@@ -38,6 +39,7 @@ bool Sht31Sensor::sleep() {
   if (!_healthy) {
     _state = SensorPowerState::Error;
     return false;
+    Serial.println("SHT31 is not healthy! when sleep");
   }
 
   _state = (_cfg.dutyClass == SensorDutyClass::AlwaysOn)
@@ -50,12 +52,8 @@ bool Sht31Sensor::sleep() {
 bool Sht31Sensor::service() {
   if (!_healthy) {
     _state = SensorPowerState::Error;
+    Serial.println("SHT31 is not healthy! when service");
     return false;
-  }
-
-  if (_state == SensorPowerState::Waking &&
-      _clock.millis() - _wakeStartMs >= _cfg.wakeDelayMs) {
-    _state = SensorPowerState::Ready;
   }
 
   return _state == SensorPowerState::Ready;
@@ -63,6 +61,7 @@ bool Sht31Sensor::service() {
 
 bool Sht31Sensor::sample() {
   if (!ready()) {
+    Serial.println("SHT31 is not healthy! when sample");
     return false;
   }
 
@@ -81,8 +80,20 @@ bool Sht31Sensor::sample() {
   _lastSampleMs = _clock.millis();
 
   if (!_reading.valid) {
-    _healthy = false;
-    _state = SensorPowerState::Error;
+    // _healthy = false;
+    // _state = SensorPowerState::Error;
+    Serial.print("[SHT31] invalid read temp=");
+    Serial.print(tempC);
+    Serial.print(" humidity=");
+    Serial.print(humidityPct);
+    Serial.print(" isnan_temp=");
+    Serial.print(isnan(tempC) ? 1 : 0);
+    Serial.print(" isnan_hum=");
+    Serial.print(isnan(humidityPct) ? 1 : 0);
+    Serial.print(" state=");
+    Serial.print(static_cast<int>(_state));
+    Serial.print(" healthy=");
+    Serial.println(_healthy ? 1 : 0);
     return false;
   }
 
@@ -93,11 +104,24 @@ const ITriggerSensor::Reading &Sht31Sensor::triggerReading() const {
 }
 
 bool Sht31Sensor::ready() const {
-  if (!_healthy || _state != SensorPowerState::Ready) {
+  bool isNotReady = !_healthy || _state != SensorPowerState::Ready;
+  if (isNotReady) {
+    // debugReady();
+    Serial.println("Sht status = ");
+    Serial.print(" state=");
+    Serial.print(static_cast<int>(_state));
+    Serial.print(" healthy=");
+    Serial.println(_healthy ? 1 : 0);
     return false;
   }
 
-  return _clock.millis() - _lastSampleMs >= _cfg.minSamplePeriodMs;
+  bool canSample = _clock.millis() - _lastSampleMs >= _cfg.minSamplePeriodMs;
+  if (!canSample) {
+    Serial.println("Sht cannot sample.");
+    // debugReady();
+  }
+
+  return canSample;
 }
 
 bool Sht31Sensor::healthy() const { return _healthy; }
@@ -139,4 +163,30 @@ size_t Sht31Sensor::writeTelemetry(char *out, size_t maxLen) const {
   }
 
   return static_cast<size_t>(n);
+}
+
+void Sht31Sensor::debugReady() const {
+  const uint32_t now = _clock.millis();
+  const uint32_t elapsed = now - _lastSampleMs;
+
+  Serial.print("[SHT31 READY DEBUG] healthy=");
+  Serial.print(_healthy ? 1 : 0);
+
+  Serial.print(" state=");
+  Serial.print(static_cast<int>(_state));
+
+  Serial.print(" now=");
+  Serial.print(now);
+
+  Serial.print(" lastSampleMs=");
+  Serial.print(_lastSampleMs);
+
+  Serial.print(" elapsed=");
+  Serial.print(elapsed);
+
+  Serial.print(" minSamplePeriodMs=");
+  Serial.print(_cfg.minSamplePeriodMs);
+
+  Serial.print(" ready=");
+  Serial.println(ready() ? 1 : 0);
 }
