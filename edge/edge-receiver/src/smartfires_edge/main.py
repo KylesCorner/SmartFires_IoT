@@ -3,6 +3,7 @@ from pathlib import Path
 
 from smartfires_edge.ingest_service import run_receive
 from smartfires_edge.packet_loss import print_summary
+from smartfires_edge.visualize_service import run_visualize
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -26,6 +27,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     summary = sub.add_parser("summary", help="Print current packet-loss summary")
     summary.add_argument("--data-dir", type=Path, default=Path("/mnt/nvme_drive/data"))
+
+    visualize = sub.add_parser("visualize", help="Render live telemetry/status tables")
+    visualize.add_argument("--port", default="/dev/ttyTHS1")
+    visualize.add_argument("--baud", type=int, default=115200)
+    visualize.add_argument("--sync-interval", type=int, default=600)
+    visualize.add_argument("--ack-interval", type=float, default=4.0)
+    visualize.add_argument("--telemetry-rows", type=int, default=20)
 
     return p
 
@@ -54,6 +62,15 @@ def main() -> int:
     if args.command == "summary":
         print_summary(args.data_dir)
         return 0
+
+    if args.command == "visualize":
+        return run_visualize(
+            port=args.port,
+            baud=args.baud,
+            sync_interval_s=args.sync_interval,
+            ack_interval_s=args.ack_interval,
+            telemetry_rows_max=max(1, int(args.telemetry_rows)),
+        )
 
     parser.error("Unknown command")
     return 2

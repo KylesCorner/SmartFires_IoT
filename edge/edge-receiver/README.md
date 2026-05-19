@@ -48,3 +48,19 @@ Those rows use `packet_type=status` and populate:
 ```bash
 smartfires-edge summary --data-dir /mnt/nvme_drive/data
 ```
+
+### Live Visualizer
+
+```bash
+smartfires-edge visualize \
+	--port /dev/ttyTHS1 \
+	--baud 115200 \
+	--sync-interval 600 \
+	--ack-interval 4.0 \
+	--telemetry-rows 20
+```
+
+`visualize` renders two live terminal tables:
+
+- telemetry samples (sample timestamp + sensor readings)
+- battery/location status (GPS validity, lat/lon, battery)
