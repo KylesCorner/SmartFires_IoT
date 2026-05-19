@@ -256,22 +256,36 @@ def run_receive(
             if status:
                 status_row = {
                     "timestamp": datetime.utcnow().isoformat(timespec="milliseconds"),
+                    "packet_type": "status",
                     "node_id": status.get("node_id"),
                     "seq": status.get("seq"),
-                    "rssi": status.get("rssi"),
-                    "flags": status.get("flags"),
-                    "gps_valid": status.get("gps_valid"),
-                    "battery_valid": status.get("battery_valid"),
+                    "session_time_ms": "",
+                    "uptime_ms": "",
+                    "sensor_flags": "",
+                    "wind_mps": "",
+                    "temp_c": "",
+                    "humidity_pct": "",
+                    "pm1_0_ug_m3": "",
+                    "pm2_5_ug_m3": "",
+                    "pm4_0_ug_m3": "",
+                    "pm10_ug_m3": "",
                     "lat": status.get("lat"),
                     "lon": status.get("lon"),
+                    "gps_valid": status.get("gps_valid"),
+                    "battery_valid": status.get("battery_valid"),
+                    "rssi": status.get("rssi"),
+                    "flags": status.get("flags"),
                     "battery_mv": status.get("battery_mv"),
                     "battery_pct": status.get("battery_pct"),
+                    "jetson_wind_mps": "",
+                    "jetson_wind_dir_deg": "",
                 }
                 status_path = (
                     status_dir
                     / f"status-{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.jsonl"
                 )
                 _append_jsonl(status_path, status_row)
+                logger.write_row(status_row)
                 print(
                     f"[STATUS] node={status_row['node_id']} seq={status_row['seq']} "
                     f"gps_valid={status_row['gps_valid']} batt_valid={status_row['battery_valid']} "
@@ -279,6 +293,11 @@ def run_receive(
                 )
 
             for pkt in event.get("packets", []):
+                pkt["packet_type"] = "telemetry"
+                pkt["gps_valid"] = ""
+                pkt["battery_valid"] = ""
+                pkt["battery_mv"] = ""
+                pkt["battery_pct"] = ""
                 gps_fix = node_gps.get(int(pkt["node_id"]))
                 pkt["lat"] = gps_fix[0] if gps_fix else ""
                 pkt["lon"] = gps_fix[1] if gps_fix else ""

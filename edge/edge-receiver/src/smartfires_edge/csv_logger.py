@@ -5,6 +5,7 @@ from pathlib import Path
 
 CSV_COLUMNS = [
     "timestamp",
+    "packet_type",
     "node_id",
     "seq",
     "session_time_ms",
@@ -19,6 +20,11 @@ CSV_COLUMNS = [
     "pm10_ug_m3",
     "lat",
     "lon",
+    "gps_valid",
+    "battery_valid",
+    "battery_mv",
+    "battery_pct",
+    "flags",
     "rssi",
     "jetson_wind_mps",
     "jetson_wind_dir_deg",

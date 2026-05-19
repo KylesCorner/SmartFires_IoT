@@ -35,6 +35,14 @@ When enabled, each telemetry row includes:
 - `jetson_wind_mps`
 - `jetson_wind_dir_deg`
 
+STATUS packets are also written to the telemetry CSV (in addition to `status/*.jsonl`).
+Those rows use `packet_type=status` and populate:
+
+- `gps_valid`
+- `battery_valid`
+- `battery_mv`
+- `battery_pct`
+
 ### Packet Loss Summary
 
 ```bash
