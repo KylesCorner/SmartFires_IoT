@@ -257,8 +257,8 @@ void TdmaRadioService::drainTxQueue() {
 
   const bool useSlotBudget = hasFreshSync;
   const uint32_t slotEndMs = (_cfg.slotWidthMs > _cfg.guardMs) ? (_cfg.slotWidthMs - _cfg.guardMs) : _cfg.slotWidthMs;
-  // For transmission debugging, keep sends serialized so every ACK exchange is easy to follow.
-  const uint8_t kMaxSendsPerUpdate = 1;
+  // Allow up to two transmissions per slot when time budget remains.
+  const uint8_t kMaxSendsPerUpdate = 3;
 
   uint8_t sendsThisUpdate = 0;
 
