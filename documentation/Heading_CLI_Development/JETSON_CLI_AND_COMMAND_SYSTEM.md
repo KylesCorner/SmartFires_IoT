@@ -1,397 +1,461 @@
 # Jetson CLI and Command System Design
 
 ## Overview
-This document details the design for a split-screen CLI on the Jetson that allows viewing live packet data while simultaneously sending commands (CALIBRATE, RESET) to nodes. The system maintains a persistent session state mapping node IDs to serial numbers, stores IMU calibration parameters, and enables graceful command handling with acknowledgments.
+
+A split-screen interactive CLI on the Jetson for viewing live packet data, sending commands
+(CALIBRATE, RESET) to nodes, managing calibration storage, and displaying computed node
+orientation. All calibration fitting and heading computation run on the Jetson — the node
+transmits only raw IMU data and a statistical calibration summary.
+
+---
+
+## Node Identity
+
+Nodes are identified by `uid_hash` — the 32-bit FNV-1a hash of the SAMD21's factory-burned
+128-bit unique serial number (hardware registers 0x0080A00C to 0x0080A048). This value is
+embedded in every PKT_AWAKEN payload and is unique per board. Collision probability for
+fewer than 50 nodes is negligible (~0.0000003%).
+
+The base station assigns a runtime `node_id` (1-based integer) from uid_hash on first
+AWAKEN, which is used for LoRa routing. The Jetson maintains the uid_hash <-> node_id
+mapping in session.json.
+
+**No HANDSHAKE redesign is needed.** The existing AWAKEN -> TIME_SYNC flow already handles
+node discovery and ID assignment. The Jetson only needs to parse uid_hash from the forwarded
+AWAKEN payload to populate its mapping.
 
 ---
 
 ## Architecture
 
-### High-Level Design
 ```
-┌─────────────────────────────────────────────┐
-│          Jetson Receiver Process             │
-├─────────────────────────────────────────────┤
-│  ┌──────────────────────────────────────┐   │
-│  │   Packet Listener Thread             │   │
-│  │  (LoRa/Serial Input)                 │   │
-│  └────────────┬─────────────────────────┘   │
-│               │                             │
-│  ┌────────────▼──────────────────────────┐  │
-│  │   Packet Parser & Router              │  │
-│  │  - Parse incoming packets             │  │
-│  │  - Route to handlers                  │  │
-│  │  - Update session state               │  │
-│  └────────────┬─────────────────────────┘  │
-│               │                            │
-│  ┌────────────▼──────────────────────────┐ │
-│  │   UI/Display Thread                   │ │
-│  │  - Show packet log (top half)         │ │
-│  │  - Command input (bottom half)        │ │
-│  └──────────────────────────────────────┘ │
-│               ▲                            │
-│               │                            │
-│  ┌────────────┴──────────────────────────┐ │
-│  │   Command Handler Thread              │ │
-│  │  - Parse user input                   │ │
-│  │  - Build command packets              │ │
-│  │  - Send to base station               │ │
-│  └──────────────────────────────────────┘ │
-└─────────────────────────────────────────────┘
+Jetson Receiver Process
+────────────────────────────────────────────────────────────
+  Packet Listener Thread
+  Reads UART frames, decodes all packet types,
+  posts events to queue.Queue
+      │
+      ▼
+  Session Manager  (thread-safe, shared state, threading.Lock)
+  uid_hash <-> node_id mapping
+  calibrations dict  { uid_hash -> { hard_iron, soft_iron } }
+  node_status dict   { node_id -> last_seen, heading, pitch, roll }
+  command_queue      [ { type, node_id, sent_at, acked } ]
+      │                             │
+      ▼                             ▼
+  UI/Display Thread          Command Handler Thread
+  curses split screen        Parses user input
+  Packet log (top 80%)       Builds + sends UART frames
+  Command input (bottom)     Tracks ACK receipt + timeouts
+────────────────────────────────────────────────────────────
 ```
-
-### Threads/Concurrency
-- **Listener Thread:** Continuously reads from serial/LoRa, parses packets, updates session state.
-- **UI Thread:** Displays packet log and command prompt (non-blocking input).
-- **Command Thread:** Handles user input parsing and command transmission.
-- **Session Manager:** Thread-safe access to node mappings and calibration data.
 
 ---
 
 ## Packet Types
 
-### Existing Packet Types
-- STATUS: Regular sensor data from nodes (includes raw IMU if applicable).
-- HANDSHAKE: Initial connection from node with SN, node_id assignment.
+### Existing (unchanged)
+
+| Type | Value | Direction | Description |
+| --- | --- | --- | --- |
+| PKT_AWAKEN | 0x06 | Node -> Jetson | Boot handshake; contains uid_hash |
+| PKT_BUNDLE | 0x04 | Node -> Jetson | Telemetry bundle (15 samples) |
+| PKT_STATUS | 0x05 | Node -> Jetson | GPS + battery + raw IMU, every 15 min |
+| PKT_TIME_SYNC | 0x03 | Jetson -> Nodes | Session clock broadcast |
+| PKT_ACK_SUMMARY | 0x07 | Jetson -> Node | App-layer reliability bitmap |
 
 ### New Packet Types
 
-#### 1. CALIBRATE Command (Jetson → Node)
+#### CMD_CALIBRATE (0x10) — Jetson -> Base -> Node
+
+Triggers the 60-second calibration routine on the target node.
+
 ```
-[Packet Type: 0x10]
-[SN: 2 bytes] or [0xFFFF for ALL]
-[Duration: 1 byte] (in 10-second units, typically 0x06 = 60 seconds)
+[PktHeader:   4]   pkt_type=0x10, node_id=0, seq
+[node_id:     1]   target node (base uses as LoRa radio address)
+[duration_s:  1]   calibration window in seconds (default 0x3C = 60)
+[CRC-8:       1]
+LoRa payload total: 7 bytes
 ```
 
-**Flow:**
-1. Jetson sends CALIBRATE packet to base station with target SN.
-2. Node receives, acknowledges with ACK packet, enters calibration mode.
-3. Node pauses normal sampling.
-4. Node collects raw IMU data for 60 seconds.
-5. Node computes calibration parameters (hard iron offsets, soft iron matrix).
-6. Node sends CALIBRATION_DATA packet back to Jetson.
+Flow:
+
+1. Jetson wraps packet in UART frame, sends to base.
+2. Base sees pkt_type=0x10, extracts node_id, calls `sendToWait(payload, len, node_id)`.
+3. Node receives, sends CMD_ACK (status=processing), enters calibration state.
+4. Node collects raw IMU for duration_s, computes statistical summary, sends CALIBRATION_DATA.
+5. Node resumes normal BUNDLE + STATUS transmission.
+
+#### CMD_RESET (0x11) — Jetson -> Base -> Node
+
+```
+[PktHeader:   4]   pkt_type=0x11, node_id=0, seq
+[node_id:     1]   target node
+[reset_type:  1]   0x00=soft reset, 0x01=hard reset (clears RAM state)
+[CRC-8:       1]
+LoRa payload total: 7 bytes
+```
+
+#### CALIBRATION_DATA (0x12) — Node -> Base -> Jetson
+
+Statistical summary from a 60-second calibration session. Single packet; the Jetson
+derives hard iron offsets and a full 3x3 soft iron matrix from this data.
+
+```
+[PktHeader:    4]   pkt_type=0x12, node_id=sender, seq
+[uid_hash:     4]   sender's uid_hash (for verification against session mapping)
+[sample_count: 2]   number of samples collected (uint16)
+[mag_mean:    12]   3 x float32 (x, y, z) — centroid; used as hard iron offset
+[mag_cov:     24]   6 x float32 — upper triangle of 3x3 covariance (xx,yy,zz,xy,xz,yz)
+[mag_min:     12]   3 x float32 — per-axis minimum (quality validation)
+[mag_max:     12]   3 x float32 — per-axis maximum (quality validation)
+[status:       1]   0x00=success, 0x01=low_sample_count, 0x02=error
+[CRC-8:        1]
+LoRa payload total: 72 bytes
+```
+
+#### CMD_ACK (0x13) — Node -> Base -> Jetson
+
+Node acknowledgment of a received command.
+
+```
+[PktHeader:  4]   pkt_type=0x13, node_id=sender, seq
+[cmd_type:   1]   command being acknowledged (0x10=CALIBRATE, 0x11=RESET)
+[uid_hash:   4]   sender's uid_hash
+[status:     1]   0x00=received, 0x01=processing, 0x02=error
+[CRC-8:      1]
+LoRa payload total: 11 bytes
+```
 
 ---
 
-#### 2. RESET Command (Jetson → Node)
-```
-[Packet Type: 0x11]
-[SN: 2 bytes] or [0xFFFF for ALL]
-[Reset Type: 1 byte] (0x00 = soft reset, 0x01 = hard reset, etc.)
+## Extended StatusPayload (24 bytes, was 12)
+
+Raw magnetometer and accelerometer are appended to the existing STATUS fields. Heading is
+computed by the Jetson on receipt — it is not transmitted by the node.
+
+```c
+struct __attribute__((packed)) StatusPayload {
+    int32_t  lat_e7;      // degrees x 1e7     (valid if STATUS_GPS_VALID)
+    int32_t  lon_e7;      // degrees x 1e7     (valid if STATUS_GPS_VALID)
+    uint16_t battery_mv;  // millivolts         (valid if STATUS_BATT_VALID)
+    uint8_t  battery_pct; // 0-100              (valid if STATUS_BATT_VALID)
+    uint8_t  flags;
+    int16_t  mag_x;       // uT x 10, raw      (valid if STATUS_IMU_VALID)
+    int16_t  mag_y;
+    int16_t  mag_z;
+    int16_t  accel_x;     // mg (milli-g), raw (valid if STATUS_IMU_VALID)
+    int16_t  accel_y;
+    int16_t  accel_z;
+};
+
+static constexpr uint8_t STATUS_GPS_VALID  = 0x01;
+static constexpr uint8_t STATUS_BATT_VALID = 0x02;
+static constexpr uint8_t STATUS_IMU_VALID  = 0x04;
 ```
 
-**Flow:**
-1. Jetson sends RESET packet to base station with target SN.
-2. Node receives, acknowledges with ACK packet.
-3. Node performs reset action (reboot, clear state, etc.).
+STATUS LoRa payload: 4 + 24 + 1 = **29 bytes** (was 17).
 
 ---
 
-#### 3. CALIBRATION_DATA (Node → Jetson)
-```
-[Packet Type: 0x12]
-[SN: 2 bytes]
-[Hard Iron Offsets: 12 bytes] (3x float32: x, y, z)
-[Soft Iron Matrix: 36 bytes] (9x float32: 3x3 matrix, row-major)
-[Timestamp: 4 bytes] (Unix epoch or node timestamp)
-[Status: 1 byte] (0x00 = success, 0x01 = incomplete, 0x02 = error)
-```
+## Session State
 
-**Note:** If soft iron matrix is diagonal-only, reduce to 12 bytes (3x float32). Adjust as needed.
+### In-Memory Structure
 
----
-
-#### 4. ACK (Node → Jetson)
-```
-[Packet Type: 0x13]
-[Command Type: 1 byte] (0x10 = CALIBRATE, 0x11 = RESET, etc.)
-[SN: 2 bytes]
-[Status: 1 byte] (0x00 = received, 0x01 = processing, 0x02 = error)
-[Message: Variable] (optional, e.g., error reason)
-```
-
----
-
-## Session State & Persistence
-
-### In-Memory Session Structure
 ```python
-{
-    "node_id_to_sn": {
-        1: 0x1234,       # node_id 1 → SN 0x1234
-        2: 0x5678,
-        3: 0x9ABC,
+session = {
+    "node_id_to_uid_hash": {
+        1: 0xA1B2C3D4,
+        2: 0xE5F60718,
     },
-    "sn_to_node_id": {
-        0x1234: 1,       # reverse mapping for quick lookup
-        0x5678: 2,
-        0x9ABC: 3,
+    "uid_hash_to_node_id": {
+        0xA1B2C3D4: 1,
+        0xE5F60718: 2,
     },
     "calibrations": {
-        0x1234: {
-            "hard_iron": [x, y, z],
-            "soft_iron": [[...], [...], [...]],  # 3x3 matrix
-            "timestamp": 1234567890,
-            "status": "valid"
+        0xA1B2C3D4: {
+            "hard_iron":    [1.23, -0.45, 0.78],       # shape (3,)
+            "soft_iron":    [[0.98, 0.02, -0.01],       # shape (3,3)
+                             [0.02, 1.01,  0.00],
+                             [-0.01, 0.00, 0.97]],
+            "sample_count": 587,
+            "timestamp":    1748000000,
+            "status":       "valid"
         },
-        0x5678: { ... },
     },
     "command_queue": [
-        {"type": "CALIBRATE", "sn": 0x1234, "sent_at": ..., "acked": False},
-        ...
+        {"type": "CALIBRATE", "node_id": 1, "sent_at": 1748001000, "acked": False},
     ],
     "node_status": {
-        1: {"last_seen": ..., "calibrating": False, "state": "idle"},
-        2: {...},
+        1: {
+            "last_seen":       1748001234,
+            "calibrating":     False,
+            "heading_true_deg": 247.3,
+            "pitch_deg":        2.1,
+            "roll_deg":        -1.4,
+            "last_heading_ts": 1748001234,
+        },
+    },
+}
+```
+
+### Persistence: `~/.smartfires/session.json`
+
+Loaded at startup. Written after each CALIBRATION_DATA received, and on `save session`
+command. The calibrations dict is the single source of truth — never deleted without an
+explicit `clear calibration` command.
+
+---
+
+## AWAKEN Handling (Updated)
+
+When the Jetson receives a forwarded PKT_AWAKEN:
+
+```
+Incoming AWAKEN: [PktHeader(node_id=1)][AwakenPayload(uid_hash=0xA1B2C3D4)]
+    │
+    ├── Parse uid_hash from AwakenPayload
+    ├── Extract node_id from PktHeader.node_id  (base assigned it)
+    ├── Update session: node_id_to_uid_hash[1] = 0xA1B2C3D4
+    │
+    ├── Look up calibrations[0xA1B2C3D4]
+    │
+    ├── Found:
+    │   Log: "[17:30:20] Node 1 (uid=0xA1B2C3D4) connected. Calibration on file."
+    │   (No push needed — calibration is applied server-side on STATUS receipt)
+    │
+    └── Not found:
+        Log: "[17:30:20] Node 1 (uid=0xA1B2C3D4) connected. No calibration — use 'calibrate node 1'."
+```
+
+Note: CALIBRATION_PUSH (0x14) is not used. The Jetson holds and applies calibration
+entirely on its own side when STATUS packets arrive. No data needs to be sent to the node.
+
+---
+
+## Heading Computation on STATUS Receipt
+
+```python
+def compute_heading(status: dict, calibration: dict) -> dict:
+    mag_raw   = np.array([status["mag_x"], status["mag_y"], status["mag_z"]]) / 10.0  # uT
+    accel_raw = np.array([status["accel_x"], status["accel_y"], status["accel_z"]]) / 1000.0  # g
+
+    hard_iron = np.array(calibration["hard_iron"])
+    soft_iron = np.array(calibration["soft_iron"])
+
+    # Calibrate magnetometer
+    mag_c = soft_iron @ (mag_raw - hard_iron)
+
+    # Tilt from accelerometer
+    roll  = np.arctan2(accel_raw[1], accel_raw[2])
+    pitch = np.arctan2(-accel_raw[0], np.sqrt(accel_raw[1]**2 + accel_raw[2]**2))
+
+    # Tilt-compensated heading
+    mx_h = mag_c[0]*np.cos(pitch) + mag_c[2]*np.sin(pitch)
+    my_h = (mag_c[0]*np.sin(roll)*np.sin(pitch)
+           + mag_c[1]*np.cos(roll)
+           - mag_c[2]*np.sin(roll)*np.cos(pitch))
+
+    heading_mag  = np.degrees(np.arctan2(-my_h, mx_h)) % 360
+    declination  = magnetic_declination(status["lat"], status["lon"])  # WMM table
+    heading_true = (heading_mag + declination) % 360
+
+    return {
+        "heading_true_deg": round(heading_true, 1),
+        "pitch_deg":        round(np.degrees(pitch), 1),
+        "roll_deg":         round(np.degrees(roll), 1),
     }
-}
 ```
 
-### Persistence to Disk
-**File: `~/.smartfires/session.json`** (or configurable path)
-```json
-{
-    "node_id_to_sn": { ... },
-    "calibrations": { ... },
-    "last_updated": 1234567890
-}
-```
+---
 
-**On startup:**
-- Load `session.json` to populate node→SN mapping and calibration data.
-- Listening mode will update mappings if nodes report new IDs.
+## Base Station Changes
 
-**On shutdown or command:**
-- Save current session to disk.
+`SmartFiresBaseApp::handleJetsonCommandPayload()` is extended to handle new types:
+
+| pkt_type | Action |
+| --- | --- |
+| 0x03 PKT_TIME_SYNC | Cache Jetson time (existing) |
+| 0x07 PKT_ACK_SUMMARY | Forward to node via send() (existing) |
+| 0x10 CMD_CALIBRATE | Extract node_id, forward via sendToWait(payload, len, node_id) |
+| 0x11 CMD_RESET | Extract node_id, forward via sendToWait(payload, len, node_id) |
+
+`processIncomingLoRa()` adds CALIBRATION_DATA (0x12) and CMD_ACK (0x13) to its
+forward-to-Jetson routing (encodeBaseFrame), alongside existing BUNDLE/STATUS/AWAKEN.
 
 ---
 
 ## CLI Interface
 
-### Layout (Split-Screen)
+### Split-Screen Layout
+
 ```
-═══════════════════════════════════════════════════════════════════════════
-│                         SMARTFIRES JETSON CLI                            │
-═══════════════════════════════════════════════════════════════════════════
-│                                                                           │
-│  [PACKET LOG - Top 80% of terminal]                                     │
-│                                                                           │
-│  [17:30:01.234] STATUS from Node 1 (SN: 0x1234) - Temp: 25C, RH: 45%   │
-│  [17:30:02.456] STATUS from Node 2 (SN: 0x5678) - Temp: 26C, RH: 43%   │
-│  [17:30:03.101] ACK: CALIBRATE received by Node 1                        │
-│  [17:30:05.234] STATUS from Node 3 (SN: 0x9ABC) - Temp: 24C, RH: 47%   │
-│                                                                           │
-│  ...                                                                     │
-│                                                                           │
-├───────────────────────────────────────────────────────────────────────────┤
-│  COMMAND INPUT (Bottom 20% of terminal)                                  │
-│  > calibrate node 1                                                      │
-│  [Sent] CALIBRATE to Node 1 (SN: 0x1234). Waiting for ACK...            │
-│  >                                                                        │
-└───────────────────────────────────────────────────────────────────────────┘
+===========================================================================
+                        SMARTFIRES JETSON CLI
+===========================================================================
+ [PACKET LOG]
+
+ [17:30:01.234] STATUS  Node 1 (0xA1B2C3D4)  hdg=247.3 deg  pitch=2.1 deg
+                         T=25.0C H=45%  batt=3800mV  gps=valid
+ [17:30:02.456] BUNDLE  Node 2 (0xE5F60718)  15 samples  T=26.1C
+ [17:30:10.234] CMD_ACK Node 1  cmd=CALIBRATE  status=processing
+                         (calibrating... ~60s remaining)
+ [17:31:10.789] CALIB   Node 1  samples=587  hard=[1.23,-0.45,0.78]  OK
+                         soft_iron eigenvalues=[0.98, 1.01, 0.97]
+
+---------------------------------------------------------------------------
+ > calibrate node 1
+ [Sent] CALIBRATE to Node 1 (uid=0xA1B2C3D4). Waiting for ACK...
+ >
 ```
 
-### Command Syntax
-All commands are simple and case-insensitive.
+### Commands
 
-#### Calibrate a Node
 ```
-calibrate node <node_id>
-calibrate <node_id>
-cal <node_id>
-calibrate all
+calibrate node <id>       Send CMD_CALIBRATE; wait for ACK + CALIBRATION_DATA
+calibrate all             Calibrate all active nodes sequentially
+cal <id>                  Shorthand for calibrate node <id>
+
+reset node <id>           Soft reset target node
+reset node <id> hard      Hard reset (clears node RAM state)
+
+list nodes                node_id, uid_hash, last_seen, calibration status, heading
+list calibrations         Stored calibration params per uid_hash
+status                    Alias for list nodes
+
+save session              Write session.json immediately
+load session              Reload session.json from disk
+clear calibration <id>    Remove calibration for one node (requires confirmation)
+clear calibrations        Remove all calibrations (requires confirmation)
+
+help [command]            Display command syntax and examples
 ```
 
-**Example:**
+### Example: Calibration Flow
+
 ```
 > calibrate node 1
-[17:30:10.234] Sending CALIBRATE to Node 1 (SN: 0x1234)...
-[17:30:10.450] ACK received: Node 1 acknowledged CALIBRATE. Calibrating for 60s...
-[17:30:70.452] CALIBRATION_DATA received from Node 1:
-  - Hard Iron: [1.2, -0.5, 0.8]
-  - Soft Iron: [[0.98, 0.01, 0.02], ...]
-  - Status: success
-[17:30:70.500] Calibration data for SN 0x1234 saved to session.
-```
+[17:30:10.234] Sending CALIBRATE to Node 1 (uid=0xA1B2C3D4), duration=60s...
+[17:30:10.500] CMD_ACK: Node 1 acknowledged CALIBRATE — status=processing.
+               Rotate the node through all orientations for 60 seconds.
+               (Node will be silent on LoRa while calibrating)
+[17:31:10.823] CALIBRATION_DATA received from Node 1:
+               Samples:     587
+               Mag range:   x=[18.3, 82.1] y=[-44.2, 31.6] z=[-12.8, 67.4]
+               Eigenvalues: [0.98, 1.01, 0.97]  (close to 1.0 = good spherical fit)
+               Status:      success
+[17:31:10.850] Calibration stored for uid=0xA1B2C3D4. Heading will be computed
+               on next STATUS packet (within 15 min).
 
-#### Reset a Node
-```
-reset node <node_id>
-reset <node_id>
-```
-
-**Example:**
-```
-> reset node 2
-[17:30:15.234] Sending RESET to Node 2 (SN: 0x5678)...
-[17:30:15.450] ACK received: Node 2 acknowledged RESET. Resetting...
-[17:30:16.000] Node 2 reset complete (reconnected with new status).
-```
-
-#### List Nodes & Calibrations
-```
-list nodes
-list calibrations
-status
-```
-
-**Example:**
-```
 > list nodes
-Node 1: SN 0x1234 - Last seen: 17:29:58, Calibration: Valid (2025-05-20)
-Node 2: SN 0x5678 - Last seen: 17:30:05, Calibration: None
-Node 3: SN 0x9ABC - Last seen: 17:30:03, Calibration: Valid (2025-05-20)
-
-> list calibrations
-SN 0x1234 (Node 1): Hard Iron [1.2, -0.5, 0.8], Status: valid
-SN 0x5678 (Node 2): No calibration data
-SN 0x9ABC (Node 3): Hard Iron [0.8, 0.2, -0.3], Status: valid
-```
-
-#### Save/Load Session
-```
-save session
-load session
-clear calibrations
-```
-
-#### Help
-```
-help
-help calibrate
+Node 1  uid=0xA1B2C3D4  last_seen=17:31:10  calib=valid (2026-05-20)  hdg=247.3 deg
+Node 2  uid=0xE5F60718  last_seen=17:30:05  calib=none                hdg=--
 ```
 
 ---
 
-## Node Discovery & Handshake
-
-### Initial Handshake Packet (Node → Base → Jetson)
-```
-[Packet Type: 0x00] (HANDSHAKE)
-[SN: 2 bytes]
-[Node_ID (assigned by base): 1 byte]
-[Firmware Version: 2 bytes]
-[Battery Level: 1 byte]
-```
-
-### Jetson Behavior on Handshake
-1. Parse handshake packet.
-2. Extract SN and node_id.
-3. Update session: `node_id_to_sn[node_id] = SN`.
-4. If SN exists in calibrations dictionary, prepare to send calibration data on wake-up.
-5. Log: `[17:30:20.456] Node 1 (SN: 0x1234) connected. Calibration data available: Yes`.
-
----
-
-## Command Handling Flow
+## Command Handling Detail
 
 ### Sending a Command
 
 ```
-User Input: "calibrate node 1"
+User types: "calibrate node 1"
     │
-    ├─ Parse: node_id=1, cmd=CALIBRATE
-    │
-    ├─ Lookup SN: node_id_to_sn[1] = 0x1234
-    │
-    ├─ Build packet:
-    │   [0x10][0x1234][0x06] = CALIBRATE packet
-    │
-    ├─ Send to base station (serial/LoRa)
-    │
-    ├─ Add to command_queue:
-    │   {"type": "CALIBRATE", "sn": 0x1234, "sent_at": time, "acked": False}
-    │
-    └─ Display: "[Sent] CALIBRATE to Node 1. Waiting for ACK..."
+    ├── Verify node_id=1 is in session (node_id_to_uid_hash[1] exists)
+    ├── Build CMD_CALIBRATE: [0xA5][0x10][0x00][seq][0x01][0x3C][crc]
+    ├── Wrap in UART frame and write to serial
+    ├── Add to command_queue: {type=CALIBRATE, node_id=1, sent_at=now, acked=False}
+    └── Display: "[Sent] CALIBRATE to Node 1. Waiting for ACK..."
 ```
 
-### Receiving an ACK
+### Receiving CMD_ACK
 
 ```
-Incoming packet: [0x13][0x10][0x1234][0x00]
+Incoming CMD_ACK: pkt_type=0x13, node_id=1, cmd_type=0x10, uid_hash=0xA1B2C3D4
     │
-    ├─ Parse: ACK, command_type=CALIBRATE, SN=0x1234, status=received
-    │
-    ├─ Lookup node_id: sn_to_node_id[0x1234] = 1
-    │
-    ├─ Find in command_queue and mark: acked=True
-    │
-    ├─ Update node_status:
-    │   node_status[1]["calibrating"] = True
-    │
-    └─ Display: "[17:30:10.450] ACK received: Node 1 acknowledged CALIBRATE. Calibrating for 60s..."
+    ├── Verify uid_hash matches session entry for node_id=1
+    ├── Mark command_queue entry acked=True
+    ├── Update node_status[1]["calibrating"] = True
+    └── Display: "CMD_ACK: Node 1 acknowledged CALIBRATE — status=processing."
 ```
 
-### Receiving Calibration Data
+### Receiving CALIBRATION_DATA
 
 ```
-Incoming packet: [0x12][0x1234][hard_iron][soft_iron][timestamp][status]
+Incoming CALIBRATION_DATA: pkt_type=0x12, node_id=1, uid_hash, stats...
     │
-    ├─ Parse: CALIBRATION_DATA, SN=0x1234, offsets={...}, matrix={...}, status=success
+    ├── Verify uid_hash matches session mapping for node_id=1
+    ├── Run quality checks (sample count >= 200, axis range >= 20 uT, eigenvalues > 0)
+    ├── Compute via numpy:
+    │     hard_iron = mag_mean
+    │     soft_iron = V @ diag(1/sqrt(eigenvalues)) @ V.T  (from eigh(covariance))
+    ├── Store calibrations[uid_hash] = { hard_iron, soft_iron, sample_count, timestamp }
+    ├── Update node_status[1]["calibrating"] = False
+    ├── Save session.json
+    └── Display calibration summary + eigenvalues
+```
+
+### Receiving STATUS (with IMU data)
+
+```
+Incoming STATUS: pkt_type=0x05, node_id=1, GPS + battery + mag + accel
     │
-    ├─ Lookup node_id: sn_to_node_id[0x1234] = 1
+    ├── Parse all fields (existing GPS/battery + new mag/accel int16 fields)
+    ├── Look up calibrations[uid_hash]
     │
-    ├─ Update calibrations:
-    │   calibrations[0x1234] = {
-    │       "hard_iron": [...],
-    │       "soft_iron": [...],
-    │       "timestamp": ...,
-    │       "status": "valid"
-    │   }
+    ├── If calibration found and STATUS_IMU_VALID set:
+    │     Compute heading (tilt-compensated + declination corrected)
+    │     Update node_status[1]: heading, pitch, roll, last_heading_ts
+    │     Log to status JSONL with heading fields
     │
-    ├─ Update node_status:
-    │   node_status[1]["calibrating"] = False
-    │
-    ├─ Save session to disk
-    │
-    └─ Display:
-       "[17:30:70.452] CALIBRATION_DATA received from Node 1:
-        - Hard Iron: [1.2, -0.5, 0.8]
-        - Soft Iron: [[0.98, 0.01, 0.02], ...]
-        - Status: success
-       [17:30:70.500] Calibration data for SN 0x1234 saved to session."
+    └── If no calibration:
+          Log STATUS without heading; display calibration prompt if not already shown
 ```
 
 ---
 
-## Implementation Considerations
+## Implementation Notes
 
 ### Thread Safety
-- Use thread-safe data structures (queues, locks) for shared session state.
-- Command queue for incoming packets to avoid race conditions.
 
-### Timeout & Retry
-- If ACK not received within 5 seconds, display warning: `[Warning] No ACK from Node 1 after 5s.`
-- No automatic retry; user must manually resend command.
+- All session state accessed from Listener, UI, and Command threads via `threading.Lock`.
+- Use `queue.Queue` for event passing from Listener to UI thread.
+
+### Timeout Handling
+
+- CMD_ACK not received within 5 s: `[Warning] No ACK from Node 1 after 5s.`
+- CALIBRATION_DATA not received within `(duration_s + 15)` s after CMD_ACK:
+  `[Warning] No CALIBRATION_DATA from Node 1 — calibration may have failed.`
+- No automatic retry — user resends manually.
 
 ### Error Handling
-- Invalid node_id: `[Error] Node ID 99 not found. Use 'list nodes' to see active nodes.`
-- Malformed commands: `[Error] Invalid command. Type 'help' for usage.`
-- Packet parse errors: Log and display, but don't crash.
+
+- Unknown node_id: `[Error] Node 3 not found. Use 'list nodes' to see active nodes.`
+- uid_hash mismatch on CALIBRATION_DATA: log and discard; do not overwrite stored data.
+- Degenerate covariance (eigenvalue <= 0): reject calibration with explanation.
+- Malformed command: `[Error] Invalid syntax. Type 'help calibrate'.`
 
 ### Logging
-- All events (packet received, command sent, ACK, etc.) logged to file and displayed.
-- Log file: `~/.smartfires/jetson.log` (rotated daily).
 
-### Graceful Shutdown
-- On exit, save session to disk.
-- Close serial/LoRa connections cleanly.
+- All events appended to `~/.smartfires/jetson.log` (daily rotation).
+- Heading included in status JSONL and telemetry CSV rows when computed.
 
----
+### UI Library
 
-## Dependencies & Tools
-- Python (threading, json, serial/LoRa drivers)
-- Curses or similar for split-screen UI (or simpler print-based approach for MVP)
+- Python `curses` for split-screen (available on Jetson Linux).
+- MVP fallback: scrolling print output with readline prompt if curses is problematic.
 
 ---
 
-## Next Steps
-1. Implement packet parsing and routing for CALIBRATE, RESET, CALIBRATION_DATA, ACK.
-2. Implement session persistence (load/save JSON).
-3. Implement CLI with split-screen display (start with print-based MVP).
-4. Implement command parsing and transmission.
-5. Test end-to-end: send calibrate → receive ACK → receive calibration data → save session.
+## Dependencies
 
----
-
-*This design will be refined as implementation details emerge.*
+```
+Python 3.10+
+numpy         — calibration eigendecomposition and heading computation
+pyserial      — UART communication
+curses        — split-screen terminal UI (stdlib)
+threading     — concurrency (stdlib)
+queue         — thread-safe event passing (stdlib)
+json          — session persistence (stdlib)
+struct        — packet encoding/decoding (stdlib)
+```

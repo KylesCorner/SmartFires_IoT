@@ -1,260 +1,349 @@
 # Phased Deployment Schedule: Jetson CLI, Calibration, and Heading System
 
 ## Overview
-This document outlines a phased approach to deploy the Jetson CLI/command system, node calibration workflow, and absolute heading calculation. Phases are sequenced to allow for testing and validation at each stage.
+
+This document sequences the work to add calibration-based absolute heading to SmartFires.
+
+Key architecture decisions reflected throughout:
+
+- **Jetson computes everything.** Calibration fitting (full ellipsoid via eigendecomposition)
+  and heading (tilt-compensated, declination-corrected) run entirely on the Jetson. The node
+  does no IMU math beyond reading the sensor and accumulating running statistics.
+- **Node sends a single calibration summary packet.** During the 60-second window the node
+  computes mean, covariance, min, and max of magnetometer readings using the Welford online
+  algorithm (O(N), constant memory). One 72-byte packet is transmitted at the end.
+- **Raw IMU in STATUS packets.** Every 15-minute STATUS carries raw mag (x,y,z) and
+  accel (x,y,z) as int16 (12 extra bytes). Jetson applies stored calibration on receipt.
+- **uid_hash is the node identifier.** 32-bit FNV-1a of the SAMD21 128-bit serial;
+  already in every AWAKEN payload. No protocol redesign needed.
+- **No CALIBRATION_PUSH.** Calibration lives on the Jetson and is applied server-side.
+  The node receives no calibration data back.
+- **Existing AWAKEN flow is unchanged.** Jetson just needs to parse uid_hash from
+  already-forwarded AWAKEN packets to build its uid_hash <-> node_id mapping.
 
 ---
 
-## Phase 0: Foundation (Week 1)
-**Goal:** Establish packet types, data structures, and basic node discovery.
+## Phase 0: Wire Protocol and Packet Type Definitions (Week 1)
 
-### Node-Side Tasks
-- [ ] Define packet type constants (0x10=CALIBRATE, 0x11=RESET, 0x12=CALIBRATION_DATA, 0x13=ACK)
-- [ ] Implement packet reception handler for CALIBRATE and RESET commands
-- [ ] Add ACK packet transmission (acknowledge command receipt)
-- [ ] Update HANDSHAKE packet to include node_id assignment from base station
+**Goal:** All new structs, constants, and encode/decode functions defined in firmware and
+Python. No radio transmission of new types yet — just get definitions in place with
+verified sizes.
 
-### Jetson-Side Tasks
-- [ ] Define packet parsing for all new packet types
-- [ ] Create session state data structure (node_id↔SN mapping, calibrations dict, command queue)
-- [ ] Implement JSON persistence layer (save/load session to disk)
-- [ ] Test node discovery: parse HANDSHAKE and populate node_id↔SN mapping
+### Firmware (node + base)
 
-### Base Station (Feather)
-- [ ] Ensure forward routing of new packet types (0x10, 0x11, 0x12, 0x13) to Jetson
+- [ ] Add new pkt_type constants to `BinaryPacket.h`:
+  - `PKT_CMD_CALIBRATE    = 0x10`
+  - `PKT_CMD_RESET        = 0x11`
+  - `PKT_CALIBRATION_DATA = 0x12`
+  - `PKT_CMD_ACK          = 0x13`
+- [ ] Add packed structs to `BinaryPacket.h`:
+  - `CmdCalibratePayload  { node_id:u8, duration_s:u8 }` — 2 bytes
+  - `CmdResetPayload      { node_id:u8, reset_type:u8 }` — 2 bytes
+  - `CalibrationDataPayload { uid_hash:u32, sample_count:u16, mag_mean[3]:f32, mag_cov[6]:f32, mag_min[3]:f32, mag_max[3]:f32, status:u8 }` — 68 bytes
+  - `CmdAckPayload        { cmd_type:u8, uid_hash:u32, status:u8 }` — 6 bytes
+- [ ] Add encode/decode functions for each new type (matching existing style)
+- [ ] Extend `StatusPayload` from 12 to 24 bytes:
+  - Add `mag_x:i16`, `mag_y:i16`, `mag_z:i16` (uT x 10)
+  - Add `accel_x:i16`, `accel_y:i16`, `accel_z:i16` (mg)
+  - Add `STATUS_IMU_VALID = 0x04` flag constant
+- [ ] Update `static_assert` size checks for all modified and new structs
+- [ ] Update `SensorSnapshot` with raw IMU fields:
+  - `magX:i16`, `magY:i16`, `magZ:i16`, `accelX:i16`, `accelY:i16`, `accelZ:i16`, `imuValid:bool`
+- [ ] Extend `pktTypeName()` in base app to cover all new types
+
+### Jetson (Python)
+
+- [ ] Add new constants to `packet.py` (PKT_CMD_CALIBRATE through PKT_CMD_ACK)
+- [ ] Add struct formats and `decode_*` / `encode_*` functions for all new types
+- [ ] Update `STATUS_PAYLOAD_FMT` and `STATUS_PAYLOAD_SIZE` for 24-byte payload
+- [ ] Add `STATUS_IMU_VALID` constant
+- [ ] Update `decode_status()` to extract and return mag and accel fields
 
 ### Validation
-- [ ] Node connects → Jetson receives HANDSHAKE → node_id↔SN mapping created ✓
-- [ ] Jetson saves/loads session.json correctly ✓
+
+- [ ] All `static_assert` size checks pass in firmware build ✓
+- [ ] `struct.calcsize()` for each new Python format matches `sizeof()` in C++ ✓
+- [ ] `decode_status()` correctly parses 24-byte STATUS payload with IMU fields ✓
+- [ ] Round-trip test: encode then decode each new packet type, verify field values ✓
 
 ---
 
-## Phase 1: Jetson CLI & Command Infrastructure (Week 2)
-**Goal:** Build interactive CLI with command parsing and transmission.
+## Phase 1: Base Station Routing for New Packet Types (Week 1-2)
 
-### Jetson-Side Tasks
-- [ ] Implement threaded architecture:
-  - [ ] Packet Listener Thread (reads from serial/LoRa, parses packets)
-  - [ ] UI Thread (displays packet log + command prompt)
-  - [ ] Command Handler Thread (parses user input, builds packets)
-  - [ ] Session Manager (thread-safe access to shared state)
-- [ ] Implement split-screen display (top=packet log, bottom=command input)
+**Goal:** Base station receives new Jetson command packets and forwards them to the correct
+node. Base station receives new node packets and forwards them to the Jetson. Testable
+without any node-side calibration logic.
+
+### Firmware (base station — `SmartFiresBaseApp`)
+
+- [ ] Extend `handleJetsonCommandPayload()`:
+  - `PKT_CMD_CALIBRATE (0x10)`: decode `CmdCalibratePayload`, extract `node_id`,
+    call `_radio.sendToWait(payload, len, node_id)`
+  - `PKT_CMD_RESET (0x11)`: same pattern
+- [ ] Extend `processIncomingLoRa()` forward-to-Jetson routing:
+  - `PKT_CALIBRATION_DATA (0x12)`: forward via `encodeBaseFrame` (same as BUNDLE/STATUS)
+  - `PKT_CMD_ACK (0x13)`: forward via `encodeBaseFrame`
+  - Update packet type counter logging for new types
+
+### Jetson (Python)
+
+- [ ] Add UART frame encode functions: `encode_cmd_calibrate_frame()`, `encode_cmd_reset_frame()`
+- [ ] Add `PKT_CALIBRATION_DATA` and `PKT_CMD_ACK` to `ingest_service.py` packet routing
+
+### Validation
+
+- [ ] Serial loopback: Jetson sends CMD_CALIBRATE frame → base logs correct node_id and
+  `sendToWait` call ✓
+- [ ] Hand-crafted CALIBRATION_DATA LoRa packet → base forwards to Jetson UART ✓
+- [ ] Hand-crafted CMD_ACK LoRa packet → base forwards to Jetson UART ✓
+
+---
+
+## Phase 2: Jetson Session Management and AWAKEN Parsing (Week 2)
+
+**Goal:** Jetson builds and persists the uid_hash <-> node_id mapping from AWAKEN packets.
+SessionManager class handles all shared state. No calibration computation yet.
+
+### Jetson (Python)
+
+- [ ] Parse `AwakenPayload.uid_hash` from forwarded PKT_AWAKEN in `ingest_service.py`
+- [ ] Create `SessionManager` class (new module `session.py`):
+  - Load/save `~/.smartfires/session.json` with `threading.Lock`
+  - `on_awaken(node_id, uid_hash)` → update uid_hash <-> node_id maps; log connection
+    status ("calibration on file" vs "no calibration — run calibrate node N")
+  - `on_calibration_data(node_id, uid_hash, stats)` → compute and store calibration
+  - `on_cmd_ack(node_id, uid_hash, cmd_type, status)` → update command_queue
+  - `on_status(node_id, uid_hash, status_dict)` → compute heading if calibration exists;
+    update node_status
+- [ ] Wire all handlers into `ingest_service.py`
+- [ ] Implement calibration computation in `on_calibration_data()`:
+  - Reconstruct 3x3 covariance from upper triangle
+  - `eigenvalues, V = np.linalg.eigh(C)`
+  - `soft_iron = V @ np.diag(1/sqrt(eigenvalues)) @ V.T`
+  - `hard_iron = mag_mean`
+  - Run quality checks (sample count, axis range, eigenvalue positivity)
+  - Save to session.json
+- [ ] Implement heading computation in `on_status()`:
+  - Apply hard iron + soft iron correction
+  - Compute roll/pitch from accel
+  - Tilt-compensate magnetometer
+  - Apply WMM magnetic declination from GPS lat/lon
+  - Store in node_status; include in CSV/JSONL log rows
+
+### Validation
+
+- [ ] Node boots → Jetson parses uid_hash from AWAKEN → mapping logged and saved ✓
+- [ ] Session survives Jetson restart (uid_hash mapping reloaded from session.json) ✓
+- [ ] Manually inject a CALIBRATION_DATA UART frame → calibration computed and stored ✓
+- [ ] Manually inject a STATUS frame with IMU fields → heading computed and logged ✓
+
+---
+
+## Phase 3: Jetson CLI Infrastructure (Week 3)
+
+**Goal:** Interactive split-screen CLI with live packet log, command parsing and transmission,
+ACK tracking, and heading display. Uses the SessionManager from Phase 2.
+
+### Jetson (Python)
+
+- [ ] Implement threaded architecture in new `cli.py` entry point:
+  - **Listener Thread**: reads UART, parses packets, posts events to `queue.Queue`,
+    calls SessionManager handlers
+  - **UI Thread**: `curses` split screen — top 80% scrolling log, bottom command prompt
+  - **Command Thread**: readline input, parses commands, sends UART frames
+  - SessionManager passed to all threads; all state access under lock
 - [ ] Implement command parser:
-  - [ ] `calibrate node <id>` → build CALIBRATE packet
-  - [ ] `reset node <id>` → build RESET packet
-  - [ ] `list nodes` → display node_id, SN, last_seen, calibration status
-  - [ ] `help` → display available commands
-- [ ] Implement command transmission (send packets to base station)
-- [ ] Implement ACK reception and feedback display
+  - `calibrate node <id>` / `cal <id>` → `encode_cmd_calibrate_frame()` + queue entry
+  - `reset node <id>` / `reset node <id> hard` → `encode_cmd_reset_frame()`
+  - `list nodes` → tabular: node_id, uid_hash, last_seen, calib status, heading
+  - `list calibrations` → uid_hash, sample_count, timestamp, eigenvalues
+  - `save session` / `load session` / `clear calibration <id>` / `clear calibrations`
+  - `help [command]`
+- [ ] ACK timeout: warn after 5 s with no CMD_ACK
+- [ ] CALIBRATION_DATA timeout: warn after `(duration_s + 15)` s with no data after ACK
+- [ ] Graceful shutdown: save session, close serial
 
-### Testing
-- [ ] Send `calibrate node 1` → verify packet reaches node ✓
-- [ ] Node sends ACK → verify CLI displays "ACK received" ✓
-- [ ] Multiple commands queued and tracked ✓
-- [ ] CLI remains responsive to new packets while commands are pending ✓
+### Validation
 
----
-
-## Phase 2: Node Calibration Mode & Data Flow (Week 3)
-**Goal:** Implement calibration routine on node and data transmission back to Jetson.
-
-### Node-Side Tasks
-- [ ] Implement calibration mode state machine:
-  - [ ] On CALIBRATE receipt: pause normal sampling, enter calibration state
-  - [ ] Collect raw magnetometer/accelerometer data for 60 seconds
-  - [ ] Compute hard iron offsets (mean centering)
-  - [ ] Compute soft iron matrix (using method: e.g., ellipsoid fitting or known algorithm)
-  - [ ] Package calibration data into CALIBRATION_DATA packet
-  - [ ] Transmit CALIBRATION_DATA to base station
-  - [ ] Resume normal sampling after calibration complete
-- [ ] Test with oscilloscope/serial monitor: verify 60s collection, computation, transmission timing
-- [ ] Handle calibration interruption (reset during calibration → abort gracefully)
-
-### Jetson-Side Tasks
-- [ ] Implement CALIBRATION_DATA reception and parsing
-- [ ] Extract hard iron offsets and soft iron matrix from packet
-- [ ] Store in calibrations dict: `calibrations[SN] = {hard_iron: [...], soft_iron: [...], timestamp: ...}`
-- [ ] Update node_status: `node_status[node_id]["calibrating"] = False`
-- [ ] Save session to disk after calibration received
-- [ ] Display calibration data in CLI with formatted output
-
-### Testing
-- [ ] Send `calibrate node 1` from CLI
-- [ ] Node enters calibration mode for 60s
-- [ ] Node sends CALIBRATION_DATA
-- [ ] Jetson receives, parses, stores to session.json ✓
-- [ ] Verify calibration data persists across Jetson restart ✓
-- [ ] `list calibrations` shows stored data ✓
+- [ ] CLI starts, packet log updates in real-time with live nodes ✓
+- [ ] `list nodes` shows uid_hash, last_seen, heading for any STATUS received ✓
+- [ ] `calibrate node 1` sends UART frame → visible on base station debug serial ✓
+- [ ] No ACK → warning displayed after 5 s ✓
+- [ ] `save session` / `load session` round-trip preserves all data ✓
 
 ---
 
-## Phase 3: IMU Raw Data Integration (Week 4)
-**Goal:** Add raw IMU data to status packets and establish Jetson-side storage.
+## Phase 4: Node Calibration Mode (Week 4)
 
-### Node-Side Tasks
-- [ ] Modify STATUS packet to include:
-  - [ ] Raw magnetometer readings (x, y, z as int16 or float32)
-  - [ ] Raw accelerometer readings (x, y, z)
-  - [ ] Optional: gyroscope readings (x, y, z)
-- [ ] Ensure STATUS packets still transmit at normal rate (don't add latency)
-- [ ] Validate data range and sampling quality
+**Goal:** Node receives CMD_CALIBRATE, collects IMU data for 60 seconds, computes the
+statistical summary on-device using Welford's algorithm, and uploads CALIBRATION_DATA.
 
-### Jetson-Side Tasks
-- [ ] Parse raw IMU data from STATUS packets
-- [ ] Store per-node IMU buffer: `imu_data[sn] = [timestamp, mag_x, mag_y, mag_z, accel_x, ...]`
-- [ ] Option: Stream to file or database for post-processing
-- [ ] Display IMU values in CLI (optional, may slow UI)
+### Firmware (node)
 
-### Testing
-- [ ] Receive STATUS packets with IMU data ✓
-- [ ] Verify data format and range ✓
-- [ ] Store to disk for analysis ✓
+- [ ] Add `CalibrationManager` class (or integrate into `SmartFiresNodeApp`):
+  - State machine: `IDLE` / `CALIBRATING` / `UPLOADING`
+  - On CMD_CALIBRATE received:
+    - Verify `node_id` field matches own `NODE_ID`
+    - Send CMD_ACK (status=processing)
+    - Enter CALIBRATING state
+  - In CALIBRATING state (called from `update()` loop):
+    - Sample ICM-20948 magnetometer at ~10 Hz via `Icm20948Sensor`
+    - Accumulate Welford running statistics:
+      `n`, `mean[3]`, cross-product sums for upper-triangle covariance `M2[6]`,
+      `min[3]`, `max[3]`
+    - After `duration_s` seconds, finalize covariance: `cov[i] = M2[i] / (n-1)`
+    - Encode `CalibrationDataPayload`
+    - Enqueue for transmission (direct send outside TDMA slot is acceptable for
+      a one-shot 72-byte packet)
+    - Return to IDLE
+- [ ] Implement CMD_CALIBRATE reception in `TdmaRadioService` or node receive path
+- [ ] Implement CMD_ACK packet encoding and transmission helper
+- [ ] Suspend BUNDLE transmission while CALIBRATING (set a flag checked by
+  `SmartFiresNodeApp::update()` before `packetHandler.push()`)
 
----
+### Validation (serial monitor on node)
 
-## Phase 4: Absolute Heading Calculation (Week 5)
-**Goal:** Compute and store absolute orientation (heading) on Jetson.
-
-### Jetson-Side Tasks
-- [ ] Implement heading calculation function:
-  - [ ] Input: raw mag (x, y, z), raw accel (x, y, z), calibration params (hard iron, soft iron)
-  - [ ] Output: heading (yaw in degrees, 0-360)
-  - [ ] Apply hard iron offset: `mag_corrected = mag - hard_iron`
-  - [ ] Apply soft iron matrix: `mag_corrected = soft_iron @ mag_corrected`
-  - [ ] Calculate tilt correction (pitch, roll from accelerometer)
-  - [ ] Calculate heading from tilt-corrected magnetometer
-  - [ ] Optional: Apply magnetic declination from GPS latitude/longitude
-- [ ] Store computed orientation per node: `orientation[sn] = {heading: ..., pitch: ..., roll: ..., timestamp: ...}`
-- [ ] Validate heading range and smoothness
-
-### Testing
-- [ ] Receive raw IMU data from node with known calibration
-- [ ] Manually verify heading calculation (e.g., rotate node, check output changes)
-- [ ] Compare with expected values (e.g., known direction)
+- [ ] Node receives CMD_CALIBRATE → logs "entering calibration, duration=60s" ✓
+- [ ] Node sends CMD_ACK → visible on base station debug UART ✓
+- [ ] After 60 s: CALIBRATION_DATA transmitted → Jetson CLI shows calibration summary ✓
+- [ ] Eigenvalues close to 1.0 with good rotation coverage ✓
+- [ ] Node resumes BUNDLE transmission after calibration ✓
 
 ---
 
-## Phase 5: Wake-Up Handshake & Calibration Distribution (Week 6)
-**Goal:** Send stored calibration data to node on reconnection.
+## Phase 5: Raw IMU in STATUS and Heading Display (Week 5)
 
-### Node-Side Tasks
-- [ ] On wake-up/reconnection, listen for calibration data in handshake response or dedicated packet
-- [ ] Store received calibration in RAM for current session
-- [ ] (Optional: use calibration for local heading calculation instead of sending raw data)
+**Goal:** `Icm20948Sensor::fillSnapshot()` populates raw IMU fields in `SensorSnapshot`.
+`PacketHandler` encodes them into STATUS. Jetson displays heading in CLI.
 
-### Jetson-Side Tasks
-- [ ] On HANDSHAKE receipt:
-  - [ ] Lookup SN in calibrations dict
-  - [ ] If calibration exists, send CALIBRATION_DATA packet back to node
-  - [ ] Log: `[17:30:20.456] Node 1 (SN: 0x1234) connected. Calibration data sent.`
-- [ ] Implement timeout: if node doesn't request calibration within N seconds, resend or log warning
+### Firmware (node)
 
-### Testing
-- [ ] Node resets/reconnects → Jetson sends calibration data
-- [ ] Node confirms receipt (via ACK or status message)
-- [ ] Verify node now has calibration available for current session
+- [ ] Implement `Icm20948Sensor::fillSnapshot(SensorSnapshot&)`:
+  - Read `_reading.magX/Y/Z` → convert to int16 (uT x 10) → `snap.magX/Y/Z`
+  - Read `_reading.accelX/Y/Z` → convert to int16 (mg) → `snap.accelX/Y/Z`
+  - Set `snap.imuValid = _reading.valid`
+- [ ] Update `PacketHandler::tryEncodeStatus()`:
+  - If `snap.imuValid`: set `STATUS_IMU_VALID` flag, populate `mag_x/y/z`, `accel_x/y/z`
+- [ ] Confirm IMU bit (0x08) in `sensor_flags` is set when IMU data is valid
 
----
+### Jetson (Python)
 
-## Phase 6: Status Packet Integration & Orientation Transmission (Week 7)
-**Goal:** Include computed heading in status packets (optional, or keep raw data only).
+- [ ] Update `SessionManager.on_status()` to call heading computation when
+  `STATUS_IMU_VALID` is set and calibration exists for the node's uid_hash
+- [ ] Add heading, pitch, roll columns to telemetry CSV and status JSONL rows
+- [ ] Update CLI `list nodes` to show heading column with degree symbol
 
-### Option A: Jetson Computes Only (Recommended)
-- [ ] Keep nodes sending raw IMU data
-- [ ] Jetson computes and stores orientation
-- [ ] No transmission of orientation back to nodes (simplifies node code)
+### Validation
 
-### Option B: Node Computes & Transmits (Future)
-- [ ] Node applies calibration locally, computes heading
-- [ ] Node includes heading in STATUS packet
-- [ ] Jetson validates/logs orientation data
-- [ ] Reduces Jetson computation but increases node complexity
-
-### Recommended for Phase 6: Finalize Option A
-- [ ] No code changes needed; verify Jetson-side computation is accurate and continuous
+- [ ] Node with healthy ICM-20948 → STATUS packet has `STATUS_IMU_VALID` set ✓
+- [ ] Node with no calibration → STATUS received, heading not computed, CLI shows `--` ✓
+- [ ] Node with calibration → STATUS received → heading computed and logged ✓
+- [ ] Rotate node physically → heading changes in expected direction on next STATUS ✓
+- [ ] CLI `list nodes` shows heading for calibrated nodes ✓
 
 ---
 
-## Phase 7: Integration Testing & End-to-End Validation (Week 8)
-**Goal:** Full system test with multiple nodes.
+## Phase 6: Integration Testing and End-to-End Validation (Week 6)
+
+**Goal:** Full lifecycle test with at least two nodes.
 
 ### Test Scenarios
-- [ ] **Cold Start:** Power on all nodes → handshakes → calibration data distributed → raw IMU received → headings computed ✓
-- [ ] **Calibration Flow:** `calibrate node 1` → 60s collection → data received → stored → persisted ✓
-- [ ] **Reset:** `reset node 2` → node reboots → reconnects → calibration data resent ✓
-- [ ] **Multiple Nodes:** Calibrate nodes 1, 2, 3 in sequence → all calibrations stored and applied ✓
-- [ ] **Data Accuracy:** Rotate node, verify heading changes correctly ✓
-- [ ] **CLI Responsiveness:** Send commands while packets flowing → no lag or data loss ✓
 
-### Field Testing (Optional)
-- [ ] Deploy with GPS data to test magnetic declination correction
-- [ ] Verify heading accuracy in real-world environment
+- [ ] **Cold start (no calibration):** Node boots → AWAKEN parsed → no calibration found →
+  STATUS received with IMU data → heading not computed → CLI prompts user to calibrate ✓
+
+- [ ] **Calibration flow:** `calibrate node 1` → CMD_CALIBRATE sent → CMD_ACK received →
+  ~60 s BUNDLE gap → CALIBRATION_DATA received (72 bytes) → quality checks pass →
+  calibration stored → next STATUS triggers heading computation ✓
+
+- [ ] **Heading accuracy check:** Rotate calibrated node to known compass headings →
+  verify Jetson-logged heading tracks correctly in direction and magnitude ✓
+
+- [ ] **Multi-node:** Calibrate nodes 1 and 2 sequentially → both calibrations stored →
+  both report heading in subsequent STATUS packets ✓
+
+- [ ] **Reset command:** `reset node 2` → CMD_RESET → CMD_ACK → node reboots → AWAKEN →
+  calibration still in session.json → next STATUS computes heading again ✓
+
+- [ ] **Session persistence:** Restart Jetson process → session.json reloaded →
+  next STATUS from any calibrated node immediately computes heading ✓
+
+- [ ] **CLI responsiveness:** Send commands while BUNDLEs flowing → no packets dropped,
+  no log entries missed, no command lag ✓
+
+- [ ] **Quality rejection:** Calibrate with insufficient rotation (one axis stationary) →
+  Jetson warns about axis range and/or rejects degenerate covariance ✓
 
 ---
 
-## Phase 8: Optimization & Polish (Week 9)
-**Goal:** Refine, optimize, and prepare for production.
+## Phase 7: Optimization and Polish (Week 7)
 
-### Tasks
-- [ ] Optimize packet parsing and transmission latency
-- [ ] Improve CLI display (better formatting, colors, logging)
-- [ ] Add telemetry and performance metrics (packet loss, latency, compute time)
-- [ ] Error handling and edge cases (node disconnects, malformed packets, etc.)
-- [ ] Documentation: CLI user guide, calibration procedure, troubleshooting
+- [ ] WMM magnetic declination lookup table (~2 KB ROM, Python dict) integrated into
+  `on_status()` heading pipeline; verify true-north correction for deployment location
+- [ ] Optional: simple IIR smoothing on Jetson-side heading output to reduce per-STATUS noise
+- [ ] CLI colors: green = heading valid, yellow = no calibration, red = not seen > 60 s
+- [ ] Log rotation and size limits for `jetson.log`
+- [ ] CLI command history (readline) and tab completion
+- [ ] 8-hour continuous run test: no memory leaks, no session corruption, no thread deadlock
+- [ ] Documentation: CLI user guide, calibration procedure, troubleshooting guide
 
 ---
 
 ## Parallel Workstreams
 
-While some phases are sequential, the following can be parallelized:
+| Workstream | Can overlap with |
+| --- | --- |
+| Phase 0 (protocol definitions) | Phase 1 (base routing) — define first, test together |
+| Phase 2 (Jetson session + AWAKEN) | Phase 3 (CLI) — SessionManager used by both |
+| Phase 4 (node calibration mode) | Phase 5 (raw IMU in STATUS) — both touch ICM-20948 driver |
 
-- **Phase 0 & 1:** Can overlap — define packets in 0, implement CLI in 1
-- **Phase 3 & 4:** Can overlap — add IMU to STATUS in 3, implement heading calculation in 4
-- **Phase 2 & 3:** Must be sequential (calibration needed before using IMU data)
+Phases 0-1 are strictly prerequisite for everything else. After that, the Jetson track
+(Phases 2-3) and firmware track (Phases 4-5) can proceed in parallel.
 
 ---
 
 ## Success Criteria by Phase
 
-| Phase | Success Criteria |
-|-------|-----------------|
-| 0     | Node connects, SN→node_id mapping created, session persists |
-| 1     | CLI commands sent, ACKs received, commands logged |
-| 2     | Calibration routine executes, data transmitted and stored |
-| 3     | Raw IMU data in STATUS packets, stored on Jetson |
-| 4     | Heading computed from raw IMU + calibration, validated accurate |
-| 5     | Calibration distributed on node reconnection |
-| 6     | Heading computation continuous and accurate |
-| 7     | Full system test passes with multiple nodes |
-| 8     | Production-ready, documented, optimized |
+| Phase | Done When |
+| --- | --- |
+| 0 | All struct sizes verified; Python formats match C++; decode round-trips pass |
+| 1 | Base station routes all 4 new packet types; verified via serial monitor |
+| 2 | Jetson builds uid_hash <-> node_id map from AWAKEN; calibration computed from injected data; heading computed from injected STATUS |
+| 3 | CLI running; commands sent; ACK tracked; live log visible; heading in list nodes |
+| 4 | Node runs 60 s calibration; uploads CALIBRATION_DATA; Jetson stores calibration |
+| 5 | STATUS packets carry valid IMU; Jetson computes and logs heading on receipt |
+| 6 | Full lifecycle passes with 2+ nodes; accuracy spot-checked against known headings |
+| 7 | 8-hour stable run; WMM declination applied; CLI polished and documented |
 
 ---
 
-## Risk Mitigation
+## Risk Register
 
-- **Packet Loss:** Add retry logic and timeouts for critical commands (calibrate, reset).
-- **Node Hang:** Implement watchdog timer to detect unresponsive nodes.
-- **Calibration Failure:** Allow manual recalibration without re-flashing node.
-- **Data Sync:** Session.json as single source of truth; backup before major changes.
+| Risk | Mitigation |
+| --- | --- |
+| Welford covariance on SAMD21 runs out of memory | Algorithm uses O(1) memory (9 running sums for upper triangle); no issue at 48 KB SRAM |
+| CALIBRATION_DATA 72-byte packet exceeds LoRa budget | 72 bytes well within 255-byte RadioHead limit; no issue |
+| StatusPayload size change (12->24 bytes) breaks existing Jetson parser | Phase 0 updates `packet.py` first; `STATUS_PAYLOAD_SIZE` constant change triggers all callers; validated before hardware test |
+| Covariance matrix degenerate if node not rotated enough | Jetson quality checks reject it with clear explanation; user must recalibrate with proper rotation |
+| sendToWait for CMD_CALIBRATE fails (node not listening) | Node is always listening between TDMA TX slots; sendToWait retries once with 100 ms timeout |
+| Heading noise on a single STATUS sample | Single sample accuracy is +-4-5 deg; acceptable for stationary deployed nodes. Optional Jetson-side IIR smoothing in Phase 7 |
 
 ---
 
 ## Timeline Summary
 
 ```
-Week 1: Phase 0 (Foundation)
-Week 2: Phase 1 (CLI Infrastructure)
-Week 3: Phase 2 (Calibration)
-Week 4: Phase 3 (IMU Raw Data)
-Week 5: Phase 4 (Heading Calculation)
-Week 6: Phase 5 (Handshake & Calibration Distribution)
-Week 7: Phase 6 (Status Packet Integration)
-Week 8: Phase 7 (Integration Testing)
-Week 9: Phase 8 (Optimization & Polish)
+Week 1:   Phase 0  Protocol definitions — firmware + Python
+Week 1-2: Phase 1  Base station routing for new packet types
+Week 2:   Phase 2  Jetson session management + AWAKEN parsing + heading computation
+Week 3:   Phase 3  Jetson CLI infrastructure
+Week 4:   Phase 4  Node calibration mode (Welford statistics + CALIBRATION_DATA upload)
+Week 5:   Phase 5  Raw IMU in STATUS + heading display in CLI
+Week 6:   Phase 6  Integration testing with 2+ nodes
+Week 7:   Phase 7  WMM declination, smoothing, polish, documentation
 
-Total: ~9 weeks
+Total: ~7 weeks
 ```
 
----
-
-*This schedule is adaptive. Phases may overlap or be adjusted based on testing results and resource availability.*
+Phases 2-3 (Jetson Python) and Phases 4-5 (firmware) can run in parallel once Phases 0-1
+are complete, reducing calendar time to ~5-6 weeks with two concurrent workstreams.

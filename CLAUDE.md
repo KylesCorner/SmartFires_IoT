@@ -15,23 +15,29 @@ Wildfire IoT sensor network. Remote drone nodes collect environmental data (temp
     runs: SmartFiresNodeApp → PacketHandler → TdmaRadioService → RadioHeadTdmaDriver
     |
     | LoRa 915 MHz (RadioHead RHReliableDatagram, 13 dBm)
-    |   Node → Base: AWAKEN payload (4 bytes, on boot until TIME_SYNC received)
+    |   Node → Base: AWAKEN payload (8 bytes, on boot until TIME_SYNC received)
     |                BUNDLE payload (≤193 bytes, 1 retry, 100 ms timeout, TDMA-gated)
-    |                STATUS payload (16 bytes, GPS + battery, every 15 min)
+    |                STATUS payload (28 bytes, GPS + battery + raw IMU, every 15 min)
+    |                CALIBRATION_DATA (72 bytes, one-shot after calibration session)
+    |                CMD_ACK (11 bytes, acknowledges CALIBRATE/RESET commands)
     |   Base → Node: TIME_SYNC broadcast (12 bytes, fire-and-forget, RH_BROADCAST_ADDRESS)
+    |                CMD_CALIBRATE (7 bytes, forwarded from Jetson)
+    |                CMD_RESET (7 bytes, forwarded from Jetson)
     v
-[Adafruit Feather M0 RFM95 — base station]  ← NOT YET PORTED to class architecture
+[Adafruit Feather M0 RFM95 — base station]  ← SmartFiresBaseApp, fully ported
     Receives telemetry, auto-ACKs, relays to Jetson over UART.
-    Reads TIME_SYNC commands from Jetson UART, broadcasts them over LoRa every 10 min.
+    Assigns node_id from uid_hash on first AWAKEN (findOrCreateNodeAssignment).
+    Reads TIME_SYNC + command frames from Jetson UART, routes/broadcasts over LoRa.
     |
     | UART 115200 baud (Serial1, binary frames — bidirectional)
     |   Feather → Jetson: base UART frames with RSSI (variable length, ≤198 bytes)
-    |   Jetson → Feather: TIME_SYNC command frames (16 bytes, every 10 min)
+    |   Jetson → Feather: TIME_SYNC (16 bytes), CMD_CALIBRATE/RESET (11 bytes), ACK_SUMMARY
     v
 [Jetson Orin Nano]
   edge/edge-receiver/src/smartfires_edge/ingest_service.py → rotated telemetry CSV
-    optionally polls ES-W302 anemometer and logs local wind with node telemetry
     Sends periodic TIME_SYNC frames to keep all nodes on a common session clock.
+    Computes node heading from raw IMU in STATUS using stored calibration (numpy).
+    Heading CLI (in development): split-screen terminal for calibrate/reset commands.
 ```
 
 Each node is a single Feather M0 with sensors directly attached — there is no separate
@@ -115,6 +121,10 @@ SmartFires_IoT/
 │   ├── BINARY_PACKET_PIPELINE.md  Current pipeline design + remaining work
 │   ├── FLASHING.md
 │   ├── SOFTWARE_DESIGN.md
+│   ├── Heading_CLI_Development/   ← Active design work (read these before touching IMU/CLI/calibration)
+│   │   ├── DEPLOYMENT_SCHEDULE.md         Phased implementation plan (7 phases)
+│   │   ├── JETSON_CLI_AND_COMMAND_SYSTEM.md  CLI architecture, packet types, session design
+│   │   └── ORIENTATION_CALIBRATION_PLAN.md   Calibration math, wire format, Jetson heading pipeline
 │   └── old/                       Pre-refactor planning docs (for reference only)
 └── lora/                          Legacy experimental LoRa sketches (ignore)
 ```
@@ -167,7 +177,7 @@ SmartFiresNodeApp::update()
     buildSnapshot()        ← calls sensor.fillSnapshot() + battery reading;
                               timestamps via TdmaClock::sessionNowMs()
     packetHandler.push(snapshot)
-    if statusPacketReady() → enqueueTelemetry(STATUS payload, 16 bytes)
+    if statusPacketReady() → enqueueTelemetry(STATUS payload, 17 bytes now / 29 bytes planned)
     if bundleReady()       → enqueueTelemetry(BUNDLE payload, ≤193 bytes)
 
 PacketHandler
@@ -205,9 +215,12 @@ RadioHeadTdmaDriver::send()               non-blocking LoRa TX for fresh telemet
 ### LoRa payloads — node → base
 
 ```
-AWAKEN:  [PktHeader: 4]                                                              =  4 bytes
-BUNDLE:  [PktHeader: 4][FullStatePayload: 20][n_deltas: 1][DeltaPayload×n: n×12]  ≤ 193 bytes
-STATUS:  [PktHeader: 4][StatusPayload: 12]                                           = 16 bytes
+AWAKEN:  [PktHeader: 4][AwakenPayload: 4][crc8: 1]                                    =  9 bytes
+BUNDLE:  [PktHeader: 4][FullStatePayload: 20][n_deltas: 1][DeltaPayload×n: n×12][crc8] ≤ 194 bytes
+STATUS:  [PktHeader: 4][StatusPayload: 12][crc8: 1]                                    = 17 bytes  (current)
+         [PktHeader: 4][StatusPayload: 24][crc8: 1]                                    = 29 bytes  (planned — adds raw IMU)
+CALIBRATION_DATA: [PktHeader: 4][CalibrationDataPayload: 67][crc8: 1]                 = 72 bytes  (planned)
+CMD_ACK: [PktHeader: 4][CmdAckPayload: 6][crc8: 1]                                    = 11 bytes  (planned)
 ```
 
 RadioHead `RHReliableDatagram` handles LoRa framing and addressing.
@@ -243,9 +256,27 @@ slots and call `TdmaClock::applySync(sessionMs)`.
 | Field | Type | Notes |
 |---|---|---|
 | `magic` | `uint8_t` | `0xA5` |
-| `pkt_type` | `uint8_t` | `0x01` FULL_STATE · `0x02` HEARTBEAT · `0x03` TIME_SYNC · `0x04` BUNDLE · `0x05` STATUS · `0x06` AWAKEN |
-| `node_id` | `uint8_t` | compile-time `NODE_ID`; `0` for TIME_SYNC frames |
+| `pkt_type` | `uint8_t` | see packet type table below |
+| `node_id` | `uint8_t` | compile-time `NODE_ID`; `0` for broadcast/command frames |
 | `seq` | `uint8_t` | rolling 0–255 |
+
+### Packet Types
+
+| Value | Name | Direction | Size (LoRa payload) | Notes |
+|---|---|---|---|---|
+| `0x01` | PKT_FULL_STATE | Node→Jetson | 25 bytes | Legacy single-sample (rare) |
+| `0x02` | PKT_HEARTBEAT | — | — | Reserved |
+| `0x03` | PKT_TIME_SYNC | Base→Nodes | 13 bytes | Broadcast, fire-and-forget |
+| `0x04` | PKT_BUNDLE | Node→Jetson | ≤194 bytes | 15 samples (ref + 14 deltas) |
+| `0x05` | PKT_STATUS | Node→Jetson | 29 bytes | GPS + battery + raw IMU, every 15 min |
+| `0x06` | PKT_AWAKEN | Node→Base | 9 bytes | Boot handshake; contains uid_hash |
+| `0x07` | PKT_ACK_SUMMARY | Jetson→Node | 9 bytes | App-layer reliability bitmap |
+| `0x10` | PKT_CMD_CALIBRATE | Jetson→Node | 7 bytes | Trigger 60 s calibration session |
+| `0x11` | PKT_CMD_RESET | Jetson→Node | 7 bytes | Soft or hard reset |
+| `0x12` | PKT_CALIBRATION_DATA | Node→Jetson | 72 bytes | Statistical summary (mean+covariance) |
+| `0x13` | PKT_CMD_ACK | Node→Jetson | 11 bytes | Acknowledge CALIBRATE or RESET |
+
+Types 0x10–0x13 are **planned but not yet implemented** — see `documentation/Heading_CLI_Development/`.
 
 ### FullStatePayload (20 bytes, packed, little-endian)
 
@@ -261,15 +292,25 @@ slots and call `TdmaClock::applySync(sessionMs)`.
 | `pm4_0_ug10` | `uint16_t` | µg/m³ × 10 |
 | `pm10_ug10` | `uint16_t` | µg/m³ × 10 |
 
-### StatusPayload (12 bytes) — sent every 15 min via PKT_STATUS
+### StatusPayload (24 bytes, planned — currently 12) — sent every 15 min via PKT_STATUS
 
-| Field | Type | Encoding |
-|---|---|---|
-| `lat_e7` | `int32_t` | degrees × 1e7 (valid if `flags & STATUS_GPS_VALID`) |
-| `lon_e7` | `int32_t` | degrees × 1e7 (valid if `flags & STATUS_GPS_VALID`) |
-| `battery_mv` | `uint16_t` | millivolts (valid if `flags & STATUS_BATT_VALID`) |
-| `battery_pct` | `uint8_t` | 0–100 (valid if `flags & STATUS_BATT_VALID`) |
-| `flags` | `uint8_t` | STATUS_GPS_VALID=0x01 · STATUS_BATT_VALID=0x02 |
+The 12-byte layout below is what is currently on the wire. The 6 raw IMU fields are
+**planned** as part of the heading system (Phase 0 of Heading_CLI_Development). Do not
+implement StatusPayload changes without reading ORIENTATION_CALIBRATION_PLAN.md first.
+
+| Field | Type | Encoding | Status |
+|---|---|---|---|
+| `lat_e7` | `int32_t` | degrees × 1e7 (valid if STATUS_GPS_VALID) | Exists |
+| `lon_e7` | `int32_t` | degrees × 1e7 (valid if STATUS_GPS_VALID) | Exists |
+| `battery_mv` | `uint16_t` | millivolts (valid if STATUS_BATT_VALID) | Exists |
+| `battery_pct` | `uint8_t` | 0–100 (valid if STATUS_BATT_VALID) | Exists |
+| `flags` | `uint8_t` | GPS_VALID=0x01 · BATT_VALID=0x02 · IMU_VALID=0x04 | Exists (IMU flag planned) |
+| `mag_x` | `int16_t` | µT × 10, raw magnetometer (valid if IMU_VALID) | **Planned** |
+| `mag_y` | `int16_t` | µT × 10 | **Planned** |
+| `mag_z` | `int16_t` | µT × 10 | **Planned** |
+| `accel_x` | `int16_t` | mg (milli-g), raw accelerometer (valid if IMU_VALID) | **Planned** |
+| `accel_y` | `int16_t` | mg | **Planned** |
+| `accel_z` | `int16_t` | mg | **Planned** |
 
 ### DeltaPayload (12 bytes, packed, little-endian)
 
@@ -344,9 +385,10 @@ Node Feather — SmartFiresNodeApp::begin()
   │  Re-broadcasts every 5 s while waiting
   │  Sensors and duty cycle are HELD OFF until sync is received
   ▼
-Base Feather  ← NOT YET PORTED
-  │  Relays PKT_AWAKEN to Jetson over UART
-  │  Receives TIME_SYNC UART frame from Jetson
+Base Feather  ← SmartFiresBaseApp (fully ported)
+  │  Relays all node packets to Jetson over UART (encodeBaseFrame)
+  │  Assigns node_id from uid_hash on first AWAKEN (findOrCreateNodeAssignment)
+  │  Receives TIME_SYNC + command frames from Jetson UART, routes/broadcasts over LoRa
   │  Broadcasts 12-byte LoRa TIME_SYNC to RH_BROADCAST_ADDRESS (every 10 min)
   ▼
 Node Feather — TdmaRadioService::checkIncomingTimeSync()
@@ -362,23 +404,81 @@ SmartFiresNodeApp::update() — sensing begins
 ## Implementation Status
 
 | Item | Status | Notes |
-|---|---|---|
+| --- | --- | --- |
 | Class-based firmware architecture | **Done** | SmartFiresNodeApp, PacketHandler, TdmaRadioService, TdmaClock, TdmaTxQueue |
 | Binary bundle protocol (PKT_BUNDLE) | **Done** | BinaryPacket.h, PacketHandler, encodeBundlePayload() |
 | Delta frames | **Done** | Reference + 14 DeltaPayloads per bundle (12-byte compact delta) |
-| PKT_STATUS periodic packet | **Done** | GPS + battery every 15 min; PacketHandler::statusPacketReady() / takeStatusPacket() / resetStatusTimer() |
+| PKT_STATUS periodic packet | **Done** | GPS + battery every 15 min; statusPacketReady() / takeStatusPacket() / resetStatusTimer() |
 | AWAKEN boot handshake | **Done** | Node broadcasts PKT_AWAKEN every 5 s until TIME_SYNC received; sensors withheld until synced |
-| uptime_ms removed | **Done** | FullStatePayload is now 20 bytes; all timestamps from TdmaClock::sessionNowMs() |
 | SHT31 sensor wired end-to-end | **Done** | fillSnapshot() implemented |
 | TDMA clock + slot gating | **Done** | TdmaClock, TdmaRadioService |
 | TIME_SYNC binary decode | **Done** | TdmaRadioService uses BinaryPacket::decodeTimeSync() |
-| Base station port | **Pending** | feather_m0_lora env exists but firmware not ported to new class structure |
-| Remaining sensors | **Pending** | Wind, GPS, SPS30, IMU — implement fillSnapshot() as each is wired in |
-| edge-receiver packet bundle decode | **Done** | `smartfires_edge/packet.py` updated for 20-byte FullStatePayload + compact 12-byte deltas |
-| Jetson anemometer integration | **Done** | `smartfires-edge receive` can poll ES-W302 and add `jetson_wind_mps` + `jetson_wind_dir_deg` to CSV rows |
+| Base station port | **Done** | SmartFiresBaseApp fully implemented: LoRa RX, UART framing, TIME_SYNC, ACK_SUMMARY, node assignment |
+| edge-receiver packet bundle decode | **Done** | `smartfires_edge/packet.py` for 20-byte FullStatePayload + 12-byte deltas |
+| Jetson anemometer integration | **Done** | `smartfires-edge receive` can poll ES-W302 and log `jetson_wind_mps` + `jetson_wind_dir_deg` |
+| Remaining sensors (fillSnapshot) | **Pending** | Wind, GPS, SPS30, IMU — implement fillSnapshot() as each is wired in |
+| Heading/calibration system | **In design** | See `documentation/Heading_CLI_Development/` — Phase 0 is next |
 
 Full details and design notes in `documentation/BINARY_PACKET_PIPELINE.md`.
 Sizing and scaling math tables are in `documentation/BANDWIDTH_SCALING.md`.
+
+---
+
+## Heading and Calibration System (In Development)
+
+The ICM-20948 IMU is wired and the driver/sensor classes exist, but IMU data does not yet
+enter the wire protocol. The heading system design is fully specified in
+`documentation/Heading_CLI_Development/` — read those three documents before touching
+anything IMU, calibration, or CLI related.
+
+### Summary of the design
+
+**Calibration flow (one-time per node):**
+
+1. Operator issues `calibrate node <id>` from the Jetson CLI.
+2. Jetson sends `CMD_CALIBRATE (0x10)` → base station routes to node via LoRa.
+3. Node enters calibration mode (~60 s), rotating through all orientations.
+4. Node computes running statistics (Welford algorithm — O(N), constant memory):
+   mean, covariance matrix upper triangle, min/max per axis.
+5. Node transmits one `CALIBRATION_DATA (0x12)` packet (72 bytes) to Jetson.
+6. Jetson runs eigendecomposition (`numpy.linalg.eigh`) on the covariance matrix →
+   derives hard iron offset (mean) and full 3×3 soft iron matrix.
+7. Jetson stores calibration keyed by `uid_hash` in `~/.smartfires/session.json`.
+
+**Normal operation (post-calibration):**
+
+- Every PKT_STATUS (15 min) carries raw `mag_x/y/z` and `accel_x/y/z` as int16.
+- Jetson applies stored calibration + tilt compensation + WMM magnetic declination →
+  computes true heading, pitch, roll.
+- Heading is stored in session and displayed in the CLI. It is never transmitted back
+  to the node — the node holds no calibration data.
+
+**Node identity:** `uid_hash` (32-bit FNV-1a of the SAMD21 128-bit serial, computed by
+`BoardIdentity::hash32()`). Already present in every AWAKEN payload. Used as the
+calibration dictionary key on the Jetson. The base station assigns `node_id` from this
+hash in `findOrCreateNodeAssignment()`.
+
+**Expected accuracy:** ±2–5° (1σ) after calibration with adequate rotation coverage and
+declination correction. Single STATUS sample noise is ±4–5°; an optional Jetson-side IIR
+filter can reduce this.
+
+### What needs to change in the codebase
+
+See `DEPLOYMENT_SCHEDULE.md` for the full phased plan. In brief:
+
+| Layer | Change |
+| --- | --- |
+| `BinaryPacket.h` | Add PKT_CMD_CALIBRATE/RESET/CALIBRATION_DATA/CMD_ACK structs + encoders |
+| `SensorSnapshot.h` | Add magX/Y/Z, accelX/Y/Z, imuValid fields |
+| `StatusPayload` | Extend 12 → 24 bytes with raw IMU int16 fields |
+| `Icm20948Sensor` | Implement fillSnapshot() — quantize to int16 and set imuValid |
+| `PacketHandler` | Encode IMU fields into STATUS; add IMU_VALID flag |
+| `SmartFiresBaseApp` | Extend handleJetsonCommandPayload() for 0x10, 0x11; forward 0x12, 0x13 to Jetson |
+| `SmartFiresNodeApp` | Add CalibrationManager state machine (Welford stats, CMD_ACK, CALIBRATION_DATA TX) |
+| `packet.py` | Add new packet types, update STATUS struct format |
+| `ingest_service.py` | Parse uid_hash from AWAKEN; add SessionManager; compute heading on STATUS |
+| New: `session.py` | SessionManager class — uid_hash↔node_id mapping, calibration storage, heading compute |
+| New: `cli.py` | Curses split-screen CLI — calibrate/reset commands, live log, heading display |
 
 ---
 
