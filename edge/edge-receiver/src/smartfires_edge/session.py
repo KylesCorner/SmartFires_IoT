@@ -127,6 +127,12 @@ class SessionManager:
                 "has_calibration": has_calibration,
             }
 
+    def mark_node_seen(self, node_id: int) -> None:
+        with self._lock:
+            node_id = int(node_id)
+            node_status = self._state["node_status"].setdefault(node_id, {})
+            node_status["last_seen"] = int(time.time())
+
     def on_calibration_data(self, node_id: int, uid_hash: int, stats: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
             node_id = int(node_id)

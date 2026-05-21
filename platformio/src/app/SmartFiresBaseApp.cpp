@@ -632,12 +632,29 @@ void SmartFiresBaseApp::processIncomingJetsonUart() {
         _debugUart.print(pktTypeName(hdr.pkt_type));
         _debugUart.print(" seq=");
         _debugUart.print(hdr.seq);
+        _debugUart.print(" node=");
+        _debugUart.print(hdr.node_id);
         _debugUart.print(" len=");
+        _debugUart.println(len);
+      } else {
+        _debugUart.print("[BaseApp] UART_CMD invalid_header len=");
         _debugUart.println(len);
       }
 
       if (handleJetsonCommandPayload(payload, len)) {
         _cmdForwardCount++;
+      } else {
+        _debugUart.print("[BaseApp] UART_CMD dropped len=");
+        _debugUart.print(len);
+        if (validHeader) {
+          _debugUart.print(" type=");
+          _debugUart.print(pktTypeName(hdr.pkt_type));
+          _debugUart.print(" seq=");
+          _debugUart.print(hdr.seq);
+          _debugUart.print(" node=");
+          _debugUart.print(hdr.node_id);
+        }
+        _debugUart.println();
       }
       len = 0;
     }
@@ -646,12 +663,16 @@ void SmartFiresBaseApp::processIncomingJetsonUart() {
 
 bool SmartFiresBaseApp::handleJetsonCommandPayload(const uint8_t *payload, uint8_t len) {
   if (!payload || len < sizeof(BinaryPacket::PktHeader)) {
+    _debugUart.print("[BaseApp] UART_CMD reject reason=short_frame len=");
+    _debugUart.println(len);
     return false;
   }
 
   BinaryPacket::PktHeader hdr;
   memcpy(&hdr, payload, sizeof(BinaryPacket::PktHeader));
   if (hdr.magic != BinaryPacket::PKT_MAGIC) {
+    _debugUart.print("[BaseApp] UART_CMD reject reason=bad_magic len=");
+    _debugUart.println(len);
     return false;
   }
 
@@ -659,6 +680,8 @@ bool SmartFiresBaseApp::handleJetsonCommandPayload(const uint8_t *payload, uint8
     BinaryPacket::TimeSyncPayload ts = {};
     BinaryPacket::PktHeader ignored = {};
     if (!BinaryPacket::decodeTimeSync(payload, len, ignored, ts)) {
+      _debugUart.print("[BaseApp] UART_CMD reject type=TIME_SYNC reason=decode_failed len=");
+      _debugUart.println(len);
       return false;
     }
 
@@ -677,6 +700,8 @@ bool SmartFiresBaseApp::handleJetsonCommandPayload(const uint8_t *payload, uint8
     BinaryPacket::PktHeader ignored;
     BinaryPacket::AckSummaryPayload ack;
     if (!BinaryPacket::decodeAckSummary(payload, len, ignored, ack)) {
+      _debugUart.print("[BaseApp] UART_CMD reject type=ACK_SUMMARY reason=decode_failed len=");
+      _debugUart.println(len);
       return false;
     }
     const bool ok = _radio.send(payload, len, ack.node_id);
@@ -698,6 +723,8 @@ bool SmartFiresBaseApp::handleJetsonCommandPayload(const uint8_t *payload, uint8
     BinaryPacket::PktHeader ignored;
     BinaryPacket::CmdCalibratePayload cmd = {};
     if (!BinaryPacket::decodeCmdCalibrate(payload, len, ignored, cmd)) {
+      _debugUart.print("[BaseApp] UART_CMD reject type=CMD_CALIBRATE reason=decode_failed len=");
+      _debugUart.println(len);
       return false;
     }
 
@@ -717,6 +744,8 @@ bool SmartFiresBaseApp::handleJetsonCommandPayload(const uint8_t *payload, uint8
     BinaryPacket::PktHeader ignored;
     BinaryPacket::CmdResetPayload cmd = {};
     if (!BinaryPacket::decodeCmdReset(payload, len, ignored, cmd)) {
+      _debugUart.print("[BaseApp] UART_CMD reject type=CMD_RESET reason=decode_failed len=");
+      _debugUart.println(len);
       return false;
     }
 
@@ -731,6 +760,12 @@ bool SmartFiresBaseApp::handleJetsonCommandPayload(const uint8_t *payload, uint8
     _debugUart.println(ok ? "OK" : "FAIL");
     return ok;
   }
+
+  _debugUart.print("[BaseApp] UART_CMD unsupported type=");
+  _debugUart.print(pktTypeName(hdr.pkt_type));
+  _debugUart.print(" (0x");
+  _debugUart.print(hdr.pkt_type, HEX);
+  _debugUart.println(")");
 
   return false;
 }

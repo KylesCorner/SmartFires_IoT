@@ -114,7 +114,11 @@ def _format_nodes(session: SessionManager) -> list[str]:
     node_status = snap.get("node_status", {})
     calibrations = snap.get("calibrations", {})
 
-    all_node_ids = sorted(set(node_map.keys()) | set(node_status.keys()))
+    all_node_ids = sorted(
+        node_id
+        for node_id in (set(node_map.keys()) | set(node_status.keys()))
+        if int(node_id) >= 2
+    )
     for node_id in all_node_ids:
         uid_hash = node_map.get(node_id)
         status = node_status.get(node_id, {})
@@ -208,9 +212,6 @@ def _process_command(line: str, runtime: CliRuntime, session: SessionManager) ->
 
         node_id = int(tokens[-1])
         uid_hash = session.get_uid_hash_for_node(node_id)
-        if uid_hash is None:
-            runtime.log(f"[Error] Node {node_id} not found. Use 'list nodes'.")
-            return
 
         seq = runtime.next_command_seq()
         frame = encode_cmd_calibrate_frame(node_id=node_id, duration_s=60, seq=seq)
@@ -223,7 +224,12 @@ def _process_command(line: str, runtime: CliRuntime, session: SessionManager) ->
         runtime.add_pending(
             PendingCommand(node_id=node_id, cmd_type=PKT_CMD_CALIBRATE, sent_at=time.time(), duration_s=60)
         )
-        runtime.log(f"[Sent] CMD_CALIBRATE node={node_id} uid=0x{uid_hash:08x} seq={seq}")
+        if uid_hash is None:
+            runtime.log(
+                f"[Sent] CMD_CALIBRATE node={node_id} seq={seq} uid=unknown (no AWAKEN mapping yet)"
+            )
+        else:
+            runtime.log(f"[Sent] CMD_CALIBRATE node={node_id} uid=0x{uid_hash:08x} seq={seq}")
         return
 
     if cmd == "reset":
@@ -270,6 +276,9 @@ def _listener_worker(port: str, baud: int, runtime: CliRuntime, session: Session
                 node_id = event.get("node_id")
                 seq = event.get("seq")
                 runtime.log(f"RX type=0x{pkt_type:02x} node={node_id} seq={seq} rssi={event.get('rssi')}")
+
+                if isinstance(node_id, int) and node_id >= 2:
+                    session.mark_node_seen(node_id)
 
                 awaken = event.get("awaken")
                 if awaken:
