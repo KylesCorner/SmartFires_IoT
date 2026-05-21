@@ -109,20 +109,22 @@ class CliRuntime:
 
 def _format_nodes(session: SessionManager) -> list[str]:
     snap = session.snapshot()
-    lines = ["node_id uid_hash last_seen calib heading"]
+    lines = ["node_id uid_hash         last_seen  calib heading"]
     node_map = snap.get("node_id_to_uid_hash", {})
     node_status = snap.get("node_status", {})
     calibrations = snap.get("calibrations", {})
 
-    for node_id in sorted(node_map.keys()):
-        uid_hash = node_map[node_id]
+    all_node_ids = sorted(set(node_map.keys()) | set(node_status.keys()))
+    for node_id in all_node_ids:
+        uid_hash = node_map.get(node_id)
         status = node_status.get(node_id, {})
         last_seen = status.get("last_seen", "--")
         heading_value = status.get("heading_true_deg", "--")
         heading = f"{heading_value}°" if heading_value != "--" else "--"
-        calib = "valid" if uid_hash in calibrations else "none"
+        uid_str = f"0x{uid_hash:08x}" if uid_hash is not None else "--"
+        calib = "valid" if (uid_hash is not None and uid_hash in calibrations) else "none"
         lines.append(
-            f"{node_id:<7} 0x{uid_hash:08x} {last_seen!s:<9} {calib:<5} {heading}"
+            f"{node_id:<7} {uid_str:<16} {last_seen!s:<10} {calib:<5} {heading}"
         )
     if len(lines) == 1:
         lines.append("(no nodes seen)")
