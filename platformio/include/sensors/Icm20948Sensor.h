@@ -48,6 +48,7 @@ public:
   const void *readingData() const override;
   size_t readingSize() const override;
   size_t writeTelemetry(char *out, size_t maxLen) const override;
+  void fillSnapshot(SensorSnapshot &snap) const override;
 
 private:
   Config _cfg;

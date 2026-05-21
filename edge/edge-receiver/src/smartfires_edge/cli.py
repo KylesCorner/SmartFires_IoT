@@ -118,7 +118,8 @@ def _format_nodes(session: SessionManager) -> list[str]:
         uid_hash = node_map[node_id]
         status = node_status.get(node_id, {})
         last_seen = status.get("last_seen", "--")
-        heading = status.get("heading_true_deg", "--")
+        heading_value = status.get("heading_true_deg", "--")
+        heading = f"{heading_value}°" if heading_value != "--" else "--"
         calib = "valid" if uid_hash in calibrations else "none"
         lines.append(
             f"{node_id:<7} 0x{uid_hash:08x} {last_seen!s:<9} {calib:<5} {heading}"

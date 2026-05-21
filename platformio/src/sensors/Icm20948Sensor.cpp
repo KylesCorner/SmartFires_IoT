@@ -1,6 +1,20 @@
 #include "sensors/Icm20948Sensor.h"
 #include <stdio.h>
 
+namespace {
+
+int16_t clampToInt16(float value) {
+  if (value > 32767.0f) {
+    return 32767;
+  }
+  if (value < -32768.0f) {
+    return -32768;
+  }
+  return static_cast<int16_t>(value);
+}
+
+} // namespace
+
 Icm20948Sensor::Icm20948Sensor(const Config &cfg, IIcm20948Driver &driver,
                                IClock &clock)
     : _cfg(cfg), _driver(driver), _clock(clock) {}
@@ -81,4 +95,21 @@ size_t Icm20948Sensor::writeTelemetry(char *out, size_t maxLen) const {
 
   if (n < 0) return 0;
   return static_cast<size_t>(n) >= maxLen ? maxLen - 1 : static_cast<size_t>(n);
+}
+
+void Icm20948Sensor::fillSnapshot(SensorSnapshot &snap) const {
+  if (!_reading.valid) {
+    snap.imuValid = false;
+    return;
+  }
+
+  // Driver reports magnetometer in uT and accelerometer in g.
+  snap.magX = clampToInt16(_reading.magX * 10.0f);      // uT x 10
+  snap.magY = clampToInt16(_reading.magY * 10.0f);
+  snap.magZ = clampToInt16(_reading.magZ * 10.0f);
+  snap.accelX = clampToInt16(_reading.accelX * 1000.0f); // mg
+  snap.accelY = clampToInt16(_reading.accelY * 1000.0f);
+  snap.accelZ = clampToInt16(_reading.accelZ * 1000.0f);
+  snap.imuValid = true;
+  snap.sensorFlags |= 0x08; // IMU
 }

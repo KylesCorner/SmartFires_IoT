@@ -148,6 +148,16 @@ void PacketHandler::tryEncodeStatus(const SensorSnapshot &snap) {
         flags |= BinaryPacket::STATUS_BATT_VALID;
     }
 
+    if (snap.imuValid) {
+        sp.mag_x = snap.magX;
+        sp.mag_y = snap.magY;
+        sp.mag_z = snap.magZ;
+        sp.accel_x = snap.accelX;
+        sp.accel_y = snap.accelY;
+        sp.accel_z = snap.accelZ;
+        flags |= BinaryPacket::STATUS_IMU_VALID;
+    }
+
     sp.flags = flags;
 
     _statusLen   = BinaryPacket::encodeStatusPayload(

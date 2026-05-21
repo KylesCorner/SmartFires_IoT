@@ -26,6 +26,10 @@ CSV_COLUMNS = [
     "battery_pct",
     "flags",
     "rssi",
+    "uid_hash",
+    "heading_true_deg",
+    "pitch_deg",
+    "roll_deg",
     "jetson_wind_mps",
     "jetson_wind_dir_deg",
 ]
