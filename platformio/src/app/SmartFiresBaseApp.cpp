@@ -162,6 +162,10 @@ void SmartFiresBaseApp::processIncomingLoRa() {
       _statusRxCount++;
     } else if (hdr.pkt_type == BinaryPacket::PKT_FULL_STATE) {
       _fullStateRxCount++;
+    } else if (hdr.pkt_type == BinaryPacket::PKT_CALIBRATION_DATA) {
+      _calibrationDataRxCount++;
+    } else if (hdr.pkt_type == BinaryPacket::PKT_CMD_ACK) {
+      _cmdAckRxCount++;
     }
 
     _debugUart.print("[BaseApp] RX from=");
@@ -248,6 +252,22 @@ void SmartFiresBaseApp::processIncomingLoRa() {
 
         _debugUart.println();
       }
+    } else if (validHeader && hdr.pkt_type == BinaryPacket::PKT_CALIBRATION_DATA) {
+      _debugUart.print("[BaseApp][CALIB#");
+      _debugUart.print(_calibrationDataRxCount);
+      _debugUart.print("] node=");
+      _debugUart.print(hdr.node_id);
+      _debugUart.print(" seq=");
+      _debugUart.print(hdr.seq);
+      _debugUart.println(" action=forward_to_jetson");
+    } else if (validHeader && hdr.pkt_type == BinaryPacket::PKT_CMD_ACK) {
+      _debugUart.print("[BaseApp][CMD_ACK#");
+      _debugUart.print(_cmdAckRxCount);
+      _debugUart.print("] node=");
+      _debugUart.print(hdr.node_id);
+      _debugUart.print(" seq=");
+      _debugUart.print(hdr.seq);
+      _debugUart.println(" action=forward_to_jetson");
     } else if (validHeader && isTelemetryPacketType(hdr.pkt_type)) {
       handleTelemetryAckSummary(hdr.node_id, hdr.seq);
     }
@@ -674,6 +694,44 @@ bool SmartFiresBaseApp::handleJetsonCommandPayload(const uint8_t *payload, uint8
     return ok;
   }
 
+  if (hdr.pkt_type == BinaryPacket::PKT_CMD_CALIBRATE) {
+    BinaryPacket::PktHeader ignored;
+    BinaryPacket::CmdCalibratePayload cmd = {};
+    if (!BinaryPacket::decodeCmdCalibrate(payload, len, ignored, cmd)) {
+      return false;
+    }
+
+    const bool ok = _radio.sendToWait(payload, len, cmd.node_id);
+    _debugUart.print("[BaseApp] TX CMD_CALIBRATE seq=");
+    _debugUart.print(hdr.seq);
+    _debugUart.print(" node=");
+    _debugUart.print(cmd.node_id);
+    _debugUart.print(" duration_s=");
+    _debugUart.print(cmd.duration_s);
+    _debugUart.print(" result=");
+    _debugUart.println(ok ? "OK" : "FAIL");
+    return ok;
+  }
+
+  if (hdr.pkt_type == BinaryPacket::PKT_CMD_RESET) {
+    BinaryPacket::PktHeader ignored;
+    BinaryPacket::CmdResetPayload cmd = {};
+    if (!BinaryPacket::decodeCmdReset(payload, len, ignored, cmd)) {
+      return false;
+    }
+
+    const bool ok = _radio.sendToWait(payload, len, cmd.node_id);
+    _debugUart.print("[BaseApp] TX CMD_RESET seq=");
+    _debugUart.print(hdr.seq);
+    _debugUart.print(" node=");
+    _debugUart.print(cmd.node_id);
+    _debugUart.print(" reset_type=");
+    _debugUart.print(cmd.reset_type);
+    _debugUart.print(" result=");
+    _debugUart.println(ok ? "OK" : "FAIL");
+    return ok;
+  }
+
   return false;
 }
 
@@ -767,6 +825,10 @@ void SmartFiresBaseApp::maybeLogHealth() {
   _debugUart.print(_statusRxCount);
   _debugUart.print(" full_rx=");
   _debugUart.print(_fullStateRxCount);
+  _debugUart.print(" calib_rx=");
+  _debugUart.print(_calibrationDataRxCount);
+  _debugUart.print(" cmd_ack_rx=");
+  _debugUart.print(_cmdAckRxCount);
   _debugUart.print(" raw_rx=");
   _debugUart.print(_rawRxCount);
   _debugUart.print(" sync_tx=");

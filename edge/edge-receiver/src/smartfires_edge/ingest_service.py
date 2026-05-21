@@ -14,6 +14,8 @@ from smartfires_edge.csv_logger import DurableCsvLogger
 from smartfires_edge.packet import (
     PKT_AWAKEN,
     PKT_BUNDLE,
+    PKT_CALIBRATION_DATA,
+    PKT_CMD_ACK,
     PKT_FULL_STATE,
     PKT_STATUS,
     encode_ack_summary_frame,
@@ -82,6 +84,10 @@ def _pkt_type_name(pkt_type: int | None) -> str:
         return "BUNDLE"
     if pkt_type == PKT_STATUS:
         return "STATUS"
+    if pkt_type == PKT_CALIBRATION_DATA:
+        return "CALIBRATION_DATA"
+    if pkt_type == PKT_CMD_ACK:
+        return "CMD_ACK"
     return f"0x{(pkt_type or 0):02x}"
 
 
@@ -290,6 +296,60 @@ def run_receive(
                     f"[STATUS] node={status_row['node_id']} seq={status_row['seq']} "
                     f"gps_valid={status_row['gps_valid']} batt_valid={status_row['battery_valid']} "
                     f"batt_mv={status_row['battery_mv']} rssi={status_row['rssi']}"
+                )
+
+            calibration_data = event.get("calibration_data")
+            if calibration_data:
+                calibration_row = {
+                    "timestamp": datetime.utcnow().isoformat(timespec="milliseconds"),
+                    "packet_type": "calibration_data",
+                    "node_id": calibration_data.get("node_id"),
+                    "seq": calibration_data.get("seq"),
+                    "uid_hash": calibration_data.get("uid_hash"),
+                    "sample_count": calibration_data.get("sample_count"),
+                    "status": calibration_data.get("status"),
+                    "rssi": calibration_data.get("rssi"),
+                    "mag_mean": calibration_data.get("mag_mean"),
+                    "mag_cov": calibration_data.get("mag_cov"),
+                    "mag_min": calibration_data.get("mag_min"),
+                    "mag_max": calibration_data.get("mag_max"),
+                }
+                status_path = (
+                    status_dir
+                    / f"status-{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.jsonl"
+                )
+                _append_jsonl(status_path, calibration_row)
+                print(
+                    "[CALIBRATION_DATA] "
+                    f"node={calibration_row['node_id']} seq={calibration_row['seq']} "
+                    f"uid=0x{int(calibration_row['uid_hash']):08x} "
+                    f"samples={calibration_row['sample_count']} status={calibration_row['status']} "
+                    f"rssi={calibration_row['rssi']}"
+                )
+
+            cmd_ack = event.get("cmd_ack")
+            if cmd_ack:
+                cmd_ack_row = {
+                    "timestamp": datetime.utcnow().isoformat(timespec="milliseconds"),
+                    "packet_type": "cmd_ack",
+                    "node_id": cmd_ack.get("node_id"),
+                    "seq": cmd_ack.get("seq"),
+                    "cmd_type": cmd_ack.get("cmd_type"),
+                    "uid_hash": cmd_ack.get("uid_hash"),
+                    "status": cmd_ack.get("status"),
+                    "rssi": cmd_ack.get("rssi"),
+                }
+                status_path = (
+                    status_dir
+                    / f"status-{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.jsonl"
+                )
+                _append_jsonl(status_path, cmd_ack_row)
+                print(
+                    "[CMD_ACK] "
+                    f"node={cmd_ack_row['node_id']} seq={cmd_ack_row['seq']} "
+                    f"cmd=0x{int(cmd_ack_row['cmd_type']):02x} "
+                    f"uid=0x{int(cmd_ack_row['uid_hash']):08x} "
+                    f"status={cmd_ack_row['status']} rssi={cmd_ack_row['rssi']}"
                 )
 
             for pkt in event.get("packets", []):
