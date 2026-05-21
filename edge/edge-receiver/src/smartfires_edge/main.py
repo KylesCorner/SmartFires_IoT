@@ -1,6 +1,7 @@
 import argparse
 from pathlib import Path
 
+from smartfires_edge.cli import run_cli
 from smartfires_edge.ingest_service import run_receive
 from smartfires_edge.packet_loss import print_summary
 from smartfires_edge.visualize_service import run_visualize
@@ -34,6 +35,11 @@ def build_parser() -> argparse.ArgumentParser:
     visualize.add_argument("--sync-interval", type=int, default=600)
     visualize.add_argument("--ack-interval", type=float, default=4.0)
     visualize.add_argument("--telemetry-rows", type=int, default=20)
+
+    cli = sub.add_parser("cli", help="Interactive Jetson CLI")
+    cli.add_argument("--port", default="/dev/ttyTHS1")
+    cli.add_argument("--baud", type=int, default=115200)
+    cli.add_argument("--session-file", type=Path, default=None)
 
     return p
 
@@ -70,6 +76,13 @@ def main() -> int:
             sync_interval_s=args.sync_interval,
             ack_interval_s=args.ack_interval,
             telemetry_rows_max=max(1, int(args.telemetry_rows)),
+        )
+
+    if args.command == "cli":
+        return run_cli(
+            port=args.port,
+            baud=args.baud,
+            session_file=args.session_file,
         )
 
     parser.error("Unknown command")

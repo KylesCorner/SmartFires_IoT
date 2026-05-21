@@ -1,4 +1,5 @@
 import math
+import copy
 import threading
 import time
 from pathlib import Path
@@ -213,6 +214,7 @@ class SessionManager:
             self._state["command_queue"].append(entry)
             if len(self._state["command_queue"]) > 256:
                 self._state["command_queue"] = self._state["command_queue"][-256:]
+            self._save_locked()
             return entry
 
     @staticmethod
@@ -297,3 +299,22 @@ class SessionManager:
             node_status.update(heading)
             node_status["last_heading_ts"] = int(time.time())
             return {"computed": True, **heading}
+
+    def clear_calibration_by_node(self, node_id: int) -> bool:
+        with self._lock:
+            node_id = int(node_id)
+            uid_hash = self._state["node_id_to_uid_hash"].get(node_id)
+            if uid_hash is None or uid_hash not in self._state["calibrations"]:
+                return False
+            del self._state["calibrations"][uid_hash]
+            self._save_locked()
+            return True
+
+    def clear_calibrations(self) -> None:
+        with self._lock:
+            self._state["calibrations"] = {}
+            self._save_locked()
+
+    def snapshot(self) -> dict[str, Any]:
+        with self._lock:
+            return copy.deepcopy(self._state)
