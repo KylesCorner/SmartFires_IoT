@@ -18,6 +18,14 @@ const char *pktTypeName(uint8_t pktType) {
       return "TIME_SYNC";
     case BinaryPacket::PKT_ACK_SUMMARY:
       return "ACK_SUMMARY";
+    case BinaryPacket::PKT_CMD_CALIBRATE:
+      return "CMD_CALIBRATE";
+    case BinaryPacket::PKT_CMD_RESET:
+      return "CMD_RESET";
+    case BinaryPacket::PKT_CALIBRATION_DATA:
+      return "CALIBRATION_DATA";
+    case BinaryPacket::PKT_CMD_ACK:
+      return "CMD_ACK";
     default:
       return "UNKNOWN";
   }
