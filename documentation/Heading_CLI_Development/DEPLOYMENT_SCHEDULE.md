@@ -4,6 +4,20 @@
 
 This document sequences the work to add calibration-based absolute heading to SmartFires.
 
+## Current Status Snapshot (2026-05-21)
+
+- [x] Phase 0 implementation complete (protocol definitions and Python mirror)
+- [x] Phase 1 implementation complete (base routing for new packet types)
+- [x] Phase 2 implementation complete (session manager, AWAKEN mapping, calibration compute)
+- [x] Phase 3 implementation complete (interactive CLI)
+- [x] Phase 4 implementation complete (node calibration flow and command ACK path)
+- [x] Phase 5 implementation complete (raw IMU in STATUS + heading display/log schema)
+- [ ] Phase 6 hardware integration testing in progress
+- [ ] Phase 7 optimization/polish pending
+
+Phase 0-5 code is implemented and committed. The next gate is hardware validation across
+the Phase 6 scenarios below.
+
 Key architecture decisions reflected throughout:
 
 - **Jetson computes everything.** Calibration fitting (full ellipsoid via eigendecomposition)
@@ -273,6 +287,21 @@ statistical summary on-device using Welford's algorithm, and uploads CALIBRATION
 
 - [ ] **Quality rejection:** Calibrate with insufficient rotation (one axis stationary) →
   Jetson warns about axis range and/or rejects degenerate covariance ✓
+
+### Phase 6 Execution Checkpoint
+
+Use this table during execution and update in-place as scenarios complete.
+
+| Scenario | Owner | Date | Result (PASS/FAIL) | Evidence Path | Notes |
+| --- | --- | --- | --- | --- | --- |
+| Cold start | | | | | |
+| Calibration flow | | | | | |
+| Heading accuracy check | | | | | |
+| Multi-node | | | | | |
+| Reset command | | | | | |
+| Session persistence | | | | | |
+| CLI responsiveness | | | | | |
+| Quality rejection | | | | | |
 
 ---
 
