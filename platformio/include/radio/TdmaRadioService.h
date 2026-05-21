@@ -24,6 +24,13 @@ enum class TdmaRadioError : uint8_t {
 
 class TdmaRadioService {
 public:
+  struct ReceivedCommand {
+    uint8_t data[TdmaConfig::MaxPayloadLen] = {};
+    uint8_t len = 0;
+    int8_t rssi = 0;
+    uint8_t from = 0;
+  };
+
   TdmaRadioService(const TdmaConfig &cfg,
                    TdmaClock &tdmaClock,
                    TdmaTxQueue &queue,
@@ -33,7 +40,9 @@ public:
   void update();
 
   bool sendAwakenHandshake(const uint8_t *payload, uint8_t len);
+  bool sendImmediate(const uint8_t *payload, uint8_t len, bool requireLinkAck = true);
   bool enqueueTelemetry(const uint8_t *payload, uint8_t len);
+  bool takePendingCommand(ReceivedCommand &out);
   uint8_t nodeId() const;
   uint8_t numSlots() const;
 
@@ -81,9 +90,12 @@ private:
   uint32_t _lastTxSlotIndex = 0xFFFFFFFFu;
   uint32_t _lastFreshTelemetrySentMs = 0;
   bool _hasFreshTelemetrySent = false;
+  bool _hasPendingCommand = false;
+  ReceivedCommand _pendingCommand = {};
 
   void drainTxQueue();
   void checkIncomingTimeSync();
+  void rememberPendingCommand(const ITdmaRadioDriver::ReceivedPacket &packet);
 
   bool isTimeSyncPacket(const ITdmaRadioDriver::ReceivedPacket &packet,
                         uint32_t &sessionMsOut,

@@ -37,6 +37,10 @@ static const char* pktTypeName(uint8_t pktType) {
     case BinaryPacket::PKT_FULL_STATE:  return "FULL_STATE";
     case BinaryPacket::PKT_TIME_SYNC:   return "TIME_SYNC";
     case BinaryPacket::PKT_ACK_SUMMARY: return "ACK_SUMMARY";
+    case BinaryPacket::PKT_CMD_CALIBRATE: return "CMD_CALIBRATE";
+    case BinaryPacket::PKT_CMD_RESET: return "CMD_RESET";
+    case BinaryPacket::PKT_CALIBRATION_DATA: return "CALIBRATION_DATA";
+    case BinaryPacket::PKT_CMD_ACK: return "CMD_ACK";
     default:                            return "UNKNOWN";
   }
 }
@@ -154,6 +158,37 @@ bool TdmaRadioService::sendAwakenHandshake(const uint8_t *payload, uint8_t len) 
   Serial.println(ok ? "OK" : "NO");
 
   return ok;
+}
+
+bool TdmaRadioService::sendImmediate(const uint8_t *payload,
+                                     uint8_t len,
+                                     bool requireLinkAck) {
+  if (_state != TdmaRadioState::Ready || !payload || len == 0) {
+    return false;
+  }
+
+  const bool ok = requireLinkAck
+                      ? _driver.sendToWait(payload, len, _cfg.baseAddr)
+                      : _driver.send(payload, len, _cfg.baseAddr);
+  if (!ok) {
+    _error = TdmaRadioError::SendFailed;
+    _failedSendCount++;
+    return false;
+  }
+
+  _sentCount++;
+  return true;
+}
+
+bool TdmaRadioService::takePendingCommand(ReceivedCommand &out) {
+  if (!_hasPendingCommand) {
+    return false;
+  }
+
+  out = _pendingCommand;
+  _hasPendingCommand = false;
+  _pendingCommand = {};
+  return true;
 }
 
 bool TdmaRadioService::enqueueTelemetry(const uint8_t *payload, uint8_t len) {
@@ -538,8 +573,39 @@ void TdmaRadioService::checkIncomingTimeSync() {
       Serial.print(" mask=0x");
       Serial.println(ack.ack_mask, HEX);
       applyAckSummary(ack);
+      continue;
+    }
+
+    BinaryPacket::PktHeader hdr = {};
+    if (decodeHeader(packet.data, packet.len, hdr) &&
+        (hdr.pkt_type == BinaryPacket::PKT_CMD_CALIBRATE ||
+         hdr.pkt_type == BinaryPacket::PKT_CMD_RESET)) {
+      rememberPendingCommand(packet);
     }
   }
+}
+
+void TdmaRadioService::rememberPendingCommand(
+    const ITdmaRadioDriver::ReceivedPacket &packet) {
+  const uint8_t clippedLen =
+      packet.len > TdmaConfig::MaxPayloadLen ? TdmaConfig::MaxPayloadLen : packet.len;
+
+  memcpy(_pendingCommand.data, packet.data, clippedLen);
+  _pendingCommand.len = clippedLen;
+  _pendingCommand.rssi = packet.rssi;
+  _pendingCommand.from = packet.from;
+  _hasPendingCommand = true;
+
+  BinaryPacket::PktHeader hdr = {};
+  const bool hasHdr = decodeHeader(packet.data, packet.len, hdr);
+  Serial.print("[Radio][CMD_RX] type=");
+  Serial.print(hasHdr ? pktTypeName(hdr.pkt_type) : "RAW");
+  Serial.print(" seq=");
+  Serial.print(hasHdr ? hdr.seq : 0);
+  Serial.print(" from=");
+  Serial.print(packet.from);
+  Serial.print(" len=");
+  Serial.println(packet.len);
 }
 
 bool TdmaRadioService::isTimeSyncPacket(
