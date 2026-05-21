@@ -22,6 +22,7 @@ from smartfires_edge.packet import (
     encode_time_sync_frame,
 )
 from smartfires_edge.packet_loss import PacketLossTracker
+from smartfires_edge.session import SessionManager
 from smartfires_edge.uart_receiver import iter_packets
 
 
@@ -171,6 +172,7 @@ def run_receive(
     ack_seq = 0
     next_ack_at = time.time() + ack_interval_s
     sync_state = {"next_seq": 0}
+    session_manager = SessionManager()
 
     session_id = random.randint(1, 0xFFFFFFFF)
     session_start = time.time()
@@ -228,6 +230,20 @@ def run_receive(
             )
 
             if hdr_node is not None and hdr_seq is not None and pkt_type == PKT_AWAKEN:
+                awaken = event.get("awaken") or {}
+                uid_hash = awaken.get("uid_hash")
+                if uid_hash is not None:
+                    aw = session_manager.on_awaken(int(hdr_node), int(uid_hash))
+                    if aw["has_calibration"]:
+                        print(
+                            f"[EDGE][AWAKEN] node={aw['node_id']} uid=0x{aw['uid_hash']:08x} "
+                            "calibration=on_file"
+                        )
+                    else:
+                        print(
+                            f"[EDGE][AWAKEN] node={aw['node_id']} uid=0x{aw['uid_hash']:08x} "
+                            "calibration=missing suggest='calibrate node <id>'"
+                        )
                 print(
                     f"[EDGE][AWAKEN] node={hdr_node} seq={hdr_seq} "
                     f"action=send_time_sync"
@@ -260,6 +276,12 @@ def run_receive(
 
             status = event.get("status")
             if status:
+                uid_hash = session_manager.get_uid_hash_for_node(int(status.get("node_id")))
+                heading = session_manager.on_status(
+                    node_id=int(status.get("node_id")),
+                    uid_hash=uid_hash,
+                    status=status,
+                )
                 status_row = {
                     "timestamp": datetime.utcnow().isoformat(timespec="milliseconds"),
                     "packet_type": "status",
@@ -283,6 +305,10 @@ def run_receive(
                     "flags": status.get("flags"),
                     "battery_mv": status.get("battery_mv"),
                     "battery_pct": status.get("battery_pct"),
+                    "uid_hash": f"0x{uid_hash:08x}" if isinstance(uid_hash, int) else "",
+                    "heading_true_deg": heading.get("heading_true_deg") if heading.get("computed") else "",
+                    "pitch_deg": heading.get("pitch_deg") if heading.get("computed") else "",
+                    "roll_deg": heading.get("roll_deg") if heading.get("computed") else "",
                     "jetson_wind_mps": "",
                     "jetson_wind_dir_deg": "",
                 }
@@ -295,11 +321,17 @@ def run_receive(
                 print(
                     f"[STATUS] node={status_row['node_id']} seq={status_row['seq']} "
                     f"gps_valid={status_row['gps_valid']} batt_valid={status_row['battery_valid']} "
-                    f"batt_mv={status_row['battery_mv']} rssi={status_row['rssi']}"
+                    f"batt_mv={status_row['battery_mv']} rssi={status_row['rssi']} "
+                    f"heading={status_row['heading_true_deg']}"
                 )
 
             calibration_data = event.get("calibration_data")
             if calibration_data:
+                calib_result = session_manager.on_calibration_data(
+                    node_id=int(calibration_data.get("node_id")),
+                    uid_hash=int(calibration_data.get("uid_hash")),
+                    stats=calibration_data,
+                )
                 calibration_row = {
                     "timestamp": datetime.utcnow().isoformat(timespec="milliseconds"),
                     "packet_type": "calibration_data",
@@ -324,11 +356,17 @@ def run_receive(
                     f"node={calibration_row['node_id']} seq={calibration_row['seq']} "
                     f"uid=0x{int(calibration_row['uid_hash']):08x} "
                     f"samples={calibration_row['sample_count']} status={calibration_row['status']} "
-                    f"rssi={calibration_row['rssi']}"
+                    f"rssi={calibration_row['rssi']} accepted={calib_result.get('accepted')}"
                 )
 
             cmd_ack = event.get("cmd_ack")
             if cmd_ack:
+                session_manager.on_cmd_ack(
+                    node_id=int(cmd_ack.get("node_id")),
+                    uid_hash=int(cmd_ack.get("uid_hash")),
+                    cmd_type=int(cmd_ack.get("cmd_type")),
+                    status=int(cmd_ack.get("status")),
+                )
                 cmd_ack_row = {
                     "timestamp": datetime.utcnow().isoformat(timespec="milliseconds"),
                     "packet_type": "cmd_ack",

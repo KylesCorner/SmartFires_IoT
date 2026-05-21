@@ -38,6 +38,10 @@ HEADER_SIZE = struct.calcsize(HEADER_FMT)   # 4
 FULL_STATE_FMT  = "<IHHhHHHHH"
 FULL_STATE_SIZE = struct.calcsize(FULL_STATE_FMT)  # 20
 
+# AwakenPayload: uid_hash(u32)
+AWAKEN_PAYLOAD_FMT = "<I"
+AWAKEN_PAYLOAD_SIZE = struct.calcsize(AWAKEN_PAYLOAD_FMT)  # 4
+
 # StatusPayload: lat_e7(i32) lon_e7(i32) battery_mv(u16) battery_pct(u8) flags(u8)
 #                mag_xyz(i16x3) accel_xyz(i16x3)
 STATUS_PAYLOAD_FMT  = "<iiHBBhhhhhh"
@@ -82,6 +86,7 @@ LORA_PAYLOAD_SIZE     = HEADER_SIZE + FULL_STATE_SIZE + 1
 LORA_BUNDLE_MAX_SIZE  = HEADER_SIZE + FULL_STATE_SIZE + 1 + BUNDLE_MAX_DELTAS * DELTA_SIZE + 1
 TIME_SYNC_LORA_SIZE   = HEADER_SIZE + TIME_SYNC_PAYLOAD_SIZE + 1
 ACK_SUMMARY_LORA_SIZE = HEADER_SIZE + ACK_SUMMARY_PAYLOAD_SIZE + 1
+AWAKEN_LORA_SIZE = HEADER_SIZE + AWAKEN_PAYLOAD_SIZE + 1
 CMD_CALIBRATE_LORA_SIZE = HEADER_SIZE + CMD_CALIBRATE_PAYLOAD_SIZE + 1
 CMD_RESET_LORA_SIZE = HEADER_SIZE + CMD_RESET_PAYLOAD_SIZE + 1
 CALIBRATION_DATA_LORA_SIZE = HEADER_SIZE + CALIBRATION_DATA_PAYLOAD_SIZE + 1
@@ -275,6 +280,25 @@ def decode_status(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Option
         "accel_x": accel_x if imu_valid else "",
         "accel_y": accel_y if imu_valid else "",
         "accel_z": accel_z if imu_valid else "",
+    }
+
+
+def decode_awaken(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Optional[dict]:
+    if len(raw_lora_payload) < AWAKEN_LORA_SIZE:
+        return None
+    if crc8(raw_lora_payload[:-1]) != raw_lora_payload[-1]:
+        return None
+
+    magic, pkt_type, node_id, seq = struct.unpack_from(HEADER_FMT, raw_lora_payload, 0)
+    if magic != PKT_MAGIC or pkt_type != PKT_AWAKEN:
+        return None
+
+    (uid_hash,) = struct.unpack_from(AWAKEN_PAYLOAD_FMT, raw_lora_payload, HEADER_SIZE)
+    return {
+        "node_id": node_id,
+        "seq": seq,
+        "rssi": rssi,
+        "uid_hash": uid_hash,
     }
 
 

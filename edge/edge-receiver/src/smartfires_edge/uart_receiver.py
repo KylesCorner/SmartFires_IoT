@@ -11,12 +11,14 @@ from smartfires_edge.packet import (
     FRAME_M0,
     FRAME_M1,
     HEADER_FMT,
+    PKT_AWAKEN,
     PKT_BUNDLE,
     PKT_FULL_STATE,
     PKT_GPS,
     PKT_MAGIC,
     PKT_STATUS,
     crc8,
+    decode_awaken,
     decode_calibration_data,
     decode_bundle,
     decode_cmd_ack,
@@ -91,10 +93,13 @@ class FrameReceiver:
 
             gps = None
             status = None
+            awaken = None
             calibration_data = None
             cmd_ack = None
             packets: list[dict] = []
-            if pkt_type == PKT_GPS or pkt_type == PKT_STATUS:
+            if pkt_type == PKT_AWAKEN:
+                awaken = decode_awaken(raw_payload, rssi)
+            elif pkt_type == PKT_GPS or pkt_type == PKT_STATUS:
                 gps = decode_gps(raw_payload, rssi)
                 status = decode_status(raw_payload, rssi)
             elif pkt_type == PKT_FULL_STATE:
@@ -117,6 +122,7 @@ class FrameReceiver:
                 "node_id": hdr_node,
                 "seq": hdr_seq,
                 "rssi": rssi,
+                "awaken": awaken,
                 "gps": gps,
                 "status": status,
                 "calibration_data": calibration_data,
