@@ -1,3 +1,4 @@
+#include "logging/DebugLogger.h"
 #include <Arduino.h>
 
 #if defined(LORA_BASE)
@@ -168,8 +169,7 @@ WindSensorRevC wind(windCfg, analog, windPower, clock);
 
 AdafruitSht31Driver sht31Driver;
 
-Sht31Sensor::Config sht31Cfg =
-    Sht31Sensor::Config::makeSht31Cfg();
+Sht31Sensor::Config sht31Cfg = Sht31Sensor::Config::makeSht31Cfg();
 Sht31Sensor sht31(sht31Cfg, sht31Driver, clock);
 
 AdafruitGpsDriver gpsDriver;
@@ -241,19 +241,24 @@ SmartFiresNodeApp::Config appCfg = SmartFiresNodeApp::Config::appCfg(
 SmartFiresNodeApp app(appCfg, clock, duty, packetHandler, tdmaRadio, tdmaClock,
                       sensors, sensorCount, &battery);
 
+DebugLogger gLog(Serial, initialRadioAddr);
+
 void scanI2C() {
-  Serial.println("I2C scan...");
+  LOG_INFO("i2c", "scan_start");
+
+  uint8_t foundCount = 0;
+
   for (uint8_t addr = 1; addr < 127; ++addr) {
     Wire.beginTransmission(addr);
     uint8_t err = Wire.endTransmission();
+
     if (err == 0) {
-      Serial.print("Found device at 0x");
-      if (addr < 16) {
-        Serial.print('0');
-      }
-      Serial.println(addr, HEX);
+      ++foundCount;
+      LOG_INFO("i2c", "found addr=0x%02X", static_cast<unsigned int>(addr));
     }
   }
+
+  LOG_INFO("i2c", "scan_done found_count=%u", static_cast<unsigned int>(foundCount));
 }
 
 void testBeginSensors() {
@@ -317,56 +322,59 @@ void setup() {
   while (!Serial1 && millis() < 3000) {
   }
 
+  gLog.setMinLevel(LogLevel::Debug);
+
+  LOG_INFO("boot", "SmartFires node starting");
+  LOG_INFO("boot", "node_id=%u", initialRadioAddr);
+
   Wire.begin();
   scanI2C();
   // testBeginSensors();
+  LOG_INFO("boot", "SmartFires Feather TDMA node starting");
 
-  Serial.println("SmartFires Feather TDMA node starting...");
-  Serial.print("UID_HASH: 0x");
-  Serial.println(nodeUidHash, HEX);
-  Serial.print("RADIO_ADDR_INIT: ");
-  Serial.println(initialRadioAddr);
-  Serial.print("TDMA_ENTITIES: ");
-  Serial.println(numSlots);
-  Serial.print("SLOT_WIDTH: ");
-  Serial.print(tdmaCfg.slotWidthMs);
-  Serial.println(" ms");
-  Serial.print("GUARD: ");
-  Serial.print(tdmaCfg.guardMs);
-  Serial.println(" ms");
-  Serial.print("SYNC_STALE: ");
-  Serial.print(tdmaCfg.syncStaleMs / 1000);
-  Serial.println(" s");
-  Serial.print("APP_RELIAB: ");
-  Serial.println(tdmaCfg.enableAppReliability ? "ON" : "OFF");
-  Serial.print("LINK_ACK: ");
-  Serial.println(tdmaCfg.enableLinkAck ? "WAIT_FOR_ACK" : "FIRE_AND_FORGET");
-  Serial.print("RETX_WINDOW: ");
-  Serial.println(tdmaCfg.reliabilityWindowDepth);
-  Serial.print("RETX_MAX_ATT: ");
-  Serial.println(tdmaCfg.reliabilityMaxAttempts);
-  Serial.print("LINK_RETRIES: ");
-  Serial.println(tdmaCfg.maxRetries);
-  Serial.print("ACK_TIMEOUT: ");
-  Serial.print(tdmaCfg.ackTimeoutMs);
-  Serial.println(" ms");
-  Serial.print("TELEM_REL_MODE: ");
-  Serial.println(reliabilityModeName(tdmaCfg.reliabilityMode));
-  Serial.print("STATUS_INTERVAL_MS: ");
-  Serial.println(packetHandlerCfg.statusIntervalMs);
-  Serial.print("STATUS_INTERVAL_S: ");
-  Serial.println(packetHandlerCfg.statusIntervalMs / 1000UL);
-  Serial.print("STATUS_INTERVAL_MIN: ");
-  Serial.println(packetHandlerCfg.statusIntervalMs / 60000UL);
+  LOG_INFO("boot", "uid_hash=0x%08lX", static_cast<unsigned long>(nodeUidHash));
+  LOG_INFO("boot", "radio_addr_init=%u",
+           static_cast<unsigned int>(initialRadioAddr));
+
+  LOG_INFO("tdma", "entities=%u", static_cast<unsigned int>(numSlots));
+  LOG_INFO("tdma", "slot_width_ms=%lu",
+           static_cast<unsigned long>(tdmaCfg.slotWidthMs));
+  LOG_INFO("tdma", "guard_ms=%lu", static_cast<unsigned long>(tdmaCfg.guardMs));
+  LOG_INFO("tdma", "sync_stale_s=%lu",
+           static_cast<unsigned long>(tdmaCfg.syncStaleMs / 1000UL));
+
+  LOG_INFO("tdma", "app_reliability=%s",
+           tdmaCfg.enableAppReliability ? "ON" : "OFF");
+  LOG_INFO("tdma", "link_ack=%s",
+           tdmaCfg.enableLinkAck ? "WAIT_FOR_ACK" : "FIRE_AND_FORGET");
+  LOG_INFO("tdma", "retx_window=%u",
+           static_cast<unsigned int>(tdmaCfg.reliabilityWindowDepth));
+  LOG_INFO("tdma", "retx_max_attempts=%u",
+           static_cast<unsigned int>(tdmaCfg.reliabilityMaxAttempts));
+  LOG_INFO("tdma", "link_retries=%u",
+           static_cast<unsigned int>(tdmaCfg.maxRetries));
+  LOG_INFO("tdma", "ack_timeout_ms=%lu",
+           static_cast<unsigned long>(tdmaCfg.ackTimeoutMs));
+  LOG_INFO("tdma", "telem_rel_mode=%s",
+           reliabilityModeName(tdmaCfg.reliabilityMode));
+
+  LOG_INFO("packet", "status_interval_ms=%lu",
+           static_cast<unsigned long>(packetHandlerCfg.statusIntervalMs));
+  LOG_INFO(
+      "packet", "status_interval_s=%lu",
+      static_cast<unsigned long>(packetHandlerCfg.statusIntervalMs / 1000UL));
+  LOG_INFO(
+      "packet", "status_interval_min=%lu",
+      static_cast<unsigned long>(packetHandlerCfg.statusIntervalMs / 60000UL));
 
   if (!app.begin()) {
-    Serial.println("SmartFires app begin failed");
+    LOG_INFO("boot", "smart_fires_app_status=%d", 1);
     while (true) {
       delay(500);
     }
   }
 
-  Serial.println("SmartFires app ready");
+  LOG_INFO("boot", "smart_fires_app_status=%d", 0);
 }
 
 unsigned long previousMillis = 0; // Stores last time event triggered

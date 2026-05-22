@@ -22,6 +22,7 @@ enum class DutyCyclePhase : uint8_t {
 enum class DutyCycleError : uint8_t {
   None,
   SensorBeginFailed,
+  BatteryBeginFailed,
   SensorWakeFailed,
   SensorWakeTimeout,
   SensorSampleFailed

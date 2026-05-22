@@ -165,28 +165,3 @@ size_t Sht31Sensor::writeTelemetry(char *out, size_t maxLen) const {
   return static_cast<size_t>(n);
 }
 
-void Sht31Sensor::debugReady() const {
-  const uint32_t now = _clock.millis();
-  const uint32_t elapsed = now - _lastSampleMs;
-
-  Serial.print("[SHT31 READY DEBUG] healthy=");
-  Serial.print(_healthy ? 1 : 0);
-
-  Serial.print(" state=");
-  Serial.print(static_cast<int>(_state));
-
-  Serial.print(" now=");
-  Serial.print(now);
-
-  Serial.print(" lastSampleMs=");
-  Serial.print(_lastSampleMs);
-
-  Serial.print(" elapsed=");
-  Serial.print(elapsed);
-
-  Serial.print(" minSamplePeriodMs=");
-  Serial.print(_cfg.minSamplePeriodMs);
-
-  Serial.print(" ready=");
-  Serial.println(ready() ? 1 : 0);
-}
