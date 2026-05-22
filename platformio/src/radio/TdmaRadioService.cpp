@@ -1,5 +1,6 @@
 #include "radio/TdmaRadioService.h"
 
+#include "logging/DebugLogger.h"
 #include "telemetry/BinaryPacket.h"
 
 #include <Arduino.h>
@@ -9,10 +10,10 @@ namespace {
 
 bool telemetryUsesLinkAck(const TdmaConfig &cfg) {
   switch (cfg.reliabilityMode) {
-    case TdmaReliabilityMode::StrictLinkAck:
-      return cfg.enableLinkAck;
-    case TdmaReliabilityMode::AppLayerAckSummary:
-      return false;
+  case TdmaReliabilityMode::StrictLinkAck:
+    return cfg.enableLinkAck;
+  case TdmaReliabilityMode::AppLayerAckSummary:
+    return false;
   }
 
   return cfg.enableLinkAck;
@@ -20,28 +21,39 @@ bool telemetryUsesLinkAck(const TdmaConfig &cfg) {
 
 const char *telemetryModeName(const TdmaConfig &cfg) {
   switch (cfg.reliabilityMode) {
-    case TdmaReliabilityMode::StrictLinkAck:
-      return "STRICT_LINK_ACK";
-    case TdmaReliabilityMode::AppLayerAckSummary:
-      return "APP_ACK_SUMMARY";
+  case TdmaReliabilityMode::StrictLinkAck:
+    return "STRICT_LINK_ACK";
+  case TdmaReliabilityMode::AppLayerAckSummary:
+    return "APP_ACK_SUMMARY";
   }
 
   return "UNKNOWN";
 }
 
-static const char* pktTypeName(uint8_t pktType) {
+const char *pktTypeName(uint8_t pktType) {
   switch (pktType) {
-    case BinaryPacket::PKT_AWAKEN:      return "AWAKEN";
-    case BinaryPacket::PKT_BUNDLE:      return "BUNDLE";
-    case BinaryPacket::PKT_STATUS:      return "STATUS";
-    case BinaryPacket::PKT_FULL_STATE:  return "FULL_STATE";
-    case BinaryPacket::PKT_TIME_SYNC:   return "TIME_SYNC";
-    case BinaryPacket::PKT_ACK_SUMMARY: return "ACK_SUMMARY";
-    case BinaryPacket::PKT_CMD_CALIBRATE: return "CMD_CALIBRATE";
-    case BinaryPacket::PKT_CMD_RESET: return "CMD_RESET";
-    case BinaryPacket::PKT_CALIBRATION_DATA: return "CALIBRATION_DATA";
-    case BinaryPacket::PKT_CMD_ACK: return "CMD_ACK";
-    default:                            return "UNKNOWN";
+  case BinaryPacket::PKT_AWAKEN:
+    return "AWAKEN";
+  case BinaryPacket::PKT_BUNDLE:
+    return "BUNDLE";
+  case BinaryPacket::PKT_STATUS:
+    return "STATUS";
+  case BinaryPacket::PKT_FULL_STATE:
+    return "FULL_STATE";
+  case BinaryPacket::PKT_TIME_SYNC:
+    return "TIME_SYNC";
+  case BinaryPacket::PKT_ACK_SUMMARY:
+    return "ACK_SUMMARY";
+  case BinaryPacket::PKT_CMD_CALIBRATE:
+    return "CMD_CALIBRATE";
+  case BinaryPacket::PKT_CMD_RESET:
+    return "CMD_RESET";
+  case BinaryPacket::PKT_CALIBRATION_DATA:
+    return "CALIBRATION_DATA";
+  case BinaryPacket::PKT_CMD_ACK:
+    return "CMD_ACK";
+  default:
+    return "UNKNOWN";
   }
 }
 
@@ -54,20 +66,6 @@ bool decodeHeader(const uint8_t *payload,
 
   memcpy(&hdrOut, payload, sizeof(BinaryPacket::PktHeader));
   return hdrOut.magic == BinaryPacket::PKT_MAGIC;
-}
-
-void printQueueSnapshot(uint8_t queuedCount,
-                        uint8_t queueCapacity,
-                        uint8_t pendingCount,
-                        uint32_t droppedOldestCount) {
-  Serial.print("  q=");
-  Serial.print(queuedCount);
-  Serial.print('/');
-  Serial.print(queueCapacity);
-  Serial.print("  pending=");
-  Serial.print(pendingCount);
-  Serial.print("  dropped=");
-  Serial.print(droppedOldestCount);
 }
 
 // Conservative slot-budget estimates to prevent crossing slot boundaries.
@@ -85,16 +83,16 @@ uint16_t estimateTxBudgetMs(const uint8_t *payload, uint8_t len) {
   }
 
   switch (hdr.pkt_type) {
-    case BinaryPacket::PKT_BUNDLE:
-      return 340;
-    case BinaryPacket::PKT_STATUS:
-      return 120;
-    case BinaryPacket::PKT_AWAKEN:
-      return 90;
-    case BinaryPacket::PKT_FULL_STATE:
-      return 140;
-    default:
-      return 140;
+  case BinaryPacket::PKT_BUNDLE:
+    return 340;
+  case BinaryPacket::PKT_STATUS:
+    return 120;
+  case BinaryPacket::PKT_AWAKEN:
+    return 90;
+  case BinaryPacket::PKT_FULL_STATE:
+    return 140;
+  default:
+    return 140;
   }
 }
 
@@ -109,13 +107,26 @@ TdmaRadioService::TdmaRadioService(const TdmaConfig &cfg,
 bool TdmaRadioService::begin() {
   _error = TdmaRadioError::None;
 
+  LOG_INFO("radio",
+           "begin node_id=%u base_addr=%u num_slots=%u mode=%s "
+           "link_ack=%u app_reliability=%u max_retries=%u ack_timeout_ms=%lu",
+           static_cast<unsigned int>(_cfg.nodeId),
+           static_cast<unsigned int>(_cfg.baseAddr),
+           static_cast<unsigned int>(_cfg.numSlots), telemetryModeName(_cfg),
+           _cfg.enableLinkAck ? 1 : 0, _cfg.enableAppReliability ? 1 : 0,
+           static_cast<unsigned int>(_cfg.maxRetries),
+           static_cast<unsigned long>(_cfg.ackTimeoutMs));
+
   if (!_driver.begin()) {
     _state = TdmaRadioState::Error;
     _error = TdmaRadioError::BeginFailed;
+    LOG_ERROR("radio", "begin_failed");
     return false;
   }
 
   _state = TdmaRadioState::Ready;
+  LOG_INFO("radio", "begin_ok state=ready");
+
   return true;
 }
 
@@ -130,17 +141,20 @@ void TdmaRadioService::update() {
 
 bool TdmaRadioService::sendAwakenHandshake(const uint8_t *payload, uint8_t len) {
   if (_state != TdmaRadioState::Ready) {
+    LOG_WARN("radio", "awaken_direct_reject reason=not_ready state=%d",
+             static_cast<int>(_state));
     return false;
   }
 
   BinaryPacket::PktHeader hdr = {};
   const bool hasHdr = decodeHeader(payload, len, hdr);
+
   if (!hasHdr || hdr.pkt_type != BinaryPacket::PKT_AWAKEN) {
-    Serial.print("[Radio][AWAKEN_DIRECT] REJECT ");
-    Serial.print(hasHdr ? pktTypeName(hdr.pkt_type) : "RAW");
-    Serial.print(" seq=");
-    Serial.print(hasHdr ? hdr.seq : 0);
-    Serial.println(" reason=not_awaken_packet");
+    LOG_WARN("radio",
+             "awaken_direct_reject pkt=%s seq=%u len=%u reason=not_awaken_packet",
+             hasHdr ? pktTypeName(hdr.pkt_type) : "RAW",
+             static_cast<unsigned int>(hasHdr ? hdr.seq : 0),
+             static_cast<unsigned int>(len));
     return false;
   }
 
@@ -150,12 +164,10 @@ bool TdmaRadioService::sendAwakenHandshake(const uint8_t *payload, uint8_t len) 
     _error = TdmaRadioError::SendFailed;
   }
 
-  Serial.print(ok ? "[Radio][AWAKEN_DIRECT] SENT " : "[Radio][AWAKEN_DIRECT] FAIL ");
-  Serial.print(hasHdr ? pktTypeName(hdr.pkt_type) : "RAW");
-  Serial.print(" seq=");
-  Serial.print(hasHdr ? hdr.seq : 0);
-  Serial.print(" link_ack=");
-  Serial.println(ok ? "OK" : "NO");
+  LOG_INFO("radio",
+           "awaken_direct_send pkt=%s seq=%u len=%u link_ack=%s ok=%u",
+           pktTypeName(hdr.pkt_type), static_cast<unsigned int>(hdr.seq),
+           static_cast<unsigned int>(len), ok ? "OK" : "NO", ok ? 1 : 0);
 
   return ok;
 }
@@ -193,88 +205,87 @@ bool TdmaRadioService::takePendingCommand(ReceivedCommand &out) {
 
 bool TdmaRadioService::enqueueTelemetry(const uint8_t *payload, uint8_t len) {
   if (_state != TdmaRadioState::Ready) {
+    LOG_WARN("radio", "enqueue_reject reason=not_ready state=%d",
+             static_cast<int>(_state));
     return false;
   }
 
   BinaryPacket::PktHeader hdr = {};
   const bool hasHdr = decodeHeader(payload, len, hdr);
+
   if (hasHdr && hdr.pkt_type == BinaryPacket::PKT_AWAKEN) {
-    Serial.print("[Radio][ENQ_REJECT] ");
-    Serial.print(hasHdr ? pktTypeName(hdr.pkt_type) : "RAW");
-    Serial.print(" seq=");
-    Serial.print(hasHdr ? hdr.seq : 0);
-    Serial.println(" reason=awaken_handshake_only");
+    LOG_WARN("radio",
+             "enqueue_reject pkt=%s seq=%u len=%u reason=awaken_handshake_only",
+             pktTypeName(hdr.pkt_type), static_cast<unsigned int>(hdr.seq),
+             static_cast<unsigned int>(len));
     return false;
   }
 
   const uint32_t droppedBefore = _queue.droppedOldestCount();
+
   if (!_queue.enqueue(payload, len)) {
     _error = TdmaRadioError::EnqueueFailed;
+
+    LOG_ERROR("radio",
+              "enqueue_failed pkt=%s seq=%u len=%u q=%u/%u pending=%u dropped=%lu",
+              hasHdr ? pktTypeName(hdr.pkt_type) : "RAW",
+              static_cast<unsigned int>(hasHdr ? hdr.seq : 0),
+              static_cast<unsigned int>(len),
+              static_cast<unsigned int>(_queue.count()),
+              static_cast<unsigned int>(_queue.capacity()),
+              static_cast<unsigned int>(_pendingCount),
+              static_cast<unsigned long>(_queue.droppedOldestCount()));
+
     return false;
   }
 
   _enqueuedCount++;
 
   if (_queue.droppedOldestCount() != droppedBefore) {
-    Serial.print("[Radio][DROP#");
-    Serial.print(_queue.droppedOldestCount());
-    Serial.print("] DROP_OLDEST cause=queue_full incoming=");
-    Serial.print(hasHdr ? pktTypeName(hdr.pkt_type) : "RAW");
-    Serial.print(" seq=");
-    Serial.print(hasHdr ? hdr.seq : 0);
-    printQueueSnapshot(_queue.count(), _queue.capacity(), _pendingCount,
-                       _queue.droppedOldestCount());
-    Serial.println();
+    LOG_WARN("radio",
+             "drop_oldest drop_count=%lu cause=queue_full incoming=%s seq=%u "
+             "q=%u/%u pending=%u dropped=%lu",
+             static_cast<unsigned long>(_queue.droppedOldestCount()),
+             hasHdr ? pktTypeName(hdr.pkt_type) : "RAW",
+             static_cast<unsigned int>(hasHdr ? hdr.seq : 0),
+             static_cast<unsigned int>(_queue.count()),
+             static_cast<unsigned int>(_queue.capacity()),
+             static_cast<unsigned int>(_pendingCount),
+             static_cast<unsigned long>(_queue.droppedOldestCount()));
   }
 
-  Serial.print("[Radio][ENQ#");
-  Serial.print(_enqueuedCount);
-  Serial.print("] ");
-  Serial.print(hasHdr ? pktTypeName(hdr.pkt_type) : "RAW");
-  Serial.print(" seq=");
-  Serial.print(hasHdr ? hdr.seq : 0);
-  printQueueSnapshot(_queue.count(), _queue.capacity(), _pendingCount,
-                     _queue.droppedOldestCount());
-  Serial.println();
+  LOG_INFO("radio",
+           "enqueue count=%lu pkt=%s seq=%u len=%u q=%u/%u pending=%u dropped=%lu",
+           static_cast<unsigned long>(_enqueuedCount),
+           hasHdr ? pktTypeName(hdr.pkt_type) : "RAW",
+           static_cast<unsigned int>(hasHdr ? hdr.seq : 0),
+           static_cast<unsigned int>(len), static_cast<unsigned int>(_queue.count()),
+           static_cast<unsigned int>(_queue.capacity()),
+           static_cast<unsigned int>(_pendingCount),
+           static_cast<unsigned long>(_queue.droppedOldestCount()));
 
   return true;
 }
 
-uint8_t TdmaRadioService::nodeId() const {
-  return _cfg.nodeId;
-}
+uint8_t TdmaRadioService::nodeId() const { return _cfg.nodeId; }
 
-uint8_t TdmaRadioService::numSlots() const {
-  return _cfg.numSlots;
-}
+uint8_t TdmaRadioService::numSlots() const { return _cfg.numSlots; }
 
-TdmaRadioState TdmaRadioService::state() const {
-  return _state;
-}
+TdmaRadioState TdmaRadioService::state() const { return _state; }
 
-TdmaRadioError TdmaRadioService::error() const {
-  return _error;
-}
+TdmaRadioError TdmaRadioService::error() const { return _error; }
 
-uint8_t TdmaRadioService::queuedCount() const {
-  return _queue.count();
-}
+uint8_t TdmaRadioService::queuedCount() const { return _queue.count(); }
 
-uint32_t TdmaRadioService::sentCount() const {
-  return _sentCount;
-}
+uint32_t TdmaRadioService::sentCount() const { return _sentCount; }
 
-uint32_t TdmaRadioService::failedSendCount() const {
-  return _failedSendCount;
-}
+uint32_t TdmaRadioService::failedSendCount() const { return _failedSendCount; }
 
 uint32_t TdmaRadioService::droppedOldestCount() const {
   return _queue.droppedOldestCount();
 }
 
-uint32_t TdmaRadioService::lastTxSlotIndex() const {
-  return _lastTxSlotIndex;
-}
+uint32_t TdmaRadioService::lastTxSlotIndex() const { return _lastTxSlotIndex; }
 
 void TdmaRadioService::drainTxQueue() {
   dropExpiredPending();
@@ -291,20 +302,26 @@ void TdmaRadioService::drainTxQueue() {
   _lastTxSlotIndex = slotIndex;
 
   const bool useSlotBudget = hasFreshSync;
-  const uint32_t slotEndMs = (_cfg.slotWidthMs > _cfg.guardMs) ? (_cfg.slotWidthMs - _cfg.guardMs) : _cfg.slotWidthMs;
-  // Allow up to two transmissions per slot when time budget remains.
-  const uint8_t kMaxSendsPerUpdate = 3;
+  const uint32_t slotEndMs =
+      (_cfg.slotWidthMs > _cfg.guardMs) ? (_cfg.slotWidthMs - _cfg.guardMs)
+                                        : _cfg.slotWidthMs;
 
+  const uint8_t kMaxSendsPerUpdate = 3;
   uint8_t sendsThisUpdate = 0;
 
   while (sendsThisUpdate < kMaxSendsPerUpdate) {
     if (useSlotBudget) {
       const uint32_t posInSlot = _tdmaClock.positionInSlotMs();
+
       if (posInSlot >= slotEndMs) {
+        LOG_DEBUG("radio",
+                  "slot_budget_exhausted slot=%lu pos_ms=%lu slot_end_ms=%lu",
+                  static_cast<unsigned long>(slotIndex),
+                  static_cast<unsigned long>(posInSlot),
+                  static_cast<unsigned long>(slotEndMs));
         return;
       }
     } else if (sendsThisUpdate > 0) {
-      // In unsynced/stale fallback mode, keep behavior conservative.
       return;
     }
 
@@ -316,8 +333,14 @@ void TdmaRadioService::drainTxQueue() {
 
     if (!_queue.empty()) {
       if (!_queue.dequeue(payload, len)) {
+        LOG_WARN("radio", "dequeue_failed q=%u/%u pending=%u dropped=%lu",
+                 static_cast<unsigned int>(_queue.count()),
+                 static_cast<unsigned int>(_queue.capacity()),
+                 static_cast<unsigned int>(_pendingCount),
+                 static_cast<unsigned long>(_queue.droppedOldestCount()));
         return;
       }
+
       fromQueue = true;
     } else if (useAppReliability) {
       if (!pickRetransmitCandidate(payload, len, retrySeq, pendingIndex)) {
@@ -329,31 +352,53 @@ void TdmaRadioService::drainTxQueue() {
 
     if (useSlotBudget) {
       const uint32_t posInSlot = _tdmaClock.positionInSlotMs();
-      const uint32_t remainingMs = (slotEndMs > posInSlot) ? (slotEndMs - posInSlot) : 0;
+      const uint32_t remainingMs =
+          (slotEndMs > posInSlot) ? (slotEndMs - posInSlot) : 0;
       const uint16_t neededMs = estimateTxBudgetMs(payload, len);
+
       if (remainingMs < neededMs) {
-        // Not enough safe budget left for this payload.
+        BinaryPacket::PktHeader deferHdr = {};
+        const bool hasDeferHdr = decodeHeader(payload, len, deferHdr);
+
+        LOG_DEBUG("radio",
+                  "slot_defer pkt=%s seq=%u len=%u slot=%lu remaining_ms=%lu "
+                  "needed_ms=%u from_queue=%u",
+                  hasDeferHdr ? pktTypeName(deferHdr.pkt_type) : "RAW",
+                  static_cast<unsigned int>(hasDeferHdr ? deferHdr.seq : 0),
+                  static_cast<unsigned int>(len),
+                  static_cast<unsigned long>(slotIndex),
+                  static_cast<unsigned long>(remainingMs),
+                  static_cast<unsigned int>(neededMs), fromQueue ? 1 : 0);
+
         if (fromQueue) {
           const uint32_t droppedBefore = _queue.droppedOldestCount();
           const bool enqOk = _queue.enqueue(payload, len);
+
           if (!enqOk) {
             _error = TdmaRadioError::EnqueueFailed;
-          } else {
-            BinaryPacket::PktHeader deferHdr = {};
-            const bool hasDeferHdr = decodeHeader(payload, len, deferHdr);
-            if (_queue.droppedOldestCount() != droppedBefore) {
-              Serial.print("[Radio][DROP#");
-              Serial.print(_queue.droppedOldestCount());
-              Serial.print("] DROP_OLDEST cause=slot_defer_requeue incoming=");
-              Serial.print(hasDeferHdr ? pktTypeName(deferHdr.pkt_type) : "RAW");
-              Serial.print(" seq=");
-              Serial.print(hasDeferHdr ? deferHdr.seq : 0);
-              printQueueSnapshot(_queue.count(), _queue.capacity(), _pendingCount,
-                                 _queue.droppedOldestCount());
-              Serial.println();
-            }
+            LOG_ERROR("radio",
+                      "slot_defer_requeue_failed pkt=%s seq=%u q=%u/%u "
+                      "pending=%u dropped=%lu",
+                      hasDeferHdr ? pktTypeName(deferHdr.pkt_type) : "RAW",
+                      static_cast<unsigned int>(hasDeferHdr ? deferHdr.seq : 0),
+                      static_cast<unsigned int>(_queue.count()),
+                      static_cast<unsigned int>(_queue.capacity()),
+                      static_cast<unsigned int>(_pendingCount),
+                      static_cast<unsigned long>(_queue.droppedOldestCount()));
+          } else if (_queue.droppedOldestCount() != droppedBefore) {
+            LOG_WARN("radio",
+                     "drop_oldest drop_count=%lu cause=slot_defer_requeue "
+                     "incoming=%s seq=%u q=%u/%u pending=%u dropped=%lu",
+                     static_cast<unsigned long>(_queue.droppedOldestCount()),
+                     hasDeferHdr ? pktTypeName(deferHdr.pkt_type) : "RAW",
+                     static_cast<unsigned int>(hasDeferHdr ? deferHdr.seq : 0),
+                     static_cast<unsigned int>(_queue.count()),
+                     static_cast<unsigned int>(_queue.capacity()),
+                     static_cast<unsigned int>(_pendingCount),
+                     static_cast<unsigned long>(_queue.droppedOldestCount()));
           }
         }
+
         return;
       }
     }
@@ -362,164 +407,160 @@ void TdmaRadioService::drainTxQueue() {
     if (len >= sizeof(BinaryPacket::PktHeader)) {
       memcpy(&hdr, payload, sizeof(BinaryPacket::PktHeader));
     }
+
     const bool useLinkAck = telemetryUsesLinkAck(_cfg);
 
-    const uint16_t attemptCountWide = static_cast<uint16_t>(_cfg.maxRetries) + 1u;
-    const uint8_t maxAttempts =
-        attemptCountWide > 0xFFu ? 0xFFu : static_cast<uint8_t>(attemptCountWide);
+    const uint16_t attemptCountWide =
+        static_cast<uint16_t>(_cfg.maxRetries) + 1u;
+    const uint8_t maxAttempts = attemptCountWide > 0xFFu
+                                    ? 0xFFu
+                                    : static_cast<uint8_t>(attemptCountWide);
+
     bool ok = false;
     uint8_t attemptsUsed = 0;
 
     if (!useLinkAck) {
-      Serial.print("[Radio][TX_NOACK] ");
-      Serial.print(pktTypeName(hdr.pkt_type));
-      Serial.print(" seq=");
-      Serial.print(hdr.seq);
-      Serial.print(" slot=");
-      Serial.println(slotIndex);
+      LOG_DEBUG("radio", "tx_noack pkt=%s seq=%u len=%u slot=%lu",
+                pktTypeName(hdr.pkt_type), static_cast<unsigned int>(hdr.seq),
+                static_cast<unsigned int>(len),
+                static_cast<unsigned long>(slotIndex));
+
       ok = _driver.send(payload, len, _cfg.baseAddr);
     }
 
     for (uint8_t attempt = 1; useLinkAck && attempt <= maxAttempts; ++attempt) {
       attemptsUsed = attempt;
-      Serial.print("[Radio][LINK_ACK_TX] ");
-      Serial.print(pktTypeName(hdr.pkt_type));
-      Serial.print(" seq=");
-      Serial.print(hdr.seq);
-      Serial.print(" slot=");
-      Serial.print(slotIndex);
-      Serial.print(" attempt=");
-      Serial.print(attempt);
-      Serial.print('/');
-      Serial.print(maxAttempts);
-      Serial.print(" timeout_ms=");
-      Serial.print(_cfg.ackTimeoutMs);
-      Serial.println();
+
+      LOG_DEBUG("radio",
+                "link_ack_tx pkt=%s seq=%u len=%u slot=%lu attempt=%u/%u "
+                "timeout_ms=%lu",
+                pktTypeName(hdr.pkt_type), static_cast<unsigned int>(hdr.seq),
+                static_cast<unsigned int>(len),
+                static_cast<unsigned long>(slotIndex),
+                static_cast<unsigned int>(attempt),
+                static_cast<unsigned int>(maxAttempts),
+                static_cast<unsigned long>(_cfg.ackTimeoutMs));
 
       if (_driver.sendToWait(payload, len, _cfg.baseAddr)) {
         ok = true;
-        Serial.print("[Radio][LINK_ACK_RX] ACK_OK seq=");
-        Serial.print(hdr.seq);
-        Serial.print(" attempt=");
-        Serial.print(attempt);
-        Serial.print(" retries_used=");
-        Serial.println(attempt - 1);
+
+        LOG_DEBUG("radio", "link_ack_rx ack_ok seq=%u attempt=%u retries_used=%u",
+                  static_cast<unsigned int>(hdr.seq),
+                  static_cast<unsigned int>(attempt),
+                  static_cast<unsigned int>(attempt - 1));
+
         break;
       }
 
-      Serial.print("[Radio][LINK_ACK_RX] ACK_TIMEOUT seq=");
-      Serial.print(hdr.seq);
-      Serial.print(" attempt=");
-      Serial.print(attempt);
-      Serial.print(" retries_remaining=");
-      Serial.println(maxAttempts - attempt);
+      LOG_WARN("radio",
+               "link_ack_rx ack_timeout seq=%u attempt=%u retries_remaining=%u",
+               static_cast<unsigned int>(hdr.seq),
+               static_cast<unsigned int>(attempt),
+               static_cast<unsigned int>(maxAttempts - attempt));
     }
 
     if (ok) {
       _sentCount++;
+
       if (useAppReliability) {
         if (fromQueue) {
           rememberSentTelemetry(payload, len);
           _lastFreshTelemetrySentMs = _tdmaClock.sessionNowMs();
           _hasFreshTelemetrySent = true;
-          Serial.print("[Radio][TX#");
-          Serial.print(_sentCount);
-          Serial.print("] SENT ");
-          Serial.print(pktTypeName(hdr.pkt_type));
-          Serial.print(" seq=");
-          Serial.print(hdr.seq);
-          Serial.print(" slot=");
-          Serial.print(slotIndex);
-          Serial.print(" mode=");
-          Serial.print(telemetryModeName(_cfg));
-          if (useLinkAck) {
-            Serial.print(" link_ack=OK");
-            Serial.print(" retries_used=");
-            Serial.print(attemptsUsed > 0 ? attemptsUsed - 1 : 0);
-          } else {
-            Serial.print(" link_ack=OFF");
-          }
-          printQueueSnapshot(_queue.count(), _queue.capacity(), _pendingCount,
-                             _queue.droppedOldestCount());
-          Serial.println();
+
+          LOG_INFO("radio",
+                   "tx_sent count=%lu pkt=%s seq=%u len=%u slot=%lu mode=%s "
+                   "link_ack=%s retries_used=%u q=%u/%u pending=%u dropped=%lu",
+                   static_cast<unsigned long>(_sentCount),
+                   pktTypeName(hdr.pkt_type),
+                   static_cast<unsigned int>(hdr.seq),
+                   static_cast<unsigned int>(len),
+                   static_cast<unsigned long>(slotIndex), telemetryModeName(_cfg),
+                   useLinkAck ? "OK" : "OFF",
+                   static_cast<unsigned int>(
+                       useLinkAck && attemptsUsed > 0 ? attemptsUsed - 1 : 0),
+                   static_cast<unsigned int>(_queue.count()),
+                   static_cast<unsigned int>(_queue.capacity()),
+                   static_cast<unsigned int>(_pendingCount),
+                   static_cast<unsigned long>(_queue.droppedOldestCount()));
         } else {
           _retransmitCount++;
-          Serial.print("[Radio][RTX#");
-          Serial.print(_retransmitCount);
-          Serial.print("] RETX ");
-          Serial.print(pktTypeName(hdr.pkt_type));
-          Serial.print(" seq=");
-          Serial.print(hdr.seq);
-          Serial.print(" attempt=");
-          Serial.print(_pending[pendingIndex].attempts + 1);
-          Serial.print(" slot=");
-          Serial.print(slotIndex);
-          Serial.print(" mode=");
-          Serial.print(telemetryModeName(_cfg));
-          if (useLinkAck) {
-            Serial.print(" retries_used=");
-            Serial.print(attemptsUsed > 0 ? attemptsUsed - 1 : 0);
-          } else {
-            Serial.print(" link_ack=OFF");
-          }
-          printQueueSnapshot(_queue.count(), _queue.capacity(), _pendingCount,
-                             _queue.droppedOldestCount());
-          Serial.println();
+
+          LOG_INFO("radio",
+                   "retx_sent count=%lu pkt=%s seq=%u len=%u attempt=%u "
+                   "slot=%lu mode=%s link_ack=%s retries_used=%u q=%u/%u "
+                   "pending=%u dropped=%lu",
+                   static_cast<unsigned long>(_retransmitCount),
+                   pktTypeName(hdr.pkt_type),
+                   static_cast<unsigned int>(hdr.seq),
+                   static_cast<unsigned int>(len),
+                   static_cast<unsigned int>(_pending[pendingIndex].attempts + 1),
+                   static_cast<unsigned long>(slotIndex), telemetryModeName(_cfg),
+                   useLinkAck ? "OK" : "OFF",
+                   static_cast<unsigned int>(
+                       useLinkAck && attemptsUsed > 0 ? attemptsUsed - 1 : 0),
+                   static_cast<unsigned int>(_queue.count()),
+                   static_cast<unsigned int>(_queue.capacity()),
+                   static_cast<unsigned int>(_pendingCount),
+                   static_cast<unsigned long>(_queue.droppedOldestCount()));
+
           markRetransmitSent(pendingIndex);
         }
       } else {
-        Serial.print("[Radio][TX#");
-        Serial.print(_sentCount);
-        Serial.print("] SENT ");
-        Serial.print(pktTypeName(hdr.pkt_type));
-        Serial.print(" seq=");
-        Serial.print(hdr.seq);
-        Serial.print(" slot=");
-        Serial.print(slotIndex);
-        printQueueSnapshot(_queue.count(), _queue.capacity(), _pendingCount,
-                           _queue.droppedOldestCount());
-        Serial.println();
+        LOG_INFO("radio",
+                 "tx_sent count=%lu pkt=%s seq=%u len=%u slot=%lu q=%u/%u "
+                 "pending=%u dropped=%lu",
+                 static_cast<unsigned long>(_sentCount), pktTypeName(hdr.pkt_type),
+                 static_cast<unsigned int>(hdr.seq),
+                 static_cast<unsigned int>(len),
+                 static_cast<unsigned long>(slotIndex),
+                 static_cast<unsigned int>(_queue.count()),
+                 static_cast<unsigned int>(_queue.capacity()),
+                 static_cast<unsigned int>(_pendingCount),
+                 static_cast<unsigned long>(_queue.droppedOldestCount()));
       }
     } else {
       _failedSendCount++;
       _error = TdmaRadioError::SendFailed;
-      Serial.print("[Radio][FAIL#");
-      Serial.print(_failedSendCount);
-      Serial.print("] FAIL ");
-      Serial.print(pktTypeName(hdr.pkt_type));
-      Serial.print(" seq=");
-      Serial.print(hdr.seq);
-      Serial.print(" mode=");
-      Serial.print(telemetryModeName(_cfg));
-      if (useLinkAck) {
-        Serial.print(" link_ack=NO");
-        Serial.print(" retries_used=");
-        Serial.print(attemptsUsed > 0 ? attemptsUsed - 1 : _cfg.maxRetries);
-      } else {
-        Serial.print(" link_ack=OFF");
-      }
-        if (!fromQueue && useAppReliability && pendingIndex < kMaxReliabilityWindow &&
-          _pending[pendingIndex].inUse) {
-        Serial.print(" attempt=");
-        Serial.print(_pending[pendingIndex].attempts + 1);
-      }
-      printQueueSnapshot(_queue.count(), _queue.capacity(), _pendingCount,
-                         _queue.droppedOldestCount());
-      Serial.println();
 
-      // Match original behavior for fresh telemetry: failed send is dropped, not requeued.
-      // Retransmit entries are retained unless expired/attempt-limited.
+      LOG_ERROR("radio",
+                "tx_failed count=%lu pkt=%s seq=%u len=%u mode=%s link_ack=%s "
+                "retries_used=%u from_queue=%u pending_attempt=%u q=%u/%u "
+                "pending=%u dropped=%lu",
+                static_cast<unsigned long>(_failedSendCount),
+                pktTypeName(hdr.pkt_type), static_cast<unsigned int>(hdr.seq),
+                static_cast<unsigned int>(len), telemetryModeName(_cfg),
+                useLinkAck ? "NO" : "OFF",
+                static_cast<unsigned int>(
+                    useLinkAck
+                        ? (attemptsUsed > 0 ? attemptsUsed - 1 : _cfg.maxRetries)
+                        : 0),
+                fromQueue ? 1 : 0,
+                static_cast<unsigned int>(
+                    (!fromQueue && useAppReliability &&
+                     pendingIndex < kMaxReliabilityWindow &&
+                     _pending[pendingIndex].inUse)
+                        ? _pending[pendingIndex].attempts + 1
+                        : 0),
+                static_cast<unsigned int>(_queue.count()),
+                static_cast<unsigned int>(_queue.capacity()),
+                static_cast<unsigned int>(_pendingCount),
+                static_cast<unsigned long>(_queue.droppedOldestCount()));
+
+      // Match original behavior for fresh telemetry: failed send is dropped,
+      // not requeued. Retransmit entries are retained unless expired/attempt-limited.
       if (fromQueue) {
-        Serial.print("[Radio][DROP#");
-        Serial.print(_queue.droppedOldestCount() + _pendingDropCount + 1);
-        Serial.print("] DROP_TX_FAIL ");
-        Serial.print(pktTypeName(hdr.pkt_type));
-        Serial.print(" seq=");
-        Serial.print(hdr.seq);
-        Serial.print(" reason=send_failed");
-        printQueueSnapshot(_queue.count(), _queue.capacity(), _pendingCount,
-                           _queue.droppedOldestCount());
-        Serial.println();
+        LOG_WARN("radio",
+                 "drop_tx_fail drop_count=%lu pkt=%s seq=%u len=%u "
+                 "reason=send_failed q=%u/%u pending=%u dropped=%lu",
+                 static_cast<unsigned long>(_queue.droppedOldestCount() +
+                                            _pendingDropCount + 1),
+                 pktTypeName(hdr.pkt_type), static_cast<unsigned int>(hdr.seq),
+                 static_cast<unsigned int>(len),
+                 static_cast<unsigned int>(_queue.count()),
+                 static_cast<unsigned int>(_queue.capacity()),
+                 static_cast<unsigned int>(_pendingCount),
+                 static_cast<unsigned long>(_queue.droppedOldestCount()));
       }
     }
 
@@ -536,6 +577,7 @@ void TdmaRadioService::checkIncomingTimeSync() {
     ITdmaRadioDriver::ReceivedPacket packet;
 
     if (!_driver.receive(packet)) {
+      LOG_WARN("radio", "receive_failed");
       return;
     }
 
@@ -545,33 +587,34 @@ void TdmaRadioService::checkIncomingTimeSync() {
 
     if (isTimeSyncPacket(packet, sessionMs, assignedNodeId)) {
       if (assignedNodeId != 0 && !applyAssignedNodeId(assignedNodeId)) {
-        Serial.print("[Radio][SYNC] IGNORE node=");
-        Serial.print(assignedNodeId);
-        Serial.println(" reason=assignment_apply_failed");
+        LOG_WARN("radio", "sync_ignore node=%u reason=assignment_apply_failed",
+                 static_cast<unsigned int>(assignedNodeId));
         continue;
       }
 
       _tdmaClock.applySync(sessionMs);
       _timeSyncCount++;
-      Serial.print("[Radio][SYNC#");
-      Serial.print(_timeSyncCount);
-      Serial.print("] TIME_SYNC rcv sessionMs=");
-      Serial.print(sessionMs);
-      Serial.print(" node=");
-      Serial.println(_cfg.nodeId);
+
+      LOG_INFO("tdma",
+               "time_sync_received count=%lu session_ms=%lu node=%u assigned=%u",
+               static_cast<unsigned long>(_timeSyncCount),
+               static_cast<unsigned long>(sessionMs),
+               static_cast<unsigned int>(_cfg.nodeId),
+               static_cast<unsigned int>(assignedNodeId));
+
       continue;
     }
 
     if (_cfg.enableAppReliability && isAckSummaryPacket(packet, ack)) {
       _ackSummaryCount++;
-      Serial.print("[Radio][ACK#");
-      Serial.print(_ackSummaryCount);
-      Serial.print("] ACK_SUMMARY rcv node=");
-      Serial.print(ack.node_id);
-      Serial.print(" base_seq=");
-      Serial.print(ack.ack_base_seq);
-      Serial.print(" mask=0x");
-      Serial.println(ack.ack_mask, HEX);
+
+      LOG_INFO("radio",
+               "ack_summary_received count=%lu node=%u base_seq=%u mask=0x%04X",
+               static_cast<unsigned long>(_ackSummaryCount),
+               static_cast<unsigned int>(ack.node_id),
+               static_cast<unsigned int>(ack.ack_base_seq),
+               static_cast<unsigned int>(ack.ack_mask));
+
       applyAckSummary(ack);
       continue;
     }
@@ -623,11 +666,13 @@ bool TdmaRadioService::isTimeSyncPacket(
     if (hdr.node_id == 0) {
       return false;
     }
+
     assignedNodeIdOut = hdr.node_id;
   } else {
     if (hdr.node_id != 0 && hdr.node_id != _cfg.nodeId) {
       return false;
     }
+
     assignedNodeIdOut = hdr.node_id;
   }
 
@@ -637,6 +682,7 @@ bool TdmaRadioService::isTimeSyncPacket(
 
 bool TdmaRadioService::applyAssignedNodeId(uint8_t nodeId) {
   if (nodeId == 0) {
+    LOG_WARN("radio", "assignment_reject node=0 reason=invalid");
     return false;
   }
 
@@ -644,12 +690,23 @@ bool TdmaRadioService::applyAssignedNodeId(uint8_t nodeId) {
     return true;
   }
 
+  const uint8_t oldNodeId = _cfg.nodeId;
+
   if (!_driver.setLocalAddress(nodeId)) {
+    LOG_ERROR("radio", "assignment_failed old_node=%u new_node=%u reason=driver",
+              static_cast<unsigned int>(oldNodeId),
+              static_cast<unsigned int>(nodeId));
     return false;
   }
 
   _cfg.nodeId = nodeId;
   _tdmaClock.applyAssignment(nodeId, _cfg.numSlots);
+
+  LOG_INFO("radio", "assignment_applied old_node=%u new_node=%u num_slots=%u",
+           static_cast<unsigned int>(oldNodeId),
+           static_cast<unsigned int>(_cfg.nodeId),
+           static_cast<unsigned int>(_cfg.numSlots));
+
   return true;
 }
 
@@ -674,10 +731,9 @@ bool TdmaRadioService::isTelemetryPacketForNode(const uint8_t *payload,
     return false;
   }
 
-  const bool telemetryType =
-      hdr.pkt_type == BinaryPacket::PKT_BUNDLE ||
-      hdr.pkt_type == BinaryPacket::PKT_STATUS ||
-      hdr.pkt_type == BinaryPacket::PKT_FULL_STATE;
+  const bool telemetryType = hdr.pkt_type == BinaryPacket::PKT_BUNDLE ||
+                             hdr.pkt_type == BinaryPacket::PKT_STATUS ||
+                             hdr.pkt_type == BinaryPacket::PKT_FULL_STATE;
 
   if (!telemetryType) {
     return false;
@@ -687,8 +743,10 @@ bool TdmaRadioService::isTelemetryPacketForNode(const uint8_t *payload,
   return true;
 }
 
-void TdmaRadioService::rememberSentTelemetry(const uint8_t *payload, uint8_t len) {
+void TdmaRadioService::rememberSentTelemetry(const uint8_t *payload,
+                                             uint8_t len) {
   uint8_t seq = 0;
+
   if (!isTelemetryPacketForNode(payload, len, seq)) {
     return;
   }
@@ -697,6 +755,7 @@ void TdmaRadioService::rememberSentTelemetry(const uint8_t *payload, uint8_t len
       (_cfg.reliabilityWindowDepth > kMaxReliabilityWindow)
           ? kMaxReliabilityWindow
           : _cfg.reliabilityWindowDepth;
+
   if (windowDepth == 0) {
     return;
   }
@@ -712,10 +771,12 @@ void TdmaRadioService::rememberSentTelemetry(const uint8_t *payload, uint8_t len
 
   for (uint8_t i = 0; i < windowDepth; ++i) {
     PendingEntry &e = _pending[i];
+
     if (!e.inUse) {
       if (freeIndex < 0) {
         freeIndex = static_cast<int8_t>(i);
       }
+
       continue;
     }
 
@@ -724,10 +785,16 @@ void TdmaRadioService::rememberSentTelemetry(const uint8_t *payload, uint8_t len
       e.len = len;
       e.lastSentMs = nowMs;
       e.attempts = 1;
+
+      LOG_DEBUG("radio", "pending_refresh seq=%u index=%d len=%u",
+                static_cast<unsigned int>(seq), static_cast<int>(i),
+                static_cast<unsigned int>(len));
+
       return;
     }
 
     const uint32_t ageMs = nowMs - e.firstSentMs;
+
     if (replaceIndex < 0 || e.attempts > replaceAttempts ||
         (e.attempts == replaceAttempts && ageMs > replaceAgeMs)) {
       replaceIndex = static_cast<int8_t>(i);
@@ -738,15 +805,18 @@ void TdmaRadioService::rememberSentTelemetry(const uint8_t *payload, uint8_t len
   }
 
   int8_t slot = freeIndex;
+
   if (slot < 0) {
     slot = replaceIndex;
   }
+
   if (slot < 0) {
     return;
   }
 
   PendingEntry &e = _pending[slot];
   replacingPending = e.inUse;
+
   if (!e.inUse) {
     _pendingCount++;
   }
@@ -761,19 +831,25 @@ void TdmaRadioService::rememberSentTelemetry(const uint8_t *payload, uint8_t len
 
   if (replacingPending) {
     _pendingDropCount++;
-    Serial.print("[Radio][DROP#");
-    Serial.print(_queue.droppedOldestCount() + _pendingDropCount);
-    Serial.print("] DROP_PENDING_WINDOW old_seq=");
-    Serial.print(replacedSeq);
-    Serial.print(" new_seq=");
-    Serial.print(seq);
-    Serial.print(" old_attempts=");
-    Serial.print(replaceAttempts);
-    Serial.print(" old_age_ms=");
-    Serial.print(replaceAgeMs);
-    printQueueSnapshot(_queue.count(), _queue.capacity(), _pendingCount,
-                       _queue.droppedOldestCount());
-    Serial.println();
+
+    LOG_WARN("radio",
+             "drop_pending_window drop_count=%lu old_seq=%u new_seq=%u "
+             "old_attempts=%u old_age_ms=%lu q=%u/%u pending=%u dropped=%lu",
+             static_cast<unsigned long>(_queue.droppedOldestCount() +
+                                        _pendingDropCount),
+             static_cast<unsigned int>(replacedSeq),
+             static_cast<unsigned int>(seq),
+             static_cast<unsigned int>(replaceAttempts),
+             static_cast<unsigned long>(replaceAgeMs),
+             static_cast<unsigned int>(_queue.count()),
+             static_cast<unsigned int>(_queue.capacity()),
+             static_cast<unsigned int>(_pendingCount),
+             static_cast<unsigned long>(_queue.droppedOldestCount()));
+  } else {
+    LOG_DEBUG("radio", "pending_add seq=%u index=%d len=%u pending=%u",
+              static_cast<unsigned int>(seq), static_cast<int>(slot),
+              static_cast<unsigned int>(len),
+              static_cast<unsigned int>(_pendingCount));
   }
 }
 
@@ -785,6 +861,7 @@ bool TdmaRadioService::pickRetransmitCandidate(uint8_t *payloadOut,
       (_cfg.reliabilityWindowDepth > kMaxReliabilityWindow)
           ? kMaxReliabilityWindow
           : _cfg.reliabilityWindowDepth;
+
   if (windowDepth == 0 || !payloadOut) {
     lenOut = 0;
     return false;
@@ -793,9 +870,9 @@ bool TdmaRadioService::pickRetransmitCandidate(uint8_t *payloadOut,
   const uint32_t nowMs = _tdmaClock.sessionNowMs();
 
   if (_cfg.reliabilityMode == TdmaReliabilityMode::AppLayerAckSummary &&
-      _cfg.reliabilityFreshTrafficHoldoffMs > 0 &&
-      _hasFreshTelemetrySent &&
-      (nowMs - _lastFreshTelemetrySentMs) < _cfg.reliabilityFreshTrafficHoldoffMs) {
+      _cfg.reliabilityFreshTrafficHoldoffMs > 0 && _hasFreshTelemetrySent &&
+      (nowMs - _lastFreshTelemetrySentMs) <
+          _cfg.reliabilityFreshTrafficHoldoffMs) {
     lenOut = 0;
     return false;
   }
@@ -805,30 +882,37 @@ bool TdmaRadioService::pickRetransmitCandidate(uint8_t *payloadOut,
 
   for (uint8_t i = 0; i < windowDepth; ++i) {
     PendingEntry &e = _pending[i];
+
     if (!e.inUse) {
       continue;
     }
 
     const uint32_t ageMs = nowMs - e.firstSentMs;
-    if (ageMs > _cfg.reliabilityMaxAgeMs || e.attempts >= _cfg.reliabilityMaxAttempts) {
+
+    if (ageMs > _cfg.reliabilityMaxAgeMs ||
+        e.attempts >= _cfg.reliabilityMaxAttempts) {
       _pendingDropCount++;
-      Serial.print("[Radio][DROP#");
-      Serial.print(_queue.droppedOldestCount() + _pendingDropCount);
-      Serial.print("] DROP_PENDING seq=");
-      Serial.print(e.seq);
-      Serial.print(" reason=");
-      Serial.print(ageMs > _cfg.reliabilityMaxAgeMs ? "max_age" : "max_attempts");
-      Serial.print(" attempts=");
-      Serial.print(e.attempts);
-      Serial.print(" age_ms=");
-      Serial.print(ageMs);
-      printQueueSnapshot(_queue.count(), _queue.capacity(), _pendingCount,
-                         _queue.droppedOldestCount());
-      Serial.println();
+
+      LOG_WARN("radio",
+               "drop_pending drop_count=%lu seq=%u reason=%s attempts=%u "
+               "age_ms=%lu q=%u/%u pending=%u dropped=%lu",
+               static_cast<unsigned long>(_queue.droppedOldestCount() +
+                                          _pendingDropCount),
+               static_cast<unsigned int>(e.seq),
+               ageMs > _cfg.reliabilityMaxAgeMs ? "max_age" : "max_attempts",
+               static_cast<unsigned int>(e.attempts),
+               static_cast<unsigned long>(ageMs),
+               static_cast<unsigned int>(_queue.count()),
+               static_cast<unsigned int>(_queue.capacity()),
+               static_cast<unsigned int>(_pendingCount),
+               static_cast<unsigned long>(_queue.droppedOldestCount()));
+
       e.inUse = false;
+
       if (_pendingCount > 0) {
         _pendingCount--;
       }
+
       continue;
     }
 
@@ -848,10 +932,18 @@ bool TdmaRadioService::pickRetransmitCandidate(uint8_t *payloadOut,
   }
 
   PendingEntry &e = _pending[bestIndex];
+
   memcpy(payloadOut, e.payload, e.len);
+
   lenOut = e.len;
   seqOut = e.seq;
   pendingIndexOut = static_cast<uint8_t>(bestIndex);
+
+  LOG_DEBUG("radio", "retx_candidate seq=%u index=%d len=%u attempts=%u",
+            static_cast<unsigned int>(seqOut), static_cast<int>(bestIndex),
+            static_cast<unsigned int>(lenOut),
+            static_cast<unsigned int>(e.attempts));
+
   return true;
 }
 
@@ -861,18 +953,29 @@ void TdmaRadioService::markRetransmitSent(uint8_t pendingIndex) {
   }
 
   PendingEntry &e = _pending[pendingIndex];
+
   if (!e.inUse) {
     return;
   }
 
   e.lastSentMs = _tdmaClock.sessionNowMs();
+
   if (e.attempts < 0xFF) {
     e.attempts++;
   }
+
+  LOG_DEBUG("radio", "retx_mark_sent seq=%u index=%u attempts=%u",
+            static_cast<unsigned int>(e.seq),
+            static_cast<unsigned int>(pendingIndex),
+            static_cast<unsigned int>(e.attempts));
 }
 
-void TdmaRadioService::applyAckSummary(const BinaryPacket::AckSummaryPayload &ack) {
+void TdmaRadioService::applyAckSummary(
+    const BinaryPacket::AckSummaryPayload &ack) {
   if (ack.node_id != _cfg.nodeId) {
+    LOG_DEBUG("radio", "ack_summary_ignore node=%u local_node=%u",
+              static_cast<unsigned int>(ack.node_id),
+              static_cast<unsigned int>(_cfg.nodeId));
     return;
   }
 
@@ -883,6 +986,7 @@ void TdmaRadioService::applyAckSummary(const BinaryPacket::AckSummaryPayload &ac
 
   for (uint8_t i = 0; i < windowDepth; ++i) {
     PendingEntry &e = _pending[i];
+
     if (!e.inUse) {
       continue;
     }
@@ -894,42 +998,45 @@ void TdmaRadioService::applyAckSummary(const BinaryPacket::AckSummaryPayload &ac
       acked = true;
     } else {
       const uint8_t ahead = static_cast<uint8_t>(e.seq - ack.ack_base_seq);
+
       if (ahead >= 1 && ahead <= 16) {
         acked = ((ack.ack_mask >> (ahead - 1)) & 0x01u) != 0u;
       }
     }
 
     if (acked) {
-      Serial.print("[Radio][ACK] ACKED seq=");
-      Serial.print(e.seq);
-      Serial.print(" attempts=");
-      Serial.print(e.attempts);
-      Serial.print(" base_seq=");
-      Serial.print(ack.ack_base_seq);
-      Serial.print(" mask=0x");
-      Serial.print(ack.ack_mask, HEX);
-      printQueueSnapshot(_queue.count(), _queue.capacity(), _pendingCount,
-                         _queue.droppedOldestCount());
-      Serial.println();
+      LOG_INFO("radio",
+               "ack_summary_acked seq=%u attempts=%u base_seq=%u mask=0x%04X "
+               "q=%u/%u pending=%u dropped=%lu",
+               static_cast<unsigned int>(e.seq),
+               static_cast<unsigned int>(e.attempts),
+               static_cast<unsigned int>(ack.ack_base_seq),
+               static_cast<unsigned int>(ack.ack_mask),
+               static_cast<unsigned int>(_queue.count()),
+               static_cast<unsigned int>(_queue.capacity()),
+               static_cast<unsigned int>(_pendingCount),
+               static_cast<unsigned long>(_queue.droppedOldestCount()));
+
       e.inUse = false;
+
       if (_pendingCount > 0) {
         _pendingCount--;
       }
     } else {
       const uint32_t ageMs = _tdmaClock.sessionNowMs() - e.firstSentMs;
-      Serial.print("[Radio][ACK] NEEDS_RETX seq=");
-      Serial.print(e.seq);
-      Serial.print(" next_attempt=");
-      Serial.print(e.attempts + 1);
-      Serial.print(" age_ms=");
-      Serial.print(ageMs);
-      Serial.print(" base_seq=");
-      Serial.print(ack.ack_base_seq);
-      Serial.print(" mask=0x");
-      Serial.print(ack.ack_mask, HEX);
-      printQueueSnapshot(_queue.count(), _queue.capacity(), _pendingCount,
-                         _queue.droppedOldestCount());
-      Serial.println();
+
+      LOG_INFO("radio",
+               "ack_summary_needs_retx seq=%u next_attempt=%u age_ms=%lu "
+               "base_seq=%u mask=0x%04X q=%u/%u pending=%u dropped=%lu",
+               static_cast<unsigned int>(e.seq),
+               static_cast<unsigned int>(e.attempts + 1),
+               static_cast<unsigned long>(ageMs),
+               static_cast<unsigned int>(ack.ack_base_seq),
+               static_cast<unsigned int>(ack.ack_mask),
+               static_cast<unsigned int>(_queue.count()),
+               static_cast<unsigned int>(_queue.capacity()),
+               static_cast<unsigned int>(_pendingCount),
+               static_cast<unsigned long>(_queue.droppedOldestCount()));
     }
   }
 }
@@ -943,31 +1050,38 @@ void TdmaRadioService::dropExpiredPending() {
       (_cfg.reliabilityWindowDepth > kMaxReliabilityWindow)
           ? kMaxReliabilityWindow
           : _cfg.reliabilityWindowDepth;
+
   const uint32_t nowMs = _tdmaClock.sessionNowMs();
 
   for (uint8_t i = 0; i < windowDepth; ++i) {
     PendingEntry &e = _pending[i];
+
     if (!e.inUse) {
       continue;
     }
 
     const uint32_t ageMs = nowMs - e.firstSentMs;
-    if (ageMs > _cfg.reliabilityMaxAgeMs || e.attempts >= _cfg.reliabilityMaxAttempts) {
+
+    if (ageMs > _cfg.reliabilityMaxAgeMs ||
+        e.attempts >= _cfg.reliabilityMaxAttempts) {
       _pendingDropCount++;
-      Serial.print("[Radio][DROP#");
-      Serial.print(_queue.droppedOldestCount() + _pendingDropCount);
-      Serial.print("] DROP_PENDING seq=");
-      Serial.print(e.seq);
-      Serial.print(" reason=");
-      Serial.print(ageMs > _cfg.reliabilityMaxAgeMs ? "max_age" : "max_attempts");
-      Serial.print(" attempts=");
-      Serial.print(e.attempts);
-      Serial.print(" age_ms=");
-      Serial.print(ageMs);
-      printQueueSnapshot(_queue.count(), _queue.capacity(), _pendingCount,
-                         _queue.droppedOldestCount());
-      Serial.println();
+
+      LOG_WARN("radio",
+               "drop_pending drop_count=%lu seq=%u reason=%s attempts=%u "
+               "age_ms=%lu q=%u/%u pending=%u dropped=%lu",
+               static_cast<unsigned long>(_queue.droppedOldestCount() +
+                                          _pendingDropCount),
+               static_cast<unsigned int>(e.seq),
+               ageMs > _cfg.reliabilityMaxAgeMs ? "max_age" : "max_attempts",
+               static_cast<unsigned int>(e.attempts),
+               static_cast<unsigned long>(ageMs),
+               static_cast<unsigned int>(_queue.count()),
+               static_cast<unsigned int>(_queue.capacity()),
+               static_cast<unsigned int>(_pendingCount),
+               static_cast<unsigned long>(_queue.droppedOldestCount()));
+
       e.inUse = false;
+
       if (_pendingCount > 0) {
         _pendingCount--;
       }

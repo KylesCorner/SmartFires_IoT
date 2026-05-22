@@ -58,8 +58,6 @@ public:
   size_t writeTelemetry(char *out, size_t maxLen) const override;
   void fillSnapshot(SensorSnapshot &snap) const override;
 
-  void debugReady() const;
-
 private:
   Config _cfg;
   ISht31Driver &_driver;
