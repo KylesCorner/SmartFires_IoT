@@ -96,6 +96,7 @@ public:
   void update();
 
   void markTelemetrySent();
+  bool resetSensors();
 
   DutyCyclePhase phase() const;
   DutyCycleError error() const;

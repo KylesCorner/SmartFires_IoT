@@ -1,4 +1,5 @@
 #pragma once
+
 #include <stdint.h>
 
 enum class GpsPowerMode {
@@ -12,10 +13,10 @@ enum class GpsPowerMode {
 };
 
 struct GpsPeriodicConfig {
-  uint32_t runTimeMs = 4000;
-  uint32_t sleepTimeMs = 15000;
-  uint32_t secondRunTimeMs = 24000;
-  uint32_t secondSleepTimeMs = 90000;
+  uint32_t runTimeMs = 0;
+  uint32_t sleepTimeMs = 0;
+  uint32_t secondRunTimeMs = 0;
+  uint32_t secondSleepTimeMs = 0;
 };
 
 class IGpsDriver {
@@ -37,15 +38,26 @@ public:
   virtual ~IGpsDriver() = default;
 
   virtual bool begin(uint8_t address) = 0;
+
+  // New:
+  //
+  // Driver should perform the strongest reset available.
+  //
+  // If no RST pin is wired yet, this can safely be implemented as:
+  //   return true;
+  //
+  // Later, your hardware driver can pulse PA1010D RST low, wait for boot,
+  // and then return true/false depending on whether the reset operation worked.
+  virtual bool reset() = 0;
+
   virtual bool poll() = 0;
   virtual bool read(Data &out) = 0;
 
+  virtual bool enterFullPower() = 0;
   virtual bool enterStandby() = 0;
   virtual bool enterBackup() = 0;
+  virtual bool wakeFromBackup() = 0;
+
   virtual bool enterPeriodicStandby(const GpsPeriodicConfig &cfg) = 0;
   virtual bool enterPeriodicBackup(const GpsPeriodicConfig &cfg) = 0;
-  virtual bool enterFullPower() = 0;
-  virtual bool wakeFromBackup() = 0;
-  virtual bool enterAlwaysLocateStandby() = 0;
-  virtual bool enterAlwaysLocateBackup() = 0;
 };

@@ -169,3 +169,7 @@ bool AdafruitGpsDriver::enterAlwaysLocateStandby() {
 bool AdafruitGpsDriver::enterAlwaysLocateBackup() {
   return sendPmtkPayload("PMTK225,9");
 }
+
+bool AdafruitGpsDriver::reset() {
+  return true;
+}
