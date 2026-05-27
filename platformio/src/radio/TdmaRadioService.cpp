@@ -176,8 +176,23 @@ bool TdmaRadioService::sendImmediate(const uint8_t *payload,
                                      uint8_t len,
                                      bool requireLinkAck) {
   if (_state != TdmaRadioState::Ready || !payload || len == 0) {
+    LOG_WARN("radio",
+             "immediate_reject reason=%s state=%d len=%u",
+             (_state != TdmaRadioState::Ready)
+                 ? "not_ready"
+                 : ((!payload || len == 0) ? "invalid_payload" : "unknown"),
+             static_cast<int>(_state), static_cast<unsigned int>(len));
     return false;
   }
+
+  BinaryPacket::PktHeader hdr = {};
+  const bool hasHdr = decodeHeader(payload, len, hdr);
+
+  LOG_INFO("radio",
+           "immediate_tx_start pkt=%s seq=%u len=%u require_link_ack=%u",
+           hasHdr ? pktTypeName(hdr.pkt_type) : "RAW",
+           static_cast<unsigned int>(hasHdr ? hdr.seq : 0),
+           static_cast<unsigned int>(len), requireLinkAck ? 1 : 0);
 
   const bool ok = requireLinkAck
                       ? _driver.sendToWait(payload, len, _cfg.baseAddr)
@@ -185,10 +200,26 @@ bool TdmaRadioService::sendImmediate(const uint8_t *payload,
   if (!ok) {
     _error = TdmaRadioError::SendFailed;
     _failedSendCount++;
+
+    LOG_ERROR("radio",
+              "immediate_tx_failed count=%lu pkt=%s seq=%u len=%u link_ack=%u",
+              static_cast<unsigned long>(_failedSendCount),
+              hasHdr ? pktTypeName(hdr.pkt_type) : "RAW",
+              static_cast<unsigned int>(hasHdr ? hdr.seq : 0),
+              static_cast<unsigned int>(len), requireLinkAck ? 1 : 0);
+
     return false;
   }
 
   _sentCount++;
+
+  LOG_INFO("radio",
+           "immediate_tx_sent count=%lu pkt=%s seq=%u len=%u link_ack=%u",
+           static_cast<unsigned long>(_sentCount),
+           hasHdr ? pktTypeName(hdr.pkt_type) : "RAW",
+           static_cast<unsigned int>(hasHdr ? hdr.seq : 0),
+           static_cast<unsigned int>(len), requireLinkAck ? 1 : 0);
+
   return true;
 }
 
@@ -197,7 +228,19 @@ bool TdmaRadioService::takePendingCommand(ReceivedCommand &out) {
     return false;
   }
 
+  BinaryPacket::PktHeader hdr = {};
+  const bool hasHdr = decodeHeader(_pendingCommand.data, _pendingCommand.len, hdr);
+
   out = _pendingCommand;
+
+  LOG_INFO("radio",
+           "cmd_take type=%s seq=%u from=%u len=%u rssi=%d",
+           hasHdr ? pktTypeName(hdr.pkt_type) : "RAW",
+           static_cast<unsigned int>(hasHdr ? hdr.seq : 0),
+           static_cast<unsigned int>(_pendingCommand.from),
+           static_cast<unsigned int>(_pendingCommand.len),
+           static_cast<int>(_pendingCommand.rssi));
+
   _hasPendingCommand = false;
   _pendingCommand = {};
   return true;
@@ -581,6 +624,16 @@ void TdmaRadioService::checkIncomingTimeSync() {
       return;
     }
 
+    BinaryPacket::PktHeader hdr = {};
+    const bool hasHdr = decodeHeader(packet.data, packet.len, hdr);
+
+    LOG_DEBUG("radio",
+              "rx_lora from=%u pkt=%s seq=%u len=%u rssi=%d",
+              static_cast<unsigned int>(packet.from),
+              hasHdr ? pktTypeName(hdr.pkt_type) : "RAW",
+              static_cast<unsigned int>(hasHdr ? hdr.seq : 0),
+              static_cast<unsigned int>(packet.len), static_cast<int>(packet.rssi));
+
     uint32_t sessionMs = 0;
     uint8_t assignedNodeId = 0;
     BinaryPacket::AckSummaryPayload ack = {};
@@ -619,12 +672,19 @@ void TdmaRadioService::checkIncomingTimeSync() {
       continue;
     }
 
-    BinaryPacket::PktHeader hdr = {};
     if (decodeHeader(packet.data, packet.len, hdr) &&
         (hdr.pkt_type == BinaryPacket::PKT_CMD_CALIBRATE ||
          hdr.pkt_type == BinaryPacket::PKT_CMD_RESET)) {
       rememberPendingCommand(packet);
+      continue;
     }
+
+    LOG_DEBUG("radio",
+              "rx_unhandled pkt=%s seq=%u from=%u len=%u",
+              hasHdr ? pktTypeName(hdr.pkt_type) : "RAW",
+              static_cast<unsigned int>(hasHdr ? hdr.seq : 0),
+              static_cast<unsigned int>(packet.from),
+              static_cast<unsigned int>(packet.len));
   }
 }
 
@@ -641,14 +701,12 @@ void TdmaRadioService::rememberPendingCommand(
 
   BinaryPacket::PktHeader hdr = {};
   const bool hasHdr = decodeHeader(packet.data, packet.len, hdr);
-  Serial.print("[Radio][CMD_RX] type=");
-  Serial.print(hasHdr ? pktTypeName(hdr.pkt_type) : "RAW");
-  Serial.print(" seq=");
-  Serial.print(hasHdr ? hdr.seq : 0);
-  Serial.print(" from=");
-  Serial.print(packet.from);
-  Serial.print(" len=");
-  Serial.println(packet.len);
+  LOG_INFO("radio", "cmd_rx type=%s seq=%u from=%u len=%u rssi=%d",
+           hasHdr ? pktTypeName(hdr.pkt_type) : "RAW",
+           static_cast<unsigned int>(hasHdr ? hdr.seq : 0),
+           static_cast<unsigned int>(packet.from),
+           static_cast<unsigned int>(packet.len),
+           static_cast<int>(packet.rssi));
 }
 
 bool TdmaRadioService::isTimeSyncPacket(

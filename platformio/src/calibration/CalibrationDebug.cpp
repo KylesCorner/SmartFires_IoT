@@ -1,0 +1,61 @@
+#include "calibration/CalibrationDebug.h"
+
+#include "logging/DebugLogger.h"
+
+namespace CalibrationDebug {
+
+const char *cmdTypeName(uint8_t cmdType) {
+  switch (cmdType) {
+  case BinaryPacket::PKT_CMD_CALIBRATE:
+    return "CMD_CALIBRATE";
+  case BinaryPacket::PKT_CMD_RESET:
+    return "CMD_RESET";
+  default:
+    return "UNKNOWN_CMD";
+  }
+}
+
+const char *statusName(uint8_t status) {
+  switch (status) {
+  case 0x00:
+    return "SUCCESS";
+  case 0x01:
+    return "LOW_SAMPLE_COUNT";
+  case 0x02:
+    return "ERROR";
+  default:
+    return "UNKNOWN_STATUS";
+  }
+}
+
+void logCalibrationDataSummary(const BinaryPacket::CalibrationDataPayload &payload,
+                               uint8_t nodeId,
+                               uint8_t seq,
+                               const char *src) {
+  LOG_INFO(src ? src : "calib",
+           "calibration_data node=%u seq=%u status=%s samples=%u uid_hash=0x%08lX "
+           "mean=[%.3f,%.3f,%.3f] min=[%.3f,%.3f,%.3f] max=[%.3f,%.3f,%.3f]",
+           static_cast<unsigned int>(nodeId),
+           static_cast<unsigned int>(seq),
+           statusName(payload.status),
+           static_cast<unsigned int>(payload.sample_count),
+           static_cast<unsigned long>(payload.uid_hash),
+           payload.mag_mean[0], payload.mag_mean[1], payload.mag_mean[2],
+           payload.mag_min[0], payload.mag_min[1], payload.mag_min[2],
+           payload.mag_max[0], payload.mag_max[1], payload.mag_max[2]);
+}
+
+void logCmdAckSummary(const BinaryPacket::CmdAckPayload &ack,
+                      uint8_t nodeId,
+                      uint8_t seq,
+                      const char *src) {
+  LOG_INFO(src ? src : "calib",
+           "cmd_ack node=%u seq=%u cmd=%s status=%s uid_hash=0x%08lX",
+           static_cast<unsigned int>(nodeId),
+           static_cast<unsigned int>(seq),
+           cmdTypeName(ack.cmd_type),
+           statusName(ack.status),
+           static_cast<unsigned long>(ack.uid_hash));
+}
+
+} // namespace CalibrationDebug

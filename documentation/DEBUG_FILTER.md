@@ -6,6 +6,8 @@ Instead of using a plain serial monitor, we use a PlatformIO monitor filter that
 
 Each log line has a source stream such as:
 
+- base
+- app
 - boot
 - i2c
 - battery
@@ -42,9 +44,17 @@ pio device monitor -e feather_m0_lora_node_debug
 You can apply filters by the example below showing a tdma filter with a min level of warning.
 ```bash
 SFDBG_SRC=tdma SFDBG_MIN_LEVEL=W pio device monitor -e feather_m0_lora_node_debug
+SFDBG_SRC=calibration  pio device monitor -e feather_m0_lora_node_debug
 ```
 
 You can also apply multiple filter streams
 ```bash
 SFDBG_SRC=tdma,i2c,gps SFDBG_MIN_LEVEL=W pio device monitor -e feather_m0_lora_node_debug
+```
+
+Base station now uses the same structured logger. To follow communication-layer
+traffic on the base station:
+
+```bash
+SFDBG_SRC=base SFDBG_MIN_LEVEL=D pio device monitor -e feather_m0_lora_base
 ```

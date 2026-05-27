@@ -1,5 +1,7 @@
 #include "radio/PacketHandler.h"
 
+#include "logging/DebugLogger.h"
+
 #include <limits.h>
 #include <math.h>
 #include <string.h>
@@ -44,6 +46,13 @@ PacketHandler::PacketHandler(const Config &cfg) : _cfg(cfg) {}
 bool PacketHandler::push(const SensorSnapshot &snap) {
     _bundleReady = false;
 
+    LOG_DEBUG("packet",
+              "push_start session_ms=%lu sensor_flags=0x%04X has_ref=%u delta_count=%u",
+              static_cast<unsigned long>(snap.sessionTimeMs),
+              static_cast<unsigned int>(snap.sensorFlags),
+              _hasRef ? 1 : 0,
+              static_cast<unsigned int>(_deltaCount));
+
     tryEncodeStatus(snap);
 
     const BinaryPacket::FullStatePayload sample = quantize(snap);
@@ -52,10 +61,18 @@ bool PacketHandler::push(const SensorSnapshot &snap) {
         _ref        = sample;
         _hasRef     = true;
         _deltaCount = 0;
+
+        LOG_DEBUG("packet", "bundle_ref_set session_ms=%lu",
+                  static_cast<unsigned long>(snap.sessionTimeMs));
+
         return false;
     }
 
     _deltas[_deltaCount++] = makeDelta(_ref, sample);
+
+    LOG_DEBUG("packet", "bundle_delta_added count=%u/%u",
+              static_cast<unsigned int>(_deltaCount),
+              static_cast<unsigned int>(_cfg.maxDeltas));
 
     if (_deltaCount < _cfg.maxDeltas) {
         return false;
@@ -69,6 +86,15 @@ bool PacketHandler::push(const SensorSnapshot &snap) {
     _bundleReady = (_bundleLen > 0);
     _hasRef      = false;
     _deltaCount  = 0;
+
+    if (_bundleReady) {
+        LOG_INFO("packet", "bundle_encoded len=%u node=%u",
+                 static_cast<unsigned int>(_bundleLen),
+                 static_cast<unsigned int>(_cfg.nodeId));
+    } else {
+        LOG_WARN("packet", "bundle_encode_failed node=%u",
+                 static_cast<unsigned int>(_cfg.nodeId));
+    }
 
     return _bundleReady;
 }
@@ -167,6 +193,17 @@ void PacketHandler::tryEncodeStatus(const SensorSnapshot &snap) {
     if (_statusReady) {
         _lastStatusMs    = snap.sessionTimeMs;
         _statusEverSent  = true;
+
+        LOG_INFO("packet",
+                 "status_encoded len=%u node=%u flags=0x%02X session_ms=%lu",
+                 static_cast<unsigned int>(_statusLen),
+                 static_cast<unsigned int>(_cfg.nodeId),
+                 static_cast<unsigned int>(sp.flags),
+                 static_cast<unsigned long>(snap.sessionTimeMs));
+    } else {
+        LOG_WARN("packet", "status_encode_failed node=%u flags=0x%02X",
+                 static_cast<unsigned int>(_cfg.nodeId),
+                 static_cast<unsigned int>(sp.flags));
     }
 }
 

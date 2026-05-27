@@ -15,20 +15,23 @@ RadioHeadTdmaDriver baseRadio(baseRadioCfg);
 
 SmartFiresBaseApp::Config baseAppCfg = SmartFiresBaseApp::Config::baseCfg();
 SmartFiresBaseApp baseApp(baseAppCfg, baseClock, baseRadio, Serial1, Serial);
+DebugLogger gLog(Serial, baseAppCfg.baseAddr);
 
 void setup() {
   Serial.begin(115200);
   while (!Serial && millis() < 3000) {
   }
 
-  Serial.println("SmartFires base station starting...");
+  gLog.setMinLevel(LogLevel::Debug);
+
+  LOG_INFO("boot", "SmartFires base station starting");
   if (!baseApp.begin()) {
-    Serial.println("SmartFires base app begin failed");
+    LOG_ERROR("boot", "SmartFires base app begin failed");
     while (true) {
       delay(500);
     }
   }
-  Serial.println("SmartFires base app ready");
+  LOG_INFO("boot", "SmartFires base app ready");
 }
 
 void loop() {

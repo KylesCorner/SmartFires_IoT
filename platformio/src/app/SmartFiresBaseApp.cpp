@@ -1,5 +1,8 @@
 #include "app/SmartFiresBaseApp.h"
 
+#include "calibration/CalibrationDebug.h"
+#include "logging/DebugLogger.h"
+
 #include <Arduino.h>
 
 namespace {
@@ -37,6 +40,77 @@ bool isTelemetryPacketType(uint8_t pktType) {
          pktType == BinaryPacket::PKT_FULL_STATE;
 }
 
+bool decodeCmdCalibrateFromJetson(const uint8_t *payload,
+                                  uint8_t len,
+                                  BinaryPacket::PktHeader &hdrOut,
+                                  BinaryPacket::CmdCalibratePayload &cmdOut,
+                                  bool &legacyNoCrcOut) {
+  legacyNoCrcOut = false;
+
+  if (!payload || len < sizeof(BinaryPacket::PktHeader) +
+                           sizeof(BinaryPacket::CmdCalibratePayload)) {
+    return false;
+  }
+
+  if (BinaryPacket::decodeCmdCalibrate(payload, len, hdrOut, cmdOut)) {
+    return true;
+  }
+
+  if (len == sizeof(BinaryPacket::PktHeader) +
+                 sizeof(BinaryPacket::CmdCalibratePayload)) {
+    BinaryPacket::PktHeader hdr = {};
+    BinaryPacket::CmdCalibratePayload cmd = {};
+    memcpy(&hdr, payload, sizeof(BinaryPacket::PktHeader));
+    memcpy(&cmd, payload + sizeof(BinaryPacket::PktHeader),
+           sizeof(BinaryPacket::CmdCalibratePayload));
+
+    if (hdr.magic == BinaryPacket::PKT_MAGIC &&
+        hdr.pkt_type == BinaryPacket::PKT_CMD_CALIBRATE) {
+      hdrOut = hdr;
+      cmdOut = cmd;
+      legacyNoCrcOut = true;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool decodeCmdResetFromJetson(const uint8_t *payload,
+                              uint8_t len,
+                              BinaryPacket::PktHeader &hdrOut,
+                              BinaryPacket::CmdResetPayload &cmdOut,
+                              bool &legacyNoCrcOut) {
+  legacyNoCrcOut = false;
+
+  if (!payload || len < sizeof(BinaryPacket::PktHeader) +
+                           sizeof(BinaryPacket::CmdResetPayload)) {
+    return false;
+  }
+
+  if (BinaryPacket::decodeCmdReset(payload, len, hdrOut, cmdOut)) {
+    return true;
+  }
+
+  if (len == sizeof(BinaryPacket::PktHeader) + sizeof(BinaryPacket::CmdResetPayload)) {
+    BinaryPacket::PktHeader hdr = {};
+    BinaryPacket::CmdResetPayload cmd = {};
+    memcpy(&hdr, payload, sizeof(BinaryPacket::PktHeader));
+    memcpy(&cmd, payload + sizeof(BinaryPacket::PktHeader),
+           sizeof(BinaryPacket::CmdResetPayload));
+
+    if (hdr.magic == BinaryPacket::PKT_MAGIC &&
+        hdr.pkt_type == BinaryPacket::PKT_CMD_RESET) {
+      hdrOut = hdr;
+      cmdOut = cmd;
+      legacyNoCrcOut = true;
+      return true;
+    }
+  }
+
+  return false;
+}
+
 uint8_t countBits32(uint32_t value) {
   uint8_t count = 0;
   while (value != 0u) {
@@ -63,7 +137,7 @@ bool SmartFiresBaseApp::begin() {
   _jetsonUart.begin(_cfg.uartBaud);
 
   if (!_radio.begin()) {
-    _debugUart.println("[BaseApp] Radio begin failed");
+    LOG_ERROR("base", "radio_begin_failed");
     return false;
   }
 
@@ -75,7 +149,9 @@ bool SmartFiresBaseApp::begin() {
                ((static_cast<uint32_t>(_cfg.baseAddr) & 0xFFu) << 8) |
                (static_cast<uint32_t>(_clock.millis()) & 0xFFu);
 
-  _debugUart.println("[BaseApp] Ready");
+  LOG_INFO("base", "ready base_addr=%u uart_baud=%lu",
+           static_cast<unsigned int>(_cfg.baseAddr),
+           static_cast<unsigned long>(_cfg.uartBaud));
   return true;
 }
 
@@ -110,7 +186,8 @@ void SmartFiresBaseApp::maybeSendPeriodicTimeSync() {
   const uint8_t len =
       BinaryPacket::encodeTimeSyncPayload(0, seq, ts, payload, sizeof(payload));
   if (len == 0) {
-    _debugUart.println("[BaseApp] TX TIME_SYNC periodic encode failed");
+    LOG_ERROR("base", "tx_time_sync_periodic_encode_failed seq=%u",
+              static_cast<unsigned int>(seq));
     _lastPeriodicTimeSyncMs = now;
     return;
   }
@@ -120,16 +197,12 @@ void SmartFiresBaseApp::maybeSendPeriodicTimeSync() {
     _timeSyncTxCount++;
   }
 
-  _debugUart.print("[BaseApp] TX TIME_SYNC_PERIODIC seq=");
-  _debugUart.print(seq);
-  _debugUart.print(" source=");
-  _debugUart.print(_hasJetsonTime ? "jetson" : "base_local");
-  _debugUart.print(" sessionMs=");
-  _debugUart.print(ts.session_time_ms);
-  _debugUart.print(" to=");
-  _debugUart.print(_cfg.timeSyncBroadcastAddr);
-  _debugUart.print(" result=");
-  _debugUart.println(ok ? "OK" : "FAIL");
+  LOG_INFO("base",
+           "tx_time_sync_periodic seq=%u source=%s session_ms=%lu to=%u result=%s",
+           static_cast<unsigned int>(seq), _hasJetsonTime ? "jetson" : "base_local",
+           static_cast<unsigned long>(ts.session_time_ms),
+           static_cast<unsigned int>(_cfg.timeSyncBroadcastAddr),
+           ok ? "OK" : "FAIL");
 
   _lastPeriodicTimeSyncMs = now;
 }
@@ -139,8 +212,8 @@ void SmartFiresBaseApp::processIncomingLoRa() {
     ITdmaRadioDriver::ReceivedPacket pkt;
     if (!_radio.receive(pkt)) {
       _radioReceiveFailCount++;
-      _debugUart.print("[BaseApp] RX_FAIL count=");
-      _debugUart.println(_radioReceiveFailCount);
+      LOG_WARN("base", "rx_fail count=%lu",
+               static_cast<unsigned long>(_radioReceiveFailCount));
       return;
     }
 
@@ -168,108 +241,116 @@ void SmartFiresBaseApp::processIncomingLoRa() {
       _cmdAckRxCount++;
     }
 
-    _debugUart.print("[BaseApp] RX from=");
-    _debugUart.print(pkt.from);
-    _debugUart.print(" type=");
-    _debugUart.print(validHeader ? pktTypeName(hdr.pkt_type) : "RAW");
-    _debugUart.print(" seq=");
-    _debugUart.print(validHeader ? hdr.seq : 0);
-    _debugUart.print(" node=");
-    _debugUart.print(validHeader ? hdr.node_id : pkt.from);
-    _debugUart.print(" len=");
-    _debugUart.print(pkt.len);
-    _debugUart.print(" rssi=");
-    _debugUart.println(pkt.rssi);
+    LOG_INFO("base", "rx_lora from=%u type=%s seq=%u node=%u len=%u rssi=%d",
+         static_cast<unsigned int>(pkt.from),
+         validHeader ? pktTypeName(hdr.pkt_type) : "RAW",
+         static_cast<unsigned int>(validHeader ? hdr.seq : 0),
+         static_cast<unsigned int>(validHeader ? hdr.node_id : pkt.from),
+         static_cast<unsigned int>(pkt.len), static_cast<int>(pkt.rssi));
 
     if (validHeader && hdr.pkt_type == BinaryPacket::PKT_AWAKEN) {
       BinaryPacket::AwakenPayload awaken = {};
       if (!BinaryPacket::decodeAwaken(pkt.data, pkt.len, hdr, awaken)) {
-        _debugUart.print("[BaseApp][AWAKEN#");
-        _debugUart.print(_awakenRxCount);
-        _debugUart.println("] decode_failed");
+        LOG_WARN("base", "awaken_decode_failed count=%lu from=%u len=%u",
+                 static_cast<unsigned long>(_awakenRxCount),
+                 static_cast<unsigned int>(pkt.from),
+                 static_cast<unsigned int>(pkt.len));
         continue;
       }
 
       NodeAssignment *assignment = findOrCreateNodeAssignment(awaken.uid_hash);
-      _debugUart.print("[BaseApp][AWAKEN#");
-      _debugUart.print(_awakenRxCount);
-      _debugUart.print("] uid=0x");
-      _debugUart.print(awaken.uid_hash, HEX);
-      _debugUart.print(" from=");
-      _debugUart.print(pkt.from);
-      _debugUart.print(" assigned_node=");
-      _debugUart.print(assignment ? assignment->nodeId : 0);
-      _debugUart.print(" assigned_slot=");
-      _debugUart.print(assignment ? static_cast<uint8_t>(assignment->nodeId - 1u) : 0xFFu);
-      _debugUart.print(" seq=");
-      _debugUart.print(hdr.seq);
-      _debugUart.println(" action=send_local_time_sync_and_forward_to_edge");
+      LOG_INFO("base",
+               "awaken_rx count=%lu uid_hash=0x%08lX from=%u assigned_node=%u assigned_slot=%u seq=%u action=send_local_time_sync_and_forward_to_edge",
+               static_cast<unsigned long>(_awakenRxCount),
+               static_cast<unsigned long>(awaken.uid_hash),
+               static_cast<unsigned int>(pkt.from),
+               static_cast<unsigned int>(assignment ? assignment->nodeId : 0),
+               static_cast<unsigned int>(
+                   assignment ? static_cast<uint8_t>(assignment->nodeId - 1u)
+                              : 0xFFu),
+               static_cast<unsigned int>(hdr.seq));
 
       const bool syncOk = assignment &&
                           sendDirectTimeSync(pkt.from, assignment->nodeId,
                                              "awaken", hdr.seq);
-      _debugUart.print("[BaseApp][AWAKEN#");
-      _debugUart.print(_awakenRxCount);
-      _debugUart.print("] local_time_sync_result=");
-      _debugUart.println(syncOk ? "OK" : "FAIL");
+      LOG_INFO("base", "awaken_local_time_sync_result count=%lu result=%s",
+               static_cast<unsigned long>(_awakenRxCount),
+               syncOk ? "OK" : "FAIL");
     } else if (validHeader && hdr.pkt_type == BinaryPacket::PKT_STATUS) {
       BinaryPacket::PktHeader statusHdr = {};
       BinaryPacket::StatusPayload status = {};
       if (!BinaryPacket::decodeStatus(pkt.data, pkt.len, statusHdr, status)) {
-        _debugUart.print("[BaseApp][STATUS#");
-        _debugUart.print(_statusRxCount);
-        _debugUart.println("] decode_failed");
+        LOG_WARN("base", "status_decode_failed count=%lu node=%u seq=%u len=%u",
+                 static_cast<unsigned long>(_statusRxCount),
+                 static_cast<unsigned int>(hdr.node_id),
+                 static_cast<unsigned int>(hdr.seq),
+                 static_cast<unsigned int>(pkt.len));
       } else {
         const bool gpsValid =
             (status.flags & BinaryPacket::STATUS_GPS_VALID) != 0u;
         const bool battValid =
             (status.flags & BinaryPacket::STATUS_BATT_VALID) != 0u;
-
-        _debugUart.print("[BaseApp][STATUS#");
-        _debugUart.print(_statusRxCount);
-        _debugUart.print("] node=");
-        _debugUart.print(statusHdr.node_id);
-        _debugUart.print(" seq=");
-        _debugUart.print(statusHdr.seq);
-        _debugUart.print(" gps_valid=");
-        _debugUart.print(gpsValid ? 1 : 0);
-        _debugUart.print(" batt_valid=");
-        _debugUart.print(battValid ? 1 : 0);
-
-        if (gpsValid) {
-          _debugUart.print(" lat=");
-          _debugUart.print(static_cast<float>(status.lat_e7) / 10000000.0f, 6);
-          _debugUart.print(" lon=");
-          _debugUart.print(static_cast<float>(status.lon_e7) / 10000000.0f, 6);
-        }
-
-        if (battValid) {
-          _debugUart.print(" batt_mv=");
-          _debugUart.print(status.battery_mv);
-          _debugUart.print(" batt_pct=");
-          _debugUart.print(status.battery_pct);
-        }
-
-        _debugUart.println();
+        LOG_INFO("base",
+                 "status_rx count=%lu node=%u seq=%u gps_valid=%u batt_valid=%u lat=%.6f lon=%.6f batt_mv=%u batt_pct=%u",
+                 static_cast<unsigned long>(_statusRxCount),
+                 static_cast<unsigned int>(statusHdr.node_id),
+                 static_cast<unsigned int>(statusHdr.seq), gpsValid ? 1 : 0,
+                 battValid ? 1 : 0,
+                 gpsValid
+                     ? static_cast<double>(static_cast<float>(status.lat_e7) /
+                                           10000000.0f)
+                     : 0.0,
+                 gpsValid
+                     ? static_cast<double>(static_cast<float>(status.lon_e7) /
+                                           10000000.0f)
+                     : 0.0,
+                 static_cast<unsigned int>(battValid ? status.battery_mv : 0),
+                 static_cast<unsigned int>(battValid ? status.battery_pct : 0));
       }
     } else if (validHeader && hdr.pkt_type == BinaryPacket::PKT_CALIBRATION_DATA) {
-      _debugUart.print("[BaseApp][CALIB#");
-      _debugUart.print(_calibrationDataRxCount);
-      _debugUart.print("] node=");
-      _debugUart.print(hdr.node_id);
-      _debugUart.print(" seq=");
-      _debugUart.print(hdr.seq);
-      _debugUart.println(" action=forward_to_jetson");
+      BinaryPacket::PktHeader calibHdr = {};
+      BinaryPacket::CalibrationDataPayload calib = {};
+
+      if (BinaryPacket::decodeCalibrationData(pkt.data, pkt.len, calibHdr, calib)) {
+        CalibrationDebug::logCalibrationDataSummary(calib, calibHdr.node_id,
+                                                    calibHdr.seq, "calib");
+      } else {
+        LOG_WARN("calib",
+                 "calibration_data_decode_failed node=%u seq=%u len=%u",
+                 static_cast<unsigned int>(hdr.node_id),
+                 static_cast<unsigned int>(hdr.seq),
+                 static_cast<unsigned int>(pkt.len));
+      }
+
+      LOG_INFO("base",
+               "calibration_data_rx count=%lu node=%u seq=%u action=forward_to_jetson",
+               static_cast<unsigned long>(_calibrationDataRxCount),
+               static_cast<unsigned int>(hdr.node_id),
+               static_cast<unsigned int>(hdr.seq));
     } else if (validHeader && hdr.pkt_type == BinaryPacket::PKT_CMD_ACK) {
-      _debugUart.print("[BaseApp][CMD_ACK#");
-      _debugUart.print(_cmdAckRxCount);
-      _debugUart.print("] node=");
-      _debugUart.print(hdr.node_id);
-      _debugUart.print(" seq=");
-      _debugUart.print(hdr.seq);
-      _debugUart.println(" action=forward_to_jetson");
+      BinaryPacket::PktHeader ackHdr = {};
+      BinaryPacket::CmdAckPayload ack = {};
+
+      if (BinaryPacket::decodeCmdAck(pkt.data, pkt.len, ackHdr, ack)) {
+        CalibrationDebug::logCmdAckSummary(ack, ackHdr.node_id, ackHdr.seq,
+                                           "calib");
+      } else {
+        LOG_WARN("calib", "cmd_ack_decode_failed node=%u seq=%u len=%u",
+                 static_cast<unsigned int>(hdr.node_id),
+                 static_cast<unsigned int>(hdr.seq),
+                 static_cast<unsigned int>(pkt.len));
+      }
+
+      LOG_INFO("base", "cmd_ack_rx count=%lu node=%u seq=%u action=forward_to_jetson",
+               static_cast<unsigned long>(_cmdAckRxCount),
+               static_cast<unsigned int>(hdr.node_id),
+               static_cast<unsigned int>(hdr.seq));
     } else if (validHeader && isTelemetryPacketType(hdr.pkt_type)) {
-      handleTelemetryAckSummary(hdr.node_id, hdr.seq);
+      const bool ackTracked = handleTelemetryAckSummary(hdr.node_id, hdr.seq);
+      LOG_INFO("base", "ack_track node=%u seq=%u pkt=%s tracked=%u",
+               static_cast<unsigned int>(hdr.node_id),
+               static_cast<unsigned int>(hdr.seq), pktTypeName(hdr.pkt_type),
+               ackTracked ? 1 : 0);
     }
 
     uint8_t frame[2 + 1 + 1 + 255 + 1] = {};
@@ -279,14 +360,22 @@ void SmartFiresBaseApp::processIncomingLoRa() {
       continue;
     }
 
-    _jetsonUart.write(frame, outLen);
+    const size_t written = _jetsonUart.write(frame, outLen);
     _rxForwardCount++;
 
+    LOG_INFO("base",
+             "rx_fwd to=jetson type=%s seq=%u node=%u bytes=%u written=%u result=%s",
+             validHeader ? pktTypeName(hdr.pkt_type) : "RAW",
+             static_cast<unsigned int>(validHeader ? hdr.seq : 0),
+             static_cast<unsigned int>(validHeader ? hdr.node_id : pkt.from),
+             static_cast<unsigned int>(outLen),
+             static_cast<unsigned int>(written),
+             written == outLen ? "OK" : "PARTIAL");
+
     if (validHeader && hdr.pkt_type == BinaryPacket::PKT_AWAKEN) {
-      _debugUart.print("[BaseApp][AWAKEN#");
-      _debugUart.print(_awakenRxCount);
-      _debugUart.print("] forwarded bytes=");
-      _debugUart.println(outLen);
+      LOG_DEBUG("base", "awaken_forwarded count=%lu bytes=%u",
+                static_cast<unsigned long>(_awakenRxCount),
+                static_cast<unsigned int>(outLen));
     }
   }
 }
@@ -302,34 +391,24 @@ bool SmartFiresBaseApp::sendDirectTimeSync(uint8_t radioAddr,
   const uint8_t len =
       BinaryPacket::encodeTimeSyncPayload(nodeId, seq, ts, payload, sizeof(payload));
   if (len == 0) {
-    _debugUart.println("[BaseApp] TX TIME_SYNC local encode failed");
+    LOG_ERROR("base", "tx_time_sync_local_encode_failed seq=%u node=%u",
+              static_cast<unsigned int>(seq), static_cast<unsigned int>(nodeId));
     return false;
   }
 
   const bool ok = _radio.sendToWait(payload, len, radioAddr);
   _timeSyncTxCount += ok ? 1u : 0u;
-  _debugUart.print("[BaseApp] TX TIME_SYNC_LOCAL seq=");
-  _debugUart.print(seq);
-  _debugUart.print(" to_radio=");
-  _debugUart.print(radioAddr);
-  _debugUart.print(" assigned_node=");
-  _debugUart.print(nodeId);
-  _debugUart.print(" assigned_slot=");
-  _debugUart.print(static_cast<uint8_t>(nodeId - 1u));
-  _debugUart.print(" sessionId=0x");
-  _debugUart.print(ts.session_id, HEX);
-  _debugUart.print(" sessionMs=");
-  _debugUart.print(ts.session_time_ms);
-  _debugUart.print(" trigger=");
-  _debugUart.print(reason ? reason : "unknown");
-  _debugUart.print(" trigger_seq=");
-  _debugUart.print(triggerSeq);
-  _debugUart.print(" source=");
-  _debugUart.print(_hasJetsonTime ? "jetson" : "base_local");
-  _debugUart.print(" link_ack=");
-  _debugUart.print(ok ? "OK" : "NO");
-  _debugUart.print(" result=");
-  _debugUart.println(ok ? "OK" : "FAIL");
+  LOG_INFO(
+      "base",
+      "tx_time_sync_local seq=%u to_radio=%u assigned_node=%u assigned_slot=%u session_id=0x%08lX session_ms=%lu trigger=%s trigger_seq=%u source=%s link_ack=%s result=%s",
+      static_cast<unsigned int>(seq), static_cast<unsigned int>(radioAddr),
+      static_cast<unsigned int>(nodeId),
+      static_cast<unsigned int>(static_cast<uint8_t>(nodeId - 1u)),
+      static_cast<unsigned long>(ts.session_id),
+      static_cast<unsigned long>(ts.session_time_ms),
+      reason ? reason : "unknown", static_cast<unsigned int>(triggerSeq),
+      _hasJetsonTime ? "jetson" : "base_local", ok ? "OK" : "NO",
+      ok ? "OK" : "FAIL");
   return ok;
 }
 
@@ -362,9 +441,8 @@ SmartFiresBaseApp::NodeAssignment *SmartFiresBaseApp::findOrCreateNodeAssignment
 bool SmartFiresBaseApp::handleTelemetryAckSummary(uint8_t nodeId, uint8_t seq) {
   AckTracker *tracker = findOrCreateAckTracker(nodeId);
   if (!tracker) {
-    _debugUart.print("[BaseApp] ACK_SUMMARY skip node=");
-    _debugUart.print(nodeId);
-    _debugUart.println(" reason=no_tracker_slot");
+    LOG_WARN("base", "ack_summary_skip node=%u reason=no_tracker_slot",
+             static_cast<unsigned int>(nodeId));
     return false;
   }
 
@@ -455,15 +533,11 @@ void SmartFiresBaseApp::updateTelemetryReceiptWindow(AckTracker &tracker,
     const uint8_t receivedCount = countBits32(tracker.receiptWindowMask);
     const uint8_t windowEndSeq =
         static_cast<uint8_t>(tracker.receiptWindowStartSeq + 19u);
-    _debugUart.print("[BaseApp][SEQ20] node=");
-    _debugUart.print(tracker.nodeId);
-    _debugUart.print(" range=");
-    _debugUart.print(tracker.receiptWindowStartSeq);
-    _debugUart.print("-");
-    _debugUart.print(windowEndSeq);
-    _debugUart.print(" received=");
-    _debugUart.print(receivedCount);
-    _debugUart.println("/20");
+    LOG_INFO("base", "seq20 node=%u range=%u-%u received=%u/20",
+         static_cast<unsigned int>(tracker.nodeId),
+         static_cast<unsigned int>(tracker.receiptWindowStartSeq),
+         static_cast<unsigned int>(windowEndSeq),
+         static_cast<unsigned int>(receivedCount));
 
     tracker.receiptWindowStartSeq =
         static_cast<uint8_t>(tracker.receiptWindowStartSeq + 20u);
@@ -563,28 +637,20 @@ bool SmartFiresBaseApp::sendAckSummary(uint8_t nodeId, uint8_t ackBaseSeq,
   const uint8_t len =
       BinaryPacket::encodeAckSummaryPayload(seq, ack, payload, sizeof(payload));
   if (len == 0) {
-    _debugUart.println("[BaseApp] TX ACK_SUMMARY local encode failed");
+    LOG_ERROR("base", "tx_ack_summary_local_encode_failed seq=%u node=%u",
+              static_cast<unsigned int>(seq), static_cast<unsigned int>(nodeId));
     return false;
   }
 
   const bool ok = _radio.sendToWait(payload, len, nodeId);
   _ackTxCount += ok ? 1u : 0u;
-  _debugUart.print("[BaseApp] TX ACK_SUMMARY_LOCAL seq=");
-  _debugUart.print(seq);
-  _debugUart.print(" node=");
-  _debugUart.print(nodeId);
-  _debugUart.print(" ack_base=");
-  _debugUart.print(ackBaseSeq);
-  _debugUart.print(" mask=0x");
-  _debugUart.print(ackMask, HEX);
-  _debugUart.print(" trigger=");
-  _debugUart.print(reason ? reason : "unknown");
-  _debugUart.print(" trigger_seq=");
-  _debugUart.print(triggerSeq);
-  _debugUart.print(" link_ack=");
-  _debugUart.print(ok ? "OK" : "NO");
-  _debugUart.print(" result=");
-  _debugUart.println(ok ? "OK" : "FAIL");
+  LOG_INFO(
+      "base",
+      "tx_ack_summary_local seq=%u node=%u ack_base=%u mask=0x%04X trigger=%s trigger_seq=%u link_ack=%s result=%s",
+      static_cast<unsigned int>(seq), static_cast<unsigned int>(nodeId),
+      static_cast<unsigned int>(ackBaseSeq), static_cast<unsigned int>(ackMask),
+      reason ? reason : "unknown", static_cast<unsigned int>(triggerSeq),
+      ok ? "OK" : "NO", ok ? "OK" : "FAIL");
   return ok;
 }
 
@@ -622,39 +688,31 @@ void SmartFiresBaseApp::processIncomingJetsonUart() {
     }
 
     if (pushJetsonUartByte(static_cast<uint8_t>(raw), payload, len)) {
+      LOG_DEBUG("base", "uart_frame_ok len=%u", static_cast<unsigned int>(len));
+
       BinaryPacket::PktHeader hdr = {};
       const bool validHeader =
           len >= sizeof(BinaryPacket::PktHeader) &&
           (memcpy(&hdr, payload, sizeof(BinaryPacket::PktHeader)),
            hdr.magic == BinaryPacket::PKT_MAGIC);
       if (validHeader) {
-        _debugUart.print("[BaseApp] UART_CMD type=");
-        _debugUart.print(pktTypeName(hdr.pkt_type));
-        _debugUart.print(" seq=");
-        _debugUart.print(hdr.seq);
-        _debugUart.print(" node=");
-        _debugUart.print(hdr.node_id);
-        _debugUart.print(" len=");
-        _debugUart.println(len);
+        LOG_INFO("base", "uart_cmd_rx type=%s seq=%u node=%u len=%u",
+                 pktTypeName(hdr.pkt_type), static_cast<unsigned int>(hdr.seq),
+                 static_cast<unsigned int>(hdr.node_id),
+                 static_cast<unsigned int>(len));
       } else {
-        _debugUart.print("[BaseApp] UART_CMD invalid_header len=");
-        _debugUart.println(len);
+        LOG_WARN("base", "uart_cmd_invalid_header len=%u",
+                 static_cast<unsigned int>(len));
       }
 
       if (handleJetsonCommandPayload(payload, len)) {
         _cmdForwardCount++;
       } else {
-        _debugUart.print("[BaseApp] UART_CMD dropped len=");
-        _debugUart.print(len);
-        if (validHeader) {
-          _debugUart.print(" type=");
-          _debugUart.print(pktTypeName(hdr.pkt_type));
-          _debugUart.print(" seq=");
-          _debugUart.print(hdr.seq);
-          _debugUart.print(" node=");
-          _debugUart.print(hdr.node_id);
-        }
-        _debugUart.println();
+        LOG_WARN("base", "uart_cmd_dropped len=%u type=%s seq=%u node=%u",
+                 static_cast<unsigned int>(len),
+                 validHeader ? pktTypeName(hdr.pkt_type) : "RAW",
+                 static_cast<unsigned int>(validHeader ? hdr.seq : 0),
+                 static_cast<unsigned int>(validHeader ? hdr.node_id : 0));
       }
       len = 0;
     }
@@ -663,16 +721,16 @@ void SmartFiresBaseApp::processIncomingJetsonUart() {
 
 bool SmartFiresBaseApp::handleJetsonCommandPayload(const uint8_t *payload, uint8_t len) {
   if (!payload || len < sizeof(BinaryPacket::PktHeader)) {
-    _debugUart.print("[BaseApp] UART_CMD reject reason=short_frame len=");
-    _debugUart.println(len);
+    LOG_WARN("base", "uart_cmd_reject reason=short_frame len=%u",
+             static_cast<unsigned int>(len));
     return false;
   }
 
   BinaryPacket::PktHeader hdr;
   memcpy(&hdr, payload, sizeof(BinaryPacket::PktHeader));
   if (hdr.magic != BinaryPacket::PKT_MAGIC) {
-    _debugUart.print("[BaseApp] UART_CMD reject reason=bad_magic len=");
-    _debugUart.println(len);
+    LOG_WARN("base", "uart_cmd_reject reason=bad_magic len=%u",
+             static_cast<unsigned int>(len));
     return false;
   }
 
@@ -680,19 +738,17 @@ bool SmartFiresBaseApp::handleJetsonCommandPayload(const uint8_t *payload, uint8
     BinaryPacket::TimeSyncPayload ts = {};
     BinaryPacket::PktHeader ignored = {};
     if (!BinaryPacket::decodeTimeSync(payload, len, ignored, ts)) {
-      _debugUart.print("[BaseApp] UART_CMD reject type=TIME_SYNC reason=decode_failed len=");
-      _debugUart.println(len);
+      LOG_WARN("base", "uart_cmd_reject type=TIME_SYNC reason=decode_failed len=%u",
+               static_cast<unsigned int>(len));
       return false;
     }
 
     updateJetsonTimeSource(ts);
 
-    _debugUart.print("[BaseApp] RX TIME_SYNC_UART seq=");
-    _debugUart.print(hdr.seq);
-    _debugUart.print(" source=jetson");
-    _debugUart.print(" sessionMs=");
-    _debugUart.print(ts.session_time_ms);
-    _debugUart.println(" action=cache_only_not_forwarded");
+    LOG_INFO("base",
+             "rx_time_sync_uart seq=%u source=jetson session_ms=%lu action=cache_only_not_forwarded",
+             static_cast<unsigned int>(hdr.seq),
+             static_cast<unsigned long>(ts.session_time_ms));
     return true;
   }
 
@@ -700,72 +756,85 @@ bool SmartFiresBaseApp::handleJetsonCommandPayload(const uint8_t *payload, uint8
     BinaryPacket::PktHeader ignored;
     BinaryPacket::AckSummaryPayload ack;
     if (!BinaryPacket::decodeAckSummary(payload, len, ignored, ack)) {
-      _debugUart.print("[BaseApp] UART_CMD reject type=ACK_SUMMARY reason=decode_failed len=");
-      _debugUart.println(len);
+      LOG_WARN("base", "uart_cmd_reject type=ACK_SUMMARY reason=decode_failed len=%u",
+               static_cast<unsigned int>(len));
       return false;
     }
     const bool ok = _radio.send(payload, len, ack.node_id);
     _ackTxCount += ok ? 1u : 0u;
-    _debugUart.print("[BaseApp] TX ACK_SUMMARY seq=");
-    _debugUart.print(hdr.seq);
-    _debugUart.print(" node=");
-    _debugUart.print(ack.node_id);
-    _debugUart.print(" base_seq=");
-    _debugUart.print(ack.ack_base_seq);
-    _debugUart.print(" mask=0x");
-    _debugUart.print(ack.ack_mask, HEX);
-    _debugUart.print(" result=");
-    _debugUart.println(ok ? "OK" : "FAIL");
+    LOG_INFO("base",
+             "tx_ack_summary seq=%u node=%u base_seq=%u mask=0x%04X result=%s",
+             static_cast<unsigned int>(hdr.seq),
+             static_cast<unsigned int>(ack.node_id),
+             static_cast<unsigned int>(ack.ack_base_seq),
+             static_cast<unsigned int>(ack.ack_mask), ok ? "OK" : "FAIL");
     return ok;
   }
 
   if (hdr.pkt_type == BinaryPacket::PKT_CMD_CALIBRATE) {
-    BinaryPacket::PktHeader ignored;
+    BinaryPacket::PktHeader cmdHdr = {};
     BinaryPacket::CmdCalibratePayload cmd = {};
-    if (!BinaryPacket::decodeCmdCalibrate(payload, len, ignored, cmd)) {
-      _debugUart.print("[BaseApp] UART_CMD reject type=CMD_CALIBRATE reason=decode_failed len=");
-      _debugUart.println(len);
+    bool legacyNoCrc = false;
+
+    if (!decodeCmdCalibrateFromJetson(payload, len, cmdHdr, cmd, legacyNoCrc)) {
+      LOG_WARN("base", "uart_cmd_reject type=CMD_CALIBRATE reason=decode_failed len=%u",
+               static_cast<unsigned int>(len));
       return false;
     }
 
-    const bool ok = _radio.sendToWait(payload, len, cmd.node_id);
-    _debugUart.print("[BaseApp] TX CMD_CALIBRATE seq=");
-    _debugUart.print(hdr.seq);
-    _debugUart.print(" node=");
-    _debugUart.print(cmd.node_id);
-    _debugUart.print(" duration_s=");
-    _debugUart.print(cmd.duration_s);
-    _debugUart.print(" result=");
-    _debugUart.println(ok ? "OK" : "FAIL");
+    uint8_t loraPayload[BinaryPacket::kCmdCalibrateLoRaSize] = {};
+    const uint8_t loraLen = BinaryPacket::encodeCmdCalibratePayload(
+        cmdHdr.seq, cmd, loraPayload, sizeof(loraPayload));
+    if (loraLen == 0) {
+      LOG_ERROR("base", "tx_cmd_calibrate_encode_failed seq=%u node=%u",
+                static_cast<unsigned int>(cmdHdr.seq),
+                static_cast<unsigned int>(cmd.node_id));
+      return false;
+    }
+
+    const bool ok = _radio.sendToWait(loraPayload, loraLen, cmd.node_id);
+    LOG_INFO("base", "tx_cmd_calibrate seq=%u node=%u duration_s=%u uart_format=%s lora_len=%u result=%s",
+             static_cast<unsigned int>(cmdHdr.seq),
+             static_cast<unsigned int>(cmd.node_id),
+             static_cast<unsigned int>(cmd.duration_s),
+             legacyNoCrc ? "legacy_no_crc" : "lora_crc",
+             static_cast<unsigned int>(loraLen), ok ? "OK" : "FAIL");
     return ok;
   }
 
   if (hdr.pkt_type == BinaryPacket::PKT_CMD_RESET) {
-    BinaryPacket::PktHeader ignored;
+    BinaryPacket::PktHeader cmdHdr = {};
     BinaryPacket::CmdResetPayload cmd = {};
-    if (!BinaryPacket::decodeCmdReset(payload, len, ignored, cmd)) {
-      _debugUart.print("[BaseApp] UART_CMD reject type=CMD_RESET reason=decode_failed len=");
-      _debugUart.println(len);
+    bool legacyNoCrc = false;
+
+    if (!decodeCmdResetFromJetson(payload, len, cmdHdr, cmd, legacyNoCrc)) {
+      LOG_WARN("base", "uart_cmd_reject type=CMD_RESET reason=decode_failed len=%u",
+               static_cast<unsigned int>(len));
       return false;
     }
 
-    const bool ok = _radio.sendToWait(payload, len, cmd.node_id);
-    _debugUart.print("[BaseApp] TX CMD_RESET seq=");
-    _debugUart.print(hdr.seq);
-    _debugUart.print(" node=");
-    _debugUart.print(cmd.node_id);
-    _debugUart.print(" reset_type=");
-    _debugUart.print(cmd.reset_type);
-    _debugUart.print(" result=");
-    _debugUart.println(ok ? "OK" : "FAIL");
+    uint8_t loraPayload[BinaryPacket::kCmdResetLoRaSize] = {};
+    const uint8_t loraLen = BinaryPacket::encodeCmdResetPayload(
+        cmdHdr.seq, cmd, loraPayload, sizeof(loraPayload));
+    if (loraLen == 0) {
+      LOG_ERROR("base", "tx_cmd_reset_encode_failed seq=%u node=%u",
+                static_cast<unsigned int>(cmdHdr.seq),
+                static_cast<unsigned int>(cmd.node_id));
+      return false;
+    }
+
+    const bool ok = _radio.sendToWait(loraPayload, loraLen, cmd.node_id);
+    LOG_INFO("base", "tx_cmd_reset seq=%u node=%u reset_type=%u uart_format=%s lora_len=%u result=%s",
+             static_cast<unsigned int>(cmdHdr.seq),
+             static_cast<unsigned int>(cmd.node_id),
+             static_cast<unsigned int>(cmd.reset_type),
+             legacyNoCrc ? "legacy_no_crc" : "lora_crc",
+             static_cast<unsigned int>(loraLen), ok ? "OK" : "FAIL");
     return ok;
   }
 
-  _debugUart.print("[BaseApp] UART_CMD unsupported type=");
-  _debugUart.print(pktTypeName(hdr.pkt_type));
-  _debugUart.print(" (0x");
-  _debugUart.print(hdr.pkt_type, HEX);
-  _debugUart.println(")");
+  LOG_WARN("base", "uart_cmd_unsupported type=%s code=0x%02X",
+           pktTypeName(hdr.pkt_type), static_cast<unsigned int>(hdr.pkt_type));
 
   return false;
 }
@@ -791,6 +860,8 @@ bool SmartFiresBaseApp::pushJetsonUartByte(uint8_t b,
     case UartRxState::Stage::WaitLen:
       if (b == 0) {
         _uartFrameErrorCount++;
+        LOG_WARN("base", "uart_frame_err reason=zero_length count=%lu",
+                 static_cast<unsigned long>(_uartFrameErrorCount));
         resetJetsonUartRx();
         return false;
       }
@@ -816,6 +887,12 @@ bool SmartFiresBaseApp::pushJetsonUartByte(uint8_t b,
 
       if (_uartRx.crc != expected) {
         _uartFrameErrorCount++;
+        LOG_WARN(
+            "base",
+            "uart_frame_err reason=crc_mismatch count=%lu expected=0x%02X got=0x%02X",
+            static_cast<unsigned long>(_uartFrameErrorCount),
+            static_cast<unsigned int>(expected),
+            static_cast<unsigned int>(_uartRx.crc));
         resetJetsonUartRx();
         return false;
       }
@@ -848,46 +925,26 @@ void SmartFiresBaseApp::maybeLogHealth() {
 
   const uint32_t lastRxAgoMs = (_lastRxMs == 0) ? 0xFFFFFFFFu : (now - _lastRxMs);
 
-  _debugUart.print("[BaseApp] rx_fwd=");
-  _debugUart.print(_rxForwardCount);
-  _debugUart.print(" cmd_fwd=");
-  _debugUart.print(_cmdForwardCount);
-  _debugUart.print(" awaken_rx=");
-  _debugUart.print(_awakenRxCount);
-  _debugUart.print(" bundle_rx=");
-  _debugUart.print(_bundleRxCount);
-  _debugUart.print(" status_rx=");
-  _debugUart.print(_statusRxCount);
-  _debugUart.print(" full_rx=");
-  _debugUart.print(_fullStateRxCount);
-  _debugUart.print(" calib_rx=");
-  _debugUart.print(_calibrationDataRxCount);
-  _debugUart.print(" cmd_ack_rx=");
-  _debugUart.print(_cmdAckRxCount);
-  _debugUart.print(" raw_rx=");
-  _debugUart.print(_rawRxCount);
-  _debugUart.print(" sync_tx=");
-  _debugUart.print(_timeSyncTxCount);
-  _debugUart.print(" ack_tx=");
-  _debugUart.print(_ackTxCount);
-  _debugUart.print(" time_src=");
-  _debugUart.print(_hasJetsonTime ? "jetson" : "base_local");
-  _debugUart.print(" jetson_sync_age_ms=");
-  if (_hasJetsonTime) {
-    _debugUart.print(now - _localMsAtJetsonUpdate);
-  } else {
-    _debugUart.print("n/a");
-  }
-  _debugUart.print(" rx_fail=");
-  _debugUart.print(_radioReceiveFailCount);
-  _debugUart.print(" last_rx_ms_ago=");
-  if (lastRxAgoMs == 0xFFFFFFFFu) {
-    _debugUart.print("never");
-  } else {
-    _debugUart.print(lastRxAgoMs);
-  }
-  _debugUart.print(" uart_err=");
-  _debugUart.println(_uartFrameErrorCount);
+  LOG_INFO(
+      "base",
+      "health rx_fwd=%lu cmd_fwd=%lu awaken_rx=%lu bundle_rx=%lu status_rx=%lu full_rx=%lu calib_rx=%lu cmd_ack_rx=%lu raw_rx=%lu sync_tx=%lu ack_tx=%lu time_src=%s jetson_sync_age_ms=%lu rx_fail=%lu last_rx_ms_ago=%lu uart_err=%lu",
+      static_cast<unsigned long>(_rxForwardCount),
+      static_cast<unsigned long>(_cmdForwardCount),
+      static_cast<unsigned long>(_awakenRxCount),
+      static_cast<unsigned long>(_bundleRxCount),
+      static_cast<unsigned long>(_statusRxCount),
+      static_cast<unsigned long>(_fullStateRxCount),
+      static_cast<unsigned long>(_calibrationDataRxCount),
+      static_cast<unsigned long>(_cmdAckRxCount),
+      static_cast<unsigned long>(_rawRxCount),
+      static_cast<unsigned long>(_timeSyncTxCount),
+      static_cast<unsigned long>(_ackTxCount),
+      _hasJetsonTime ? "jetson" : "base_local",
+      static_cast<unsigned long>(_hasJetsonTime ? (now - _localMsAtJetsonUpdate)
+                                                : 0xFFFFFFFFu),
+      static_cast<unsigned long>(_radioReceiveFailCount),
+      static_cast<unsigned long>(lastRxAgoMs),
+      static_cast<unsigned long>(_uartFrameErrorCount));
 
   _lastHealthLogMs = now;
 }
