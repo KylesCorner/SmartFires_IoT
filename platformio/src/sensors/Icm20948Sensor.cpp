@@ -178,6 +178,22 @@ bool Icm20948Sensor::sample() {
   _reading.timestampMs = _clock.millis();
   _lastSampleMs = _reading.timestampMs;
 
+  // Dedicated IMU debug stream: emitted per IMU sample so troubleshooting
+  // does not depend on STATUS packet interval.
+  LOG_DEBUG(
+      "IMU",
+      "imu_raw_sample mag_ut=[%.3f,%.3f,%.3f] accel_mg=[%.1f,%.1f,%.1f] gyro_dps=[%.3f,%.3f,%.3f] t_ms=%lu",
+      _reading.magX,
+      _reading.magY,
+      _reading.magZ,
+      _reading.accelX,
+      _reading.accelY,
+      _reading.accelZ,
+      _reading.gyroX,
+      _reading.gyroY,
+      _reading.gyroZ,
+      static_cast<unsigned long>(_reading.timestampMs));
+
   return true;
 }
 

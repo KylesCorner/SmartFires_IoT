@@ -12,10 +12,14 @@ from typing import Any
 import serial
 
 from smartfires_edge.packet import (
+    PKT_AWAKEN,
+    PKT_BUNDLE,
     PKT_CALIBRATION_DATA,
     PKT_CMD_ACK,
     PKT_CMD_CALIBRATE,
     PKT_CMD_RESET,
+    PKT_FULL_STATE,
+    PKT_STATUS,
     encode_cmd_calibrate_frame,
     encode_cmd_reset_frame,
 )
@@ -151,6 +155,41 @@ def _format_calibrations(session: SessionManager) -> list[str]:
             f"0x{uid_hash:08x} {calib.get('sample_count', 0):<12} {calib.get('timestamp', '--'):<10} [{eig_txt}]"
         )
     return lines
+
+
+def _pkt_type_name(pkt_type: int | None) -> str:
+    if pkt_type == PKT_AWAKEN:
+        return "awaken"
+    if pkt_type == PKT_FULL_STATE:
+        return "full_state"
+    if pkt_type == PKT_BUNDLE:
+        return "bundle"
+    if pkt_type == PKT_STATUS:
+        return "status"
+    if pkt_type == PKT_CALIBRATION_DATA:
+        return "calibration_data"
+    if pkt_type == PKT_CMD_ACK:
+        return "cmd_ack"
+    return "unknown"
+
+
+def _rx_payload_text(event: dict[str, Any]) -> str:
+    payload: Any = None
+    if event.get("awaken"):
+        payload = event["awaken"]
+    elif event.get("status"):
+        payload = event["status"]
+    elif event.get("calibration_data"):
+        payload = event["calibration_data"]
+    elif event.get("cmd_ack"):
+        payload = event["cmd_ack"]
+    elif event.get("packets"):
+        payload = event["packets"]
+
+    if payload is None:
+        return ""
+
+    return f" payload={json.dumps(payload, sort_keys=True)}"
 
 
 def _process_command(line: str, runtime: CliRuntime, session: SessionManager) -> None:
@@ -293,7 +332,12 @@ def _listener_worker(port: str, baud: int, runtime: CliRuntime, session: Session
                 pkt_type = event.get("pkt_type")
                 node_id = event.get("node_id")
                 seq = event.get("seq")
-                runtime.log(f"RX type=0x{pkt_type:02x} node={node_id} seq={seq} rssi={event.get('rssi')}")
+                pkt_code = f"0x{int(pkt_type):02x}" if isinstance(pkt_type, int) else "n/a"
+                pkt_name = _pkt_type_name(pkt_type if isinstance(pkt_type, int) else None)
+                runtime.log(
+                    f"RX type={pkt_code} ({pkt_name}) node={node_id} seq={seq} "
+                    f"rssi={event.get('rssi')}" + _rx_payload_text(event)
+                )
 
                 if isinstance(node_id, int) and node_id >= 2:
                     session.mark_node_seen(node_id)
