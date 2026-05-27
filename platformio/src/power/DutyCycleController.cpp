@@ -53,14 +53,15 @@ DutyCycleController::DutyCycleController(const DutyCycleConfig &cfg,
 bool DutyCycleController::begin() {
   _error = DutyCycleError::None;
 
-  LOG_INFO("duty",
-           "begin enabled=%u sensor_count=%u warmup_ms=%lu sample_period_ms=%lu "
-           "active_sample_ms=%lu min_sleep_ms=%lu",
-           _cfg.enabled ? 1 : 0, static_cast<unsigned int>(_sensorCount),
-           static_cast<unsigned long>(_cfg.warmupMs),
-           static_cast<unsigned long>(_cfg.samplePeriodMs),
-           static_cast<unsigned long>(_cfg.activeSampleMs),
-           static_cast<unsigned long>(_cfg.minSleepMs));
+  LOG_INFO(
+      "duty",
+      "begin enabled=%u sensor_count=%u warmup_ms=%lu sample_period_ms=%lu "
+      "active_sample_ms=%lu min_sleep_ms=%lu",
+      _cfg.enabled ? 1 : 0, static_cast<unsigned int>(_sensorCount),
+      static_cast<unsigned long>(_cfg.warmupMs),
+      static_cast<unsigned long>(_cfg.samplePeriodMs),
+      static_cast<unsigned long>(_cfg.activeSampleMs),
+      static_cast<unsigned long>(_cfg.minSleepMs));
 
   if (!_battery.begin()) {
     _error = DutyCycleError::BatteryBeginFailed;
@@ -180,8 +181,8 @@ void DutyCycleController::transitionTo(DutyCyclePhase next) {
   _phase = next;
   _phaseStartMs = now;
 
-  LOG_INFO("duty", "transition from=%s to=%s elapsed_ms=%lu",
-           phaseName(prev), phaseName(next), static_cast<unsigned long>(elapsed));
+  LOG_INFO("duty", "transition from=%s to=%s elapsed_ms=%lu", phaseName(prev),
+           phaseName(next), static_cast<unsigned long>(elapsed));
 
   if (next == DutyCyclePhase::ActiveSampling) {
     _freshSampleReady = false;
@@ -204,11 +205,12 @@ bool DutyCycleController::thresholdCrossed(
                        humidityDelta >= _cfg.humidityDeltaThresholdPct;
 
   if (crossed) {
-    LOG_INFO("trigger",
-             "threshold_crossed temp_c=%.2f baseline_temp_c=%.2f temp_delta=%.2f "
-             "humidity_pct=%.2f baseline_humidity_pct=%.2f humidity_delta=%.2f",
-             r.tempC, _baselineTempC, tempDelta, r.humidityPct,
-             _baselineHumidityPct, humidityDelta);
+    LOG_INFO(
+        "trigger",
+        "threshold_crossed temp_c=%.2f baseline_temp_c=%.2f temp_delta=%.2f "
+        "humidity_pct=%.2f baseline_humidity_pct=%.2f humidity_delta=%.2f",
+        r.tempC, _baselineTempC, tempDelta, r.humidityPct, _baselineHumidityPct,
+        humidityDelta);
   }
 
   return crossed;
@@ -286,8 +288,7 @@ void DutyCycleController::updateSampling() {
 
       const char *sensorName = sensor->name();
 
-      LOG_DEBUG(sensorName,
-                "status ready=%u healthy=%u state=%d duty_class=%s",
+      LOG_DEBUG(sensorName, "status ready=%u healthy=%u state=%d duty_class=%s",
                 sensor->ready() ? 1 : 0, sensor->healthy() ? 1 : 0,
                 static_cast<int>(sensor->powerState()),
                 dutyClassName(sensor->dutyClass()));
@@ -325,7 +326,8 @@ void DutyCycleController::updateSampling() {
   }
 
   if (phaseElapsedMs() >= _cfg.activeSampleMs) {
-    LOG_INFO("duty", "active_window_complete elapsed_ms=%lu active_sample_ms=%lu",
+    LOG_INFO("duty",
+             "active_window_complete elapsed_ms=%lu active_sample_ms=%lu",
              static_cast<unsigned long>(phaseElapsedMs()),
              static_cast<unsigned long>(_cfg.activeSampleMs));
 
@@ -364,6 +366,12 @@ bool DutyCycleController::beginSensors() {
 
     if (!sensor->begin()) {
       LOG_ERROR(sensorName, "begin_failed");
+      if (!sensor->reset()) {
+        LOG_ERROR(sensorName, "reset_failed");
+      } else {
+        LOG_INFO(sensorName, "begin_ok_after_reset");
+        return true;
+      }
 
       _error = DutyCycleError::SensorBeginFailed;
       return false;
@@ -459,4 +467,29 @@ void DutyCycleController::serviceAllSensors() {
 
     sensor->service();
   }
+}
+bool DutyCycleController::resetSensors() {
+  bool ok = true;
+
+  for (size_t i = 0; i < _sensorCount; ++i) {
+    ISensor *sensor = _sensors[i];
+
+    if (!sensor) {
+      continue;
+    }
+
+    LOG_WARN(sensor->name(), "reset_start_from_controller");
+
+    if (!sensor->reset()) {
+      LOG_ERROR(sensor->name(), "reset_failed_from_controller");
+      ok = false;
+      continue;
+    }
+
+    LOG_WARN(sensor->name(), "reset_ok_from_controller state=%d healthy=%u",
+             static_cast<int>(sensor->powerState()),
+             sensor->healthy() ? 1 : 0);
+  }
+
+  return ok;
 }

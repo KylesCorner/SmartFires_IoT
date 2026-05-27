@@ -5,13 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-enum class SensorPowerState : uint8_t {
-  Off,
-  Sleeping,
-  Waking,
-  Ready,
-  Error
-};
+enum class SensorPowerState : uint8_t { Off, Sleeping, Waking, Ready, Error };
 
 enum class SensorDutyClass : uint8_t {
   AlwaysOn,
@@ -32,7 +26,10 @@ public:
   virtual bool sleep() = 0;
   virtual bool service() = 0;
   virtual bool sample() = 0;
-
+  virtual bool reset() {
+    (void)sleep();
+    return begin();
+  }
   virtual bool ready() const = 0;
   virtual bool healthy() const = 0;
 

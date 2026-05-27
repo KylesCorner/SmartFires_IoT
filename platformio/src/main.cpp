@@ -327,8 +327,12 @@ void setup() {
   LOG_INFO("boot", "SmartFires node starting");
   LOG_INFO("boot", "node_id=%u", initialRadioAddr);
 
+  gps.reset();
+
   Wire.begin();
+  delay(100);
   scanI2C();
+  // duty.resetSensors();
   // testBeginSensors();
   LOG_INFO("boot", "SmartFires Feather TDMA node starting");
 

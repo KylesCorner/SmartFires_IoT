@@ -339,6 +339,25 @@ SensorPowerState Pa1010dGpsSensor::powerState() const { return _state; }
 
 SensorDutyClass Pa1010dGpsSensor::dutyClass() const { return _cfg.dutyClass; }
 
+bool Pa1010dGpsSensor::reset() {
+  LOG_WARN("gps", "reset_start state=%s healthy=%u",
+           sensorPowerStateName(_state), _healthy ? 1 : 0);
+
+  _state = SensorPowerState::Off;
+  _healthy = false;
+  _reading = Reading{};
+  _wakeStartMs = 0;
+  _lastSampleMs = 0;
+
+  if (!_driver.reset()) {
+    _state = SensorPowerState::Error;
+    LOG_ERROR("gps", "reset_failed reason=driver_reset_failed");
+    return false;
+  }
+
+  return begin();
+}
+
 const Pa1010dGpsSensor::Reading &Pa1010dGpsSensor::reading() const {
   return _reading;
 }

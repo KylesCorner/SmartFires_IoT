@@ -105,6 +105,7 @@ public:
   bool sample() override;
   bool ready() const override;
   bool healthy() const override;
+  bool reset() override;
 
   SensorPowerState powerState() const override;
   SensorDutyClass dutyClass() const override;
