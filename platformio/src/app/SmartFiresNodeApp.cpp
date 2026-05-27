@@ -194,16 +194,6 @@ void SmartFiresNodeApp::update() {
     return;
   }
 
-  _duty.update();
-
-  if (_cfg.enableBattery && _battery && _battery->ready()) {
-    if (_battery->sample()) {
-      LOG_DEBUG("battery", "sample_ok caller=app");
-    } else {
-      LOG_WARN("battery", "sample_failed caller=app");
-    }
-  }
-
   updateCalibrationMode();
 
   if (_calState != CalibrationState::Idle) {
@@ -217,6 +207,16 @@ void SmartFiresNodeApp::update() {
   }
 
   _calTelemetrySuppressedLogged = false;
+
+  _duty.update();
+
+  if (_cfg.enableBattery && _battery && _battery->ready()) {
+    if (_battery->sample()) {
+      LOG_DEBUG("battery", "sample_ok caller=app");
+    } else {
+      LOG_WARN("battery", "sample_failed caller=app");
+    }
+  }
 
   if (_duty.telemetryReady()) {
     const SensorSnapshot snap = buildSnapshot();
@@ -426,6 +426,7 @@ void SmartFiresNodeApp::handleIncomingCommands() {
       _calUploadAttemptCount = 0;
       _lastCalUploadAttemptMs = 0;
       _lastCalProgressLogMs = 0;
+      _radio.flushTelemetryBuffers("calibration_start");
       _calState = CalibrationState::Calibrating;
       resetCalibrationStats();
 
@@ -482,6 +483,15 @@ void SmartFiresNodeApp::updateCalibrationMode() {
   }
 
   if (_calState == CalibrationState::Calibrating) {
+    if (_imuSensor) {
+      _imuSensor->service();
+      if (_imuSensor->ready()) {
+        if (!_imuSensor->sample()) {
+          LOG_WARN("calib", "imu_sample_failed_during_calibration");
+        }
+      }
+    }
+
     maybeCaptureCalibrationSample();
 
     const uint32_t now = _clock.millis();

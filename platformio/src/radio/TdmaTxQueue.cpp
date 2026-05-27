@@ -47,6 +47,12 @@ bool TdmaTxQueue::dequeue(uint8_t *payload, uint8_t &lenOut) {
   return true;
 }
 
+void TdmaTxQueue::clear() {
+  _head = 0;
+  _tail = 0;
+  _count = 0;
+}
+
 bool TdmaTxQueue::empty() const {
   return _count == 0;
 }

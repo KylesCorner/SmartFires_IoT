@@ -18,6 +18,7 @@ public:
 
   bool enqueue(const uint8_t *payload, uint8_t len);
   bool dequeue(uint8_t *payload, uint8_t &lenOut);
+  void clear();
 
   bool empty() const;
   bool full() const;

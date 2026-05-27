@@ -310,6 +310,37 @@ bool TdmaRadioService::enqueueTelemetry(const uint8_t *payload, uint8_t len) {
   return true;
 }
 
+void TdmaRadioService::flushTelemetryBuffers(const char *reason) {
+  uint8_t droppedQueued = 0;
+  uint8_t throwawayLen = 0;
+  uint8_t throwaway[TdmaConfig::MaxPayloadLen] = {};
+
+  while (_queue.dequeue(throwaway, throwawayLen)) {
+    droppedQueued = static_cast<uint8_t>(droppedQueued + 1u);
+  }
+
+  _queue.clear();
+
+  uint8_t droppedPending = 0;
+  for (uint8_t i = 0; i < kMaxReliabilityWindow; ++i) {
+    if (_pending[i].inUse) {
+      _pending[i] = PendingEntry{};
+      droppedPending = static_cast<uint8_t>(droppedPending + 1u);
+    }
+  }
+
+  _pendingCount = 0;
+  _hasFreshTelemetrySent = false;
+
+  LOG_WARN("radio",
+           "telemetry_flush reason=%s dropped_queued=%u dropped_pending=%u q=%u/%u pending=%u",
+           reason ? reason : "manual", static_cast<unsigned int>(droppedQueued),
+           static_cast<unsigned int>(droppedPending),
+           static_cast<unsigned int>(_queue.count()),
+           static_cast<unsigned int>(_queue.capacity()),
+           static_cast<unsigned int>(_pendingCount));
+}
+
 uint8_t TdmaRadioService::nodeId() const { return _cfg.nodeId; }
 
 uint8_t TdmaRadioService::numSlots() const { return _cfg.numSlots; }
