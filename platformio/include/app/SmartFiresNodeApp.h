@@ -16,16 +16,19 @@ public:
         uint32_t deviceUidHash;
         bool    enableBattery;
         bool    awakenOnlyMode;
+        bool    enableTelemetryTx;
 
         static SmartFiresNodeApp::Config appCfg(uint8_t nodeId_ = 0,
                                                 uint32_t deviceUidHash_ = 0,
                                                 bool enableBattery_ = true,
-                                                bool awakenOnlyMode_ = true) {
+                                                bool awakenOnlyMode_ = true,
+                                                bool enableTelemetryTx_ = true) {
             SmartFiresNodeApp::Config cfg;
             cfg.nodeId        = nodeId_;
             cfg.deviceUidHash = deviceUidHash_;
             cfg.enableBattery = enableBattery_;
             cfg.awakenOnlyMode = awakenOnlyMode_;
+            cfg.enableTelemetryTx = enableTelemetryTx_;
             return cfg;
         }
     };

@@ -200,6 +200,26 @@ void PacketHandler::tryEncodeStatus(const SensorSnapshot &snap) {
                  static_cast<unsigned int>(_cfg.nodeId),
                  static_cast<unsigned int>(sp.flags),
                  static_cast<unsigned long>(snap.sessionTimeMs));
+        if ((sp.flags & BinaryPacket::STATUS_IMU_VALID) != 0u) {
+            LOG_DEBUG("packet",
+                      "status_imu_payload node=%u mag_xyz=[%d,%d,%d] accel_xyz=[%d,%d,%d] units=mag_ut_x10,accel_mg",
+                      static_cast<unsigned int>(_cfg.nodeId),
+                      static_cast<int>(sp.mag_x),
+                      static_cast<int>(sp.mag_y),
+                      static_cast<int>(sp.mag_z),
+                      static_cast<int>(sp.accel_x),
+                      static_cast<int>(sp.accel_y),
+                      static_cast<int>(sp.accel_z));
+            LOG_DEBUG("calib",
+                      "status_imu_payload node=%u mag_xyz=[%d,%d,%d] accel_xyz=[%d,%d,%d] units=mag_ut_x10,accel_mg",
+                      static_cast<unsigned int>(_cfg.nodeId),
+                      static_cast<int>(sp.mag_x),
+                      static_cast<int>(sp.mag_y),
+                      static_cast<int>(sp.mag_z),
+                      static_cast<int>(sp.accel_x),
+                      static_cast<int>(sp.accel_y),
+                      static_cast<int>(sp.accel_z));
+        }
     } else {
         LOG_WARN("packet", "status_encode_failed node=%u flags=0x%02X",
                  static_cast<unsigned int>(_cfg.nodeId),

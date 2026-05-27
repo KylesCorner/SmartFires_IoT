@@ -80,10 +80,11 @@ SmartFiresNodeApp::SmartFiresNodeApp(
 bool SmartFiresNodeApp::begin() {
   LOG_INFO("app",
            "begin node_id=%u uid_hash=0x%08lX enable_battery=%s "
-           "awaken_only=%s sensor_count=%u",
+           "awaken_only=%s bundle_tx=%s sensor_count=%u",
            static_cast<unsigned int>(_cfg.nodeId),
            static_cast<unsigned long>(_cfg.deviceUidHash),
            boolName(_cfg.enableBattery), boolName(_cfg.awakenOnlyMode),
+           boolName(_cfg.enableTelemetryTx),
            static_cast<unsigned int>(_sensorCount));
 
   if (_cfg.enableBattery && _battery) {
@@ -271,6 +272,15 @@ void SmartFiresNodeApp::update() {
       const uint8_t len = _packetHandler.takeBundle(buf, sizeof(buf));
 
       if (len > 0) {
+        if (!_cfg.enableTelemetryTx) {
+          LOG_INFO("app",
+                   "bundle_tx_disabled bundle_dropped len=%u session_ms=%lu",
+                   static_cast<unsigned int>(len),
+                   static_cast<unsigned long>(snap.sessionTimeMs));
+          _duty.markTelemetrySent();
+          return;
+        }
+
         BinaryPacket::PktHeader hdr = {};
         const bool hasHdr = decodePacketHeader(buf, len, hdr);
         const bool enqueued = _radio.enqueueTelemetry(buf, len);

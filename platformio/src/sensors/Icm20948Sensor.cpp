@@ -224,13 +224,13 @@ void Icm20948Sensor::fillSnapshot(SensorSnapshot &snap) const {
     return;
   }
 
-  // Driver reports magnetometer in uT and accelerometer in g.
+  // Driver reports magnetometer in uT and accelerometer in milli-g.
   snap.magX = clampToInt16(_reading.magX * 10.0f);      // uT x 10
   snap.magY = clampToInt16(_reading.magY * 10.0f);
   snap.magZ = clampToInt16(_reading.magZ * 10.0f);
-  snap.accelX = clampToInt16(_reading.accelX * 1000.0f); // mg
-  snap.accelY = clampToInt16(_reading.accelY * 1000.0f);
-  snap.accelZ = clampToInt16(_reading.accelZ * 1000.0f);
+  snap.accelX = clampToInt16(_reading.accelX); // mg
+  snap.accelY = clampToInt16(_reading.accelY);
+  snap.accelZ = clampToInt16(_reading.accelZ);
   snap.imuValid = true;
   snap.sensorFlags |= 0x08; // IMU
 }

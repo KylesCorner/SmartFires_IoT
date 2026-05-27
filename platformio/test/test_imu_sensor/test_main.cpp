@@ -508,6 +508,37 @@ void test_imu_write_telemetry_truncates_safely_after_sample(void) {
   TEST_ASSERT_EQUAL_CHAR('\0', out[sizeof(out) - 1]);
 }
 
+void test_imu_fill_snapshot_preserves_driver_accel_mg_units(void) {
+  FakeClock clock;
+  FakeIcm20948Driver driver;
+
+  driver.setReading(-980.0f, 245.0f, 1012.0f,
+                    4.0f, 5.0f, 6.0f,
+                    -41.1f, 46.8f, 153.1f,
+                    true);
+
+  Icm20948Sensor sensor(makeCfg(10, 0, SensorDutyClass::DutyCycled, 0), driver,
+                        clock);
+
+  TEST_ASSERT_TRUE(sensor.begin());
+
+  wakeAndService(sensor, clock, 100);
+
+  TEST_ASSERT_TRUE(sensor.sample());
+
+  SensorSnapshot snap = {};
+  sensor.fillSnapshot(snap);
+
+  TEST_ASSERT_TRUE(snap.imuValid);
+  TEST_ASSERT_BITS_HIGH(0x08, snap.sensorFlags);
+  TEST_ASSERT_EQUAL_INT16(-411, snap.magX);
+  TEST_ASSERT_EQUAL_INT16(468, snap.magY);
+  TEST_ASSERT_EQUAL_INT16(1531, snap.magZ);
+  TEST_ASSERT_EQUAL_INT16(-980, snap.accelX);
+  TEST_ASSERT_EQUAL_INT16(245, snap.accelY);
+  TEST_ASSERT_EQUAL_INT16(1012, snap.accelZ);
+}
+
 // -----------------------------------------------------------------------------
 // runner
 // -----------------------------------------------------------------------------
@@ -549,6 +580,7 @@ void runIcm20948SensorTests() {
   RUN_TEST(test_imu_write_telemetry_returns_zero_for_zero_size_buffer);
   RUN_TEST(test_imu_write_telemetry_formats_latest_reading_after_sample);
   RUN_TEST(test_imu_write_telemetry_truncates_safely_after_sample);
+  RUN_TEST(test_imu_fill_snapshot_preserves_driver_accel_mg_units);
 
   UNITY_END();
 }

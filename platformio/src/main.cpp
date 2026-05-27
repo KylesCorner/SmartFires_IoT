@@ -235,7 +235,8 @@ RadioHeadTdmaDriver radioDriver(radioDriverCfg);
 TdmaRadioService tdmaRadio(tdmaCfg, tdmaClock, tdmaQueue, radioDriver);
 
 SmartFiresNodeApp::Config appCfg = SmartFiresNodeApp::Config::appCfg(
-    kUnassignedNodeId, nodeUidHash, true, false);
+  kUnassignedNodeId, nodeUidHash, true, false,
+  false); // bundle TX enabled; set false to keep STATUS but drop bundles
 
 // -----------------------------------------------------------------------------
 // App

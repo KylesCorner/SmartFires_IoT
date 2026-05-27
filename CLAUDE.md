@@ -1,5 +1,11 @@
 # SmartFires IoT — Claude Context
 
+## Agent Execution Guardrails
+
+- Do not run `pio run`, `pio test`, `pio device monitor`, flashing commands, or other hardware-facing PlatformIO commands unless the user explicitly asks for execution in the current session.
+- Default behavior for embedded validation in this repo is: explain what should be run and give the exact command for the user to execute.
+- Reason: hardware availability, connected board selection, active serial monitor state, and local PlatformIO context are session-specific and may not be safe for an agent to assume.
+
 ## Project Purpose
 
 Wildfire IoT sensor network. Remote drone nodes collect environmental data (temperature, humidity, wind speed, particulate matter, GPS) and transmit it wirelessly over LoRa to a base station connected to a Jetson Orin Nano edge computer.

@@ -67,7 +67,7 @@ struct DutyCycleConfig {
                                       bool enabled_ = false ,uint32_t minSleepMs_ = 0,
                                       uint32_t maxWakeMs_ = 0,
                                       uint32_t activeSampleMs_ = 0,
-                                      uint32_t samplePeriodMs_ = 10000,
+                                      uint32_t samplePeriodMs_ = 500,
                                       uint32_t warmupMs_ = 10000,
                                       float tempDeltaThresholdC_ = 0,
                                       float humidityDeltaThresholdPct_ = 0,
