@@ -792,6 +792,14 @@ bool SmartFiresBaseApp::handleJetsonCommandPayload(const uint8_t *payload, uint8
       return false;
     }
 
+    LOG_DEBUG("base",
+              "tx_cmd_calibrate_attempt seq=%u node=%u duration_s=%u uart_format=%s lora_len=%u",
+              static_cast<unsigned int>(cmdHdr.seq),
+              static_cast<unsigned int>(cmd.node_id),
+              static_cast<unsigned int>(cmd.duration_s),
+              legacyNoCrc ? "legacy_no_crc" : "lora_crc",
+              static_cast<unsigned int>(loraLen));
+
     const bool ok = _radio.sendToWait(loraPayload, loraLen, cmd.node_id);
     LOG_INFO("base", "tx_cmd_calibrate seq=%u node=%u duration_s=%u uart_format=%s lora_len=%u result=%s",
              static_cast<unsigned int>(cmdHdr.seq),

@@ -94,7 +94,7 @@ private:
   };
 
   static constexpr uint32_t kHealthLogPeriodMs = 5000;
-  static constexpr uint32_t kPeriodicTimeSyncMs = 5000;
+  static constexpr uint32_t kPeriodicTimeSyncMs = 50000;
 
   Config _cfg;
   IClock &_clock;

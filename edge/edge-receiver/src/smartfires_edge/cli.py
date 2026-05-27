@@ -219,7 +219,16 @@ def _process_command(line: str, runtime: CliRuntime, session: SessionManager) ->
             runtime.log("[Error] Serial not ready yet.")
             return
         with runtime.write_lock:
-            runtime.serial_conn.write(frame)
+            written = runtime.serial_conn.write(frame)
+            runtime.serial_conn.flush()
+
+        runtime.log(
+            f"[TX] CMD_CALIBRATE bytes={written}/{len(frame)} seq={seq} hex={frame.hex()}"
+        )
+        if written != len(frame):
+            runtime.log(
+                f"[Warning] Short UART write for CMD_CALIBRATE: wrote {written} of {len(frame)} bytes"
+            )
 
         runtime.add_pending(
             PendingCommand(node_id=node_id, cmd_type=PKT_CMD_CALIBRATE, sent_at=time.time(), duration_s=60)
@@ -245,7 +254,16 @@ def _process_command(line: str, runtime: CliRuntime, session: SessionManager) ->
             runtime.log("[Error] Serial not ready yet.")
             return
         with runtime.write_lock:
-            runtime.serial_conn.write(frame)
+            written = runtime.serial_conn.write(frame)
+            runtime.serial_conn.flush()
+
+        runtime.log(
+            f"[TX] CMD_RESET bytes={written}/{len(frame)} seq={seq} hex={frame.hex()}"
+        )
+        if written != len(frame):
+            runtime.log(
+                f"[Warning] Short UART write for CMD_RESET: wrote {written} of {len(frame)} bytes"
+            )
 
         runtime.add_pending(
             PendingCommand(node_id=node_id, cmd_type=PKT_CMD_RESET, sent_at=time.time())

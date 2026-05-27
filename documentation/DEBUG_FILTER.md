@@ -44,7 +44,7 @@ pio device monitor -e feather_m0_lora_node_debug
 You can apply filters by the example below showing a tdma filter with a min level of warning.
 ```bash
 SFDBG_SRC=tdma SFDBG_MIN_LEVEL=W pio device monitor -e feather_m0_lora_node_debug
-SFDBG_SRC=calibration  pio device monitor -e feather_m0_lora_node_debug
+SFDBG_SRC=radio,tdma,calibration  pio device monitor -e feather_m0_lora_node_debug
 ```
 
 You can also apply multiple filter streams
@@ -56,5 +56,6 @@ Base station now uses the same structured logger. To follow communication-layer
 traffic on the base station:
 
 ```bash
-SFDBG_SRC=base SFDBG_MIN_LEVEL=D pio device monitor -e feather_m0_lora_base
+SFDBG_SRC=base,app,calibration SFDBG_MIN_LEVEL=D pio device monitor -e feather_m0_lora_base
+SFDBG_SRC=base,app,calibration pio device monitor -e feather_m0_lora_base
 ```
