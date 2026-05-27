@@ -152,6 +152,8 @@ bool SmartFiresBaseApp::begin() {
   LOG_INFO("base", "ready base_addr=%u uart_baud=%lu",
            static_cast<unsigned int>(_cfg.baseAddr),
            static_cast<unsigned long>(_cfg.uartBaud));
+  LOG_INFO("base", "uart_configured_baud=%lu",
+           static_cast<unsigned long>(_cfg.uartBaud));
   return true;
 }
 
@@ -850,6 +852,7 @@ bool SmartFiresBaseApp::handleJetsonCommandPayload(const uint8_t *payload, uint8
 bool SmartFiresBaseApp::pushJetsonUartByte(uint8_t b,
                                            uint8_t *payloadOut,
                                            uint8_t &lenOut) {
+  _uartByteRxCount++;
   lenOut = 0;
 
   switch (_uartRx.stage) {
@@ -933,11 +936,20 @@ void SmartFiresBaseApp::maybeLogHealth() {
 
   const uint32_t lastRxAgoMs = (_lastRxMs == 0) ? 0xFFFFFFFFu : (now - _lastRxMs);
 
-  LOG_INFO(
+    LOG_INFO(
       "base",
-      "health rx_fwd=%lu cmd_fwd=%lu awaken_rx=%lu bundle_rx=%lu status_rx=%lu full_rx=%lu calib_rx=%lu cmd_ack_rx=%lu raw_rx=%lu sync_tx=%lu ack_tx=%lu time_src=%s jetson_sync_age_ms=%lu rx_fail=%lu last_rx_ms_ago=%lu uart_err=%lu",
-      static_cast<unsigned long>(_rxForwardCount),
+      "health_link cmd_fwd=%lu uart_err=%lu uart_bytes=%lu sync_tx=%lu ack_tx=%lu time_src=%s",
       static_cast<unsigned long>(_cmdForwardCount),
+      static_cast<unsigned long>(_uartFrameErrorCount),
+      static_cast<unsigned long>(_uartByteRxCount),
+      static_cast<unsigned long>(_timeSyncTxCount),
+      static_cast<unsigned long>(_ackTxCount),
+      _hasJetsonTime ? "jetson" : "base_local");
+
+    LOG_INFO(
+      "base",
+      "health_rx rx_fwd=%lu awaken=%lu bundle=%lu status=%lu full=%lu calib=%lu cmd_ack=%lu raw=%lu rx_fail=%lu last_rx_ms_ago=%lu jetson_sync_age_ms=%lu",
+      static_cast<unsigned long>(_rxForwardCount),
       static_cast<unsigned long>(_awakenRxCount),
       static_cast<unsigned long>(_bundleRxCount),
       static_cast<unsigned long>(_statusRxCount),
@@ -945,14 +957,10 @@ void SmartFiresBaseApp::maybeLogHealth() {
       static_cast<unsigned long>(_calibrationDataRxCount),
       static_cast<unsigned long>(_cmdAckRxCount),
       static_cast<unsigned long>(_rawRxCount),
-      static_cast<unsigned long>(_timeSyncTxCount),
-      static_cast<unsigned long>(_ackTxCount),
-      _hasJetsonTime ? "jetson" : "base_local",
-      static_cast<unsigned long>(_hasJetsonTime ? (now - _localMsAtJetsonUpdate)
-                                                : 0xFFFFFFFFu),
       static_cast<unsigned long>(_radioReceiveFailCount),
       static_cast<unsigned long>(lastRxAgoMs),
-      static_cast<unsigned long>(_uartFrameErrorCount));
+      static_cast<unsigned long>(_hasJetsonTime ? (now - _localMsAtJetsonUpdate)
+                          : 0xFFFFFFFFu));
 
   _lastHealthLogMs = now;
 }
