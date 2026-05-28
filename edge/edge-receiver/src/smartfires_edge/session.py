@@ -184,9 +184,12 @@ class SessionManager:
             soft_iron = V @ np.diag(scales) @ V.T
 
             status = "valid" if sample_ok else "low_sample_count"
+            # sensor_to_body is always reset to identity on new calibration data.
+            # A fresh alignment fit (set_alignment) is required after every recalibration.
             self._state["calibrations"][uid_hash] = {
                 "hard_iron": [float(v) for v in hard_iron.tolist()],
                 "soft_iron": [[float(v) for v in row] for row in soft_iron.tolist()],
+                "sensor_to_body": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
                 "sample_count": sample_count,
                 "timestamp": int(time.time()),
                 "status": status,
@@ -263,14 +266,21 @@ class SessionManager:
 
         mag_c = soft_iron @ (mag_icm - hard_iron)
 
-        roll = math.atan2(accel_raw[1], accel_raw[2])
-        pitch = math.atan2(-accel_raw[0], math.sqrt(accel_raw[1] ** 2 + accel_raw[2] ** 2))
+        # Rotate both mag and accel from the ICM-20948 board frame into the vehicle
+        # body frame. Defaults to identity when no alignment has been fitted yet.
+        R_sb_list = calibration.get("sensor_to_body")
+        R_sb = np.array(R_sb_list, dtype=float) if R_sb_list is not None else np.eye(3)
+        mag_body = R_sb @ mag_c
+        accel_body = R_sb @ accel_raw
 
-        mx_h = mag_c[0] * math.cos(pitch) + mag_c[2] * math.sin(pitch)
+        roll = math.atan2(accel_body[1], accel_body[2])
+        pitch = math.atan2(-accel_body[0], math.sqrt(accel_body[1] ** 2 + accel_body[2] ** 2))
+
+        mx_h = mag_body[0] * math.cos(pitch) + mag_body[2] * math.sin(pitch)
         my_h = (
-            mag_c[0] * math.sin(roll) * math.sin(pitch)
-            + mag_c[1] * math.cos(roll)
-            - mag_c[2] * math.sin(roll) * math.cos(pitch)
+            mag_body[0] * math.sin(roll) * math.sin(pitch)
+            + mag_body[1] * math.cos(roll)
+            - mag_body[2] * math.sin(roll) * math.cos(pitch)
         )
 
         heading_mag = math.degrees(math.atan2(-my_h, mx_h)) % 360.0
@@ -312,6 +322,73 @@ class SessionManager:
             node_status.update(heading)
             node_status["last_heading_ts"] = int(time.time())
             return {"computed": True, **heading}
+
+    @staticmethod
+    def fit_sensor_to_body(
+        observations: list[tuple[list[float], list[float]]],
+    ) -> tuple[np.ndarray, float]:
+        """Fit a rotation matrix R_sb that maps the ICM-20948 board frame into the
+        vehicle body frame using the Wahba/Kabsch method.
+
+        observations: list of (sensor_vec, body_vec) pairs from static poses.
+            sensor_vec — averaged mag_body (post-AK09916 permutation, post-soft-iron)
+                         or averaged accel_raw, in the ICM-20948 board frame.
+            body_vec   — known reference direction in the vehicle body frame
+                         (e.g. [1,0,0] when the nose points forward during that pose).
+        Vectors need not be unit-length; they are normalised internally.
+        At least 3 non-coplanar pose pairs are required.
+
+        Returns (R_sb, rms_residual_deg). Raise if fewer than 3 observations supplied.
+        Reject the result if rms_residual_deg > 5.0 — see plan validation criteria.
+        """
+        if len(observations) < 3:
+            raise ValueError("at least 3 pose observations are required to fit R_sb")
+
+        H = np.zeros((3, 3), dtype=float)
+        for s_vec, b_vec in observations:
+            s = np.asarray(s_vec, dtype=float)
+            b = np.asarray(b_vec, dtype=float)
+            s_norm = np.linalg.norm(s)
+            b_norm = np.linalg.norm(b)
+            if s_norm < 1e-9 or b_norm < 1e-9:
+                raise ValueError("zero-length vector in observations")
+            H += np.outer(b / b_norm, s / s_norm)
+
+        U, _, Vt = np.linalg.svd(H)
+        # Enforce det = +1 to avoid reflections
+        d = float(np.linalg.det(U @ Vt))
+        R_sb = U @ np.diag([1.0, 1.0, d]) @ Vt
+
+        errors: list[float] = []
+        for s_vec, b_vec in observations:
+            s = np.asarray(s_vec, dtype=float)
+            b = np.asarray(b_vec, dtype=float)
+            s /= np.linalg.norm(s)
+            b /= np.linalg.norm(b)
+            b_pred = R_sb @ s
+            cos_err = float(np.clip(np.dot(b_pred, b), -1.0, 1.0))
+            errors.append(math.degrees(math.acos(cos_err)))
+
+        rms_deg = math.sqrt(sum(e * e for e in errors) / len(errors))
+        return R_sb, rms_deg
+
+    def set_alignment(self, node_id: int, R_sb: np.ndarray) -> dict[str, Any]:
+        """Persist a fitted sensor-to-body rotation matrix for the given node.
+
+        R_sb must be the output of fit_sensor_to_body. Caller is responsible for
+        rejecting fits with rms_residual_deg > 5.0 before calling this method.
+        Returns {"stored": True} on success or {"stored": False, "reason": str}.
+        """
+        with self._lock:
+            node_id = int(node_id)
+            uid_hash = self._state["node_id_to_uid_hash"].get(node_id)
+            if uid_hash is None or uid_hash not in self._state["calibrations"]:
+                return {"stored": False, "reason": "no_calibration_for_node"}
+            self._state["calibrations"][uid_hash]["sensor_to_body"] = [
+                [float(v) for v in row] for row in R_sb.tolist()
+            ]
+            self._save_locked()
+            return {"stored": True}
 
     def clear_calibration_by_node(self, node_id: int) -> bool:
         with self._lock:

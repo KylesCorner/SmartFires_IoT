@@ -1,5 +1,6 @@
 import argparse
 import curses
+import json
 import queue
 import threading
 import time
@@ -189,7 +190,11 @@ def _rx_payload_text(event: dict[str, Any]) -> str:
     if payload is None:
         return ""
 
-    return f" payload={json.dumps(payload, sort_keys=True)}"
+    try:
+        return f" payload={json.dumps(payload, sort_keys=True, default=str)}"
+    except Exception:
+        # Never let payload formatting crash the listener loop.
+        return f" payload={repr(payload)}"
 
 
 def _process_command(line: str, runtime: CliRuntime, session: SessionManager) -> None:
