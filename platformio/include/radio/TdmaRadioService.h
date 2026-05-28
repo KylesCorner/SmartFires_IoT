@@ -68,6 +68,7 @@ private:
     uint32_t firstSentMs = 0;
     uint32_t lastSentMs = 0;
     uint8_t attempts = 0;
+    bool ackGateOpened = false;  // set true when entry_age_ms >= retry_wait_ms first elapses
   };
 
   TdmaConfig _cfg;
@@ -88,6 +89,8 @@ private:
   uint32_t _ackSummaryCount = 0;
   uint32_t _timeSyncCount = 0;
   uint32_t _pendingDropCount = 0;
+  uint32_t _lastAckSummarySessionMs = 0;
+  bool _hasReceivedAckSummary = false;
   uint32_t _lastTxSlotIndex = 0xFFFFFFFFu;
   uint32_t _lastFreshTelemetrySentMs = 0;
   bool _hasFreshTelemetrySent = false;
@@ -97,6 +100,7 @@ private:
   void drainTxQueue();
   void checkIncomingTimeSync();
   void rememberPendingCommand(const ITdmaRadioDriver::ReceivedPacket &packet);
+  uint32_t computeRetryWaitMs() const;
 
   bool isTimeSyncPacket(const ITdmaRadioDriver::ReceivedPacket &packet,
                         uint32_t &sessionMsOut,

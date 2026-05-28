@@ -98,6 +98,20 @@ uint16_t estimateTxBudgetMs(const uint8_t *payload, uint8_t len) {
 
 } // namespace
 
+uint32_t TdmaRadioService::computeRetryWaitMs() const {
+  const uint32_t scaled =
+      (_cfg.expectedAckIntervalMs *
+       static_cast<uint32_t>(_cfg.retryWaitMultiplierPermille)) /
+      1000u;
+  if (scaled < _cfg.retryWaitMinMs) {
+    return _cfg.retryWaitMinMs;
+  }
+  if (scaled > _cfg.retryWaitMaxMs) {
+    return _cfg.retryWaitMaxMs;
+  }
+  return scaled;
+}
+
 TdmaRadioService::TdmaRadioService(const TdmaConfig &cfg,
                                    TdmaClock &tdmaClock,
                                    TdmaTxQueue &queue,
@@ -917,6 +931,7 @@ void TdmaRadioService::rememberSentTelemetry(const uint8_t *payload,
   e.firstSentMs = nowMs;
   e.lastSentMs = nowMs;
   e.attempts = 1;
+  e.ackGateOpened = false;
 
   if (replacingPending) {
     _pendingDropCount++;
@@ -1009,6 +1024,48 @@ bool TdmaRadioService::pickRetransmitCandidate(uint8_t *payloadOut,
       continue;
     }
 
+    if (_cfg.reliabilityMode == TdmaReliabilityMode::AppLayerAckSummary) {
+      const uint32_t retryWaitMs = computeRetryWaitMs();
+
+      if (ageMs < retryWaitMs) {
+        LOG_DEBUG("radio",
+                  "retx_blocked reason=awaiting_ack_window seq=%u age_ms=%lu wait_ms=%lu",
+                  static_cast<unsigned int>(e.seq),
+                  static_cast<unsigned long>(ageMs),
+                  static_cast<unsigned long>(retryWaitMs));
+        continue;
+      }
+
+      if (!e.ackGateOpened) {
+        e.ackGateOpened = true;
+        LOG_INFO("radio",
+                 "retx_gate_open reason=ack_window_elapsed seq=%u age_ms=%lu wait_ms=%lu",
+                 static_cast<unsigned int>(e.seq),
+                 static_cast<unsigned long>(ageMs),
+                 static_cast<unsigned long>(retryWaitMs));
+      }
+
+      if (_cfg.requireAckSummaryBeforeFirstRetry && e.attempts == 1) {
+        const bool ackSeen = (_hasReceivedAckSummary &&
+                              _lastAckSummarySessionMs > e.firstSentMs);
+        if (!ackSeen) {
+          if (ageMs >= _cfg.retryWaitMaxMs) {
+            LOG_INFO("radio",
+                     "retx_gate_open reason=fallback_timeout seq=%u age_ms=%lu",
+                     static_cast<unsigned int>(e.seq),
+                     static_cast<unsigned long>(ageMs));
+            // falls through to candidate selection
+          } else {
+            LOG_DEBUG("radio",
+                      "retx_blocked reason=awaiting_first_ack_summary seq=%u age_ms=%lu",
+                      static_cast<unsigned int>(e.seq),
+                      static_cast<unsigned long>(ageMs));
+            continue;
+          }
+        }
+      }
+    }
+
     if (bestIndex < 0 || e.lastSentMs < oldestLastSentMs) {
       bestIndex = static_cast<int8_t>(i);
       oldestLastSentMs = e.lastSentMs;
@@ -1067,6 +1124,9 @@ void TdmaRadioService::applyAckSummary(
               static_cast<unsigned int>(_cfg.nodeId));
     return;
   }
+
+  _lastAckSummarySessionMs = _tdmaClock.sessionNowMs();
+  _hasReceivedAckSummary = true;
 
   const uint8_t windowDepth =
       (_cfg.reliabilityWindowDepth > kMaxReliabilityWindow)

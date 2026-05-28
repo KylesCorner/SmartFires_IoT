@@ -124,6 +124,14 @@ TdmaConfig makeNodeTdmaCfg(uint8_t numSlots) {
       (cfg.reliabilityMode == TdmaReliabilityMode::StrictLinkAck);
   cfg.maxRetries = 3;
   cfg.ackTimeoutMs = 250;
+  cfg.queueDepth = 8;
+  cfg.reliabilityWindowDepth = 8;
+  cfg.reliabilityMaxAgeMs = 30000;
+  cfg.expectedAckIntervalMs = 4000;
+  cfg.retryWaitMultiplierPermille = 2000;
+  cfg.retryWaitMinMs = 4500;
+  cfg.retryWaitMaxMs = 10000;
+  cfg.requireAckSummaryBeforeFirstRetry = false;
   return cfg;
 }
 
@@ -355,16 +363,26 @@ void setup() {
            tdmaCfg.enableAppReliability ? "ON" : "OFF");
   LOG_INFO("tdma", "link_ack=%s",
            tdmaCfg.enableLinkAck ? "WAIT_FOR_ACK" : "FIRE_AND_FORGET");
+  LOG_INFO("tdma", "queue_depth=%u",
+           static_cast<unsigned int>(tdmaCfg.queueDepth));
   LOG_INFO("tdma", "retx_window=%u",
            static_cast<unsigned int>(tdmaCfg.reliabilityWindowDepth));
   LOG_INFO("tdma", "retx_max_attempts=%u",
            static_cast<unsigned int>(tdmaCfg.reliabilityMaxAttempts));
+  LOG_INFO("tdma", "retx_max_age_ms=%lu",
+           static_cast<unsigned long>(tdmaCfg.reliabilityMaxAgeMs));
   LOG_INFO("tdma", "link_retries=%u",
            static_cast<unsigned int>(tdmaCfg.maxRetries));
   LOG_INFO("tdma", "ack_timeout_ms=%lu",
            static_cast<unsigned long>(tdmaCfg.ackTimeoutMs));
   LOG_INFO("tdma", "telem_rel_mode=%s",
            reliabilityModeName(tdmaCfg.reliabilityMode));
+  LOG_INFO("tdma", "ack_paced_gate: expected_ack_interval_ms=%lu mul_permille=%u wait_min_ms=%lu wait_max_ms=%lu req_ack_before_retx=%s",
+           static_cast<unsigned long>(tdmaCfg.expectedAckIntervalMs),
+           static_cast<unsigned int>(tdmaCfg.retryWaitMultiplierPermille),
+           static_cast<unsigned long>(tdmaCfg.retryWaitMinMs),
+           static_cast<unsigned long>(tdmaCfg.retryWaitMaxMs),
+           tdmaCfg.requireAckSummaryBeforeFirstRetry ? "YES" : "NO");
 
   LOG_INFO("packet", "status_interval_ms=%lu",
            static_cast<unsigned long>(packetHandlerCfg.statusIntervalMs));

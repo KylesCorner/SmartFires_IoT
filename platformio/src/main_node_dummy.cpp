@@ -78,6 +78,14 @@ TdmaConfig makeDummyTdmaCfg() {
     // Keep retries visible in logs during packet-transmission isolation.
     cfg.maxRetries = 3;
     cfg.ackTimeoutMs = 250;
+    cfg.queueDepth = 8;
+    cfg.reliabilityWindowDepth = 8;
+    cfg.reliabilityMaxAgeMs = 30000;
+    cfg.expectedAckIntervalMs = 4000;
+    cfg.retryWaitMultiplierPermille = 2000;
+    cfg.retryWaitMinMs = 4500;
+    cfg.retryWaitMaxMs = 10000;
+    cfg.requireAckSummaryBeforeFirstRetry = false;
     return cfg;
 }
 
@@ -191,11 +199,19 @@ void setup() {
     Serial.print("[DUMMY] SYNC_STALE   = "); Serial.print(tdmaCfg.syncStaleMs / 1000); Serial.println(" s");
     Serial.print("[DUMMY] APP_RELIAB   = "); Serial.println(tdmaCfg.enableAppReliability ? "ON" : "OFF");
     Serial.print("[DUMMY] LINK_ACK     = "); Serial.println(tdmaCfg.enableLinkAck ? "WAIT_FOR_ACK" : "FIRE_AND_FORGET");
+    Serial.print("[DUMMY] QUEUE_DEPTH  = "); Serial.println(tdmaCfg.queueDepth);
     Serial.print("[DUMMY] RETX_WINDOW  = "); Serial.println(tdmaCfg.reliabilityWindowDepth);
     Serial.print("[DUMMY] RETX_MAX_ATT = "); Serial.println(tdmaCfg.reliabilityMaxAttempts);
+    Serial.print("[DUMMY] RETX_MAX_AGE = "); Serial.print(tdmaCfg.reliabilityMaxAgeMs); Serial.println(" ms");
     Serial.print("[DUMMY] LINK_RETRIES = "); Serial.println(tdmaCfg.maxRetries);
     Serial.print("[DUMMY] ACK_TIMEOUT  = "); Serial.print(tdmaCfg.ackTimeoutMs); Serial.println(" ms");
     Serial.print("[DUMMY] TELEM_MODE   = "); Serial.println(reliabilityModeName(tdmaCfg.reliabilityMode));
+    Serial.println("[DUMMY] --- ACK-paced retry gate ---");
+    Serial.print("[DUMMY] ACK_INTERVAL = "); Serial.print(tdmaCfg.expectedAckIntervalMs); Serial.println(" ms");
+    Serial.print("[DUMMY] RETRY_MUL    = "); Serial.print(tdmaCfg.retryWaitMultiplierPermille); Serial.println("/1000");
+    Serial.print("[DUMMY] RETRY_MIN    = "); Serial.print(tdmaCfg.retryWaitMinMs); Serial.println(" ms");
+    Serial.print("[DUMMY] RETRY_MAX    = "); Serial.print(tdmaCfg.retryWaitMaxMs); Serial.println(" ms");
+    Serial.print("[DUMMY] REQ_ACK_1ST  = "); Serial.println(tdmaCfg.requireAckSummaryBeforeFirstRetry ? "YES" : "NO");
     Serial.println("========================================");
 
     if (!app.begin()) {

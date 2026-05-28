@@ -40,6 +40,15 @@ struct TdmaConfig {
   uint32_t reliabilityFreshTrafficHoldoffMs = 2000;
   TdmaReliabilityMode reliabilityMode = TdmaReliabilityMode::StrictLinkAck;
 
+  // ACK-paced retry gate (APP_ACK_SUMMARY mode only; logic applied in Phase 2).
+  // retry_wait_ms = clamp(expectedAckIntervalMs * retryWaitMultiplierPermille / 1000,
+  //                       retryWaitMinMs, retryWaitMaxMs)
+  uint32_t expectedAckIntervalMs = 4000;          // matches edge-receiver --ack-interval 4.0 default
+  uint16_t retryWaitMultiplierPermille = 2000;     // 2.0x => 8000 ms at 4 s interval
+  uint32_t retryWaitMinMs = 4500;                  // floor: one interval + 500 ms jitter margin
+  uint32_t retryWaitMaxMs = 10000;                 // ceiling: 2.5 intervals
+  bool requireAckSummaryBeforeFirstRetry = false;  // opt-in: gate first retry on observed ACK summary
+
   static TdmaConfig tdmaCfg(uint8_t nodeId_ = 1, uint8_t baseAddr_ = 0x01,
                             uint8_t numSlots_ = 4, uint32_t slotWidthMs_ = 900,
                             uint32_t guardMs_ = 20,
