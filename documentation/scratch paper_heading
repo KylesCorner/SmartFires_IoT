@@ -1,0 +1,19 @@
+Facing me (North):
+Heading: 90.5
+mag_xyz=[802,-898,2310]
+
+90 degrees counter clockwise:
+Heading: 297.8
+mag_xyz=[937,297,2443]
+
+90 degrees CC from that:
+Heading: 266.4
+mag_xyz=[-151,852,2083]
+
+90 degrees CC from that:
+Heading: 149.2
+mag_xyz=[-571,-831,2685]
+
+Facing me again, should be the same as first:
+Heading: 43.7
+mag_xyz=[952,-847,2026]
