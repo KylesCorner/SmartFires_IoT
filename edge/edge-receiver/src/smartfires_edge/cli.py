@@ -31,10 +31,9 @@ from smartfires_edge.uart_receiver import FrameReceiver
 HELP_TEXT: dict[str, str] = {
     "calibrate": "calibrate node <id> | cal <id>",
     "reset": "reset node <id> [hard]",
-    "list": "list nodes | list calibrations",
+    "list": "list nodes",
     "save": "save session",
     "load": "load session",
-    "clear": "clear calibration <id> | clear calibrations",
     "help": "help [command]",
     "quit": "quit | exit",
 }
@@ -47,8 +46,6 @@ class PendingCommand:
     sent_at: float
     ack_warned: bool = False
     duration_s: int = 60
-    waiting_calibration: bool = False
-    calibration_deadline: float = 0.0
 
 
 class CliRuntime:
@@ -82,17 +79,8 @@ class CliRuntime:
             for pending in reversed(self.pending_commands):
                 if pending.node_id == node_id and pending.cmd_type == cmd_type and not pending.ack_warned:
                     pending.ack_warned = True
-                    if cmd_type == PKT_CMD_CALIBRATE:
-                        pending.waiting_calibration = True
-                        pending.calibration_deadline = time.time() + pending.duration_s + 15.0
                     return pending
         return None
-
-    def complete_calibration_wait(self, node_id: int) -> None:
-        with self.state_lock:
-            for pending in self.pending_commands:
-                if pending.node_id == node_id and pending.waiting_calibration:
-                    pending.waiting_calibration = False
 
     def collect_timeout_warnings(self) -> list[str]:
         warnings: list[str] = []
@@ -104,20 +92,14 @@ class CliRuntime:
                     warnings.append(
                         f"[Warning] No CMD_ACK from node {pending.node_id} after 5s for cmd=0x{pending.cmd_type:02x}."
                     )
-                if pending.waiting_calibration and now >= pending.calibration_deadline:
-                    pending.waiting_calibration = False
-                    warnings.append(
-                        f"[Warning] No CALIBRATION_DATA from node {pending.node_id} within timeout."
-                    )
         return warnings
 
 
 def _format_nodes(session: SessionManager) -> list[str]:
     snap = session.snapshot()
-    lines = ["node_id uid_hash         last_seen  calib heading"]
+    lines = ["node_id uid_hash         last_seen  heading        accuracy"]
     node_map = snap.get("node_id_to_uid_hash", {})
     node_status = snap.get("node_status", {})
-    calibrations = snap.get("calibrations", {})
 
     all_node_ids = sorted(
         node_id
@@ -129,32 +111,15 @@ def _format_nodes(session: SessionManager) -> list[str]:
         status = node_status.get(node_id, {})
         last_seen = status.get("last_seen", "--")
         heading_value = status.get("heading_true_deg", "--")
-        heading = f"{heading_value}°" if heading_value != "--" else "--"
+        heading = f"{heading_value:.1f}°" if isinstance(heading_value, float) else "--"
+        acc_value = status.get("heading_accuracy_deg", "--")
+        accuracy = f"±{acc_value:.2f}°" if isinstance(acc_value, float) else "--"
         uid_str = f"0x{uid_hash:08x}" if uid_hash is not None else "--"
-        calib = "valid" if (uid_hash is not None and uid_hash in calibrations) else "none"
         lines.append(
-            f"{node_id:<7} {uid_str:<16} {last_seen!s:<10} {calib:<5} {heading}"
+            f"{node_id:<7} {uid_str:<16} {last_seen!s:<10} {heading:<14} {accuracy}"
         )
     if len(lines) == 1:
         lines.append("(no nodes seen)")
-    return lines
-
-
-def _format_calibrations(session: SessionManager) -> list[str]:
-    snap = session.snapshot()
-    lines = ["uid_hash sample_count timestamp eigenvalues"]
-    calibrations = snap.get("calibrations", {})
-    if not calibrations:
-        lines.append("(no calibrations)")
-        return lines
-
-    for uid_hash in sorted(calibrations.keys()):
-        calib = calibrations[uid_hash]
-        eig = calib.get("eigenvalues", [])
-        eig_txt = ",".join(f"{float(v):.3f}" for v in eig)
-        lines.append(
-            f"0x{uid_hash:08x} {calib.get('sample_count', 0):<12} {calib.get('timestamp', '--'):<10} [{eig_txt}]"
-        )
     return lines
 
 
@@ -180,8 +145,6 @@ def _rx_payload_text(event: dict[str, Any]) -> str:
         payload = event["awaken"]
     elif event.get("status"):
         payload = event["status"]
-    elif event.get("calibration_data"):
-        payload = event["calibration_data"]
     elif event.get("cmd_ack"):
         payload = event["cmd_ack"]
     elif event.get("packets"):
@@ -217,12 +180,10 @@ def _process_command(line: str, runtime: CliRuntime, session: SessionManager) ->
         return
 
     if cmd == "list":
-        if len(tokens) < 2:
-            runtime.log("Usage: list nodes | list calibrations")
+        if len(tokens) < 2 or tokens[1].lower() != "nodes":
+            runtime.log("Usage: list nodes")
             return
-        target = tokens[1].lower()
-        lines = _format_nodes(session) if target == "nodes" else _format_calibrations(session)
-        for out in lines:
+        for out in _format_nodes(session):
             runtime.log(out)
         return
 
@@ -234,19 +195,6 @@ def _process_command(line: str, runtime: CliRuntime, session: SessionManager) ->
     if cmd == "load" and len(tokens) == 2 and tokens[1].lower() == "session":
         session.load()
         runtime.log("Session loaded.")
-        return
-
-    if cmd == "clear":
-        if len(tokens) >= 2 and tokens[1].lower() == "calibrations":
-            session.clear_calibrations()
-            runtime.log("All calibrations cleared.")
-            return
-        if len(tokens) == 3 and tokens[1].lower() == "calibration":
-            node_id = int(tokens[2])
-            ok = session.clear_calibration_by_node(node_id)
-            runtime.log("Calibration cleared." if ok else "No calibration found for node.")
-            return
-        runtime.log("Usage: clear calibration <id> | clear calibrations")
         return
 
     if cmd in ("cal", "calibrate"):
@@ -350,9 +298,8 @@ def _listener_worker(port: str, baud: int, runtime: CliRuntime, session: Session
                 awaken = event.get("awaken")
                 if awaken:
                     aw = session.on_awaken(int(awaken["node_id"]), int(awaken["uid_hash"]))
-                    msg = "calibration on file" if aw["has_calibration"] else "no calibration"
                     runtime.log(
-                        f"AWAKEN node={aw['node_id']} uid=0x{aw['uid_hash']:08x} {msg}"
+                        f"AWAKEN node={aw['node_id']} uid=0x{aw['uid_hash']:08x}"
                     )
 
                 status = event.get("status")
@@ -361,7 +308,7 @@ def _listener_worker(port: str, baud: int, runtime: CliRuntime, session: Session
                     heading = session.on_status(int(status["node_id"]), uid_hash, status)
                     if heading.get("computed"):
                         runtime.log(
-                            f"STATUS node={status['node_id']} heading={heading['heading_true_deg']} pitch={heading['pitch_deg']} roll={heading['roll_deg']}"
+                            f"STATUS node={status['node_id']} heading={heading['heading_true_deg']:.1f}°"
                         )
 
                 cmd_ack = event.get("cmd_ack")
@@ -372,26 +319,11 @@ def _listener_worker(port: str, baud: int, runtime: CliRuntime, session: Session
                         cmd_type=int(cmd_ack["cmd_type"]),
                         status=int(cmd_ack["status"]),
                     )
-                    pending = runtime.mark_cmd_ack(int(cmd_ack["node_id"]), int(cmd_ack["cmd_type"]))
+                    runtime.mark_cmd_ack(int(cmd_ack["node_id"]), int(cmd_ack["cmd_type"]))
                     runtime.log(
                         f"CMD_ACK node={cmd_ack['node_id']} cmd=0x{cmd_ack['cmd_type']:02x} status={cmd_ack['status']}"
                     )
-                    if pending and pending.waiting_calibration:
-                        runtime.log(
-                            f"Node {pending.node_id} acknowledged calibration; waiting up to {pending.duration_s + 15}s for CALIBRATION_DATA"
-                        )
 
-                calibration_data = event.get("calibration_data")
-                if calibration_data:
-                    runtime.complete_calibration_wait(int(calibration_data["node_id"]))
-                    result = session.on_calibration_data(
-                        node_id=int(calibration_data["node_id"]),
-                        uid_hash=int(calibration_data["uid_hash"]),
-                        stats=calibration_data,
-                    )
-                    runtime.log(
-                        f"CALIBRATION_DATA node={calibration_data['node_id']} samples={calibration_data['sample_count']} accepted={result.get('accepted')}"
-                    )
     except Exception as exc:
         runtime.log(f"[FATAL] Listener error: {exc}")
         runtime.stop_event.set()

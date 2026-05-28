@@ -231,16 +231,9 @@ def run_receive(
                 uid_hash = awaken.get("uid_hash")
                 if uid_hash is not None:
                     aw = session_manager.on_awaken(int(hdr_node), int(uid_hash))
-                    if aw["has_calibration"]:
-                        print(
-                            f"[EDGE][AWAKEN] node={aw['node_id']} uid=0x{aw['uid_hash']:08x} "
-                            "calibration=on_file"
-                        )
-                    else:
-                        print(
-                            f"[EDGE][AWAKEN] node={aw['node_id']} uid=0x{aw['uid_hash']:08x} "
-                            "calibration=missing suggest='calibrate node <id>'"
-                        )
+                    print(
+                        f"[EDGE][AWAKEN] node={aw['node_id']} uid=0x{aw['uid_hash']:08x}"
+                    )
                 print(
                     f"[EDGE][AWAKEN] node={hdr_node} seq={hdr_seq} "
                     f"action=send_time_sync"
@@ -304,8 +297,6 @@ def run_receive(
                     "battery_pct": status.get("battery_pct"),
                     "uid_hash": f"0x{uid_hash:08x}" if isinstance(uid_hash, int) else "",
                     "heading_true_deg": heading.get("heading_true_deg") if heading.get("computed") else "",
-                    "pitch_deg": heading.get("pitch_deg") if heading.get("computed") else "",
-                    "roll_deg": heading.get("roll_deg") if heading.get("computed") else "",
                     "jetson_wind_mps": "",
                     "jetson_wind_dir_deg": "",
                 }
