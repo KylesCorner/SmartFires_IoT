@@ -77,10 +77,21 @@ SmartFires_IoT/
 │   ├── anemometer_read.py
 │   └── edge-receiver/
 ├── documentation/
-│   ├── BANDWIDTH_SCALING.md
-│   ├── BINARY_PACKET_PIPELINE.md
-│   ├── SOFTWARE_DESIGN.md
-│   └── SOFTWARE_DESIGN_DIAGRAM.md
+│   ├── README.md                      — doc index
+│   ├── SOFTWARE_DESIGN.md             — this file
+│   ├── SOFTWARE_DESIGN_DIAGRAM.md
+│   ├── Current_Architecture/          — subsystem deep-dives (current state)
+│   │   ├── TDMA_PROTOCOL.md
+│   │   ├── PACKET_RELIABILITY.md
+│   │   ├── DUTY_CYCLING.md
+│   │   ├── UART_JETSON_BRIDGE.md
+│   │   └── BANDWIDTH_SCALING.md
+│   ├── User_Reference/                — how-to guides
+│   │   ├── FLASHING.md
+│   │   ├── DEBUG_FILTER.md
+│   │   ├── JETSON_CHEATSHEET.md
+│   │   └── NETWORK_TEST.md
+│   └── Completed_Plans/               — historical design docs
 ├── CLAUDE.md
 └── README.md
 ```
@@ -252,24 +263,27 @@ Base to Jetson UART frames wrap received LoRa payloads with:
 - payload bytes
 - CRC-8/MAXIM
 
-Detailed field layouts are maintained in `documentation/BINARY_PACKET_PIPELINE.md` and `platformio/include/telemetry/BinaryPacket.h`.
+Detailed field layouts are maintained in `documentation/Completed_Plans/BINARY_PACKET_PIPELINE.md` and `platformio/include/telemetry/BinaryPacket.h`. For the current reliability model see `documentation/Current_Architecture/PACKET_RELIABILITY.md`.
 
 ## Build Targets
 
 The current PlatformIO environments are:
 
-| Environment | Purpose |
-| --- | --- |
-| `native` | host-based unit tests |
-| `feather_m0_lora_node` | remote telemetry node firmware |
-| `feather_m0_lora` | base station firmware |
+| Environment | Purpose | Key flags |
+| --- | --- | --- |
+| `native` | host-based unit tests | `UNIT_TEST` |
+| `feather_m0_lora_node` | real sensor node firmware | `LORA_NODE=1` `NUM_SLOTS=4` `SMARTFIRES_TDMA_RELIABILITY_MODE=1` |
+| `feather_m0_lora_node_debug` | debug node (default env, debug filter) | same as node + `SMARTFIRES_STATUS_INTERVAL_MS=1000` |
+| `feather_m0_lora_node_dummy` | synthetic-data test node | `LORA_NODE=1` `NODE_ID=2` `SMARTFIRES_DUMMY_NODE=1` |
+| `feather_m0_lora_base` | base station firmware | `LORA_BASE=1` |
+| `feather_m0_lora_sniffer` | passive LoRa packet monitor | `SMARTFIRES_LORA_SNIFFER=1` |
 
 Key compile-time flags:
 
-- `NODE_ID` identifies a node uniquely
-- `NUM_SLOTS` must match across all deployed nodes
-- `LORA_NODE` selects node firmware mode
-- `LORA_BASE` selects base station firmware mode
+- `NODE_ID` — overrides runtime uid_hash node identity for dummy/test nodes; real nodes derive identity from the SAMD21 serial number
+- `NUM_SLOTS` — must match across all deployed node Feathers; mismatch causes slot collisions
+- `LORA_NODE` / `LORA_BASE` — selects node vs base firmware role in `main.cpp`
+- `SMARTFIRES_TDMA_RELIABILITY_MODE` — `0` = StrictLinkAck, `1` = AppLayerAckSummary (production default)
 
 ## Test Strategy
 

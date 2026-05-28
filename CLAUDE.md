@@ -123,14 +123,21 @@ SmartFires_IoT/
 │           ├── anemometer.py      ES-W302 polling module for integrated local wind logging
 │           └── main.py            CLI entrypoint (`smartfires-edge`)
 ├── documentation/
-│   ├── BINARY_PACKET_PIPELINE.md  Current pipeline design + remaining work
-│   ├── FLASHING.md
-│   ├── SOFTWARE_DESIGN.md
-│   ├── Heading_CLI_Development/   ← Active design work (read these before touching IMU/CLI/calibration)
-│   │   ├── DEPLOYMENT_SCHEDULE.md         Phased implementation plan (7 phases)
-│   │   ├── JETSON_CLI_AND_COMMAND_SYSTEM.md  CLI architecture, packet types, session design
-│   │   └── ORIENTATION_CALIBRATION_PLAN.md   Calibration math, wire format, Jetson heading pipeline
-│   └── old/                       Pre-refactor planning docs (for reference only)
+│   ├── README.md                  ← doc index — start here
+│   ├── SOFTWARE_DESIGN.md         Master system architecture
+│   ├── SOFTWARE_DESIGN_DIAGRAM.md
+│   ├── Current_Architecture/      ← subsystem deep-dives (current state)
+│   │   ├── TDMA_PROTOCOL.md       Slot timing, session clock, boot handshake, TX budget
+│   │   ├── PACKET_RELIABILITY.md  StrictLinkAck vs AppLayerAckSummary, pending window, ACK_SUMMARY
+│   │   ├── DUTY_CYCLING.md        DutyCycleController phases, config, trigger sensor
+│   │   ├── UART_JETSON_BRIDGE.md  Frame format, FrameReceiver, ingest loop, SessionManager
+│   │   └── BANDWIDTH_SCALING.md   Airtime math, node-count scaling table
+│   ├── User_Reference/            ← practical how-to guides
+│   │   ├── FLASHING.md
+│   │   ├── DEBUG_FILTER.md
+│   │   ├── JETSON_CHEATSHEET.md
+│   │   └── NETWORK_TEST.md
+│   └── Completed_Plans/           ← historical design docs (code is now authoritative)
 └── lora/                          Legacy experimental LoRa sketches (ignore)
 ```
 
@@ -140,17 +147,22 @@ SmartFires_IoT/
 
 | Environment | Board | Key flags | Purpose |
 |---|---|---|---|
-| `feather_m0_lora_node` | Feather M0 | `NODE_ID=1` `NUM_SLOTS=2` | Sensor node firmware |
-| `feather_m0_lora` | Feather M0 | — | Base station (not yet ported) |
+| `feather_m0_lora_node` | Feather M0 | `LORA_NODE=1` `NUM_SLOTS=4` `SMARTFIRES_TDMA_RELIABILITY_MODE=1` | Real sensor node firmware |
+| `feather_m0_lora_node_debug` | Feather M0 | same + `SMARTFIRES_STATUS_INTERVAL_MS=1000` | Default env; debug filter, faster STATUS |
+| `feather_m0_lora_node_dummy` | Feather M0 | `LORA_NODE=1` `NODE_ID=2` `SMARTFIRES_DUMMY_NODE=1` `NUM_SLOTS=4` | Synthetic-data test node |
+| `feather_m0_lora_base` | Feather M0 | `LORA_BASE=1` | Base station firmware |
+| `feather_m0_lora_sniffer` | Feather M0 | `SMARTFIRES_LORA_SNIFFER=1` | Passive LoRa packet monitor |
 | `native` | Desktop | `UNIT_TEST` | Unity unit tests — no hardware required |
+
+`NODE_ID` is **not** set for the real node environments — nodes derive their identity at runtime from the SAMD21 128-bit serial number via FNV-1a hash (`uid_hash`). The base station assigns `node_id` from this hash on first `AWAKEN`.
 
 ### Adding a node
 
-1. Duplicate `feather_m0_lora_node` in `platformio.ini`, set `NODE_ID=N`.
-2. **Update `NUM_SLOTS` to the new total node count in ALL node environments.**
+1. Add a new `[env:feather_m0_lora_node_N]` section in `platformio.ini` based on `feather_m0_lora_node`.
+2. **Update `NUM_SLOTS` to the new total node count in ALL node environments (including dummy and debug).**
 3. Reflash every node Feather — they all need the same `NUM_SLOTS` for TDMA to work.
 
-`NUM_SLOTS` is the only flag that must match across all node Feathers. `NODE_ID` is unique per device.
+`NUM_SLOTS` is the only flag that must match across all node Feathers.
 
 ### Common build commands (run from `platformio/`)
 
@@ -414,10 +426,10 @@ SmartFiresNodeApp::update() — sensing begins
 | edge-receiver packet bundle decode | **Done** | `smartfires_edge/packet.py` for 20-byte FullStatePayload + 12-byte deltas |
 | Jetson anemometer integration | **Done** | `smartfires-edge receive` can poll ES-W302 and log `jetson_wind_mps` + `jetson_wind_dir_deg` |
 | Remaining sensors (fillSnapshot) | **Pending** | Wind, GPS, SPS30, IMU — implement fillSnapshot() as each is wired in |
-| Heading/calibration system | **In design** | See `documentation/Heading_CLI_Development/` — Phase 0 is next |
+| Heading/calibration system | **In design** | Design docs in `documentation/Completed_Plans/` (DEPLOYMENT_SCHEDULE, JETSON_CLI, ORIENTATION_CALIBRATION) |
 
-Full details and design notes in `documentation/BINARY_PACKET_PIPELINE.md`.
-Sizing and scaling math tables are in `documentation/BANDWIDTH_SCALING.md`.
+Full details and design notes in `documentation/Completed_Plans/BINARY_PACKET_PIPELINE.md`.
+Sizing and scaling math tables are in `documentation/Current_Architecture/BANDWIDTH_SCALING.md`.
 
 ---
 
