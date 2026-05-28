@@ -54,11 +54,15 @@ Wraps a received LoRa payload with RSSI metadata.
 
 The 12-byte payload is `PktHeader (4 bytes) + TimeSyncPayload (8 bytes)`.
 
-### Jetson → Feather: ACK_SUMMARY frame (13 bytes)
+### Jetson → Feather: ACK_SUMMARY frame (legacy, 13 bytes)
 
 ```
 [0xAA][0x55][len=9][PKT_ACK_SUMMARY payload: 9 bytes][crc8]
 ```
+
+This frame format is kept here for protocol reference only. Standard-packet
+app reliability is now base-managed, so `SmartFiresBaseApp` rejects Jetson
+`ACK_SUMMARY` frames during normal operation.
 
 ### Jetson → Feather: command frames (CMD_CALIBRATE / CMD_RESET)
 
@@ -99,7 +103,6 @@ for event, receiver, ser in iter_packets(port, baud):
     # handle STATUS: log GPS, battery, heading; write CSV + JSONL
     # handle BUNDLE/FULL_STATE: expand deltas, write telemetry CSV rows
     # handle CMD_ACK: record in session
-    # periodic: send ACK_SUMMARY frames per tracked node
     # periodic: save packet-loss metrics
 ```
 
@@ -114,13 +117,12 @@ thread (`_time_sync_sender`) sends `TIME_SYNC` frames periodically at
 All writes to the serial port are serialised via `write_lock` (a
 `threading.Lock`) shared between the sync thread and the main receive loop.
 
-### ACK_SUMMARY Dispatch
+### ACK Ownership
 
-The ingest loop maintains `ack_state` per node. After each qualifying packet
-(`BUNDLE`, `FULL_STATE`, or `STATUS`) it updates the sliding-window state.
-Every `ack_interval_s` seconds (default 4 s), one `ACK_SUMMARY` frame is sent
-for each node that has received traffic since the last summary. See
-[PACKET_RELIABILITY.md](PACKET_RELIABILITY.md) for the full ACK mechanism.
+The Jetson ingest loop does not generate `ACK_SUMMARY` frames for standard
+telemetry. `STATUS`, `BUNDLE`, and `FULL_STATE` are forwarded upward for
+logging and visualization only. Standard-packet acknowledgement is handled
+entirely inside `SmartFiresBaseApp` on the Feather base station.
 
 ## Base Station Role (SmartFiresBaseApp)
 
@@ -130,13 +132,12 @@ decode telemetry beyond what is needed for routing:
 1. Receives LoRa packets from nodes via `recvfromAck()` (auto-ACKs at the link layer).
 2. Assigns `node_id` from `uid_hash` on the first `AWAKEN` (`findOrCreateNodeAssignment`).
 3. Wraps the LoRa payload with RSSI into a base UART frame and writes it to `Serial1`.
-4. Reads incoming Jetson UART frames and routes:
-   - `TIME_SYNC` → LoRa broadcast to `RH_BROADCAST_ADDRESS`
-   - `ACK_SUMMARY` → targeted LoRa send to the addressed node
-   - `CMD_CALIBRATE` / `CMD_RESET` → targeted LoRa send to the addressed node
+4. Reads incoming Jetson UART frames and routes `TIME_SYNC` to LoRa broadcast and `CMD_CALIBRATE` / `CMD_RESET` to targeted LoRa sends.
 5. Logs periodic health counters (received count, UART TX count) to the debug UART.
 
-The base station has no knowledge of bundle contents or sensor fields.
+The base station has no knowledge of bundle contents or sensor fields, but it
+does own app-layer reliability tracking and `ACK_SUMMARY` emission for
+standard packets.
 
 ## SessionManager (session.py)
 

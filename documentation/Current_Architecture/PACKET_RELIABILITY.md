@@ -44,7 +44,8 @@ no per-packet ACK wait). The base still auto-ACKs via RadioHead's receive path
 (`recvfromAck()`), but the node does not block on this.
 
 Reliability is recovered at the application layer through a **pending window**
-on the node and periodic **ACK_SUMMARY** frames from the Jetson.
+on the node and periodic **ACK_SUMMARY** frames generated locally by the base
+station firmware.
 
 ## App-Layer Reliability Mechanism
 
@@ -73,20 +74,12 @@ the entry is refreshed in place.
 When the window is full and a new entry must be added, the entry with the most
 retransmit attempts and greatest age is evicted first.
 
-### Jetson Side — ACK_SUMMARY
+### Base Side — ACK_SUMMARY
 
-The Jetson tracks received sequence numbers per node in a sliding window and
-periodically sends an `ACK_SUMMARY` frame to the base. The base forwards it
-to the target node over LoRa.
-
-The Jetson maintains `ack_state` per node:
-
-```python
-state = {
-    "base": <highest contiguous seq received>,
-    "received": {set of out-of-order seqs ahead of base, up to 16 ahead},
-}
-```
+`SmartFiresBaseApp` tracks received telemetry sequence numbers per node in a
+sliding window. Whenever it receives a standard telemetry packet (`STATUS`,
+`BUNDLE`, `FULL_STATE`), it updates the per-node tracker, marks the tracker
+dirty, and later emits a targeted `ACK_SUMMARY` in the base TDMA slot window.
 
 The `ACK_SUMMARY` wire format encodes this as:
 
@@ -98,9 +91,9 @@ AckSummaryPayload (5 bytes)
   _pad:         uint8_t
 ```
 
-ACK summaries are sent on a configurable interval (default `--ack-interval 4.0`
-seconds) for each node that has received traffic. One summary per node per
-interval.
+ACK summaries are paced on the base side with a small minimum flush interval
+and are only sent during the base slot window. The Jetson does not generate or
+forward standard-packet acknowledgements.
 
 ### Node Side — Applying ACK_SUMMARY
 
@@ -115,10 +108,10 @@ Sequence number comparison uses 8-bit modulo arithmetic:
 
 ## Reliability Boundary
 
-The Feather-to-Feather LoRa link owns reliability. The Jetson receives whatever
-survives and generates acknowledgements to help the node clean up its pending
-window. The Jetson does not complete the reliability exchange — it is not on
-the critical path for packet delivery.
+The Feather-to-Feather LoRa link owns reliability. The base station receives
+telemetry, updates its local ACK tracker, and sends `ACK_SUMMARY` packets back
+to the node. The Jetson receives forwarded telemetry and is not on the
+acknowledgement path for standard packets.
 
 ## History
 

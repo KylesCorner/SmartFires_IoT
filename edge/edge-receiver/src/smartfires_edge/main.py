@@ -18,7 +18,6 @@ def build_parser() -> argparse.ArgumentParser:
     recv.add_argument("--nodes", nargs="+", type=int, default=[1, 2])
     recv.add_argument("--metrics-interval", type=int, default=10)
     recv.add_argument("--sync-interval", type=int, default=600)
-    recv.add_argument("--ack-interval", type=float, default=4.0)
     recv.add_argument("--fsync-every-row", action="store_true")
     recv.add_argument("--raw-log", action="store_true")
     recv.add_argument("--anemometer-port", default=None)
@@ -33,7 +32,6 @@ def build_parser() -> argparse.ArgumentParser:
     visualize.add_argument("--port", default="/dev/ttyTHS1")
     visualize.add_argument("--baud", type=int, default=115200)
     visualize.add_argument("--sync-interval", type=int, default=600)
-    visualize.add_argument("--ack-interval", type=float, default=4.0)
     visualize.add_argument("--telemetry-rows", type=int, default=20)
 
     cli = sub.add_parser("cli", help="Interactive Jetson CLI")
@@ -56,7 +54,6 @@ def main() -> int:
             nodes=args.nodes,
             metrics_interval_s=args.metrics_interval,
             sync_interval_s=args.sync_interval,
-            ack_interval_s=args.ack_interval,
             fsync_every_row=args.fsync_every_row,
             raw_log=args.raw_log,
             anemometer_port=args.anemometer_port,
@@ -74,7 +71,6 @@ def main() -> int:
             port=args.port,
             baud=args.baud,
             sync_interval_s=args.sync_interval,
-            ack_interval_s=args.ack_interval,
             telemetry_rows_max=max(1, int(args.telemetry_rows)),
         )
 

@@ -7,8 +7,6 @@ from datetime import datetime, timezone
 import serial
 
 from smartfires_edge.ingest_service import (
-    _ack_state_mask,
-    _ack_state_update,
     _send_time_sync,
     _time_sync_sender,
 )
@@ -17,7 +15,6 @@ from smartfires_edge.packet import (
     PKT_BUNDLE,
     PKT_FULL_STATE,
     PKT_STATUS,
-    encode_ack_summary_frame,
 )
 from smartfires_edge.uart_receiver import iter_packets
 
@@ -113,15 +110,11 @@ def run_visualize(
     port: str,
     baud: int,
     sync_interval_s: int,
-    ack_interval_s: float,
     telemetry_rows_max: int,
 ) -> int:
     telemetry_rows: deque = deque(maxlen=telemetry_rows_max)
     status_by_node: dict[int, dict] = {}
 
-    ack_state: dict[int, dict] = {}
-    ack_seq = 0
-    next_ack_at = time.time() + ack_interval_s
     sync_state = {"next_seq": 0}
     session_start = time.time()
     session_id = int(session_start * 1000) & 0xFFFFFFFF
@@ -209,33 +202,6 @@ def run_visualize(
                         "pm10_ug_m3": _fmt_num(pkt.get("pm10_ug_m3"), 1),
                     }
                 )
-
-            if (
-                hdr_node is not None
-                and hdr_seq is not None
-                and pkt_type in (PKT_FULL_STATE, PKT_BUNDLE, PKT_STATUS)
-            ):
-                st = ack_state.setdefault(int(hdr_node), {"init": False, "base": 0, "received": set()})
-                _ack_state_update(st, int(hdr_seq))
-
-            now = time.time()
-            if now >= next_ack_at and ack_state:
-                for node_id, st in ack_state.items():
-                    if not st.get("init", False):
-                        continue
-                    frame = encode_ack_summary_frame(
-                        node_id=node_id,
-                        ack_base_seq=st["base"],
-                        ack_mask=_ack_state_mask(st),
-                        seq=ack_seq,
-                    )
-                    with write_lock:
-                        try:
-                            ser.write(frame)
-                        except serial.SerialException as exc:
-                            print(f"[VIS][ACK] write error: {exc}", file=sys.stderr)
-                    ack_seq = (ack_seq + 1) & 0xFF
-                next_ack_at = now + ack_interval_s
 
             _render_screen(port, baud, telemetry_rows, status_by_node)
 

@@ -15,8 +15,7 @@ smartfires-edge receive \
   --port /dev/ttyTHS1 \
   --baud 115200 \
   --data-dir /mnt/nvme_drive/data \
-  --sync-interval 600 \
-  --ack-interval 4.0
+  --sync-interval 600
 ```
 
 ### Enable Jetson Anemometer Logging
@@ -43,6 +42,9 @@ Those rows use `packet_type=status` and populate:
 - `battery_mv`
 - `battery_pct`
 
+Standard-packet app-layer reliability is owned by the base station firmware.
+The Jetson receiver only ingests forwarded LoRa traffic and sends `TIME_SYNC`.
+
 ### Packet Loss Summary
 
 ```bash
@@ -56,7 +58,6 @@ smartfires-edge visualize \
   --port /dev/ttyTHS1 \
   --baud 115200 \
   --sync-interval 600 \
-  --ack-interval 4.0 \
   --telemetry-rows 20
 ```
 

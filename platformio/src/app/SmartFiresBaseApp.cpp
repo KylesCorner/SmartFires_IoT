@@ -323,7 +323,9 @@ void SmartFiresBaseApp::processIncomingLoRa() {
                static_cast<unsigned long>(_cmdAckRxCount),
                static_cast<unsigned int>(hdr.node_id),
                static_cast<unsigned int>(hdr.seq));
-    } else if (validHeader && isTelemetryPacketType(hdr.pkt_type)) {
+    }
+
+    if (validHeader && isTelemetryPacketType(hdr.pkt_type)) {
       const bool ackTracked = handleTelemetryAckSummary(hdr.node_id, hdr.seq);
       LOG_INFO("base", "ack_track node=%u seq=%u pkt=%s tracked=%u",
                static_cast<unsigned int>(hdr.node_id),
@@ -731,22 +733,11 @@ bool SmartFiresBaseApp::handleJetsonCommandPayload(const uint8_t *payload, uint8
   }
 
   if (hdr.pkt_type == BinaryPacket::PKT_ACK_SUMMARY) {
-    BinaryPacket::PktHeader ignored;
-    BinaryPacket::AckSummaryPayload ack;
-    if (!BinaryPacket::decodeAckSummary(payload, len, ignored, ack)) {
-      LOG_WARN("base", "uart_cmd_reject type=ACK_SUMMARY reason=decode_failed len=%u",
-               static_cast<unsigned int>(len));
-      return false;
-    }
-    const bool ok = _radio.send(payload, len, ack.node_id);
-    _ackTxCount += ok ? 1u : 0u;
-    LOG_INFO("base",
-             "tx_ack_summary seq=%u node=%u base_seq=%u mask=0x%04X result=%s",
-             static_cast<unsigned int>(hdr.seq),
-             static_cast<unsigned int>(ack.node_id),
-             static_cast<unsigned int>(ack.ack_base_seq),
-             static_cast<unsigned int>(ack.ack_mask), ok ? "OK" : "FAIL");
-    return ok;
+    LOG_WARN(
+        "base",
+        "uart_cmd_reject type=ACK_SUMMARY reason=base_managed_app_reliability len=%u",
+        static_cast<unsigned int>(len));
+    return false;
   }
 
   if (hdr.pkt_type == BinaryPacket::PKT_CMD_CALIBRATE) {

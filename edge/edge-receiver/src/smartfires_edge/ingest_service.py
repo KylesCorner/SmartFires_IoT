@@ -17,7 +17,6 @@ from smartfires_edge.packet import (
     PKT_CMD_ACK,
     PKT_FULL_STATE,
     PKT_STATUS,
-    encode_ack_summary_frame,
     encode_time_sync_frame,
 )
 from smartfires_edge.packet_loss import PacketLossTracker
@@ -31,48 +30,6 @@ def _append_jsonl(path: Path, payload: dict) -> None:
         f.write(json.dumps(payload, sort_keys=True) + "\n")
         f.flush()
         os.fsync(f.fileno())
-
-
-def _seq_ahead(base: int, seq: int) -> int:
-    return (seq - base) & 0xFF
-
-
-def _ack_state_update(state: dict, seq: int) -> None:
-    if not state.get("init", False):
-        state["base"] = (seq - 1) & 0xFF
-        state["init"] = True
-
-    received = state.setdefault("received", set())
-    received.add(seq & 0xFF)
-
-    base = state["base"]
-    while True:
-        nxt = (base + 1) & 0xFF
-        if nxt not in received:
-            break
-        received.remove(nxt)
-        base = nxt
-    state["base"] = base
-
-    to_drop = []
-    for s in received:
-        d = _seq_ahead(base, s)
-        if d == 0 or d > 16:
-            to_drop.append(s)
-    for s in to_drop:
-        received.discard(s)
-
-
-def _ack_state_mask(state: dict) -> int:
-    if not state.get("init", False):
-        return 0
-    base = state["base"]
-    mask = 0
-    for s in state.get("received", set()):
-        d = _seq_ahead(base, s)
-        if 1 <= d <= 16:
-            mask |= 1 << (d - 1)
-    return mask
 
 
 def _pkt_type_name(pkt_type: int | None) -> str:
@@ -149,7 +106,6 @@ def run_receive(
     nodes: list[int],
     metrics_interval_s: int,
     sync_interval_s: int,
-    ack_interval_s: float,
     fsync_every_row: bool,
     raw_log: bool,
     anemometer_port: str | None,
@@ -165,9 +121,6 @@ def run_receive(
     logger = DurableCsvLogger(telemetry_dir, fsync_every_row=fsync_every_row)
     tracker = PacketLossTracker(nodes)
     node_gps: dict[int, tuple[float, float]] = {}
-    ack_state: dict[int, dict] = {}
-    ack_seq = 0
-    next_ack_at = time.time() + ack_interval_s
     sync_state = {"next_seq": 0}
     session_manager = SessionManager()
 
@@ -388,39 +341,6 @@ def run_receive(
                     f"wind={pkt['wind_mps']:.2f} PM2.5={pkt['pm2_5_ug_m3']:.1f} "
                     f"rssi={pkt['rssi']:4d}"
                 )
-
-            if (
-                hdr_node is not None
-                and hdr_seq is not None
-                and pkt_type in (PKT_FULL_STATE, PKT_BUNDLE, PKT_STATUS)
-            ):
-                st = ack_state.setdefault(int(hdr_node), {"init": False, "base": 0, "received": set()})
-                _ack_state_update(st, int(hdr_seq))
-
-            now = time.time()
-            if now >= next_ack_at and ack_state:
-                for node_id, st in ack_state.items():
-                    if not st.get("init", False):
-                        continue
-                    frame = encode_ack_summary_frame(
-                        node_id=node_id,
-                        ack_base_seq=st["base"],
-                        ack_mask=_ack_state_mask(st),
-                        seq=ack_seq,
-                    )
-                    with write_lock:
-                        try:
-                            ser.write(frame)
-                        except serial.SerialException as exc:
-                            print(f"[ACK_SUM] write error: {exc}", file=sys.stderr)
-                        else:
-                            print(
-                                f"[EDGE][ACK-TX#{ack_seq:03d}] node={node_id} "
-                                f"base_seq={st['base']} mask=0x{_ack_state_mask(st):04x} "
-                                f"bytes={len(frame)}"
-                            )
-                    ack_seq = (ack_seq + 1) & 0xFF
-                next_ack_at = now + ack_interval_s
 
             now = time.monotonic()
             if now - last_metrics_write >= metrics_interval_s:
