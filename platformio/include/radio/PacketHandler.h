@@ -62,6 +62,7 @@ public:
     // Force STATUS to be sent on the next push (call on new session_id from TIME_SYNC).
     void resetStatusTimer();
     void setNodeId(uint8_t nodeId);
+    void setBundleEncodingEnabled(bool enabled);
 
     // Full reset (new node session / reboot).
     void reset();
@@ -85,11 +86,13 @@ private:
     bool     _statusReady       = false;
     uint8_t  _statusBuf[BinaryPacket::kStatusLoRaSize] = {};
     uint8_t  _statusLen         = 0;
+    bool     _bundleEncodingEnabled = true;
 
     static BinaryPacket::FullStatePayload quantize(const SensorSnapshot &snap);
     static BinaryPacket::DeltaPayload     makeDelta(
         const BinaryPacket::FullStatePayload &ref,
         const BinaryPacket::FullStatePayload &sample);
 
+    void resetBundleState();
     void tryEncodeStatus(const SensorSnapshot &snap);
 };

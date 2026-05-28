@@ -83,6 +83,29 @@ SFDBG_SRC=base,app,calibration SFDBG_MIN_LEVEL=D pio device monitor -e feather_m
 SFDBG_SRC=base,app,calibration pio device monitor -e feather_m0_lora_base
 ```
 
+To confirm whether the base is attempting to send app-layer ACK summaries,
+watch only the `base` stream at info level. Each transmit attempt logs
+`tx_ack_summary_local`:
+
+```bash
+SFDBG_SRC=base SFDBG_MIN_LEVEL=I SFDBG_SHOW_RAW=0 pio device monitor -e feather_m0_lora_base | tee /tmp/sf-base-ack.log
+```
+
+To confirm whether the node is receiving app-layer ACK summaries from the base,
+watch only the `radio` stream at info level. A successful receive logs
+`ack_summary_received`; a failed inbound decode logs `receive_failed`:
+
+```bash
+SFDBG_SRC=radio SFDBG_MIN_LEVEL=I SFDBG_SHOW_RAW=0 pio device monitor -e feather_m0_lora_node_debug | tee /tmp/sf-node-ack.log
+```
+
+If you want the surrounding packet context as well, raise the same stream to
+debug level so you also capture `rx_lora` lines:
+
+```bash
+SFDBG_SRC=radio SFDBG_MIN_LEVEL=D SFDBG_SHOW_RAW=0 pio device monitor -e feather_m0_lora_node_debug | tee /tmp/sf-node-ack.log
+```
+
 
 
 Monitor Node Reliability and Packets:

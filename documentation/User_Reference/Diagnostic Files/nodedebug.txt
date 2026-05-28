@@ -1,0 +1,928 @@
+13:47:27 [D] node=164 src=radio        seq=8773   t=189829     retx_blocked reason=awaiting_ack_window seq=37 age_ms=7158 wait_ms=8000
+13:47:27 [D] node=164 src=radio        seq=8774   t=189856     retx_blocked reason=awaiting_ack_window seq=37 age_ms=7185 wait_ms=8000
+13:47:27 [D] node=164 src=radio        seq=8775   t=189883     retx_blocked reason=awaiting_ack_window seq=37 age_ms=7212 wait_ms=8000
+13:47:28 [D] node=164 src=radio        seq=8776   t=189910     retx_blocked reason=awaiting_ack_window seq=37 age_ms=7238 wait_ms=8000
+13:47:28 [D] node=164 src=radio        seq=8777   t=189937     retx_blocked reason=awaiting_ack_window seq=37 age_ms=7265 wait_ms=8000
+13:47:28 [D] node=164 src=radio        seq=8778   t=189964     retx_blocked reason=awaiting_ack_window seq=37 age_ms=7292 wait_ms=8000
+13:47:28 [D] node=164 src=radio        seq=8779   t=189991     retx_blocked reason=awaiting_ack_window seq=37 age_ms=7319 wait_ms=8000
+13:47:28 [D] node=164 src=radio        seq=8780   t=190018     retx_blocked reason=awaiting_ack_window seq=37 age_ms=7346 wait_ms=8000
+13:47:28 [D] node=164 src=radio        seq=8781   t=190045     retx_blocked reason=awaiting_ack_window seq=37 age_ms=7374 wait_ms=8000
+13:47:28 [D] node=164 src=radio        seq=8782   t=190072     retx_blocked reason=awaiting_ack_window seq=37 age_ms=7400 wait_ms=8000
+13:47:28 [D] node=164 src=radio        seq=8783   t=190099     retx_blocked reason=awaiting_ack_window seq=37 age_ms=7427 wait_ms=8000
+13:47:28 [D] node=164 src=radio        seq=8784   t=190126     retx_blocked reason=awaiting_ack_window seq=37 age_ms=7454 wait_ms=8000
+13:47:28 [D] node=164 src=radio        seq=8785   t=190153     retx_blocked reason=awaiting_ack_window seq=37 age_ms=7481 wait_ms=8000
+13:47:28 [D] node=164 src=packet       seq=8804   t=190277     [seq jump 8785->8804] push_start session_ms=1117666 sensor_flags=0x000B has_ref=1 delta_count=4
+13:47:28 [D] node=164 src=packet       seq=8805   t=190279     bundle_delta_added count=5/14
+13:47:28 [D] node=164 src=packet       seq=8807   t=190282     [seq jump 8805->8807] handler_push_done status_ready=0 bundle_ready=0 push_bundle_ready=0
+13:47:28 [D] node=164 src=radio        seq=8810   t=190310     [seq jump 8807->8810] retx_blocked reason=awaiting_ack_window seq=37 age_ms=7638 wait_ms=8000
+13:47:28 [D] node=164 src=radio        seq=8811   t=190336     retx_blocked reason=awaiting_ack_window seq=37 age_ms=7665 wait_ms=8000
+13:47:28 [D] node=164 src=radio        seq=8812   t=190363     retx_blocked reason=awaiting_ack_window seq=37 age_ms=7692 wait_ms=8000
+13:47:28 [D] node=164 src=packet       seq=8832   t=190792     [seq jump 8812->8832] push_start session_ms=1118180 sensor_flags=0x000B has_ref=1 delta_count=5
+13:47:28 [D] node=164 src=packet       seq=8833   t=190793     bundle_delta_added count=6/14
+13:47:28 [D] node=164 src=packet       seq=8835   t=190796     [seq jump 8833->8835] handler_push_done status_ready=0 bundle_ready=0 push_bundle_ready=0
+13:47:29 [D] node=164 src=packet       seq=8855   t=191293     [seq jump 8835->8855] push_start session_ms=1118681 sensor_flags=0x000B has_ref=1 delta_count=6
+13:47:29 [D] node=164 src=packet       seq=8856   t=191295     bundle_delta_added count=7/14
+13:47:29 [D] node=164 src=packet       seq=8858   t=191297     [seq jump 8856->8858] handler_push_done status_ready=0 bundle_ready=0 push_bundle_ready=0
+13:47:29 [D] node=164 src=packet       seq=8880   t=191803     [seq jump 8858->8880] push_start session_ms=1119191 sensor_flags=0x000B has_ref=1 delta_count=7
+13:47:29 [D] node=164 src=packet       seq=8881   t=191804     bundle_delta_added count=8/14
+13:47:29 [D] node=164 src=packet       seq=8883   t=191807     [seq jump 8881->8883] handler_push_done status_ready=0 bundle_ready=0 push_bundle_ready=0
+13:47:30 [D] node=164 src=packet       seq=8904   t=192311     [seq jump 8883->8904] push_start session_ms=1119700 sensor_flags=0x000B has_ref=1 delta_count=8
+13:47:30 [D] node=164 src=packet       seq=8905   t=192313     bundle_delta_added count=9/14
+13:47:30 [D] node=164 src=packet       seq=8907   t=192316     [seq jump 8905->8907] handler_push_done status_ready=0 bundle_ready=0 push_bundle_ready=0
+13:47:30 [D] node=164 src=packet       seq=8928   t=192815     [seq jump 8907->8928] push_start session_ms=1120203 sensor_flags=0x000B has_ref=1 delta_count=9
+13:47:30 [I] node=164 src=packet       seq=8929   t=192817     status_encoded len=21 node=2 flags=0x06 session_ms=1120203
+13:47:30 [D] node=164 src=packet       seq=8930   t=192818     status_imu_payload node=2 heading_deg=357.3 accuracy_deg=0.12
+13:47:30 [D] node=164 src=packet       seq=8931   t=192820     bundle_delta_added count=10/14
+13:47:30 [D] node=164 src=packet       seq=8933   t=192823     [seq jump 8931->8933] handler_push_done status_ready=1 bundle_ready=0 push_bundle_ready=0
+13:47:30 [I] node=164 src=radio        seq=8934   t=192824     enqueue count=18 pkt=STATUS seq=39 len=21 q=1/8 pending=1 dropped=0
+13:47:30 [I] node=164 src=packet       seq=8935   t=192826     enqueue_ok pkt=STATUS seq=39 len=21 queue_depth=1
+13:47:31 [D] node=164 src=radio        seq=8938   t=193131     [seq jump 8935->8938] tx_noack pkt=STATUS seq=39 len=21 slot=1245
+13:47:31 [D] node=164 src=radio        seq=8939   t=193132     pending_add seq=39 index=1 len=21 pending=2
+13:47:31 [I] node=164 src=radio        seq=8940   t=193134     tx_sent count=28 pkt=STATUS seq=39 len=21 slot=1245 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+13:47:31 [D] node=164 src=packet       seq=8959   t=193335     [seq jump 8940->8959] push_start session_ms=1120723 sensor_flags=0x000B has_ref=1 delta_count=10
+13:47:31 [D] node=164 src=packet       seq=8960   t=193336     bundle_delta_added count=11/14
+13:47:31 [D] node=164 src=packet       seq=8962   t=193339     [seq jump 8960->8962] handler_push_done status_ready=0 bundle_ready=0 push_bundle_ready=0
+13:47:31 [D] node=164 src=radio        seq=8965   t=193399     [seq jump 8962->8965] rx_lora from=1 pkt=ACK_SUMMARY seq=116 len=9 rssi=-67
+13:47:31 [I] node=164 src=radio        seq=8966   t=193400     ack_summary_received count=17 node=2 base_seq=7 mask=0xA54A
+13:47:31 [I] node=164 src=radio        seq=8967   t=193402     ack_summary_needs_retx seq=37 next_attempt=2 age_ms=10730 base_seq=7 mask=0xA54A q=0/8 pending=2 dropped=0
+13:47:31 [I] node=164 src=radio        seq=8968   t=193404     ack_summary_needs_retx seq=39 next_attempt=2 age_ms=272 base_seq=7 mask=0xA54A q=0/8 pending=2 dropped=0
+13:47:31 [D] node=164 src=packet       seq=8988   t=193859     [seq jump 8968->8988] push_start session_ms=1121248 sensor_flags=0x000B has_ref=1 delta_count=11
+13:47:31 [D] node=164 src=packet       seq=8989   t=193861     bundle_delta_added count=12/14
+13:47:31 [D] node=164 src=packet       seq=8991   t=193864     [seq jump 8989->8991] handler_push_done status_ready=0 bundle_ready=0 push_bundle_ready=0
+13:47:32 [D] node=164 src=packet       seq=9011   t=194361     [seq jump 8991->9011] push_start session_ms=1121749 sensor_flags=0x000B has_ref=1 delta_count=12
+13:47:32 [D] node=164 src=packet       seq=9012   t=194362     bundle_delta_added count=13/14
+13:47:32 [D] node=164 src=packet       seq=9014   t=194365     [seq jump 9012->9014] handler_push_done status_ready=0 bundle_ready=0 push_bundle_ready=0
+13:47:32 [D] node=164 src=packet       seq=9036   t=194870     [seq jump 9014->9036] push_start session_ms=1122258 sensor_flags=0x000B has_ref=1 delta_count=13
+13:47:32 [D] node=164 src=packet       seq=9037   t=194871     bundle_delta_added count=14/14
+13:47:32 [I] node=164 src=packet       seq=9038   t=194873     bundle_encoded len=194 node=2
+13:47:32 [D] node=164 src=packet       seq=9040   t=194876     [seq jump 9038->9040] handler_push_done status_ready=0 bundle_ready=1 push_bundle_ready=1
+13:47:33 [D] node=164 src=packet       seq=9061   t=195380     [seq jump 9040->9061] push_start session_ms=1122768 sensor_flags=0x000B has_ref=0 delta_count=0
+13:47:33 [D] node=164 src=packet       seq=9062   t=195382     bundle_ref_set session_ms=1122768
+13:47:33 [D] node=164 src=packet       seq=9064   t=195385     [seq jump 9062->9064] handler_push_done status_ready=0 bundle_ready=0 push_bundle_ready=0
+13:47:33 [D] node=164 src=packet       seq=9085   t=195884     [seq jump 9064->9085] push_start session_ms=1123272 sensor_flags=0x000B has_ref=1 delta_count=0
+13:47:33 [D] node=164 src=packet       seq=9086   t=195885     bundle_delta_added count=1/14
+13:47:33 [D] node=164 src=packet       seq=9088   t=195888     [seq jump 9086->9088] handler_push_done status_ready=0 bundle_ready=0 push_bundle_ready=0
+13:47:34 [D] node=164 src=packet       seq=9109   t=196391     [seq jump 9088->9109] push_start session_ms=1123780 sensor_flags=0x000B has_ref=1 delta_count=1
+13:47:34 [D] node=164 src=packet       seq=9110   t=196393     bundle_delta_added count=2/14
+13:47:34 [D] node=164 src=packet       seq=9112   t=196396     [seq jump 9110->9112] handler_push_done status_ready=0 bundle_ready=0 push_bundle_ready=0
+13:47:34 [I] node=164 src=radio        seq=9115   t=196751     [seq jump 9112->9115] retx_gate_open reason=ack_window_elapsed seq=37 age_ms=14080 wait_ms=8000
+13:47:34 [D] node=164 src=radio        seq=9116   t=196753     retx_blocked reason=awaiting_ack_window seq=39 age_ms=3619 wait_ms=8000
+13:47:34 [D] node=164 src=radio        seq=9117   t=196755     retx_candidate seq=37 index=0 len=21 attempts=1
+13:47:34 [D] node=164 src=radio        seq=9118   t=196756     tx_noack pkt=STATUS seq=37 len=21 slot=1249
+13:47:34 [I] node=164 src=radio        seq=9119   t=196758     retx_sent count=11 pkt=STATUS seq=37 len=21 attempt=2 slot=1249 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+13:47:34 [D] node=164 src=radio        seq=9120   t=196760     retx_mark_sent seq=37 index=0 attempts=2
+13:47:34 [D] node=164 src=radio        seq=9121   t=196761     retx_blocked reason=awaiting_ack_window seq=39 age_ms=3629 wait_ms=8000
+13:47:34 [D] node=164 src=radio        seq=9122   t=196788     retx_blocked reason=awaiting_ack_window seq=39 age_ms=3656 wait_ms=8000
+13:47:35 [D] node=164 src=packet       seq=9142   t=196916     [seq jump 9122->9142] push_start session_ms=1124305 sensor_flags=0x000B has_ref=1 delta_count=2
+13:47:35 [D] node=164 src=packet       seq=9143   t=196918     bundle_delta_added count=3/14
+13:47:35 [D] node=164 src=packet       seq=9145   t=196921     [seq jump 9143->9145] handler_push_done status_ready=0 bundle_ready=0 push_bundle_ready=0
+13:47:35 [D] node=164 src=radio        seq=9148   t=196949     [seq jump 9145->9148] retx_blocked reason=awaiting_ack_window seq=39 age_ms=3817 wait_ms=8000
+13:47:35 [D] node=164 src=radio        seq=9149   t=196976     retx_blocked reason=awaiting_ack_window seq=39 age_ms=3843 wait_ms=8000
+13:47:35 [D] node=164 src=radio        seq=9150   t=197003     retx_blocked reason=awaiting_ack_window seq=39 age_ms=3871 wait_ms=8000
+13:47:35 [D] node=164 src=radio        seq=9151   t=197030     retx_blocked reason=awaiting_ack_window seq=39 age_ms=3897 wait_ms=8000
+13:47:35 [D] node=164 src=radio        seq=9152   t=197057     retx_blocked reason=awaiting_ack_window seq=39 age_ms=3924 wait_ms=8000
+13:47:35 [D] node=164 src=radio        seq=9153   t=197084     retx_blocked reason=awaiting_ack_window seq=39 age_ms=3951 wait_ms=8000
+13:47:35 [D] node=164 src=radio        seq=9154   t=197111     retx_blocked reason=awaiting_ack_window seq=39 age_ms=3978 wait_ms=8000
+13:47:35 [D] node=164 src=radio        seq=9155   t=197137     retx_blocked reason=awaiting_ack_window seq=39 age_ms=4005 wait_ms=8000
+13:47:35 [D] node=164 src=radio        seq=9156   t=197164     retx_blocked reason=awaiting_ack_window seq=39 age_ms=4032 wait_ms=8000
+13:47:35 [D] node=164 src=radio        seq=9157   t=197191     retx_blocked reason=awaiting_ack_window seq=39 age_ms=4059 wait_ms=8000
+13:47:35 [D] node=164 src=radio        seq=9158   t=197218     retx_blocked reason=awaiting_ack_window seq=39 age_ms=4085 wait_ms=8000
+13:47:35 [D] node=164 src=radio        seq=9159   t=197245     retx_blocked reason=awaiting_ack_window seq=39 age_ms=4112 wait_ms=8000
+13:47:35 [D] node=164 src=radio        seq=9160   t=197272     retx_blocked reason=awaiting_ack_window seq=39 age_ms=4139 wait_ms=8000
+13:47:35 [D] node=164 src=radio        seq=9161   t=197299     retx_blocked reason=awaiting_ack_window seq=39 age_ms=4166 wait_ms=8000
+13:47:35 [D] node=164 src=packet       seq=9179   t=197417     [seq jump 9161->9179] push_start session_ms=1124806 sensor_flags=0x000B has_ref=1 delta_count=3
+13:47:35 [D] node=164 src=packet       seq=9180   t=197419     bundle_delta_added count=4/14
+13:47:35 [D] node=164 src=packet       seq=9182   t=197422     [seq jump 9180->9182] handler_push_done status_ready=0 bundle_ready=0 push_bundle_ready=0
+13:47:35 [D] node=164 src=radio        seq=9185   t=197450     [seq jump 9182->9185] retx_blocked reason=awaiting_ack_window seq=39 age_ms=4317 wait_ms=8000
+13:47:35 [D] node=164 src=radio        seq=9186   t=197477     retx_blocked reason=awaiting_ack_window seq=39 age_ms=4344 wait_ms=8000
+13:47:35 [D] node=164 src=radio        seq=9187   t=197503     retx_blocked reason=awaiting_ack_window seq=39 age_ms=4371 wait_ms=8000
+13:47:35 [D] node=164 src=radio        seq=9188   t=197530     retx_blocked reason=awaiting_ack_window seq=39 age_ms=4398 wait_ms=8000
+13:47:35 [D] node=164 src=radio        seq=9189   t=197557     retx_blocked reason=awaiting_ack_window seq=39 age_ms=4425 wait_ms=8000
+13:47:35 [D] node=164 src=radio        seq=9190   t=197584     retx_blocked reason=awaiting_ack_window seq=39 age_ms=4451 wait_ms=8000
+13:47:36 [D] node=164 src=packet       seq=9210   t=197938     [seq jump 9190->9210] push_start session_ms=1125326 sensor_flags=0x000B has_ref=1 delta_count=4
+13:47:36 [D] node=164 src=packet       seq=9211   t=197940     bundle_delta_added count=5/14
+13:47:36 [D] node=164 src=packet       seq=9213   t=197943     [seq jump 9211->9213] handler_push_done status_ready=0 bundle_ready=0 push_bundle_ready=0
+stelliosbonadurer@wl-183-27 platformio % SFDBG_SRC=boot,tdma,radio SFDBG_MIN_LEVEL=D SFDBG_SHOW_RAW=0 pio device monitor -e feather_m0_lora_node_debug | tee /tmp/sf-node-debug.log
+
+────────────────────────────────────────────────────────────
+ SmartFires structured debug monitor
+────────────────────────────────────────────────────────────
+ node filter : *
+ src filter  : boot,radio,tdma
+ min level   : D
+ show raw    : no
+ env examples:
+   SFDBG_SRC=i2c pio device monitor -e feather_m0_lora_node_debug
+   SFDBG_SRC=i2c,battery SFDBG_MIN_LEVEL=D pio device monitor -e feather_m0_lora_node_debug
+   SFDBG_SHOW_RAW=0 pio device monitor -e feather_m0_lora_node_debug
+────────────────────────────────────────────────────────────
+
+--- Terminal on /dev/cu.usbmodem11301 | 115200 8-N-1
+--- Available filters and text transformations: debug, default, direct, hexlify, log2file, nocontrol, printable, send_on_enter, smartfires_debug, time
+--- More details at https://bit.ly/pio-monitor-filters
+--- Quit: Ctrl+C | Menu: Ctrl+T | Help: Ctrl+T followed by Ctrl+H
+13:47:38 [D] node=164 src=radio        seq=9336   t=200505     retx_blocked reason=awaiting_ack_window seq=39 age_ms=7326 wait_ms=8000
+13:47:38 [D] node=164 src=radio        seq=9337   t=200506     retx_candidate seq=37 index=0 len=21 attempts=2
+13:47:38 [D] node=164 src=radio        seq=9338   t=200508     tx_noack pkt=STATUS seq=37 len=21 slot=1253
+13:47:38 [I] node=164 src=radio        seq=9339   t=200510     retx_sent count=12 pkt=STATUS seq=37 len=21 attempt=3 slot=1253 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+13:47:38 [D] node=164 src=radio        seq=9340   t=200512     retx_mark_sent seq=37 index=0 attempts=3
+13:47:38 [W] node=164 src=radio        seq=9341   t=200513     drop_pending drop_count=6 seq=37 reason=max_attempts attempts=3 age_ms=17796 q=0/8 pending=2 dropped=0
+13:47:38 [D] node=164 src=radio        seq=9342   t=200515     retx_blocked reason=awaiting_ack_window seq=39 age_ms=7335 wait_ms=8000
+13:47:38 [D] node=164 src=radio        seq=9343   t=200542     retx_blocked reason=awaiting_ack_window seq=39 age_ms=7364 wait_ms=8000
+13:47:38 [D] node=164 src=radio        seq=9344   t=200569     retx_blocked reason=awaiting_ack_window seq=39 age_ms=7391 wait_ms=8000
+13:47:38 [D] node=164 src=radio        seq=9345   t=200596     retx_blocked reason=awaiting_ack_window seq=39 age_ms=7418 wait_ms=8000
+13:47:38 [D] node=164 src=radio        seq=9346   t=200623     retx_blocked reason=awaiting_ack_window seq=39 age_ms=7444 wait_ms=8000
+13:47:38 [D] node=164 src=radio        seq=9347   t=200650     retx_blocked reason=awaiting_ack_window seq=39 age_ms=7471 wait_ms=8000
+13:47:38 [D] node=164 src=radio        seq=9348   t=200708     rx_lora from=1 pkt=ACK_SUMMARY seq=117 len=9 rssi=-64
+13:47:38 [I] node=164 src=radio        seq=9349   t=200710     ack_summary_received count=18 node=2 base_seq=7 mask=0xA54A
+13:47:38 [I] node=164 src=radio        seq=9350   t=200711     ack_summary_needs_retx seq=39 next_attempt=2 age_ms=7533 base_seq=7 mask=0xA54A q=0/8 pending=1 dropped=0
+13:47:38 [D] node=164 src=radio        seq=9351   t=200714     retx_blocked reason=awaiting_ack_window seq=39 age_ms=7535 wait_ms=8000
+13:47:38 [D] node=164 src=radio        seq=9352   t=200741     retx_blocked reason=awaiting_ack_window seq=39 age_ms=7562 wait_ms=8000
+13:47:38 [D] node=164 src=radio        seq=9353   t=200768     retx_blocked reason=awaiting_ack_window seq=39 age_ms=7589 wait_ms=8000
+13:47:38 [D] node=164 src=radio        seq=9354   t=200795     retx_blocked reason=awaiting_ack_window seq=39 age_ms=7616 wait_ms=8000
+13:47:38 [D] node=164 src=radio        seq=9355   t=200822     retx_blocked reason=awaiting_ack_window seq=39 age_ms=7643 wait_ms=8000
+13:47:38 [D] node=164 src=radio        seq=9356   t=200849     retx_blocked reason=awaiting_ack_window seq=39 age_ms=7670 wait_ms=8000
+13:47:38 [D] node=164 src=radio        seq=9357   t=200876     retx_blocked reason=awaiting_ack_window seq=39 age_ms=7697 wait_ms=8000
+13:47:39 [D] node=164 src=radio        seq=9383   t=201034     [seq jump 9357->9383] retx_blocked reason=awaiting_ack_window seq=39 age_ms=7856 wait_ms=8000
+13:47:39 [D] node=164 src=radio        seq=9384   t=201061     retx_blocked reason=awaiting_ack_window seq=39 age_ms=7883 wait_ms=8000
+13:47:39 [D] node=164 src=radio        seq=9385   t=201088     retx_blocked reason=awaiting_ack_window seq=39 age_ms=7910 wait_ms=8000
+13:47:39 [D] node=164 src=radio        seq=9386   t=201115     retx_blocked reason=awaiting_ack_window seq=39 age_ms=7936 wait_ms=8000
+13:47:39 [D] node=164 src=radio        seq=9387   t=201142     retx_blocked reason=awaiting_ack_window seq=39 age_ms=7963 wait_ms=8000
+13:47:39 [D] node=164 src=radio        seq=9388   t=201169     retx_blocked reason=awaiting_ack_window seq=39 age_ms=7990 wait_ms=8000
+13:47:39 [I] node=164 src=radio        seq=9389   t=201195     retx_gate_open reason=ack_window_elapsed seq=39 age_ms=8017 wait_ms=8000
+13:47:39 [D] node=164 src=radio        seq=9390   t=201197     retx_candidate seq=39 index=1 len=21 attempts=1
+13:47:39 [D] node=164 src=radio        seq=9391   t=201198     slot_defer pkt=STATUS seq=39 len=21 slot=1253 remaining_ms=35 needed_ms=120 from_queue=0
+13:47:39 [D] node=164 src=radio        seq=9392   t=201225     retx_candidate seq=39 index=1 len=21 attempts=1
+13:47:39 [D] node=164 src=radio        seq=9393   t=201227     slot_defer pkt=STATUS seq=39 len=21 slot=1253 remaining_ms=7 needed_ms=120 from_queue=0
+13:47:41 [I] node=164 src=radio        seq=9491   t=203029     [seq jump 9393->9491] enqueue count=19 pkt=STATUS seq=42 len=21 q=1/8 pending=1 dropped=0
+13:47:42 [D] node=164 src=radio        seq=9544   t=204076     [seq jump 9491->9544] tx_noack pkt=STATUS seq=42 len=21 slot=1257
+13:47:42 [D] node=164 src=radio        seq=9545   t=204078     pending_add seq=42 index=0 len=21 pending=2
+13:47:42 [I] node=164 src=radio        seq=9546   t=204079     tx_sent count=31 pkt=STATUS seq=42 len=21 slot=1257 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+13:47:45 [D] node=164 src=radio        seq=9715   t=207631     [seq jump 9546->9715] retx_blocked reason=awaiting_ack_window seq=42 age_ms=3552 wait_ms=8000
+13:47:45 [D] node=164 src=radio        seq=9716   t=207632     retx_candidate seq=39 index=1 len=21 attempts=1
+13:47:45 [D] node=164 src=radio        seq=9717   t=207634     tx_noack pkt=STATUS seq=39 len=21 slot=1261
+13:47:45 [I] node=164 src=radio        seq=9718   t=207636     retx_sent count=13 pkt=STATUS seq=39 len=21 attempt=2 slot=1261 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+13:47:45 [D] node=164 src=radio        seq=9719   t=207638     retx_mark_sent seq=39 index=1 attempts=2
+13:47:45 [D] node=164 src=radio        seq=9720   t=207639     retx_blocked reason=awaiting_ack_window seq=42 age_ms=3561 wait_ms=8000
+13:47:45 [D] node=164 src=radio        seq=9721   t=207666     retx_blocked reason=awaiting_ack_window seq=42 age_ms=3588 wait_ms=8000
+13:47:45 [D] node=164 src=radio        seq=9722   t=207693     retx_blocked reason=awaiting_ack_window seq=42 age_ms=3615 wait_ms=8000
+13:47:45 [D] node=164 src=radio        seq=9723   t=207720     retx_blocked reason=awaiting_ack_window seq=42 age_ms=3642 wait_ms=8000
+13:47:45 [D] node=164 src=radio        seq=9724   t=207747     retx_blocked reason=awaiting_ack_window seq=42 age_ms=3669 wait_ms=8000
+13:47:45 [D] node=164 src=radio        seq=9725   t=207774     retx_blocked reason=awaiting_ack_window seq=42 age_ms=3696 wait_ms=8000
+13:47:45 [D] node=164 src=radio        seq=9726   t=207833     rx_lora from=1 pkt=ACK_SUMMARY seq=118 len=9 rssi=-70
+13:47:45 [I] node=164 src=radio        seq=9727   t=207834     ack_summary_received count=19 node=2 base_seq=7 mask=0xA54A
+13:47:45 [I] node=164 src=radio        seq=9728   t=207836     ack_summary_needs_retx seq=42 next_attempt=2 age_ms=3757 base_seq=7 mask=0xA54A q=0/8 pending=2 dropped=0
+13:47:45 [I] node=164 src=radio        seq=9729   t=207838     ack_summary_needs_retx seq=39 next_attempt=3 age_ms=14659 base_seq=7 mask=0xA54A q=0/8 pending=2 dropped=0
+13:47:45 [D] node=164 src=radio        seq=9730   t=207840     retx_blocked reason=awaiting_ack_window seq=42 age_ms=3762 wait_ms=8000
+13:47:45 [D] node=164 src=radio        seq=9731   t=207867     retx_blocked reason=awaiting_ack_window seq=42 age_ms=3788 wait_ms=8000
+13:47:45 [D] node=164 src=radio        seq=9732   t=207894     retx_blocked reason=awaiting_ack_window seq=42 age_ms=3815 wait_ms=8000
+13:47:46 [D] node=164 src=radio        seq=9733   t=207920     retx_blocked reason=awaiting_ack_window seq=42 age_ms=3842 wait_ms=8000
+13:47:46 [D] node=164 src=radio        seq=9734   t=207947     retx_blocked reason=awaiting_ack_window seq=42 age_ms=3869 wait_ms=8000
+13:47:46 [D] node=164 src=radio        seq=9735   t=207974     retx_blocked reason=awaiting_ack_window seq=42 age_ms=3896 wait_ms=8000
+13:47:46 [D] node=164 src=radio        seq=9761   t=208133     [seq jump 9735->9761] retx_blocked reason=awaiting_ack_window seq=42 age_ms=4055 wait_ms=8000
+13:47:46 [D] node=164 src=radio        seq=9762   t=208160     retx_blocked reason=awaiting_ack_window seq=42 age_ms=4082 wait_ms=8000
+13:47:46 [D] node=164 src=radio        seq=9763   t=208187     retx_blocked reason=awaiting_ack_window seq=42 age_ms=4109 wait_ms=8000
+13:47:46 [D] node=164 src=radio        seq=9764   t=208214     retx_blocked reason=awaiting_ack_window seq=42 age_ms=4135 wait_ms=8000
+13:47:46 [D] node=164 src=radio        seq=9765   t=208241     retx_blocked reason=awaiting_ack_window seq=42 age_ms=4162 wait_ms=8000
+13:47:46 [D] node=164 src=radio        seq=9766   t=208268     retx_blocked reason=awaiting_ack_window seq=42 age_ms=4189 wait_ms=8000
+13:47:46 [D] node=164 src=radio        seq=9767   t=208295     retx_blocked reason=awaiting_ack_window seq=42 age_ms=4216 wait_ms=8000
+13:47:46 [D] node=164 src=radio        seq=9768   t=208322     retx_blocked reason=awaiting_ack_window seq=42 age_ms=4243 wait_ms=8000
+13:47:46 [D] node=164 src=radio        seq=9769   t=208348     retx_blocked reason=awaiting_ack_window seq=42 age_ms=4270 wait_ms=8000
+13:47:46 [D] node=164 src=radio        seq=9770   t=208375     retx_blocked reason=awaiting_ack_window seq=42 age_ms=4297 wait_ms=8000
+13:47:46 [D] node=164 src=radio        seq=9771   t=208402     retx_blocked reason=awaiting_ack_window seq=42 age_ms=4324 wait_ms=8000
+13:47:46 [D] node=164 src=radio        seq=9772   t=208429     retx_blocked reason=awaiting_ack_window seq=42 age_ms=4351 wait_ms=8000
+13:47:49 [D] node=164 src=radio        seq=9919   t=211176     [seq jump 9772->9919] retx_blocked reason=awaiting_ack_window seq=42 age_ms=7098 wait_ms=8000
+13:47:49 [D] node=164 src=radio        seq=9920   t=211178     retx_candidate seq=39 index=1 len=21 attempts=2
+13:47:49 [D] node=164 src=radio        seq=9921   t=211179     tx_noack pkt=STATUS seq=39 len=21 slot=1265
+13:47:49 [I] node=164 src=radio        seq=9922   t=211181     retx_sent count=14 pkt=STATUS seq=39 len=21 attempt=3 slot=1265 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+13:47:49 [D] node=164 src=radio        seq=9923   t=211183     retx_mark_sent seq=39 index=1 attempts=3
+13:47:49 [D] node=164 src=radio        seq=9924   t=211184     retx_blocked reason=awaiting_ack_window seq=42 age_ms=7106 wait_ms=8000
+13:47:49 [W] node=164 src=radio        seq=9925   t=211186     drop_pending drop_count=7 seq=39 reason=max_attempts attempts=3 age_ms=18006 q=0/8 pending=2 dropped=0
+13:47:49 [D] node=164 src=radio        seq=9926   t=211213     retx_blocked reason=awaiting_ack_window seq=42 age_ms=7135 wait_ms=8000
+13:47:49 [D] node=164 src=radio        seq=9927   t=211240     retx_blocked reason=awaiting_ack_window seq=42 age_ms=7162 wait_ms=8000
+13:47:49 [D] node=164 src=radio        seq=9928   t=211268     retx_blocked reason=awaiting_ack_window seq=42 age_ms=7189 wait_ms=8000
+13:47:49 [D] node=164 src=radio        seq=9929   t=211294     retx_blocked reason=awaiting_ack_window seq=42 age_ms=7216 wait_ms=8000
+13:47:49 [D] node=164 src=radio        seq=9930   t=211322     retx_blocked reason=awaiting_ack_window seq=42 age_ms=7243 wait_ms=8000
+13:47:49 [D] node=164 src=radio        seq=9931   t=211349     retx_blocked reason=awaiting_ack_window seq=42 age_ms=7270 wait_ms=8000
+13:47:49 [D] node=164 src=radio        seq=9932   t=211376     retx_blocked reason=awaiting_ack_window seq=42 age_ms=7297 wait_ms=8000
+13:47:49 [D] node=164 src=radio        seq=9933   t=211403     retx_blocked reason=awaiting_ack_window seq=42 age_ms=7325 wait_ms=8000
+13:47:49 [D] node=164 src=radio        seq=9934   t=211430     retx_blocked reason=awaiting_ack_window seq=42 age_ms=7352 wait_ms=8000
+13:47:49 [D] node=164 src=radio        seq=9935   t=211457     retx_blocked reason=awaiting_ack_window seq=42 age_ms=7379 wait_ms=8000
+13:47:49 [D] node=164 src=radio        seq=9936   t=211484     retx_blocked reason=awaiting_ack_window seq=42 age_ms=7405 wait_ms=8000
+13:47:49 [D] node=164 src=radio        seq=9937   t=211511     retx_blocked reason=awaiting_ack_window seq=42 age_ms=7432 wait_ms=8000
+13:47:49 [D] node=164 src=radio        seq=9938   t=211538     retx_blocked reason=awaiting_ack_window seq=42 age_ms=7460 wait_ms=8000
+13:47:49 [D] node=164 src=radio        seq=9962   t=211690     [seq jump 9938->9962] retx_blocked reason=awaiting_ack_window seq=42 age_ms=7611 wait_ms=8000
+13:47:49 [D] node=164 src=radio        seq=9963   t=211717     retx_blocked reason=awaiting_ack_window seq=42 age_ms=7638 wait_ms=8000
+13:47:49 [D] node=164 src=radio        seq=9964   t=211743     retx_blocked reason=awaiting_ack_window seq=42 age_ms=7665 wait_ms=8000
+13:47:49 [D] node=164 src=radio        seq=9965   t=211770     retx_blocked reason=awaiting_ack_window seq=42 age_ms=7692 wait_ms=8000
+13:47:49 [D] node=164 src=radio        seq=9966   t=211797     retx_blocked reason=awaiting_ack_window seq=42 age_ms=7719 wait_ms=8000
+13:47:49 [D] node=164 src=radio        seq=9967   t=211824     retx_blocked reason=awaiting_ack_window seq=42 age_ms=7746 wait_ms=8000
+13:47:49 [D] node=164 src=radio        seq=9968   t=211851     retx_blocked reason=awaiting_ack_window seq=42 age_ms=7773 wait_ms=8000
+13:47:49 [D] node=164 src=radio        seq=9969   t=211878     retx_blocked reason=awaiting_ack_window seq=42 age_ms=7800 wait_ms=8000
+13:47:49 [D] node=164 src=radio        seq=9970   t=211905     retx_blocked reason=awaiting_ack_window seq=42 age_ms=7827 wait_ms=8000
+13:47:50 [D] node=164 src=radio        seq=9971   t=211932     retx_blocked reason=awaiting_ack_window seq=42 age_ms=7854 wait_ms=8000
+13:47:50 [D] node=164 src=radio        seq=9972   t=211959     retx_blocked reason=awaiting_ack_window seq=42 age_ms=7881 wait_ms=8000
+13:47:50 [D] node=164 src=radio        seq=9973   t=211987     retx_blocked reason=awaiting_ack_window seq=42 age_ms=7908 wait_ms=8000
+13:47:50 [D] node=164 src=radio        seq=9974   t=212014     retx_blocked reason=awaiting_ack_window seq=42 age_ms=7935 wait_ms=8000
+13:47:51 [I] node=164 src=radio        seq=10048  t=213187     [seq jump 9974->10048] enqueue count=20 pkt=STATUS seq=44 len=21 q=1/8 pending=1 dropped=0
+13:47:52 [D] node=164 src=radio        seq=10124  t=214786     [seq jump 10048->10124] tx_noack pkt=STATUS seq=44 len=21 slot=1269
+13:47:52 [D] node=164 src=radio        seq=10125  t=214788     pending_add seq=44 index=1 len=21 pending=2
+13:47:52 [I] node=164 src=radio        seq=10126  t=214789     tx_sent count=34 pkt=STATUS seq=44 len=21 slot=1269 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+13:47:53 [D] node=164 src=radio        seq=10127  t=214975     rx_lora from=1 pkt=ACK_SUMMARY seq=119 len=9 rssi=-66
+13:47:53 [I] node=164 src=radio        seq=10128  t=214977     ack_summary_received count=20 node=2 base_seq=7 mask=0xA54A
+13:47:53 [I] node=164 src=radio        seq=10129  t=214978     ack_summary_needs_retx seq=42 next_attempt=2 age_ms=10900 base_seq=7 mask=0xA54A q=0/8 pending=2 dropped=0
+13:47:53 [I] node=164 src=radio        seq=10130  t=214980     ack_summary_needs_retx seq=44 next_attempt=2 age_ms=193 base_seq=7 mask=0xA54A q=0/8 pending=2 dropped=0
+13:47:56 [I] node=164 src=radio        seq=10302  t=218391     [seq jump 10130->10302] retx_gate_open reason=ack_window_elapsed seq=42 age_ms=14313 wait_ms=8000
+13:47:56 [D] node=164 src=radio        seq=10303  t=218393     retx_blocked reason=awaiting_ack_window seq=44 age_ms=3604 wait_ms=8000
+13:47:56 [D] node=164 src=radio        seq=10304  t=218395     retx_candidate seq=42 index=0 len=21 attempts=1
+13:47:56 [D] node=164 src=radio        seq=10305  t=218396     tx_noack pkt=STATUS seq=42 len=21 slot=1273
+13:47:56 [I] node=164 src=radio        seq=10306  t=218398     retx_sent count=15 pkt=STATUS seq=42 len=21 attempt=2 slot=1273 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+13:47:56 [D] node=164 src=radio        seq=10307  t=218401     retx_mark_sent seq=42 index=0 attempts=2
+13:47:56 [D] node=164 src=radio        seq=10308  t=218402     retx_blocked reason=awaiting_ack_window seq=44 age_ms=3614 wait_ms=8000
+13:47:56 [D] node=164 src=radio        seq=10309  t=218429     retx_blocked reason=awaiting_ack_window seq=44 age_ms=3641 wait_ms=8000
+13:47:56 [D] node=164 src=radio        seq=10310  t=218456     retx_blocked reason=awaiting_ack_window seq=44 age_ms=3668 wait_ms=8000
+13:47:56 [D] node=164 src=radio        seq=10311  t=218483     retx_blocked reason=awaiting_ack_window seq=44 age_ms=3696 wait_ms=8000
+13:47:56 [D] node=164 src=radio        seq=10312  t=218510     retx_blocked reason=awaiting_ack_window seq=44 age_ms=3723 wait_ms=8000
+13:47:56 [D] node=164 src=radio        seq=10313  t=218537     retx_blocked reason=awaiting_ack_window seq=44 age_ms=3750 wait_ms=8000
+13:47:56 [D] node=164 src=radio        seq=10314  t=218564     retx_blocked reason=awaiting_ack_window seq=44 age_ms=3777 wait_ms=8000
+13:47:56 [D] node=164 src=radio        seq=10315  t=218592     retx_blocked reason=awaiting_ack_window seq=44 age_ms=3804 wait_ms=8000
+13:47:56 [D] node=164 src=radio        seq=10316  t=218619     retx_blocked reason=awaiting_ack_window seq=44 age_ms=3831 wait_ms=8000
+13:47:56 [D] node=164 src=radio        seq=10317  t=218646     retx_blocked reason=awaiting_ack_window seq=44 age_ms=3859 wait_ms=8000
+13:47:56 [D] node=164 src=radio        seq=10341  t=218798     [seq jump 10317->10341] retx_blocked reason=awaiting_ack_window seq=44 age_ms=4011 wait_ms=8000
+13:47:56 [D] node=164 src=radio        seq=10342  t=218825     retx_blocked reason=awaiting_ack_window seq=44 age_ms=4038 wait_ms=8000
+13:47:56 [D] node=164 src=radio        seq=10343  t=218852     retx_blocked reason=awaiting_ack_window seq=44 age_ms=4064 wait_ms=8000
+13:47:56 [D] node=164 src=radio        seq=10344  t=218879     retx_blocked reason=awaiting_ack_window seq=44 age_ms=4092 wait_ms=8000
+13:47:56 [D] node=164 src=radio        seq=10345  t=218906     retx_blocked reason=awaiting_ack_window seq=44 age_ms=4119 wait_ms=8000
+13:47:57 [D] node=164 src=radio        seq=10346  t=218933     retx_blocked reason=awaiting_ack_window seq=44 age_ms=4146 wait_ms=8000
+13:47:57 [D] node=164 src=radio        seq=10347  t=218961     retx_blocked reason=awaiting_ack_window seq=44 age_ms=4173 wait_ms=8000
+13:47:57 [D] node=164 src=radio        seq=10348  t=218988     retx_blocked reason=awaiting_ack_window seq=44 age_ms=4200 wait_ms=8000
+13:47:57 [D] node=164 src=radio        seq=10349  t=219015     retx_blocked reason=awaiting_ack_window seq=44 age_ms=4227 wait_ms=8000
+13:47:57 [D] node=164 src=radio        seq=10350  t=219042     retx_blocked reason=awaiting_ack_window seq=44 age_ms=4255 wait_ms=8000
+13:47:57 [D] node=164 src=radio        seq=10351  t=219069     retx_blocked reason=awaiting_ack_window seq=44 age_ms=4282 wait_ms=8000
+13:47:57 [D] node=164 src=radio        seq=10352  t=219096     retx_blocked reason=awaiting_ack_window seq=44 age_ms=4309 wait_ms=8000
+13:47:57 [D] node=164 src=radio        seq=10353  t=219123     retx_blocked reason=awaiting_ack_window seq=44 age_ms=4336 wait_ms=8000
+13:47:57 [D] node=164 src=radio        seq=10354  t=219150     retx_blocked reason=awaiting_ack_window seq=44 age_ms=4363 wait_ms=8000
+13:48:00 [D] node=164 src=radio        seq=10500  t=221992     [seq jump 10354->10500] retx_blocked reason=awaiting_ack_window seq=44 age_ms=7205 wait_ms=8000
+13:48:00 [D] node=164 src=radio        seq=10501  t=221994     retx_candidate seq=42 index=0 len=21 attempts=2
+13:48:00 [D] node=164 src=radio        seq=10502  t=221995     tx_noack pkt=STATUS seq=42 len=21 slot=1277
+13:48:00 [I] node=164 src=radio        seq=10503  t=221997     retx_sent count=16 pkt=STATUS seq=42 len=21 attempt=3 slot=1277 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+13:48:00 [D] node=164 src=radio        seq=10504  t=222000     retx_mark_sent seq=42 index=0 attempts=3
+13:48:00 [W] node=164 src=radio        seq=10505  t=222001     drop_pending drop_count=8 seq=42 reason=max_attempts attempts=3 age_ms=17922 q=0/8 pending=2 dropped=0
+13:48:00 [D] node=164 src=radio        seq=10506  t=222003     retx_blocked reason=awaiting_ack_window seq=44 age_ms=7213 wait_ms=8000
+13:48:00 [D] node=164 src=radio        seq=10507  t=222030     retx_blocked reason=awaiting_ack_window seq=44 age_ms=7242 wait_ms=8000
+13:48:00 [D] node=164 src=radio        seq=10508  t=222057     retx_blocked reason=awaiting_ack_window seq=44 age_ms=7269 wait_ms=8000
+13:48:00 [D] node=164 src=radio        seq=10509  t=222084     retx_blocked reason=awaiting_ack_window seq=44 age_ms=7296 wait_ms=8000
+13:48:00 [D] node=164 src=radio        seq=10510  t=222111     retx_blocked reason=awaiting_ack_window seq=44 age_ms=7323 wait_ms=8000
+13:48:00 [D] node=164 src=radio        seq=10511  t=222138     retx_blocked reason=awaiting_ack_window seq=44 age_ms=7351 wait_ms=8000
+13:48:00 [D] node=164 src=radio        seq=10512  t=222197     rx_lora from=1 pkt=ACK_SUMMARY seq=120 len=9 rssi=-64
+13:48:00 [I] node=164 src=radio        seq=10513  t=222199     ack_summary_received count=21 node=2 base_seq=7 mask=0xA54A
+13:48:00 [I] node=164 src=radio        seq=10514  t=222200     ack_summary_needs_retx seq=44 next_attempt=2 age_ms=7413 base_seq=7 mask=0xA54A q=0/8 pending=1 dropped=0
+13:48:00 [D] node=164 src=radio        seq=10515  t=222203     retx_blocked reason=awaiting_ack_window seq=44 age_ms=7415 wait_ms=8000
+13:48:00 [D] node=164 src=radio        seq=10541  t=222364     [seq jump 10515->10541] retx_blocked reason=awaiting_ack_window seq=44 age_ms=7576 wait_ms=8000
+13:48:00 [D] node=164 src=radio        seq=10542  t=222391     retx_blocked reason=awaiting_ack_window seq=44 age_ms=7603 wait_ms=8000
+13:48:00 [D] node=164 src=radio        seq=10543  t=222418     retx_blocked reason=awaiting_ack_window seq=44 age_ms=7630 wait_ms=8000
+13:48:00 [D] node=164 src=radio        seq=10544  t=222445     retx_blocked reason=awaiting_ack_window seq=44 age_ms=7657 wait_ms=8000
+13:48:00 [D] node=164 src=radio        seq=10545  t=222472     retx_blocked reason=awaiting_ack_window seq=44 age_ms=7684 wait_ms=8000
+13:48:00 [D] node=164 src=radio        seq=10546  t=222499     retx_blocked reason=awaiting_ack_window seq=44 age_ms=7711 wait_ms=8000
+13:48:00 [D] node=164 src=radio        seq=10547  t=222526     retx_blocked reason=awaiting_ack_window seq=44 age_ms=7739 wait_ms=8000
+13:48:00 [D] node=164 src=radio        seq=10548  t=222553     retx_blocked reason=awaiting_ack_window seq=44 age_ms=7766 wait_ms=8000
+13:48:00 [D] node=164 src=radio        seq=10549  t=222580     retx_blocked reason=awaiting_ack_window seq=44 age_ms=7792 wait_ms=8000
+13:48:00 [D] node=164 src=radio        seq=10550  t=222607     retx_blocked reason=awaiting_ack_window seq=44 age_ms=7819 wait_ms=8000
+13:48:00 [D] node=164 src=radio        seq=10551  t=222634     retx_blocked reason=awaiting_ack_window seq=44 age_ms=7846 wait_ms=8000
+13:48:00 [D] node=164 src=radio        seq=10552  t=222661     retx_blocked reason=awaiting_ack_window seq=44 age_ms=7873 wait_ms=8000
+13:48:00 [D] node=164 src=radio        seq=10553  t=222688     retx_blocked reason=awaiting_ack_window seq=44 age_ms=7900 wait_ms=8000
+13:48:00 [D] node=164 src=radio        seq=10554  t=222714     retx_blocked reason=awaiting_ack_window seq=44 age_ms=7927 wait_ms=8000
+13:48:01 [I] node=164 src=radio        seq=10603  t=223352     [seq jump 10554->10603] enqueue count=21 pkt=STATUS seq=46 len=21 q=1/8 pending=1 dropped=0
+13:48:03 [D] node=164 src=radio        seq=10705  t=225590     [seq jump 10603->10705] tx_noack pkt=STATUS seq=46 len=21 slot=1281
+13:48:03 [D] node=164 src=radio        seq=10706  t=225592     pending_add seq=46 index=0 len=21 pending=2
+13:48:03 [I] node=164 src=radio        seq=10707  t=225594     tx_sent count=37 pkt=STATUS seq=46 len=21 slot=1281 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+Disconnected (read failed: [Errno 6] Device not configured)
+Reconnecting to /dev/cu.usbmodem11301 ....       Connected!
+13:48:13 [I] node=164 src=boot         seq=0      t=5003       [seq reset] SmartFires node starting
+13:48:13 [I] node=164 src=boot         seq=1      t=5004       node_id=164
+13:48:13 [I] node=164 src=boot         seq=11     t=5153       [seq jump 1->11] SmartFires Feather TDMA node starting
+13:48:13 [I] node=164 src=boot         seq=12     t=5154       uid_hash=0xEED5D264
+13:48:13 [I] node=164 src=boot         seq=13     t=5155       radio_addr_init=164
+13:48:13 [I] node=164 src=tdma         seq=14     t=5155       entities=4
+13:48:13 [I] node=164 src=tdma         seq=15     t=5156       slot_width_ms=900
+13:48:13 [I] node=164 src=tdma         seq=16     t=5156       guard_ms=20
+13:48:13 [I] node=164 src=tdma         seq=17     t=5157       sync_stale_s=1320
+13:48:13 [I] node=164 src=tdma         seq=18     t=5158       app_reliability=ON
+13:48:13 [I] node=164 src=tdma         seq=19     t=5158       link_ack=FIRE_AND_FORGET
+13:48:13 [I] node=164 src=tdma         seq=20     t=5159       queue_depth=8
+13:48:13 [I] node=164 src=tdma         seq=21     t=5160       retx_window=8
+13:48:13 [I] node=164 src=tdma         seq=22     t=5160       retx_max_attempts=3
+13:48:13 [I] node=164 src=tdma         seq=23     t=5161       retx_max_age_ms=30000
+13:48:13 [I] node=164 src=tdma         seq=24     t=5162       link_retries=3
+13:48:13 [I] node=164 src=tdma         seq=25     t=5162       ack_timeout_ms=250
+13:48:13 [I] node=164 src=tdma         seq=26     t=5163       telem_rel_mode=APP_ACK_SUMMARY
+13:48:13 [I] node=164 src=tdma         seq=27     t=5164       ack_paced_gate: expected_ack_interval_ms=4000 mul_permille=2000 wait_min_ms=4500 wait_max_ms=10000 req_ack_before_retx=NO
+13:48:17 [I] node=164 src=radio        seq=83     t=9226       [seq jump 27->83] begin node_id=0 base_addr=1 num_slots=4 mode=APP_ACK_SUMMARY link_ack=0 app_reliability=1 max_retries=3 ack_timeout_ms=250
+13:48:17 [I] node=164 src=radio        seq=84     t=9369       begin_ok state=ready
+13:48:17 [I] node=164 src=radio        seq=85     t=9370       begin_ok caller=app node_id=0
+13:48:17 [I] node=164 src=radio        seq=86     t=9456       awaken_direct_send pkt=AWAKEN seq=0 len=9 link_ack=OK ok=1
+13:48:17 [I] node=164 src=boot         seq=89     t=9460       [seq jump 86->89] smart_fires_app_status=0
+13:48:17 [D] node=164 src=radio        seq=90     t=9543       rx_lora from=1 pkt=TIME_SYNC seq=24 len=13 rssi=-64
+13:48:17 [I] node=164 src=radio        seq=91     t=9544       assignment_applied old_node=0 new_node=2 num_slots=4
+13:48:17 [I] node=164 src=tdma         seq=92     t=9546       time_sync_received count=1 session_ms=1167007 node=2 assigned=2
+13:48:17 [I] node=164 src=tdma         seq=94     t=9548       [seq jump 92->94] time_sync_acquired session_ms=1167010 current_slot=0 my_slot=1
+13:48:17 [D] node=164 src=radio        seq=96     t=9661       [seq jump 94->96] rx_lora from=1 pkt=ACK_SUMMARY seq=121 len=9 rssi=-65
+13:48:17 [I] node=164 src=radio        seq=97     t=9663       ack_summary_received count=1 node=2 base_seq=7 mask=0xA54A
+13:48:27 [D] node=164 src=radio        seq=99     t=19188      [seq jump 97->99] rx_lora from=1 pkt=TIME_SYNC seq=25 len=13 rssi=-66
+13:48:27 [I] node=164 src=tdma         seq=100    t=19190      time_sync_received count=2 session_ms=1176726 node=2 assigned=0
+13:48:27 [I] node=164 src=radio        seq=127    t=19383      [seq jump 100->127] enqueue count=1 pkt=STATUS seq=0 len=21 q=1/8 pending=0 dropped=0
+13:48:28 [D] node=164 src=radio        seq=179    t=20591      [seq jump 127->179] tx_noack pkt=STATUS seq=0 len=21 slot=1309
+13:48:28 [D] node=164 src=radio        seq=180    t=20593      pending_add seq=0 index=0 len=21 pending=1
+13:48:28 [I] node=164 src=radio        seq=181    t=20594      tx_sent count=1 pkt=STATUS seq=0 len=21 slot=1309 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=1 dropped=0
+13:48:29 [D] node=164 src=radio        seq=182    t=20786      rx_lora from=1 pkt=ACK_SUMMARY seq=122 len=9 rssi=-67
+13:48:29 [I] node=164 src=radio        seq=183    t=20788      ack_summary_received count=2 node=2 base_seq=7 mask=0xA54A
+13:48:29 [I] node=164 src=radio        seq=184    t=20789      ack_summary_acked seq=0 attempts=1 base_seq=7 mask=0xA54A q=0/8 pending=1 dropped=0
+Disconnected (read failed: [Errno 6] Device not configured)
+Reconnecting to /dev/cu.usbmodem11301 .  Connected!
+13:48:42 [I] node=164 src=boot         seq=0      t=5003       [seq reset] SmartFires node starting
+13:48:42 [I] node=164 src=boot         seq=1      t=5004       node_id=164
+13:48:42 [I] node=164 src=boot         seq=11     t=5153       [seq jump 1->11] SmartFires Feather TDMA node starting
+13:48:42 [I] node=164 src=boot         seq=12     t=5154       uid_hash=0xEED5D264
+13:48:42 [I] node=164 src=boot         seq=13     t=5155       radio_addr_init=164
+13:48:42 [I] node=164 src=tdma         seq=14     t=5156       entities=4
+13:48:42 [I] node=164 src=tdma         seq=15     t=5156       slot_width_ms=900
+13:48:42 [I] node=164 src=tdma         seq=16     t=5157       guard_ms=20
+13:48:42 [I] node=164 src=tdma         seq=17     t=5157       sync_stale_s=1320
+13:48:42 [I] node=164 src=tdma         seq=18     t=5158       app_reliability=ON
+13:48:42 [I] node=164 src=tdma         seq=19     t=5159       link_ack=FIRE_AND_FORGET
+13:48:42 [I] node=164 src=tdma         seq=20     t=5159       queue_depth=8
+13:48:42 [I] node=164 src=tdma         seq=21     t=5160       retx_window=8
+13:48:42 [I] node=164 src=tdma         seq=22     t=5161       retx_max_attempts=3
+13:48:42 [I] node=164 src=tdma         seq=23     t=5161       retx_max_age_ms=30000
+13:48:42 [I] node=164 src=tdma         seq=24     t=5162       link_retries=3
+13:48:42 [I] node=164 src=tdma         seq=25     t=5163       ack_timeout_ms=250
+13:48:42 [I] node=164 src=tdma         seq=26     t=5163       telem_rel_mode=APP_ACK_SUMMARY
+13:48:42 [I] node=164 src=tdma         seq=27     t=5164       ack_paced_gate: expected_ack_interval_ms=4000 mul_permille=2000 wait_min_ms=4500 wait_max_ms=10000 req_ack_before_retx=NO
+13:48:46 [I] node=164 src=radio        seq=83     t=9226       [seq jump 27->83] begin node_id=0 base_addr=1 num_slots=4 mode=APP_ACK_SUMMARY link_ack=0 app_reliability=1 max_retries=3 ack_timeout_ms=250
+13:48:47 [I] node=164 src=radio        seq=84     t=9370       begin_ok state=ready
+13:48:47 [I] node=164 src=radio        seq=85     t=9371       begin_ok caller=app node_id=0
+13:48:47 [I] node=164 src=radio        seq=86     t=10210      awaken_direct_send pkt=AWAKEN seq=0 len=9 link_ack=NO ok=0
+13:48:47 [I] node=164 src=boot         seq=90     t=10215      [seq jump 86->90] smart_fires_app_status=0
+13:48:53 [I] node=164 src=radio        seq=91     t=15937      awaken_direct_send pkt=AWAKEN seq=1 len=9 link_ack=NO ok=0
+13:48:58 [I] node=164 src=radio        seq=95     t=21030      [seq jump 91->95] awaken_direct_send pkt=AWAKEN seq=2 len=9 link_ack=NO ok=0
+13:49:03 [I] node=164 src=radio        seq=99     t=26197      [seq jump 95->99] awaken_direct_send pkt=AWAKEN seq=3 len=9 link_ack=NO ok=0
+13:49:08 [I] node=164 src=radio        seq=103    t=31150      [seq jump 99->103] awaken_direct_send pkt=AWAKEN seq=4 len=9 link_ack=NO ok=0
+13:49:13 [I] node=164 src=radio        seq=107    t=36200      [seq jump 103->107] awaken_direct_send pkt=AWAKEN seq=5 len=9 link_ack=NO ok=0
+13:49:18 [I] node=164 src=radio        seq=111    t=41165      [seq jump 107->111] awaken_direct_send pkt=AWAKEN seq=6 len=9 link_ack=NO ok=0
+Disconnected (read failed: [Errno 6] Device not configured)
+Reconnecting to /dev/cu.usbmodem11301 .  Connected!
+13:49:24 [I] node=164 src=boot         seq=0      t=5003       [seq reset] SmartFires node starting
+13:49:24 [I] node=164 src=boot         seq=1      t=5004       node_id=164
+13:49:24 [I] node=164 src=boot         seq=11     t=5153       [seq jump 1->11] SmartFires Feather TDMA node starting
+13:49:24 [I] node=164 src=boot         seq=12     t=5154       uid_hash=0xEED5D264
+13:49:24 [I] node=164 src=boot         seq=13     t=5155       radio_addr_init=164
+13:49:24 [I] node=164 src=tdma         seq=14     t=5155       entities=4
+13:49:24 [I] node=164 src=tdma         seq=15     t=5156       slot_width_ms=900
+13:49:24 [I] node=164 src=tdma         seq=16     t=5157       guard_ms=20
+13:49:24 [I] node=164 src=tdma         seq=17     t=5157       sync_stale_s=1320
+13:49:24 [I] node=164 src=tdma         seq=18     t=5158       app_reliability=ON
+13:49:24 [I] node=164 src=tdma         seq=19     t=5159       link_ack=FIRE_AND_FORGET
+13:49:24 [I] node=164 src=tdma         seq=20     t=5159       queue_depth=8
+13:49:24 [I] node=164 src=tdma         seq=21     t=5160       retx_window=8
+13:49:24 [I] node=164 src=tdma         seq=22     t=5160       retx_max_attempts=3
+13:49:24 [I] node=164 src=tdma         seq=23     t=5161       retx_max_age_ms=30000
+13:49:24 [I] node=164 src=tdma         seq=24     t=5162       link_retries=3
+13:49:24 [I] node=164 src=tdma         seq=25     t=5162       ack_timeout_ms=250
+13:49:24 [I] node=164 src=tdma         seq=26     t=5163       telem_rel_mode=APP_ACK_SUMMARY
+13:49:24 [I] node=164 src=tdma         seq=27     t=5164       ack_paced_gate: expected_ack_interval_ms=4000 mul_permille=2000 wait_min_ms=4500 wait_max_ms=10000 req_ack_before_retx=NO
+13:49:28 [I] node=164 src=radio        seq=83     t=9225       [seq jump 27->83] begin node_id=0 base_addr=1 num_slots=4 mode=APP_ACK_SUMMARY link_ack=0 app_reliability=1 max_retries=3 ack_timeout_ms=250
+13:49:28 [I] node=164 src=radio        seq=84     t=9369       begin_ok state=ready
+13:49:28 [I] node=164 src=radio        seq=85     t=9370       begin_ok caller=app node_id=0
+13:49:29 [I] node=164 src=radio        seq=86     t=10209      awaken_direct_send pkt=AWAKEN seq=0 len=9 link_ack=NO ok=0
+13:49:29 [I] node=164 src=boot         seq=90     t=10214      [seq jump 86->90] smart_fires_app_status=0
+13:49:35 [I] node=164 src=radio        seq=91     t=15936      awaken_direct_send pkt=AWAKEN seq=1 len=9 link_ack=NO ok=0
+13:49:40 [I] node=164 src=radio        seq=95     t=21029      [seq jump 91->95] awaken_direct_send pkt=AWAKEN seq=2 len=9 link_ack=NO ok=0
+13:49:45 [I] node=164 src=radio        seq=99     t=26196      [seq jump 95->99] awaken_direct_send pkt=AWAKEN seq=3 len=9 link_ack=NO ok=0
+13:49:50 [I] node=164 src=radio        seq=103    t=31149      [seq jump 99->103] awaken_direct_send pkt=AWAKEN seq=4 len=9 link_ack=NO ok=0
+13:49:55 [I] node=164 src=radio        seq=107    t=36198      [seq jump 103->107] awaken_direct_send pkt=AWAKEN seq=5 len=9 link_ack=NO ok=0
+Disconnected (read failed: [Errno 6] Device not configured)
+Reconnecting to /dev/cu.usbmodem11301 .  Connected!
+13:50:04 [I] node=164 src=boot         seq=0      t=5003       [seq reset] SmartFires node starting
+13:50:04 [I] node=164 src=boot         seq=1      t=5004       node_id=164
+13:50:04 [I] node=164 src=boot         seq=11     t=5153       [seq jump 1->11] SmartFires Feather TDMA node starting
+13:50:04 [I] node=164 src=boot         seq=12     t=5154       uid_hash=0xEED5D264
+13:50:04 [I] node=164 src=boot         seq=13     t=5155       radio_addr_init=164
+13:50:04 [I] node=164 src=tdma         seq=14     t=5155       entities=4
+13:50:04 [I] node=164 src=tdma         seq=15     t=5156       slot_width_ms=900
+13:50:04 [I] node=164 src=tdma         seq=16     t=5156       guard_ms=20
+13:50:04 [I] node=164 src=tdma         seq=17     t=5157       sync_stale_s=1320
+13:50:04 [I] node=164 src=tdma         seq=18     t=5158       app_reliability=ON
+13:50:04 [I] node=164 src=tdma         seq=19     t=5158       link_ack=FIRE_AND_FORGET
+13:50:04 [I] node=164 src=tdma         seq=20     t=5159       queue_depth=8
+13:50:04 [I] node=164 src=tdma         seq=21     t=5160       retx_window=8
+13:50:04 [I] node=164 src=tdma         seq=22     t=5160       retx_max_attempts=3
+13:50:04 [I] node=164 src=tdma         seq=23     t=5161       retx_max_age_ms=30000
+13:50:04 [I] node=164 src=tdma         seq=24     t=5162       link_retries=3
+13:50:04 [I] node=164 src=tdma         seq=25     t=5162       ack_timeout_ms=250
+13:50:04 [I] node=164 src=tdma         seq=26     t=5163       telem_rel_mode=APP_ACK_SUMMARY
+13:50:04 [I] node=164 src=tdma         seq=27     t=5164       ack_paced_gate: expected_ack_interval_ms=4000 mul_permille=2000 wait_min_ms=4500 wait_max_ms=10000 req_ack_before_retx=NO
+13:50:08 [I] node=164 src=radio        seq=83     t=9224       [seq jump 27->83] begin node_id=0 base_addr=1 num_slots=4 mode=APP_ACK_SUMMARY link_ack=0 app_reliability=1 max_retries=3 ack_timeout_ms=250
+13:50:08 [I] node=164 src=radio        seq=84     t=9368       begin_ok state=ready
+13:50:08 [I] node=164 src=radio        seq=85     t=9368       begin_ok caller=app node_id=0
+13:50:09 [I] node=164 src=radio        seq=86     t=10208      awaken_direct_send pkt=AWAKEN seq=0 len=9 link_ack=NO ok=0
+13:50:09 [I] node=164 src=boot         seq=90     t=10212      [seq jump 86->90] smart_fires_app_status=0
+13:50:15 [I] node=164 src=radio        seq=91     t=15934      awaken_direct_send pkt=AWAKEN seq=1 len=9 link_ack=NO ok=0
+13:50:20 [I] node=164 src=radio        seq=95     t=21027      [seq jump 91->95] awaken_direct_send pkt=AWAKEN seq=2 len=9 link_ack=NO ok=0
+13:50:25 [I] node=164 src=radio        seq=99     t=26194      [seq jump 95->99] awaken_direct_send pkt=AWAKEN seq=3 len=9 link_ack=NO ok=0
+13:50:30 [I] node=164 src=radio        seq=103    t=31147      [seq jump 99->103] awaken_direct_send pkt=AWAKEN seq=4 len=9 link_ack=NO ok=0
+13:50:35 [I] node=164 src=radio        seq=107    t=36196      [seq jump 103->107] awaken_direct_send pkt=AWAKEN seq=5 len=9 link_ack=NO ok=0
+13:50:40 [I] node=164 src=radio        seq=111    t=41186      [seq jump 107->111] awaken_direct_send pkt=AWAKEN seq=6 len=9 link_ack=NO ok=0
+13:50:45 [I] node=164 src=radio        seq=115    t=46382      [seq jump 111->115] awaken_direct_send pkt=AWAKEN seq=7 len=9 link_ack=NO ok=0
+13:50:50 [I] node=164 src=radio        seq=119    t=51211      [seq jump 115->119] awaken_direct_send pkt=AWAKEN seq=8 len=9 link_ack=NO ok=0
+13:50:55 [I] node=164 src=radio        seq=123    t=56000      [seq jump 119->123] awaken_direct_send pkt=AWAKEN seq=9 len=9 link_ack=NO ok=0
+13:51:00 [I] node=164 src=radio        seq=127    t=61211      [seq jump 123->127] awaken_direct_send pkt=AWAKEN seq=10 len=9 link_ack=NO ok=0
+13:51:05 [I] node=164 src=radio        seq=131    t=66185      [seq jump 127->131] awaken_direct_send pkt=AWAKEN seq=11 len=9 link_ack=NO ok=0
+13:51:10 [I] node=164 src=radio        seq=135    t=71361      [seq jump 131->135] awaken_direct_send pkt=AWAKEN seq=12 len=9 link_ack=NO ok=0
+13:51:15 [I] node=164 src=radio        seq=139    t=76059      [seq jump 135->139] awaken_direct_send pkt=AWAKEN seq=13 len=9 link_ack=NO ok=0
+13:51:20 [I] node=164 src=radio        seq=143    t=81411      [seq jump 139->143] awaken_direct_send pkt=AWAKEN seq=14 len=9 link_ack=NO ok=0
+13:51:24 [I] node=164 src=radio        seq=147    t=85512      [seq jump 143->147] awaken_direct_send pkt=AWAKEN seq=15 len=9 link_ack=OK ok=1
+13:51:25 [D] node=164 src=radio        seq=150    t=85623      [seq jump 147->150] rx_lora from=1 pkt=TIME_SYNC seq=0 len=13 rssi=-66
+13:51:25 [I] node=164 src=radio        seq=151    t=85624      assignment_applied old_node=0 new_node=2 num_slots=4
+13:51:25 [I] node=164 src=tdma         seq=152    t=85625      time_sync_received count=1 session_ms=3643 node=2 assigned=2
+13:51:25 [I] node=164 src=tdma         seq=154    t=85628      [seq jump 152->154] time_sync_acquired session_ms=3646 current_slot=0 my_slot=1
+13:51:25 [I] node=164 src=radio        seq=183    t=85803      [seq jump 154->183] enqueue count=1 pkt=STATUS seq=0 len=21 q=1/8 pending=0 dropped=0
+13:51:25 [D] node=164 src=radio        seq=210    t=86522      [seq jump 183->210] tx_noack pkt=STATUS seq=0 len=21 slot=5
+13:51:25 [D] node=164 src=radio        seq=211    t=86524      pending_add seq=0 index=0 len=21 pending=1
+13:51:25 [I] node=164 src=radio        seq=212    t=86526      tx_sent count=1 pkt=STATUS seq=0 len=21 slot=5 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=1 dropped=0
+13:51:29 [D] node=164 src=radio        seq=376    t=90116      [seq jump 212->376] retx_blocked reason=awaiting_ack_window seq=0 age_ms=3592 wait_ms=8000
+13:51:29 [D] node=164 src=radio        seq=377    t=90143      retx_blocked reason=awaiting_ack_window seq=0 age_ms=3618 wait_ms=8000
+13:51:29 [D] node=164 src=radio        seq=378    t=90170      retx_blocked reason=awaiting_ack_window seq=0 age_ms=3645 wait_ms=8000
+13:51:29 [D] node=164 src=radio        seq=379    t=90197      retx_blocked reason=awaiting_ack_window seq=0 age_ms=3673 wait_ms=8000
+13:51:29 [D] node=164 src=radio        seq=380    t=90224      retx_blocked reason=awaiting_ack_window seq=0 age_ms=3700 wait_ms=8000
+13:51:29 [D] node=164 src=radio        seq=381    t=90251      retx_blocked reason=awaiting_ack_window seq=0 age_ms=3727 wait_ms=8000
+13:51:29 [D] node=164 src=radio        seq=382    t=90278      retx_blocked reason=awaiting_ack_window seq=0 age_ms=3753 wait_ms=8000
+13:51:29 [D] node=164 src=radio        seq=383    t=90305      retx_blocked reason=awaiting_ack_window seq=0 age_ms=3781 wait_ms=8000
+13:51:29 [D] node=164 src=radio        seq=407    t=90465      [seq jump 383->407] retx_blocked reason=awaiting_ack_window seq=0 age_ms=3940 wait_ms=8000
+13:51:29 [D] node=164 src=radio        seq=408    t=90492      retx_blocked reason=awaiting_ack_window seq=0 age_ms=3967 wait_ms=8000
+13:51:29 [D] node=164 src=radio        seq=409    t=90519      retx_blocked reason=awaiting_ack_window seq=0 age_ms=3994 wait_ms=8000
+13:51:29 [D] node=164 src=radio        seq=410    t=90546      retx_blocked reason=awaiting_ack_window seq=0 age_ms=4021 wait_ms=8000
+13:51:30 [D] node=164 src=radio        seq=411    t=90573      retx_blocked reason=awaiting_ack_window seq=0 age_ms=4048 wait_ms=8000
+13:51:30 [D] node=164 src=radio        seq=412    t=90600      retx_blocked reason=awaiting_ack_window seq=0 age_ms=4075 wait_ms=8000
+13:51:30 [D] node=164 src=radio        seq=413    t=90627      retx_blocked reason=awaiting_ack_window seq=0 age_ms=4102 wait_ms=8000
+13:51:30 [D] node=164 src=radio        seq=414    t=90654      retx_blocked reason=awaiting_ack_window seq=0 age_ms=4130 wait_ms=8000
+13:51:30 [D] node=164 src=radio        seq=415    t=90681      retx_blocked reason=awaiting_ack_window seq=0 age_ms=4157 wait_ms=8000
+13:51:30 [D] node=164 src=radio        seq=416    t=90708      retx_blocked reason=awaiting_ack_window seq=0 age_ms=4184 wait_ms=8000
+13:51:30 [D] node=164 src=radio        seq=417    t=90735      retx_blocked reason=awaiting_ack_window seq=0 age_ms=4211 wait_ms=8000
+13:51:30 [D] node=164 src=radio        seq=418    t=90762      retx_blocked reason=awaiting_ack_window seq=0 age_ms=4238 wait_ms=8000
+13:51:30 [D] node=164 src=radio        seq=419    t=90789      retx_blocked reason=awaiting_ack_window seq=0 age_ms=4265 wait_ms=8000
+13:51:30 [D] node=164 src=radio        seq=420    t=90816      retx_blocked reason=awaiting_ack_window seq=0 age_ms=4292 wait_ms=8000
+13:51:33 [D] node=164 src=radio        seq=561    t=93720      [seq jump 420->561] retx_blocked reason=awaiting_ack_window seq=0 age_ms=7196 wait_ms=8000
+13:51:33 [D] node=164 src=radio        seq=562    t=93747      retx_blocked reason=awaiting_ack_window seq=0 age_ms=7223 wait_ms=8000
+13:51:33 [D] node=164 src=radio        seq=563    t=93774      retx_blocked reason=awaiting_ack_window seq=0 age_ms=7250 wait_ms=8000
+13:51:33 [D] node=164 src=radio        seq=564    t=93801      retx_blocked reason=awaiting_ack_window seq=0 age_ms=7277 wait_ms=8000
+13:51:33 [D] node=164 src=radio        seq=565    t=93828      retx_blocked reason=awaiting_ack_window seq=0 age_ms=7304 wait_ms=8000
+13:51:33 [D] node=164 src=radio        seq=566    t=93855      retx_blocked reason=awaiting_ack_window seq=0 age_ms=7331 wait_ms=8000
+13:51:33 [D] node=164 src=radio        seq=567    t=93882      retx_blocked reason=awaiting_ack_window seq=0 age_ms=7358 wait_ms=8000
+13:51:33 [D] node=164 src=radio        seq=568    t=93909      retx_blocked reason=awaiting_ack_window seq=0 age_ms=7385 wait_ms=8000
+13:51:33 [D] node=164 src=radio        seq=592    t=94065      [seq jump 568->592] retx_blocked reason=awaiting_ack_window seq=0 age_ms=7541 wait_ms=8000
+13:51:33 [D] node=164 src=radio        seq=593    t=94092      retx_blocked reason=awaiting_ack_window seq=0 age_ms=7568 wait_ms=8000
+13:51:33 [D] node=164 src=radio        seq=594    t=94119      retx_blocked reason=awaiting_ack_window seq=0 age_ms=7594 wait_ms=8000
+13:51:33 [D] node=164 src=radio        seq=595    t=94146      retx_blocked reason=awaiting_ack_window seq=0 age_ms=7621 wait_ms=8000
+13:51:33 [D] node=164 src=radio        seq=596    t=94173      retx_blocked reason=awaiting_ack_window seq=0 age_ms=7648 wait_ms=8000
+13:51:33 [D] node=164 src=radio        seq=597    t=94199      retx_blocked reason=awaiting_ack_window seq=0 age_ms=7675 wait_ms=8000
+13:51:33 [D] node=164 src=radio        seq=598    t=94226      retx_blocked reason=awaiting_ack_window seq=0 age_ms=7702 wait_ms=8000
+13:51:33 [D] node=164 src=radio        seq=599    t=94253      retx_blocked reason=awaiting_ack_window seq=0 age_ms=7729 wait_ms=8000
+13:51:33 [D] node=164 src=radio        seq=600    t=94280      retx_blocked reason=awaiting_ack_window seq=0 age_ms=7756 wait_ms=8000
+13:51:33 [D] node=164 src=radio        seq=601    t=94307      retx_blocked reason=awaiting_ack_window seq=0 age_ms=7783 wait_ms=8000
+13:51:33 [D] node=164 src=radio        seq=602    t=94334      retx_blocked reason=awaiting_ack_window seq=0 age_ms=7809 wait_ms=8000
+13:51:33 [D] node=164 src=radio        seq=603    t=94361      retx_blocked reason=awaiting_ack_window seq=0 age_ms=7837 wait_ms=8000
+13:51:33 [D] node=164 src=radio        seq=604    t=94388      retx_blocked reason=awaiting_ack_window seq=0 age_ms=7863 wait_ms=8000
+13:51:33 [D] node=164 src=radio        seq=605    t=94415      retx_blocked reason=awaiting_ack_window seq=0 age_ms=7890 wait_ms=8000
+13:51:35 [I] node=164 src=radio        seq=699    t=96070      [seq jump 605->699] enqueue count=2 pkt=STATUS seq=2 len=21 q=1/8 pending=1 dropped=0
+13:51:36 [D] node=164 src=radio        seq=750    t=97311      [seq jump 699->750] tx_noack pkt=STATUS seq=2 len=21 slot=17
+13:51:36 [D] node=164 src=radio        seq=751    t=97313      pending_add seq=2 index=1 len=21 pending=2
+13:51:36 [I] node=164 src=radio        seq=752    t=97314      tx_sent count=2 pkt=STATUS seq=2 len=21 slot=17 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+13:51:40 [I] node=164 src=radio        seq=919    t=100913     [seq jump 752->919] retx_gate_open reason=ack_window_elapsed seq=0 age_ms=14388 wait_ms=8000
+13:51:40 [D] node=164 src=radio        seq=920    t=100914     retx_blocked reason=awaiting_ack_window seq=2 age_ms=3600 wait_ms=8000
+13:51:40 [D] node=164 src=radio        seq=921    t=100916     retx_candidate seq=0 index=0 len=21 attempts=1
+13:51:40 [D] node=164 src=radio        seq=922    t=100917     tx_noack pkt=STATUS seq=0 len=21 slot=21
+13:51:40 [I] node=164 src=radio        seq=923    t=100919     retx_sent count=1 pkt=STATUS seq=0 len=21 attempt=2 slot=21 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+13:51:40 [D] node=164 src=radio        seq=924    t=100921     retx_mark_sent seq=0 index=0 attempts=2
+13:51:40 [D] node=164 src=radio        seq=925    t=100923     retx_blocked reason=awaiting_ack_window seq=2 age_ms=3610 wait_ms=8000
+13:51:40 [D] node=164 src=radio        seq=926    t=100949     retx_blocked reason=awaiting_ack_window seq=2 age_ms=3637 wait_ms=8000
+13:51:40 [D] node=164 src=radio        seq=927    t=100976     retx_blocked reason=awaiting_ack_window seq=2 age_ms=3664 wait_ms=8000
+13:51:40 [D] node=164 src=radio        seq=928    t=101003     retx_blocked reason=awaiting_ack_window seq=2 age_ms=3691 wait_ms=8000
+13:51:40 [D] node=164 src=radio        seq=929    t=101031     retx_blocked reason=awaiting_ack_window seq=2 age_ms=3718 wait_ms=8000
+13:51:40 [D] node=164 src=radio        seq=954    t=101191     [seq jump 929->954] retx_blocked reason=awaiting_ack_window seq=2 age_ms=3879 wait_ms=8000
+13:51:40 [D] node=164 src=radio        seq=955    t=101218     retx_blocked reason=awaiting_ack_window seq=2 age_ms=3906 wait_ms=8000
+13:51:40 [D] node=164 src=radio        seq=956    t=101245     retx_blocked reason=awaiting_ack_window seq=2 age_ms=3933 wait_ms=8000
+13:51:40 [D] node=164 src=radio        seq=957    t=101272     retx_blocked reason=awaiting_ack_window seq=2 age_ms=3959 wait_ms=8000
+13:51:40 [D] node=164 src=radio        seq=958    t=101299     retx_blocked reason=awaiting_ack_window seq=2 age_ms=3986 wait_ms=8000
+13:51:40 [D] node=164 src=radio        seq=959    t=101326     retx_blocked reason=awaiting_ack_window seq=2 age_ms=4014 wait_ms=8000
+13:51:40 [D] node=164 src=radio        seq=960    t=101353     retx_blocked reason=awaiting_ack_window seq=2 age_ms=4041 wait_ms=8000
+13:51:40 [D] node=164 src=radio        seq=961    t=101380     retx_blocked reason=awaiting_ack_window seq=2 age_ms=4067 wait_ms=8000
+13:51:40 [D] node=164 src=radio        seq=962    t=101407     retx_blocked reason=awaiting_ack_window seq=2 age_ms=4094 wait_ms=8000
+13:51:40 [D] node=164 src=radio        seq=963    t=101433     retx_blocked reason=awaiting_ack_window seq=2 age_ms=4121 wait_ms=8000
+13:51:40 [D] node=164 src=radio        seq=964    t=101460     retx_blocked reason=awaiting_ack_window seq=2 age_ms=4148 wait_ms=8000
+13:51:40 [D] node=164 src=radio        seq=965    t=101487     retx_blocked reason=awaiting_ack_window seq=2 age_ms=4175 wait_ms=8000
+13:51:40 [D] node=164 src=radio        seq=966    t=101514     retx_blocked reason=awaiting_ack_window seq=2 age_ms=4201 wait_ms=8000
+13:51:40 [D] node=164 src=radio        seq=967    t=101541     retx_blocked reason=awaiting_ack_window seq=2 age_ms=4228 wait_ms=8000
+13:51:41 [D] node=164 src=radio        seq=992    t=101698     [seq jump 967->992] retx_blocked reason=awaiting_ack_window seq=2 age_ms=4385 wait_ms=8000
+13:51:41 [D] node=164 src=radio        seq=993    t=101725     retx_blocked reason=awaiting_ack_window seq=2 age_ms=4412 wait_ms=8000
+13:51:41 [D] node=164 src=radio        seq=994    t=101751     retx_blocked reason=awaiting_ack_window seq=2 age_ms=4439 wait_ms=8000
+13:51:43 [D] node=164 src=radio        seq=1113   t=104512     [seq jump 994->1113] retx_blocked reason=awaiting_ack_window seq=2 age_ms=7199 wait_ms=8000
+13:51:43 [D] node=164 src=radio        seq=1114   t=104513     retx_candidate seq=0 index=0 len=21 attempts=2
+13:51:43 [D] node=164 src=radio        seq=1115   t=104515     tx_noack pkt=STATUS seq=0 len=21 slot=25
+13:51:43 [I] node=164 src=radio        seq=1116   t=104517     retx_sent count=2 pkt=STATUS seq=0 len=21 attempt=3 slot=25 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+13:51:43 [D] node=164 src=radio        seq=1117   t=104519     retx_mark_sent seq=0 index=0 attempts=3
+13:51:43 [W] node=164 src=radio        seq=1118   t=104521     drop_pending drop_count=1 seq=0 reason=max_attempts attempts=3 age_ms=17996 q=0/8 pending=2 dropped=0
+13:51:43 [D] node=164 src=radio        seq=1119   t=104523     retx_blocked reason=awaiting_ack_window seq=2 age_ms=7208 wait_ms=8000
+13:51:43 [D] node=164 src=radio        seq=1120   t=104549     retx_blocked reason=awaiting_ack_window seq=2 age_ms=7237 wait_ms=8000
+13:51:44 [D] node=164 src=radio        seq=1121   t=104576     retx_blocked reason=awaiting_ack_window seq=2 age_ms=7264 wait_ms=8000
+13:51:44 [D] node=164 src=radio        seq=1146   t=104734     [seq jump 1121->1146] retx_blocked reason=awaiting_ack_window seq=2 age_ms=7422 wait_ms=8000
+13:51:44 [D] node=164 src=radio        seq=1147   t=104761     retx_blocked reason=awaiting_ack_window seq=2 age_ms=7449 wait_ms=8000
+13:51:44 [D] node=164 src=radio        seq=1148   t=104788     retx_blocked reason=awaiting_ack_window seq=2 age_ms=7476 wait_ms=8000
+13:51:44 [D] node=164 src=radio        seq=1149   t=104815     retx_blocked reason=awaiting_ack_window seq=2 age_ms=7503 wait_ms=8000
+13:51:44 [D] node=164 src=radio        seq=1150   t=104842     retx_blocked reason=awaiting_ack_window seq=2 age_ms=7530 wait_ms=8000
+13:51:44 [D] node=164 src=radio        seq=1151   t=104869     retx_blocked reason=awaiting_ack_window seq=2 age_ms=7557 wait_ms=8000
+13:51:44 [D] node=164 src=radio        seq=1152   t=104896     retx_blocked reason=awaiting_ack_window seq=2 age_ms=7584 wait_ms=8000
+13:51:44 [D] node=164 src=radio        seq=1153   t=104923     retx_blocked reason=awaiting_ack_window seq=2 age_ms=7610 wait_ms=8000
+13:51:44 [D] node=164 src=radio        seq=1154   t=104950     retx_blocked reason=awaiting_ack_window seq=2 age_ms=7638 wait_ms=8000
+13:51:44 [D] node=164 src=radio        seq=1155   t=104977     retx_blocked reason=awaiting_ack_window seq=2 age_ms=7664 wait_ms=8000
+13:51:44 [D] node=164 src=radio        seq=1156   t=105004     retx_blocked reason=awaiting_ack_window seq=2 age_ms=7691 wait_ms=8000
+13:51:44 [D] node=164 src=radio        seq=1157   t=105031     retx_blocked reason=awaiting_ack_window seq=2 age_ms=7718 wait_ms=8000
+13:51:44 [D] node=164 src=radio        seq=1158   t=105058     retx_blocked reason=awaiting_ack_window seq=2 age_ms=7745 wait_ms=8000
+13:51:44 [D] node=164 src=radio        seq=1159   t=105085     retx_blocked reason=awaiting_ack_window seq=2 age_ms=7772 wait_ms=8000
+13:51:44 [D] node=164 src=radio        seq=1183   t=105238     [seq jump 1159->1183] retx_blocked reason=awaiting_ack_window seq=2 age_ms=7926 wait_ms=8000
+13:51:44 [D] node=164 src=radio        seq=1184   t=105265     retx_blocked reason=awaiting_ack_window seq=2 age_ms=7953 wait_ms=8000
+13:51:44 [D] node=164 src=radio        seq=1185   t=105292     retx_blocked reason=awaiting_ack_window seq=2 age_ms=7980 wait_ms=8000
+13:51:44 [I] node=164 src=radio        seq=1186   t=105319     retx_gate_open reason=ack_window_elapsed seq=2 age_ms=8007 wait_ms=8000
+13:51:44 [D] node=164 src=radio        seq=1187   t=105321     retx_candidate seq=2 index=1 len=21 attempts=1
+13:51:44 [D] node=164 src=radio        seq=1188   t=105322     slot_defer pkt=STATUS seq=2 len=21 slot=25 remaining_ms=40 needed_ms=120 from_queue=0
+13:51:44 [D] node=164 src=radio        seq=1189   t=105349     retx_candidate seq=2 index=1 len=21 attempts=1
+13:51:44 [D] node=164 src=radio        seq=1190   t=105351     slot_defer pkt=STATUS seq=2 len=21 slot=25 remaining_ms=12 needed_ms=120 from_queue=0
+13:51:45 [I] node=164 src=radio        seq=1239   t=106247     [seq jump 1190->1239] enqueue count=3 pkt=STATUS seq=4 len=21 q=1/8 pending=1 dropped=0
+13:51:47 [D] node=164 src=radio        seq=1313   t=108118     [seq jump 1239->1313] tx_noack pkt=STATUS seq=4 len=21 slot=29
+13:51:47 [D] node=164 src=radio        seq=1314   t=108120     pending_add seq=4 index=0 len=21 pending=2
+13:51:47 [I] node=164 src=radio        seq=1315   t=108121     tx_sent count=5 pkt=STATUS seq=4 len=21 slot=29 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+13:51:51 [D] node=164 src=radio        seq=1483   t=111704     [seq jump 1315->1483] retx_blocked reason=awaiting_ack_window seq=4 age_ms=3584 wait_ms=8000
+13:51:51 [D] node=164 src=radio        seq=1484   t=111705     retx_candidate seq=2 index=1 len=21 attempts=1
+13:51:51 [D] node=164 src=radio        seq=1485   t=111707     tx_noack pkt=STATUS seq=2 len=21 slot=33
+13:51:51 [I] node=164 src=radio        seq=1486   t=111709     retx_sent count=3 pkt=STATUS seq=2 len=21 attempt=2 slot=33 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+13:51:51 [D] node=164 src=radio        seq=1487   t=111711     retx_mark_sent seq=2 index=1 attempts=2
+13:51:51 [D] node=164 src=radio        seq=1488   t=111712     retx_blocked reason=awaiting_ack_window seq=4 age_ms=3593 wait_ms=8000
+13:51:51 [D] node=164 src=radio        seq=1513   t=111870     [seq jump 1488->1513] retx_blocked reason=awaiting_ack_window seq=4 age_ms=3750 wait_ms=8000
+13:51:51 [D] node=164 src=radio        seq=1514   t=111897     retx_blocked reason=awaiting_ack_window seq=4 age_ms=3777 wait_ms=8000
+13:51:51 [D] node=164 src=radio        seq=1515   t=111924     retx_blocked reason=awaiting_ack_window seq=4 age_ms=3804 wait_ms=8000
+13:51:51 [D] node=164 src=radio        seq=1516   t=111950     retx_blocked reason=awaiting_ack_window seq=4 age_ms=3831 wait_ms=8000
+13:51:51 [D] node=164 src=radio        seq=1517   t=111977     retx_blocked reason=awaiting_ack_window seq=4 age_ms=3858 wait_ms=8000
+13:51:51 [D] node=164 src=radio        seq=1518   t=112004     retx_blocked reason=awaiting_ack_window seq=4 age_ms=3885 wait_ms=8000
+13:51:51 [D] node=164 src=radio        seq=1519   t=112031     retx_blocked reason=awaiting_ack_window seq=4 age_ms=3911 wait_ms=8000
+13:51:51 [D] node=164 src=radio        seq=1520   t=112058     retx_blocked reason=awaiting_ack_window seq=4 age_ms=3938 wait_ms=8000
+13:51:51 [D] node=164 src=radio        seq=1521   t=112084     retx_blocked reason=awaiting_ack_window seq=4 age_ms=3965 wait_ms=8000
+13:51:51 [D] node=164 src=radio        seq=1522   t=112111     retx_blocked reason=awaiting_ack_window seq=4 age_ms=3992 wait_ms=8000
+13:51:51 [D] node=164 src=radio        seq=1523   t=112138     retx_blocked reason=awaiting_ack_window seq=4 age_ms=4019 wait_ms=8000
+13:51:51 [D] node=164 src=radio        seq=1524   t=112165     retx_blocked reason=awaiting_ack_window seq=4 age_ms=4046 wait_ms=8000
+13:51:51 [D] node=164 src=radio        seq=1525   t=112192     retx_blocked reason=awaiting_ack_window seq=4 age_ms=4072 wait_ms=8000
+13:51:51 [D] node=164 src=radio        seq=1526   t=112219     retx_blocked reason=awaiting_ack_window seq=4 age_ms=4099 wait_ms=8000
+13:51:51 [D] node=164 src=radio        seq=1550   t=112371     [seq jump 1526->1550] retx_blocked reason=awaiting_ack_window seq=4 age_ms=4252 wait_ms=8000
+13:51:51 [D] node=164 src=radio        seq=1551   t=112398     retx_blocked reason=awaiting_ack_window seq=4 age_ms=4278 wait_ms=8000
+13:51:51 [D] node=164 src=radio        seq=1552   t=112425     retx_blocked reason=awaiting_ack_window seq=4 age_ms=4305 wait_ms=8000
+13:51:51 [D] node=164 src=radio        seq=1553   t=112451     retx_blocked reason=awaiting_ack_window seq=4 age_ms=4332 wait_ms=8000
+13:51:51 [D] node=164 src=radio        seq=1554   t=112478     retx_blocked reason=awaiting_ack_window seq=4 age_ms=4359 wait_ms=8000
+13:51:51 [D] node=164 src=radio        seq=1555   t=112505     retx_blocked reason=awaiting_ack_window seq=4 age_ms=4386 wait_ms=8000
+13:51:51 [D] node=164 src=radio        seq=1556   t=112532     retx_blocked reason=awaiting_ack_window seq=4 age_ms=4412 wait_ms=8000
+13:51:51 [D] node=164 src=radio        seq=1557   t=112559     retx_blocked reason=awaiting_ack_window seq=4 age_ms=4439 wait_ms=8000
+13:51:54 [D] node=164 src=radio        seq=1700   t=115424     [seq jump 1557->1700] retx_blocked reason=awaiting_ack_window seq=4 age_ms=7305 wait_ms=8000
+13:51:54 [D] node=164 src=radio        seq=1701   t=115426     retx_candidate seq=2 index=1 len=21 attempts=2
+13:51:54 [D] node=164 src=radio        seq=1702   t=115427     tx_noack pkt=STATUS seq=2 len=21 slot=37
+13:51:54 [I] node=164 src=radio        seq=1703   t=115430     retx_sent count=4 pkt=STATUS seq=2 len=21 attempt=3 slot=37 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+13:51:54 [D] node=164 src=radio        seq=1704   t=115432     retx_mark_sent seq=2 index=1 attempts=3
+13:51:54 [D] node=164 src=radio        seq=1705   t=115433     retx_blocked reason=awaiting_ack_window seq=4 age_ms=7314 wait_ms=8000
+13:51:54 [W] node=164 src=radio        seq=1706   t=115435     drop_pending drop_count=2 seq=2 reason=max_attempts attempts=3 age_ms=18121 q=0/8 pending=2 dropped=0
+13:51:54 [D] node=164 src=radio        seq=1707   t=115462     retx_blocked reason=awaiting_ack_window seq=4 age_ms=7343 wait_ms=8000
+13:51:54 [D] node=164 src=radio        seq=1708   t=115489     retx_blocked reason=awaiting_ack_window seq=4 age_ms=7369 wait_ms=8000
+13:51:54 [D] node=164 src=radio        seq=1709   t=115516     retx_blocked reason=awaiting_ack_window seq=4 age_ms=7396 wait_ms=8000
+13:51:54 [D] node=164 src=radio        seq=1710   t=115543     retx_blocked reason=awaiting_ack_window seq=4 age_ms=7423 wait_ms=8000
+13:51:55 [D] node=164 src=radio        seq=1711   t=115570     retx_blocked reason=awaiting_ack_window seq=4 age_ms=7450 wait_ms=8000
+13:51:55 [D] node=164 src=radio        seq=1712   t=115597     retx_blocked reason=awaiting_ack_window seq=4 age_ms=7478 wait_ms=8000
+13:51:55 [D] node=164 src=radio        seq=1713   t=115624     retx_blocked reason=awaiting_ack_window seq=4 age_ms=7504 wait_ms=8000
+13:51:55 [D] node=164 src=radio        seq=1714   t=115651     retx_blocked reason=awaiting_ack_window seq=4 age_ms=7532 wait_ms=8000
+13:51:55 [D] node=164 src=radio        seq=1715   t=115678     retx_blocked reason=awaiting_ack_window seq=4 age_ms=7559 wait_ms=8000
+13:51:55 [D] node=164 src=radio        seq=1716   t=115705     retx_blocked reason=awaiting_ack_window seq=4 age_ms=7586 wait_ms=8000
+13:51:55 [D] node=164 src=radio        seq=1717   t=115732     retx_blocked reason=awaiting_ack_window seq=4 age_ms=7612 wait_ms=8000
+13:51:55 [D] node=164 src=radio        seq=1718   t=115759     retx_blocked reason=awaiting_ack_window seq=4 age_ms=7639 wait_ms=8000
+13:51:55 [D] node=164 src=radio        seq=1719   t=115785     retx_blocked reason=awaiting_ack_window seq=4 age_ms=7666 wait_ms=8000
+13:51:55 [D] node=164 src=radio        seq=1745   t=115943     [seq jump 1719->1745] retx_blocked reason=awaiting_ack_window seq=4 age_ms=7824 wait_ms=8000
+13:51:55 [D] node=164 src=radio        seq=1746   t=115970     retx_blocked reason=awaiting_ack_window seq=4 age_ms=7851 wait_ms=8000
+13:51:55 [D] node=164 src=radio        seq=1747   t=115997     retx_blocked reason=awaiting_ack_window seq=4 age_ms=7877 wait_ms=8000
+13:51:55 [D] node=164 src=radio        seq=1748   t=116024     retx_blocked reason=awaiting_ack_window seq=4 age_ms=7904 wait_ms=8000
+13:51:55 [D] node=164 src=radio        seq=1749   t=116050     retx_blocked reason=awaiting_ack_window seq=4 age_ms=7931 wait_ms=8000
+13:51:55 [D] node=164 src=radio        seq=1750   t=116077     retx_blocked reason=awaiting_ack_window seq=4 age_ms=7958 wait_ms=8000
+13:51:55 [D] node=164 src=radio        seq=1751   t=116104     retx_blocked reason=awaiting_ack_window seq=4 age_ms=7985 wait_ms=8000
+13:51:55 [I] node=164 src=radio        seq=1752   t=116131     retx_gate_open reason=ack_window_elapsed seq=4 age_ms=8012 wait_ms=8000
+13:51:55 [D] node=164 src=radio        seq=1753   t=116133     retx_candidate seq=4 index=0 len=21 attempts=1
+13:51:55 [D] node=164 src=radio        seq=1754   t=116134     slot_defer pkt=STATUS seq=4 len=21 slot=37 remaining_ms=29 needed_ms=120 from_queue=0
+13:51:55 [D] node=164 src=radio        seq=1755   t=116161     retx_candidate seq=4 index=0 len=21 attempts=1
+13:51:55 [D] node=164 src=radio        seq=1756   t=116162     slot_defer pkt=STATUS seq=4 len=21 slot=37 remaining_ms=0 needed_ms=120 from_queue=0
+13:51:55 [I] node=164 src=radio        seq=1780   t=116418     [seq jump 1756->1780] enqueue count=4 pkt=STATUS seq=7 len=21 q=1/8 pending=1 dropped=0
+13:51:58 [D] node=164 src=radio        seq=1903   t=118985     [seq jump 1780->1903] tx_noack pkt=STATUS seq=7 len=21 slot=41
+13:51:58 [D] node=164 src=radio        seq=1904   t=118987     pending_add seq=7 index=1 len=21 pending=2
+13:51:58 [I] node=164 src=radio        seq=1905   t=118988     tx_sent count=8 pkt=STATUS seq=7 len=21 slot=41 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+13:52:01 [D] node=164 src=radio        seq=2071   t=122535     [seq jump 1905->2071] retx_blocked reason=awaiting_ack_window seq=7 age_ms=3549 wait_ms=8000
+13:52:01 [D] node=164 src=radio        seq=2072   t=122537     retx_candidate seq=4 index=0 len=21 attempts=1
+13:52:01 [D] node=164 src=radio        seq=2073   t=122538     tx_noack pkt=STATUS seq=4 len=21 slot=45
+13:52:01 [I] node=164 src=radio        seq=2074   t=122540     retx_sent count=5 pkt=STATUS seq=4 len=21 attempt=2 slot=45 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+13:52:01 [D] node=164 src=radio        seq=2075   t=122542     retx_mark_sent seq=4 index=0 attempts=2
+13:52:01 [D] node=164 src=radio        seq=2076   t=122544     retx_blocked reason=awaiting_ack_window seq=7 age_ms=3557 wait_ms=8000
+13:52:02 [D] node=164 src=radio        seq=2077   t=122570     retx_blocked reason=awaiting_ack_window seq=7 age_ms=3584 wait_ms=8000
+13:52:02 [D] node=164 src=radio        seq=2078   t=122598     retx_blocked reason=awaiting_ack_window seq=7 age_ms=3611 wait_ms=8000
+13:52:02 [D] node=164 src=radio        seq=2079   t=122625     retx_blocked reason=awaiting_ack_window seq=7 age_ms=3638 wait_ms=8000
+13:52:02 [D] node=164 src=radio        seq=2080   t=122652     retx_blocked reason=awaiting_ack_window seq=7 age_ms=3666 wait_ms=8000
+13:52:02 [D] node=164 src=radio        seq=2081   t=122679     retx_blocked reason=awaiting_ack_window seq=7 age_ms=3692 wait_ms=8000
+13:52:02 [D] node=164 src=radio        seq=2082   t=122706     retx_blocked reason=awaiting_ack_window seq=7 age_ms=3719 wait_ms=8000
+13:52:02 [D] node=164 src=radio        seq=2083   t=122733     retx_blocked reason=awaiting_ack_window seq=7 age_ms=3747 wait_ms=8000
+13:52:02 [D] node=164 src=radio        seq=2084   t=122760     retx_blocked reason=awaiting_ack_window seq=7 age_ms=3774 wait_ms=8000
+13:52:02 [D] node=164 src=radio        seq=2085   t=122787     retx_blocked reason=awaiting_ack_window seq=7 age_ms=3800 wait_ms=8000
+13:52:02 [D] node=164 src=radio        seq=2086   t=122814     retx_blocked reason=awaiting_ack_window seq=7 age_ms=3827 wait_ms=8000
+13:52:02 [D] node=164 src=radio        seq=2087   t=122841     retx_blocked reason=awaiting_ack_window seq=7 age_ms=3854 wait_ms=8000
+13:52:02 [D] node=164 src=radio        seq=2088   t=122867     retx_blocked reason=awaiting_ack_window seq=7 age_ms=3881 wait_ms=8000
+13:52:02 [D] node=164 src=radio        seq=2089   t=122894     retx_blocked reason=awaiting_ack_window seq=7 age_ms=3908 wait_ms=8000
+13:52:02 [D] node=164 src=radio        seq=2114   t=123051     [seq jump 2089->2114] retx_blocked reason=awaiting_ack_window seq=7 age_ms=4064 wait_ms=8000
+13:52:02 [D] node=164 src=radio        seq=2115   t=123078     retx_blocked reason=awaiting_ack_window seq=7 age_ms=4091 wait_ms=8000
+13:52:02 [D] node=164 src=radio        seq=2116   t=123105     retx_blocked reason=awaiting_ack_window seq=7 age_ms=4118 wait_ms=8000
+13:52:02 [D] node=164 src=radio        seq=2117   t=123131     retx_blocked reason=awaiting_ack_window seq=7 age_ms=4145 wait_ms=8000
+13:52:02 [D] node=164 src=radio        seq=2118   t=123158     retx_blocked reason=awaiting_ack_window seq=7 age_ms=4172 wait_ms=8000
+13:52:02 [D] node=164 src=radio        seq=2119   t=123185     retx_blocked reason=awaiting_ack_window seq=7 age_ms=4199 wait_ms=8000
+13:52:02 [D] node=164 src=radio        seq=2120   t=123212     retx_blocked reason=awaiting_ack_window seq=7 age_ms=4225 wait_ms=8000
+13:52:02 [D] node=164 src=radio        seq=2121   t=123239     retx_blocked reason=awaiting_ack_window seq=7 age_ms=4252 wait_ms=8000
+13:52:02 [D] node=164 src=radio        seq=2122   t=123266     retx_blocked reason=awaiting_ack_window seq=7 age_ms=4280 wait_ms=8000
+13:52:02 [D] node=164 src=radio        seq=2123   t=123293     retx_blocked reason=awaiting_ack_window seq=7 age_ms=4306 wait_ms=8000
+13:52:02 [D] node=164 src=radio        seq=2124   t=123320     retx_blocked reason=awaiting_ack_window seq=7 age_ms=4333 wait_ms=8000
+13:52:02 [D] node=164 src=radio        seq=2125   t=123346     retx_blocked reason=awaiting_ack_window seq=7 age_ms=4360 wait_ms=8000
+13:52:05 [D] node=164 src=radio        seq=2269   t=126112     [seq jump 2125->2269] retx_blocked reason=awaiting_ack_window seq=7 age_ms=7126 wait_ms=8000
+13:52:05 [D] node=164 src=radio        seq=2270   t=126114     retx_candidate seq=4 index=0 len=21 attempts=2
+13:52:05 [D] node=164 src=radio        seq=2271   t=126115     tx_noack pkt=STATUS seq=4 len=21 slot=49
+13:52:05 [I] node=164 src=radio        seq=2272   t=126117     retx_sent count=6 pkt=STATUS seq=4 len=21 attempt=3 slot=49 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+13:52:05 [D] node=164 src=radio        seq=2273   t=126120     retx_mark_sent seq=4 index=0 attempts=3
+13:52:05 [W] node=164 src=radio        seq=2274   t=126121     drop_pending drop_count=3 seq=4 reason=max_attempts attempts=3 age_ms=18001 q=0/8 pending=2 dropped=0
+13:52:05 [D] node=164 src=radio        seq=2275   t=126123     retx_blocked reason=awaiting_ack_window seq=7 age_ms=7134 wait_ms=8000
+13:52:05 [D] node=164 src=radio        seq=2276   t=126150     retx_blocked reason=awaiting_ack_window seq=7 age_ms=7163 wait_ms=8000
+13:52:05 [D] node=164 src=radio        seq=2277   t=126177     retx_blocked reason=awaiting_ack_window seq=7 age_ms=7190 wait_ms=8000
+13:52:05 [D] node=164 src=radio        seq=2278   t=126204     retx_blocked reason=awaiting_ack_window seq=7 age_ms=7218 wait_ms=8000
+13:52:05 [D] node=164 src=radio        seq=2279   t=126231     retx_blocked reason=awaiting_ack_window seq=7 age_ms=7244 wait_ms=8000
+13:52:05 [D] node=164 src=radio        seq=2280   t=126258     retx_blocked reason=awaiting_ack_window seq=7 age_ms=7271 wait_ms=8000
+13:52:05 [D] node=164 src=radio        seq=2281   t=126285     retx_blocked reason=awaiting_ack_window seq=7 age_ms=7298 wait_ms=8000
+13:52:05 [D] node=164 src=radio        seq=2282   t=126312     retx_blocked reason=awaiting_ack_window seq=7 age_ms=7325 wait_ms=8000
+13:52:05 [D] node=164 src=radio        seq=2283   t=126339     retx_blocked reason=awaiting_ack_window seq=7 age_ms=7352 wait_ms=8000
+13:52:05 [D] node=164 src=radio        seq=2284   t=126366     retx_blocked reason=awaiting_ack_window seq=7 age_ms=7379 wait_ms=8000
+13:52:05 [D] node=164 src=radio        seq=2285   t=126393     retx_blocked reason=awaiting_ack_window seq=7 age_ms=7407 wait_ms=8000
+13:52:05 [D] node=164 src=radio        seq=2286   t=126420     retx_blocked reason=awaiting_ack_window seq=7 age_ms=7433 wait_ms=8000
+13:52:05 [D] node=164 src=radio        seq=2287   t=126447     retx_blocked reason=awaiting_ack_window seq=7 age_ms=7460 wait_ms=8000
+13:52:06 [I] node=164 src=radio        seq=2311   t=126575     [seq jump 2287->2311] enqueue count=5 pkt=STATUS seq=9 len=21 q=1/8 pending=1 dropped=0
+13:52:06 [D] node=164 src=radio        seq=2315   t=126604     [seq jump 2311->2315] tx_noack pkt=STATUS seq=9 len=21 slot=49
+13:52:06 [D] node=164 src=radio        seq=2316   t=126606     pending_add seq=9 index=0 len=21 pending=2
+13:52:06 [I] node=164 src=radio        seq=2317   t=126607     tx_sent count=11 pkt=STATUS seq=9 len=21 slot=49 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+13:52:09 [D] node=164 src=radio        seq=2460   t=129727     [seq jump 2317->2460] retx_blocked reason=awaiting_ack_window seq=9 age_ms=3121 wait_ms=8000
+13:52:09 [I] node=164 src=radio        seq=2461   t=129728     retx_gate_open reason=ack_window_elapsed seq=7 age_ms=10740 wait_ms=8000
+13:52:09 [D] node=164 src=radio        seq=2462   t=129730     retx_candidate seq=7 index=1 len=21 attempts=1
+13:52:09 [D] node=164 src=radio        seq=2463   t=129731     tx_noack pkt=STATUS seq=7 len=21 slot=53
+13:52:09 [I] node=164 src=radio        seq=2464   t=129733     retx_sent count=7 pkt=STATUS seq=7 len=21 attempt=2 slot=53 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+13:52:09 [D] node=164 src=radio        seq=2465   t=129736     retx_mark_sent seq=7 index=1 attempts=2
+13:52:09 [D] node=164 src=radio        seq=2466   t=129737     retx_blocked reason=awaiting_ack_window seq=9 age_ms=3131 wait_ms=8000
+13:52:09 [D] node=164 src=radio        seq=2467   t=129764     retx_blocked reason=awaiting_ack_window seq=9 age_ms=3158 wait_ms=8000
+13:52:09 [D] node=164 src=radio        seq=2468   t=129791     retx_blocked reason=awaiting_ack_window seq=9 age_ms=3185 wait_ms=8000
+13:52:09 [D] node=164 src=radio        seq=2469   t=129818     retx_blocked reason=awaiting_ack_window seq=9 age_ms=3212 wait_ms=8000
+13:52:09 [D] node=164 src=radio        seq=2470   t=129845     retx_blocked reason=awaiting_ack_window seq=9 age_ms=3239 wait_ms=8000
+13:52:09 [D] node=164 src=radio        seq=2471   t=129872     retx_blocked reason=awaiting_ack_window seq=9 age_ms=3266 wait_ms=8000
+13:52:09 [D] node=164 src=radio        seq=2472   t=129898     retx_blocked reason=awaiting_ack_window seq=9 age_ms=3293 wait_ms=8000
+13:52:09 [D] node=164 src=radio        seq=2473   t=129925     retx_blocked reason=awaiting_ack_window seq=9 age_ms=3320 wait_ms=8000
+13:52:09 [D] node=164 src=radio        seq=2474   t=129952     retx_blocked reason=awaiting_ack_window seq=9 age_ms=3347 wait_ms=8000
+13:52:09 [D] node=164 src=radio        seq=2475   t=129979     retx_blocked reason=awaiting_ack_window seq=9 age_ms=3374 wait_ms=8000
+13:52:09 [D] node=164 src=radio        seq=2476   t=130006     retx_blocked reason=awaiting_ack_window seq=9 age_ms=3400 wait_ms=8000
+13:52:09 [D] node=164 src=radio        seq=2501   t=130161     [seq jump 2476->2501] retx_blocked reason=awaiting_ack_window seq=9 age_ms=3556 wait_ms=8000
+13:52:09 [D] node=164 src=radio        seq=2502   t=130188     retx_blocked reason=awaiting_ack_window seq=9 age_ms=3583 wait_ms=8000
+13:52:09 [D] node=164 src=radio        seq=2503   t=130215     retx_blocked reason=awaiting_ack_window seq=9 age_ms=3610 wait_ms=8000
+13:52:09 [D] node=164 src=radio        seq=2504   t=130242     retx_blocked reason=awaiting_ack_window seq=9 age_ms=3636 wait_ms=8000
+13:52:09 [D] node=164 src=radio        seq=2505   t=130269     retx_blocked reason=awaiting_ack_window seq=9 age_ms=3663 wait_ms=8000
+13:52:09 [D] node=164 src=radio        seq=2506   t=130296     retx_blocked reason=awaiting_ack_window seq=9 age_ms=3690 wait_ms=8000
+13:52:09 [D] node=164 src=radio        seq=2507   t=130322     retx_blocked reason=awaiting_ack_window seq=9 age_ms=3717 wait_ms=8000
+13:52:09 [D] node=164 src=radio        seq=2508   t=130349     retx_blocked reason=awaiting_ack_window seq=9 age_ms=3744 wait_ms=8000
+13:52:09 [D] node=164 src=radio        seq=2509   t=130376     retx_blocked reason=awaiting_ack_window seq=9 age_ms=3771 wait_ms=8000
+13:52:09 [D] node=164 src=radio        seq=2510   t=130403     retx_blocked reason=awaiting_ack_window seq=9 age_ms=3798 wait_ms=8000
+13:52:09 [D] node=164 src=radio        seq=2511   t=130430     retx_blocked reason=awaiting_ack_window seq=9 age_ms=3825 wait_ms=8000
+13:52:09 [D] node=164 src=radio        seq=2512   t=130457     retx_blocked reason=awaiting_ack_window seq=9 age_ms=3851 wait_ms=8000
+13:52:09 [D] node=164 src=radio        seq=2513   t=130484     retx_blocked reason=awaiting_ack_window seq=9 age_ms=3878 wait_ms=8000
+13:52:09 [D] node=164 src=radio        seq=2514   t=130511     retx_blocked reason=awaiting_ack_window seq=9 age_ms=3905 wait_ms=8000
+13:52:12 [D] node=164 src=radio        seq=2658   t=133304     [seq jump 2514->2658] retx_blocked reason=awaiting_ack_window seq=9 age_ms=6699 wait_ms=8000
+13:52:12 [D] node=164 src=radio        seq=2659   t=133306     retx_candidate seq=7 index=1 len=21 attempts=2
+13:52:12 [D] node=164 src=radio        seq=2660   t=133307     tx_noack pkt=STATUS seq=7 len=21 slot=57
+13:52:12 [I] node=164 src=radio        seq=2661   t=133309     retx_sent count=8 pkt=STATUS seq=7 len=21 attempt=3 slot=57 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+13:52:12 [D] node=164 src=radio        seq=2662   t=133312     retx_mark_sent seq=7 index=1 attempts=3
+13:52:12 [D] node=164 src=radio        seq=2663   t=133313     retx_blocked reason=awaiting_ack_window seq=9 age_ms=6707 wait_ms=8000
+13:52:12 [W] node=164 src=radio        seq=2664   t=133314     drop_pending drop_count=4 seq=7 reason=max_attempts attempts=3 age_ms=14326 q=0/8 pending=2 dropped=0
+13:52:12 [D] node=164 src=radio        seq=2665   t=133342     retx_blocked reason=awaiting_ack_window seq=9 age_ms=6736 wait_ms=8000
+13:52:12 [D] node=164 src=radio        seq=2666   t=133369     retx_blocked reason=awaiting_ack_window seq=9 age_ms=6763 wait_ms=8000
+13:52:12 [D] node=164 src=radio        seq=2667   t=133396     retx_blocked reason=awaiting_ack_window seq=9 age_ms=6790 wait_ms=8000
+13:52:12 [D] node=164 src=radio        seq=2668   t=133423     retx_blocked reason=awaiting_ack_window seq=9 age_ms=6817 wait_ms=8000
+13:52:12 [D] node=164 src=radio        seq=2669   t=133450     retx_blocked reason=awaiting_ack_window seq=9 age_ms=6844 wait_ms=8000
+13:52:12 [D] node=164 src=radio        seq=2670   t=133476     retx_blocked reason=awaiting_ack_window seq=9 age_ms=6871 wait_ms=8000
+13:52:12 [D] node=164 src=radio        seq=2671   t=133504     retx_blocked reason=awaiting_ack_window seq=9 age_ms=6898 wait_ms=8000
+13:52:12 [D] node=164 src=radio        seq=2672   t=133531     retx_blocked reason=awaiting_ack_window seq=9 age_ms=6925 wait_ms=8000
+13:52:12 [D] node=164 src=radio        seq=2673   t=133558     retx_blocked reason=awaiting_ack_window seq=9 age_ms=6952 wait_ms=8000
+13:52:13 [D] node=164 src=radio        seq=2697   t=133709     [seq jump 2673->2697] retx_blocked reason=awaiting_ack_window seq=9 age_ms=7103 wait_ms=8000
+13:52:13 [D] node=164 src=radio        seq=2698   t=133736     retx_blocked reason=awaiting_ack_window seq=9 age_ms=7130 wait_ms=8000
+13:52:13 [D] node=164 src=radio        seq=2699   t=133762     retx_blocked reason=awaiting_ack_window seq=9 age_ms=7157 wait_ms=8000
+13:52:13 [D] node=164 src=radio        seq=2700   t=133789     retx_blocked reason=awaiting_ack_window seq=9 age_ms=7184 wait_ms=8000
+13:52:13 [D] node=164 src=radio        seq=2701   t=133816     retx_blocked reason=awaiting_ack_window seq=9 age_ms=7211 wait_ms=8000
+13:52:13 [D] node=164 src=radio        seq=2702   t=133843     retx_blocked reason=awaiting_ack_window seq=9 age_ms=7237 wait_ms=8000
+13:52:13 [D] node=164 src=radio        seq=2703   t=133870     retx_blocked reason=awaiting_ack_window seq=9 age_ms=7264 wait_ms=8000
+13:52:13 [D] node=164 src=radio        seq=2704   t=133897     retx_blocked reason=awaiting_ack_window seq=9 age_ms=7291 wait_ms=8000
+13:52:13 [D] node=164 src=radio        seq=2705   t=133923     retx_blocked reason=awaiting_ack_window seq=9 age_ms=7318 wait_ms=8000
+13:52:13 [D] node=164 src=radio        seq=2706   t=133950     retx_blocked reason=awaiting_ack_window seq=9 age_ms=7345 wait_ms=8000
+13:52:13 [D] node=164 src=radio        seq=2707   t=133977     retx_blocked reason=awaiting_ack_window seq=9 age_ms=7371 wait_ms=8000
+13:52:13 [D] node=164 src=radio        seq=2708   t=134004     retx_blocked reason=awaiting_ack_window seq=9 age_ms=7398 wait_ms=8000
+13:52:13 [D] node=164 src=radio        seq=2709   t=134030     retx_blocked reason=awaiting_ack_window seq=9 age_ms=7425 wait_ms=8000
+13:52:13 [D] node=164 src=radio        seq=2710   t=134057     retx_blocked reason=awaiting_ack_window seq=9 age_ms=7452 wait_ms=8000
+13:52:13 [D] node=164 src=radio        seq=2711   t=134084     retx_blocked reason=awaiting_ack_window seq=9 age_ms=7479 wait_ms=8000
+13:52:13 [W] node=164 src=radio        seq=2736   t=134240     [seq jump 2711->2736] receive_failed
+13:52:16 [I] node=164 src=radio        seq=2855   t=136752     [seq jump 2736->2855] enqueue count=6 pkt=STATUS seq=11 len=21 q=1/8 pending=1 dropped=0
+13:52:16 [D] node=164 src=radio        seq=2859   t=136908     [seq jump 2855->2859] tx_noack pkt=STATUS seq=11 len=21 slot=61
+13:52:16 [D] node=164 src=radio        seq=2860   t=136909     pending_add seq=11 index=1 len=21 pending=2
+13:52:16 [I] node=164 src=radio        seq=2861   t=136911     tx_sent count=14 pkt=STATUS seq=11 len=21 slot=61 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+13:52:19 [I] node=164 src=radio        seq=3029   t=140517     [seq jump 2861->3029] retx_gate_open reason=ack_window_elapsed seq=9 age_ms=13911 wait_ms=8000
+13:52:19 [D] node=164 src=radio        seq=3030   t=140519     retx_blocked reason=awaiting_ack_window seq=11 age_ms=3607 wait_ms=8000
+13:52:19 [D] node=164 src=radio        seq=3031   t=140520     retx_candidate seq=9 index=0 len=21 attempts=1
+13:52:19 [D] node=164 src=radio        seq=3032   t=140521     tx_noack pkt=STATUS seq=9 len=21 slot=65
+13:52:19 [I] node=164 src=radio        seq=3033   t=140523     retx_sent count=9 pkt=STATUS seq=9 len=21 attempt=2 slot=65 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+13:52:19 [D] node=164 src=radio        seq=3034   t=140526     retx_mark_sent seq=9 index=0 attempts=2
+13:52:19 [D] node=164 src=radio        seq=3035   t=140527     retx_blocked reason=awaiting_ack_window seq=11 age_ms=3618 wait_ms=8000
+13:52:19 [D] node=164 src=radio        seq=3036   t=140554     retx_blocked reason=awaiting_ack_window seq=11 age_ms=3644 wait_ms=8000
+13:52:20 [D] node=164 src=radio        seq=3037   t=140581     retx_blocked reason=awaiting_ack_window seq=11 age_ms=3671 wait_ms=8000
+13:52:20 [D] node=164 src=radio        seq=3038   t=140608     retx_blocked reason=awaiting_ack_window seq=11 age_ms=3698 wait_ms=8000
+13:52:20 [D] node=164 src=radio        seq=3039   t=140635     retx_blocked reason=awaiting_ack_window seq=11 age_ms=3725 wait_ms=8000
+13:52:20 [D] node=164 src=radio        seq=3040   t=140662     retx_blocked reason=awaiting_ack_window seq=11 age_ms=3752 wait_ms=8000
+13:52:20 [D] node=164 src=radio        seq=3041   t=140689     retx_blocked reason=awaiting_ack_window seq=11 age_ms=3779 wait_ms=8000
+13:52:20 [D] node=164 src=radio        seq=3065   t=140841     [seq jump 3041->3065] retx_blocked reason=awaiting_ack_window seq=11 age_ms=3932 wait_ms=8000
+13:52:20 [D] node=164 src=radio        seq=3066   t=140868     retx_blocked reason=awaiting_ack_window seq=11 age_ms=3958 wait_ms=8000
+13:52:20 [D] node=164 src=radio        seq=3067   t=140895     retx_blocked reason=awaiting_ack_window seq=11 age_ms=3986 wait_ms=8000
+13:52:20 [D] node=164 src=radio        seq=3068   t=140922     retx_blocked reason=awaiting_ack_window seq=11 age_ms=4013 wait_ms=8000
+13:52:20 [D] node=164 src=radio        seq=3069   t=140949     retx_blocked reason=awaiting_ack_window seq=11 age_ms=4040 wait_ms=8000
+13:52:20 [D] node=164 src=radio        seq=3070   t=140976     retx_blocked reason=awaiting_ack_window seq=11 age_ms=4067 wait_ms=8000
+13:52:20 [D] node=164 src=radio        seq=3071   t=141003     retx_blocked reason=awaiting_ack_window seq=11 age_ms=4094 wait_ms=8000
+13:52:20 [D] node=164 src=radio        seq=3072   t=141030     retx_blocked reason=awaiting_ack_window seq=11 age_ms=4121 wait_ms=8000
+13:52:20 [D] node=164 src=radio        seq=3073   t=141057     retx_blocked reason=awaiting_ack_window seq=11 age_ms=4148 wait_ms=8000
+13:52:20 [D] node=164 src=radio        seq=3074   t=141084     retx_blocked reason=awaiting_ack_window seq=11 age_ms=4174 wait_ms=8000
+13:52:20 [D] node=164 src=radio        seq=3075   t=141111     retx_blocked reason=awaiting_ack_window seq=11 age_ms=4201 wait_ms=8000
+13:52:20 [D] node=164 src=radio        seq=3076   t=141138     retx_blocked reason=awaiting_ack_window seq=11 age_ms=4229 wait_ms=8000
+13:52:20 [D] node=164 src=radio        seq=3077   t=141165     retx_blocked reason=awaiting_ack_window seq=11 age_ms=4256 wait_ms=8000
+13:52:20 [D] node=164 src=radio        seq=3078   t=141192     retx_blocked reason=awaiting_ack_window seq=11 age_ms=4283 wait_ms=8000
+13:52:20 [D] node=164 src=radio        seq=3103   t=141350     [seq jump 3078->3103] retx_blocked reason=awaiting_ack_window seq=11 age_ms=4440 wait_ms=8000
+13:52:23 [D] node=164 src=radio        seq=3222   t=144108     [seq jump 3103->3222] retx_blocked reason=awaiting_ack_window seq=11 age_ms=7198 wait_ms=8000
+13:52:23 [D] node=164 src=radio        seq=3223   t=144110     retx_candidate seq=9 index=0 len=21 attempts=2
+13:52:23 [D] node=164 src=radio        seq=3224   t=144111     tx_noack pkt=STATUS seq=9 len=21 slot=69
+13:52:23 [I] node=164 src=radio        seq=3225   t=144113     retx_sent count=10 pkt=STATUS seq=9 len=21 attempt=3 slot=69 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+13:52:23 [D] node=164 src=radio        seq=3226   t=144115     retx_mark_sent seq=9 index=0 attempts=3
+13:52:23 [W] node=164 src=radio        seq=3227   t=144116     drop_pending drop_count=5 seq=9 reason=max_attempts attempts=3 age_ms=17511 q=0/8 pending=2 dropped=0
+13:52:23 [D] node=164 src=radio        seq=3228   t=144118     retx_blocked reason=awaiting_ack_window seq=11 age_ms=7207 wait_ms=8000
+13:52:23 [D] node=164 src=radio        seq=3229   t=144145     retx_blocked reason=awaiting_ack_window seq=11 age_ms=7236 wait_ms=8000
+13:52:23 [D] node=164 src=radio        seq=3230   t=144172     retx_blocked reason=awaiting_ack_window seq=11 age_ms=7263 wait_ms=8000
+13:52:23 [D] node=164 src=radio        seq=3231   t=144199     retx_blocked reason=awaiting_ack_window seq=11 age_ms=7290 wait_ms=8000
+13:52:23 [D] node=164 src=radio        seq=3232   t=144226     retx_blocked reason=awaiting_ack_window seq=11 age_ms=7316 wait_ms=8000
+13:52:23 [D] node=164 src=radio        seq=3233   t=144253     retx_blocked reason=awaiting_ack_window seq=11 age_ms=7343 wait_ms=8000
+13:52:23 [D] node=164 src=radio        seq=3258   t=144410     [seq jump 3233->3258] retx_blocked reason=awaiting_ack_window seq=11 age_ms=7500 wait_ms=8000
+13:52:23 [D] node=164 src=radio        seq=3259   t=144437     retx_blocked reason=awaiting_ack_window seq=11 age_ms=7528 wait_ms=8000
+13:52:23 [D] node=164 src=radio        seq=3260   t=144464     retx_blocked reason=awaiting_ack_window seq=11 age_ms=7554 wait_ms=8000
+13:52:23 [D] node=164 src=radio        seq=3261   t=144491     retx_blocked reason=awaiting_ack_window seq=11 age_ms=7582 wait_ms=8000
+13:52:23 [D] node=164 src=radio        seq=3262   t=144518     retx_blocked reason=awaiting_ack_window seq=11 age_ms=7609 wait_ms=8000
+13:52:23 [D] node=164 src=radio        seq=3263   t=144545     retx_blocked reason=awaiting_ack_window seq=11 age_ms=7636 wait_ms=8000
+13:52:24 [D] node=164 src=radio        seq=3264   t=144572     retx_blocked reason=awaiting_ack_window seq=11 age_ms=7663 wait_ms=8000
+13:52:24 [D] node=164 src=radio        seq=3265   t=144599     retx_blocked reason=awaiting_ack_window seq=11 age_ms=7690 wait_ms=8000
+13:52:24 [D] node=164 src=radio        seq=3266   t=144626     retx_blocked reason=awaiting_ack_window seq=11 age_ms=7717 wait_ms=8000
+13:52:24 [D] node=164 src=radio        seq=3267   t=144653     retx_blocked reason=awaiting_ack_window seq=11 age_ms=7744 wait_ms=8000
+13:52:24 [D] node=164 src=radio        seq=3268   t=144680     retx_blocked reason=awaiting_ack_window seq=11 age_ms=7771 wait_ms=8000
+13:52:24 [D] node=164 src=radio        seq=3269   t=144707     retx_blocked reason=awaiting_ack_window seq=11 age_ms=7798 wait_ms=8000
+13:52:24 [D] node=164 src=radio        seq=3270   t=144734     retx_blocked reason=awaiting_ack_window seq=11 age_ms=7825 wait_ms=8000
+13:52:24 [D] node=164 src=radio        seq=3271   t=144761     retx_blocked reason=awaiting_ack_window seq=11 age_ms=7852 wait_ms=8000
+13:52:24 [I] node=164 src=radio        seq=3296   t=144922     [seq jump 3271->3296] retx_gate_open reason=ack_window_elapsed seq=11 age_ms=8012 wait_ms=8000
+13:52:24 [D] node=164 src=radio        seq=3297   t=144923     retx_candidate seq=11 index=1 len=21 attempts=1
+13:52:24 [D] node=164 src=radio        seq=3298   t=144925     slot_defer pkt=STATUS seq=11 len=21 slot=69 remaining_ms=38 needed_ms=120 from_queue=0
+13:52:24 [D] node=164 src=radio        seq=3299   t=144952     retx_candidate seq=11 index=1 len=21 attempts=1
+13:52:24 [D] node=164 src=radio        seq=3300   t=144953     slot_defer pkt=STATUS seq=11 len=21 slot=69 remaining_ms=9 needed_ms=120 from_queue=0
+13:52:26 [I] node=164 src=radio        seq=3396   t=146932     [seq jump 3300->3396] enqueue count=7 pkt=STATUS seq=14 len=21 q=1/8 pending=1 dropped=0
+13:52:27 [D] node=164 src=radio        seq=3424   t=147721     [seq jump 3396->3424] tx_noack pkt=STATUS seq=14 len=21 slot=73
+13:52:27 [D] node=164 src=radio        seq=3425   t=147723     pending_add seq=14 index=0 len=21 pending=2
+13:52:27 [I] node=164 src=radio        seq=3426   t=147725     tx_sent count=17 pkt=STATUS seq=14 len=21 slot=73 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+13:52:30 [D] node=164 src=radio        seq=3592   t=151329     [seq jump 3426->3592] retx_blocked reason=awaiting_ack_window seq=14 age_ms=3605 wait_ms=8000
+13:52:30 [D] node=164 src=radio        seq=3593   t=151330     retx_candidate seq=11 index=1 len=21 attempts=1
+13:52:30 [D] node=164 src=radio        seq=3594   t=151332     tx_noack pkt=STATUS seq=11 len=21 slot=77
+13:52:30 [I] node=164 src=radio        seq=3595   t=151334     retx_sent count=11 pkt=STATUS seq=11 len=21 attempt=2 slot=77 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+13:52:30 [D] node=164 src=radio        seq=3596   t=151336     retx_mark_sent seq=11 index=1 attempts=2
+13:52:30 [D] node=164 src=radio        seq=3597   t=151337     retx_blocked reason=awaiting_ack_window seq=14 age_ms=3614 wait_ms=8000
+13:52:30 [D] node=164 src=radio        seq=3598   t=151367     retx_blocked reason=awaiting_ack_window seq=14 age_ms=3644 wait_ms=8000
+13:52:30 [D] node=164 src=radio        seq=3599   t=151398     retx_blocked reason=awaiting_ack_window seq=14 age_ms=3674 wait_ms=8000
+13:52:30 [W] node=164 src=radio        seq=3625   t=151560     [seq jump 3599->3625] receive_failed
+13:52:30 [D] node=164 src=radio        seq=3626   t=151561     retx_blocked reason=awaiting_ack_window seq=14 age_ms=3837 wait_ms=8000
+13:52:31 [D] node=164 src=radio        seq=3627   t=151591     retx_blocked reason=awaiting_ack_window seq=14 age_ms=3868 wait_ms=8000
+13:52:31 [D] node=164 src=radio        seq=3628   t=151621     retx_blocked reason=awaiting_ack_window seq=14 age_ms=3898 wait_ms=8000
+13:52:31 [D] node=164 src=radio        seq=3629   t=151651     retx_blocked reason=awaiting_ack_window seq=14 age_ms=3928 wait_ms=8000
+13:52:31 [D] node=164 src=radio        seq=3630   t=151681     retx_blocked reason=awaiting_ack_window seq=14 age_ms=3958 wait_ms=8000
+13:52:31 [D] node=164 src=radio        seq=3631   t=151711     retx_blocked reason=awaiting_ack_window seq=14 age_ms=3988 wait_ms=8000
+13:52:31 [D] node=164 src=radio        seq=3632   t=151741     retx_blocked reason=awaiting_ack_window seq=14 age_ms=4018 wait_ms=8000
+13:52:31 [D] node=164 src=radio        seq=3633   t=151771     retx_blocked reason=awaiting_ack_window seq=14 age_ms=4048 wait_ms=8000
+13:52:31 [D] node=164 src=radio        seq=3634   t=151801     retx_blocked reason=awaiting_ack_window seq=14 age_ms=4078 wait_ms=8000
+13:52:31 [D] node=164 src=radio        seq=3635   t=151831     retx_blocked reason=awaiting_ack_window seq=14 age_ms=4108 wait_ms=8000
+13:52:31 [D] node=164 src=radio        seq=3636   t=151861     retx_blocked reason=awaiting_ack_window seq=14 age_ms=4138 wait_ms=8000
+13:52:31 [D] node=164 src=radio        seq=3637   t=151888     retx_blocked reason=awaiting_ack_window seq=14 age_ms=4165 wait_ms=8000
+13:52:31 [D] node=164 src=radio        seq=3638   t=151916     retx_blocked reason=awaiting_ack_window seq=14 age_ms=4192 wait_ms=8000
+13:52:31 [D] node=164 src=radio        seq=3663   t=152077     [seq jump 3638->3663] retx_blocked reason=awaiting_ack_window seq=14 age_ms=4353 wait_ms=8000
+13:52:31 [D] node=164 src=radio        seq=3664   t=152103     retx_blocked reason=awaiting_ack_window seq=14 age_ms=4380 wait_ms=8000
+13:52:31 [D] node=164 src=radio        seq=3665   t=152130     retx_blocked reason=awaiting_ack_window seq=14 age_ms=4407 wait_ms=8000
+13:52:31 [D] node=164 src=radio        seq=3666   t=152160     retx_blocked reason=awaiting_ack_window seq=14 age_ms=4437 wait_ms=8000
+13:52:34 [D] node=164 src=radio        seq=3789   t=154914     [seq jump 3666->3789] retx_blocked reason=awaiting_ack_window seq=14 age_ms=7190 wait_ms=8000
+13:52:34 [D] node=164 src=radio        seq=3790   t=154915     retx_candidate seq=11 index=1 len=21 attempts=2
+13:52:34 [D] node=164 src=radio        seq=3791   t=154917     tx_noack pkt=STATUS seq=11 len=21 slot=81
+13:52:34 [I] node=164 src=radio        seq=3792   t=154918     retx_sent count=12 pkt=STATUS seq=11 len=21 attempt=3 slot=81 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+13:52:34 [D] node=164 src=radio        seq=3793   t=154921     retx_mark_sent seq=11 index=1 attempts=3
+13:52:34 [D] node=164 src=radio        seq=3794   t=154922     retx_blocked reason=awaiting_ack_window seq=14 age_ms=7199 wait_ms=8000
+13:52:34 [W] node=164 src=radio        seq=3795   t=154924     drop_pending drop_count=6 seq=11 reason=max_attempts attempts=3 age_ms=18013 q=0/8 pending=2 dropped=0
+13:52:34 [D] node=164 src=radio        seq=3796   t=154954     retx_blocked reason=awaiting_ack_window seq=14 age_ms=7231 wait_ms=8000
+13:52:34 [D] node=164 src=radio        seq=3797   t=154981     retx_blocked reason=awaiting_ack_window seq=14 age_ms=7258 wait_ms=8000
+13:52:34 [D] node=164 src=radio        seq=3798   t=155008     retx_blocked reason=awaiting_ack_window seq=14 age_ms=7285 wait_ms=8000
+13:52:34 [W] node=164 src=radio        seq=3823   t=155170     [seq jump 3798->3823] receive_failed
+13:52:34 [D] node=164 src=radio        seq=3824   t=155171     retx_blocked reason=awaiting_ack_window seq=14 age_ms=7447 wait_ms=8000
+13:52:34 [D] node=164 src=radio        seq=3825   t=155198     retx_blocked reason=awaiting_ack_window seq=14 age_ms=7474 wait_ms=8000
+13:52:34 [D] node=164 src=radio        seq=3826   t=155228     retx_blocked reason=awaiting_ack_window seq=14 age_ms=7505 wait_ms=8000
+13:52:34 [D] node=164 src=radio        seq=3827   t=155258     retx_blocked reason=awaiting_ack_window seq=14 age_ms=7535 wait_ms=8000
+13:52:34 [D] node=164 src=radio        seq=3828   t=155288     retx_blocked reason=awaiting_ack_window seq=14 age_ms=7565 wait_ms=8000
+13:52:34 [D] node=164 src=radio        seq=3829   t=155319     retx_blocked reason=awaiting_ack_window seq=14 age_ms=7595 wait_ms=8000
+13:52:34 [D] node=164 src=radio        seq=3830   t=155349     retx_blocked reason=awaiting_ack_window seq=14 age_ms=7625 wait_ms=8000
+13:52:34 [D] node=164 src=radio        seq=3831   t=155379     retx_blocked reason=awaiting_ack_window seq=14 age_ms=7655 wait_ms=8000
+13:52:34 [D] node=164 src=radio        seq=3832   t=155409     retx_blocked reason=awaiting_ack_window seq=14 age_ms=7685 wait_ms=8000
+13:52:34 [D] node=164 src=radio        seq=3833   t=155439     retx_blocked reason=awaiting_ack_window seq=14 age_ms=7716 wait_ms=8000
+13:52:34 [D] node=164 src=radio        seq=3834   t=155469     retx_blocked reason=awaiting_ack_window seq=14 age_ms=7746 wait_ms=8000
+13:52:34 [D] node=164 src=radio        seq=3835   t=155499     retx_blocked reason=awaiting_ack_window seq=14 age_ms=7776 wait_ms=8000
+13:52:34 [D] node=164 src=radio        seq=3836   t=155530     retx_blocked reason=awaiting_ack_window seq=14 age_ms=7806 wait_ms=8000
+13:52:35 [D] node=164 src=radio        seq=3861   t=155684     [seq jump 3836->3861] retx_blocked reason=awaiting_ack_window seq=14 age_ms=7961 wait_ms=8000
+13:52:35 [D] node=164 src=radio        seq=3862   t=155714     retx_blocked reason=awaiting_ack_window seq=14 age_ms=7991 wait_ms=8000
+13:52:35 [I] node=164 src=radio        seq=3863   t=155745     retx_gate_open reason=ack_window_elapsed seq=14 age_ms=8021 wait_ms=8000
+13:52:35 [D] node=164 src=radio        seq=3864   t=155746     retx_candidate seq=14 index=0 len=21 attempts=1
+13:52:35 [D] node=164 src=radio        seq=3865   t=155748     slot_defer pkt=STATUS seq=14 len=21 slot=81 remaining_ms=15 needed_ms=120 from_queue=0
+13:52:36 [I] node=164 src=radio        seq=3938   t=157213     [seq jump 3865->3938] enqueue count=8 pkt=STATUS seq=16 len=21 q=1/8 pending=1 dropped=0
+13:52:37 [D] node=164 src=radio        seq=3990   t=158527     [seq jump 3938->3990] tx_noack pkt=STATUS seq=16 len=21 slot=85
+13:52:37 [D] node=164 src=radio        seq=3991   t=158529     pending_add seq=16 index=1 len=21 pending=2
+13:52:37 [I] node=164 src=radio        seq=3992   t=158530     tx_sent count=20 pkt=STATUS seq=16 len=21 slot=85 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+13:52:41 [D] node=164 src=radio        seq=4164   t=162120     [seq jump 3992->4164] retx_blocked reason=awaiting_ack_window seq=16 age_ms=3591 wait_ms=8000
+13:52:41 [D] node=164 src=radio        seq=4165   t=162122     retx_candidate seq=14 index=0 len=21 attempts=1
+13:52:41 [D] node=164 src=radio        seq=4166   t=162123     tx_noack pkt=STATUS seq=14 len=21 slot=89
+13:52:41 [I] node=164 src=radio        seq=4167   t=162125     retx_sent count=13 pkt=STATUS seq=14 len=21 attempt=2 slot=89 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+13:52:41 [D] node=164 src=radio        seq=4168   t=162127     retx_mark_sent seq=14 index=0 attempts=2
+13:52:41 [D] node=164 src=radio        seq=4169   t=162129     retx_blocked reason=awaiting_ack_window seq=16 age_ms=3600 wait_ms=8000
+13:52:41 [D] node=164 src=radio        seq=4170   t=162159     retx_blocked reason=awaiting_ack_window seq=16 age_ms=3630 wait_ms=8000
+13:52:41 [D] node=164 src=radio        seq=4171   t=162189     retx_blocked reason=awaiting_ack_window seq=16 age_ms=3660 wait_ms=8000
+13:52:41 [D] node=164 src=radio        seq=4172   t=162219     retx_blocked reason=awaiting_ack_window seq=16 age_ms=3690 wait_ms=8000
+13:52:41 [W] node=164 src=radio        seq=4173   t=162249     receive_failed
+13:52:41 [D] node=164 src=radio        seq=4174   t=162250     retx_blocked reason=awaiting_ack_window seq=16 age_ms=3722 wait_ms=8000
+13:52:41 [D] node=164 src=radio        seq=4199   t=162411     [seq jump 4174->4199] retx_blocked reason=awaiting_ack_window seq=16 age_ms=3883 wait_ms=8000
+13:52:41 [D] node=164 src=radio        seq=4200   t=162441     retx_blocked reason=awaiting_ack_window seq=16 age_ms=3913 wait_ms=8000
+13:52:41 [D] node=164 src=radio        seq=4201   t=162471     retx_blocked reason=awaiting_ack_window seq=16 age_ms=3943 wait_ms=8000
+13:52:41 [D] node=164 src=radio        seq=4202   t=162501     retx_blocked reason=awaiting_ack_window seq=16 age_ms=3973 wait_ms=8000
+13:52:41 [D] node=164 src=radio        seq=4203   t=162531     retx_blocked reason=awaiting_ack_window seq=16 age_ms=4003 wait_ms=8000
+13:52:41 [D] node=164 src=radio        seq=4204   t=162561     retx_blocked reason=awaiting_ack_window seq=16 age_ms=4033 wait_ms=8000
+13:52:42 [D] node=164 src=radio        seq=4205   t=162591     retx_blocked reason=awaiting_ack_window seq=16 age_ms=4063 wait_ms=8000
+13:52:42 [D] node=164 src=radio        seq=4206   t=162621     retx_blocked reason=awaiting_ack_window seq=16 age_ms=4093 wait_ms=8000
+13:52:42 [D] node=164 src=radio        seq=4207   t=162651     retx_blocked reason=awaiting_ack_window seq=16 age_ms=4123 wait_ms=8000
+13:52:42 [D] node=164 src=radio        seq=4208   t=162681     retx_blocked reason=awaiting_ack_window seq=16 age_ms=4153 wait_ms=8000
+13:52:42 [D] node=164 src=radio        seq=4209   t=162711     retx_blocked reason=awaiting_ack_window seq=16 age_ms=4183 wait_ms=8000
+13:52:42 [D] node=164 src=radio        seq=4210   t=162742     retx_blocked reason=awaiting_ack_window seq=16 age_ms=4213 wait_ms=8000
+13:52:42 [D] node=164 src=radio        seq=4211   t=162772     retx_blocked reason=awaiting_ack_window seq=16 age_ms=4243 wait_ms=8000
+13:52:42 [D] node=164 src=radio        seq=4236   t=162926     [seq jump 4211->4236] retx_blocked reason=awaiting_ack_window seq=16 age_ms=4397 wait_ms=8000
+13:52:42 [D] node=164 src=radio        seq=4237   t=162956     retx_blocked reason=awaiting_ack_window seq=16 age_ms=4427 wait_ms=8000
+13:52:45 [D] node=164 src=radio        seq=4359   t=165708     [seq jump 4237->4359] retx_blocked reason=awaiting_ack_window seq=16 age_ms=7179 wait_ms=8000
+13:52:45 [D] node=164 src=radio        seq=4360   t=165710     retx_candidate seq=14 index=0 len=21 attempts=2
+13:52:45 [D] node=164 src=radio        seq=4361   t=165711     tx_noack pkt=STATUS seq=14 len=21 slot=93
+13:52:45 [I] node=164 src=radio        seq=4362   t=165713     retx_sent count=14 pkt=STATUS seq=14 len=21 attempt=3 slot=93 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+13:52:45 [D] node=164 src=radio        seq=4363   t=165716     retx_mark_sent seq=14 index=0 attempts=3
+13:52:45 [W] node=164 src=radio        seq=4364   t=165717     drop_pending drop_count=7 seq=14 reason=max_attempts attempts=3 age_ms=17993 q=0/8 pending=2 dropped=0
+13:52:45 [D] node=164 src=radio        seq=4365   t=165719     retx_blocked reason=awaiting_ack_window seq=16 age_ms=7188 wait_ms=8000
+13:52:45 [D] node=164 src=radio        seq=4366   t=165749     retx_blocked reason=awaiting_ack_window seq=16 age_ms=7220 wait_ms=8000
+13:52:45 [D] node=164 src=radio        seq=4367   t=165779     retx_blocked reason=awaiting_ack_window seq=16 age_ms=7250 wait_ms=8000
+13:52:45 [D] node=164 src=radio        seq=4368   t=165809     retx_blocked reason=awaiting_ack_window seq=16 age_ms=7281 wait_ms=8000
+13:52:45 [W] node=164 src=radio        seq=4369   t=165840     receive_failed
+13:52:45 [D] node=164 src=radio        seq=4370   t=165840     retx_blocked reason=awaiting_ack_window seq=16 age_ms=7312 wait_ms=8000
+13:52:45 [D] node=164 src=radio        seq=4371   t=165870     retx_blocked reason=awaiting_ack_window seq=16 age_ms=7342 wait_ms=8000
+13:52:45 [D] node=164 src=radio        seq=4396   t=166024     [seq jump 4371->4396] retx_blocked reason=awaiting_ack_window seq=16 age_ms=7495 wait_ms=8000
+13:52:45 [D] node=164 src=radio        seq=4397   t=166050     retx_blocked reason=awaiting_ack_window seq=16 age_ms=7522 wait_ms=8000
+13:52:45 [D] node=164 src=radio        seq=4398   t=166080     retx_blocked reason=awaiting_ack_window seq=16 age_ms=7552 wait_ms=8000
+13:52:45 [D] node=164 src=radio        seq=4399   t=166107     retx_blocked reason=awaiting_ack_window seq=16 age_ms=7579 wait_ms=8000
+13:52:45 [D] node=164 src=radio        seq=4400   t=166134     retx_blocked reason=awaiting_ack_window seq=16 age_ms=7606 wait_ms=8000
+13:52:45 [D] node=164 src=radio        seq=4401   t=166164     retx_blocked reason=awaiting_ack_window seq=16 age_ms=7635 wait_ms=8000
+13:52:45 [D] node=164 src=radio        seq=4402   t=166191     retx_blocked reason=awaiting_ack_window seq=16 age_ms=7662 wait_ms=8000
+13:52:45 [D] node=164 src=radio        seq=4403   t=166221     retx_blocked reason=awaiting_ack_window seq=16 age_ms=7693 wait_ms=8000
+13:52:45 [D] node=164 src=radio        seq=4404   t=166251     retx_blocked reason=awaiting_ack_window seq=16 age_ms=7723 wait_ms=8000
+13:52:45 [D] node=164 src=radio        seq=4405   t=166281     retx_blocked reason=awaiting_ack_window seq=16 age_ms=7753 wait_ms=8000
+13:52:45 [D] node=164 src=radio        seq=4406   t=166311     retx_blocked reason=awaiting_ack_window seq=16 age_ms=7783 wait_ms=8000
+13:52:45 [D] node=164 src=radio        seq=4407   t=166341     retx_blocked reason=awaiting_ack_window seq=16 age_ms=7813 wait_ms=8000
+13:52:45 [D] node=164 src=radio        seq=4408   t=166372     retx_blocked reason=awaiting_ack_window seq=16 age_ms=7843 wait_ms=8000
+13:52:45 [I] node=164 src=radio        seq=4433   t=166533     [seq jump 4408->4433] retx_gate_open reason=ack_window_elapsed seq=16 age_ms=8005 wait_ms=8000
+13:52:45 [D] node=164 src=radio        seq=4434   t=166535     retx_candidate seq=16 index=1 len=21 attempts=1
+13:52:45 [D] node=164 src=radio        seq=4435   t=166536     slot_defer pkt=STATUS seq=16 len=21 slot=93 remaining_ms=26 needed_ms=120 from_queue=0
+13:52:46 [I] node=164 src=radio        seq=4484   t=167546     [seq jump 4435->4484] enqueue count=9 pkt=STATUS seq=18 len=21 q=1/8 pending=1 dropped=0
+13:52:48 [D] node=164 src=radio        seq=4561   t=169316     [seq jump 4484->4561] tx_noack pkt=STATUS seq=18 len=21 slot=97
+13:52:48 [D] node=164 src=radio        seq=4562   t=169318     pending_add seq=18 index=0 len=21 pending=2
+13:52:48 [I] node=164 src=radio        seq=4563   t=169319     tx_sent count=23 pkt=STATUS seq=18 len=21 slot=97 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0

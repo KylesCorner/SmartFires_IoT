@@ -1,0 +1,144 @@
+ *  Executing task: platformio device monitor --environment feather_m0_lora_base 
+
+
+────────────────────────────────────────────────────────────
+ SmartFires structured debug monitor
+────────────────────────────────────────────────────────────
+ node filter : *
+ src filter  : *
+ min level   : T
+ show raw    : yes
+ env examples:
+   SFDBG_SRC=i2c pio device monitor -e feather_m0_lora_node_debug
+   SFDBG_SRC=i2c,battery SFDBG_MIN_LEVEL=D pio device monitor -e feather_m0_lora_node_debug
+   SFDBG_SHOW_RAW=0 pio device monitor -e feather_m0_lora_node_debug
+────────────────────────────────────────────────────────────
+
+--- Terminal on /dev/cu.usbmodem1201 | 115200 8-N-1
+--- Available filters and text transformations: debug, default, direct, hexlify, log2file, nocontrol, printable, send_on_enter, smartfires_debug, time
+--- More details at https://bit.ly/pio-monitor-filters
+--- Quit: Ctrl+C | Menu: Ctrl+T | Help: Ctrl+T followed by Ctrl+H
+@SFDBG  v=1     node=1  src=boot        lvl=I   seq=0   t=2060  msg=SmartFires base station starting
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=1   t=2202  msg=ready base_addr=1 uart_baud=115200
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=2   t=2203  msg=uart_configured_baud=115200
+@SFDBG  v=1     node=1  src=boot        lvl=I   seq=3   t=2204  msg=SmartFires base app ready
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=4   t=3639  msg=rx_lora from=164 type=AWAKEN seq=15 node=0 len=9 rssi=-57
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=5   t=3640  msg=awaken_rx count=1 uid_hash=0xEED5D264 from=164 assigned_node=2 assigned_slot=1 seq=15 action=send_local_time_sync_and_forward_to_edge
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=6   t=3752  msg=tx_time_sync_local seq=0 to_radio=164 assigned_node=2 assigned_slot=1 session_id=0x5346019A session_ms=3643 trigger=awaken trigger_seq=15 source=base_local lin
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=7   t=3755  msg=awaken_local_time_sync_result count=1 result=OK
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=8   t=3756  msg=rx_fwd to=jetson type=AWAKEN seq=15 node=0 bytes=14 written=14 result=OK
+@SFDBG  v=1     node=1  src=base        lvl=D   seq=9   t=3758  msg=awaken_forwarded count=1 bytes=14
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=10  t=4749  msg=rx_lora from=2 type=STATUS seq=0 node=2 len=21 rssi=-56
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=11  t=4751  msg=status_rx count=1 node=2 seq=0 gps_valid=0 batt_valid=1 lat=0.000000 lon=0.000000 batt_mv=1185 batt_pct=0
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=12  t=4753  msg=rx_fwd to=jetson type=STATUS seq=0 node=2 bytes=26 written=26 result=OK
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=13  t=7205  msg=health_link cmd_fwd=0 uart_err=0 uart_bytes=0 sync_tx=1 ack_tx=0 time_src=base_local
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=14  t=7207  msg=health_rx rx_fwd=2 awaken=1 bundle=0 status=1 full=0 cmd_ack=0 raw=0 rx_fail=0 last_rx_ms_ago=2456 jetson_sync_age_ms=4294967295
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=15  t=12209 msg=health_link cmd_fwd=0 uart_err=0 uart_bytes=0 sync_tx=1 ack_tx=0 time_src=base_local
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=16  t=12210 msg=health_rx rx_fwd=2 awaken=1 bundle=0 status=1 full=0 cmd_ack=0 raw=0 rx_fail=0 last_rx_ms_ago=7460 jetson_sync_age_ms=4294967295
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=17  t=15537 msg=rx_lora from=2 type=STATUS seq=2 node=2 len=21 rssi=-55
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=18  t=15538 msg=status_rx count=2 node=2 seq=2 gps_valid=0 batt_valid=1 lat=0.000000 lon=0.000000 batt_mv=1192 batt_pct=0
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=19  t=15541 msg=rx_fwd to=jetson type=STATUS seq=2 node=2 bytes=26 written=26 result=OK
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=20  t=17208 msg=health_link cmd_fwd=0 uart_err=0 uart_bytes=0 sync_tx=1 ack_tx=0 time_src=base_local
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=21  t=17210 msg=health_rx rx_fwd=3 awaken=1 bundle=0 status=2 full=0 cmd_ack=0 raw=0 rx_fail=0 last_rx_ms_ago=1672 jetson_sync_age_ms=4294967295
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=22  t=19140 msg=rx_lora from=2 type=STATUS seq=0 node=2 len=21 rssi=-55
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=23  t=19142 msg=status_rx count=3 node=2 seq=0 gps_valid=0 batt_valid=1 lat=0.000000 lon=0.000000 batt_mv=1185 batt_pct=0
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=24  t=19144 msg=rx_fwd to=jetson type=STATUS seq=0 node=2 bytes=26 written=26 result=OK
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=25  t=22210 msg=health_link cmd_fwd=0 uart_err=0 uart_bytes=0 sync_tx=1 ack_tx=0 time_src=base_local
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=26  t=22212 msg=health_rx rx_fwd=4 awaken=1 bundle=0 status=3 full=0 cmd_ack=0 raw=0 rx_fail=0 last_rx_ms_ago=3071 jetson_sync_age_ms=4294967295
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=27  t=22738 msg=rx_lora from=2 type=STATUS seq=0 node=2 len=21 rssi=-55
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=28  t=22740 msg=status_rx count=4 node=2 seq=0 gps_valid=0 batt_valid=1 lat=0.000000 lon=0.000000 batt_mv=1185 batt_pct=0
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=29  t=22743 msg=rx_fwd to=jetson type=STATUS seq=0 node=2 bytes=26 written=26 result=OK
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=30  t=26342 msg=rx_lora from=2 type=STATUS seq=4 node=2 len=21 rssi=-55
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=31  t=26344 msg=status_rx count=5 node=2 seq=4 gps_valid=0 batt_valid=1 lat=0.000000 lon=0.000000 batt_mv=1243 batt_pct=0
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=32  t=26346 msg=rx_fwd to=jetson type=STATUS seq=4 node=2 bytes=26 written=26 result=OK
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=33  t=27214 msg=health_link cmd_fwd=0 uart_err=0 uart_bytes=0 sync_tx=1 ack_tx=0 time_src=base_local
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=34  t=27216 msg=health_rx rx_fwd=6 awaken=1 bundle=0 status=5 full=0 cmd_ack=0 raw=0 rx_fail=0 last_rx_ms_ago=872 jetson_sync_age_ms=4294967295
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=35  t=29930 msg=rx_lora from=2 type=STATUS seq=2 node=2 len=21 rssi=-55
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=36  t=29931 msg=status_rx count=6 node=2 seq=2 gps_valid=0 batt_valid=1 lat=0.000000 lon=0.000000 batt_mv=1192 batt_pct=0
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=37  t=29934 msg=rx_fwd to=jetson type=STATUS seq=2 node=2 bytes=26 written=26 result=OK
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=38  t=32213 msg=health_link cmd_fwd=0 uart_err=0 uart_bytes=0 sync_tx=1 ack_tx=0 time_src=base_local
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=39  t=32216 msg=health_rx rx_fwd=7 awaken=1 bundle=0 status=6 full=0 cmd_ack=0 raw=0 rx_fail=0 last_rx_ms_ago=2284 jetson_sync_age_ms=4294967295
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=40  t=33649 msg=rx_lora from=2 type=STATUS seq=2 node=2 len=21 rssi=-55
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=41  t=33651 msg=status_rx count=7 node=2 seq=2 gps_valid=0 batt_valid=1 lat=0.000000 lon=0.000000 batt_mv=1192 batt_pct=0
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=42  t=33653 msg=rx_fwd to=jetson type=STATUS seq=2 node=2 bytes=26 written=26 result=OK
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=43  t=37202 msg=rx_lora from=2 type=STATUS seq=7 node=2 len=21 rssi=-53
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=44  t=37204 msg=status_rx count=8 node=2 seq=7 gps_valid=0 batt_valid=1 lat=0.000000 lon=0.000000 batt_mv=721 batt_pct=0
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=45  t=37206 msg=rx_fwd to=jetson type=STATUS seq=7 node=2 bytes=26 written=26 result=OK
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=46  t=37218 msg=health_link cmd_fwd=0 uart_err=0 uart_bytes=0 sync_tx=1 ack_tx=0 time_src=base_local
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=47  t=37220 msg=health_rx rx_fwd=9 awaken=1 bundle=0 status=8 full=0 cmd_ack=0 raw=0 rx_fail=0 last_rx_ms_ago=16 jetson_sync_age_ms=4294967295
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=48  t=40754 msg=rx_lora from=2 type=STATUS seq=4 node=2 len=21 rssi=-53
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=49  t=40755 msg=status_rx count=9 node=2 seq=4 gps_valid=0 batt_valid=1 lat=0.000000 lon=0.000000 batt_mv=1243 batt_pct=0
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=50  t=40758 msg=rx_fwd to=jetson type=STATUS seq=4 node=2 bytes=26 written=26 result=OK
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=51  t=42218 msg=health_link cmd_fwd=0 uart_err=0 uart_bytes=0 sync_tx=1 ack_tx=0 time_src=base_local
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=52  t=42220 msg=health_rx rx_fwd=10 awaken=1 bundle=0 status=9 full=0 cmd_ack=0 raw=0 rx_fail=0 last_rx_ms_ago=1464 jetson_sync_age_ms=4294967295
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=53  t=44332 msg=rx_lora from=2 type=STATUS seq=4 node=2 len=21 rssi=-54
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=54  t=44334 msg=status_rx count=10 node=2 seq=4 gps_valid=0 batt_valid=1 lat=0.000000 lon=0.000000 batt_mv=1243 batt_pct=0
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=55  t=44336 msg=rx_fwd to=jetson type=STATUS seq=4 node=2 bytes=26 written=26 result=OK
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=56  t=44820 msg=rx_lora from=2 type=STATUS seq=9 node=2 len=21 rssi=-56
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=57  t=44822 msg=status_rx count=11 node=2 seq=9 gps_valid=0 batt_valid=1 lat=0.000000 lon=0.000000 batt_mv=805 batt_pct=0
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=58  t=44824 msg=rx_fwd to=jetson type=STATUS seq=9 node=2 bytes=26 written=26 result=OK
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=59  t=47221 msg=health_link cmd_fwd=0 uart_err=0 uart_bytes=0 sync_tx=1 ack_tx=0 time_src=base_local
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=60  t=47223 msg=health_rx rx_fwd=12 awaken=1 bundle=0 status=11 full=0 cmd_ack=0 raw=0 rx_fail=0 last_rx_ms_ago=2401 jetson_sync_age_ms=4294967295
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=61  t=47947 msg=rx_lora from=2 type=STATUS seq=7 node=2 len=21 rssi=-55
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=62  t=47949 msg=status_rx count=12 node=2 seq=7 gps_valid=0 batt_valid=1 lat=0.000000 lon=0.000000 batt_mv=721 batt_pct=0
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=63  t=47951 msg=rx_fwd to=jetson type=STATUS seq=7 node=2 bytes=26 written=26 result=OK
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=64  t=51520 msg=rx_lora from=2 type=STATUS seq=7 node=2 len=21 rssi=-58
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=65  t=51522 msg=status_rx count=13 node=2 seq=7 gps_valid=0 batt_valid=1 lat=0.000000 lon=0.000000 batt_mv=721 batt_pct=0
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=66  t=51524 msg=rx_fwd to=jetson type=STATUS seq=7 node=2 bytes=26 written=26 result=OK
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=67  t=52205 msg=tx_time_sync_periodic seq=1 source=base_local session_ms=52204 to=255 result=OK
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=68  t=52222 msg=health_link cmd_fwd=0 uart_err=0 uart_bytes=0 sync_tx=2 ack_tx=0 time_src=base_local
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=69  t=52224 msg=health_rx rx_fwd=14 awaken=1 bundle=0 status=13 full=0 cmd_ack=0 raw=0 rx_fail=0 last_rx_ms_ago=701 jetson_sync_age_ms=4294967295
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=70  t=55120 msg=rx_lora from=2 type=STATUS seq=11 node=2 len=21 rssi=-57
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=71  t=55122 msg=status_rx count=14 node=2 seq=11 gps_valid=0 batt_valid=1 lat=0.000000 lon=0.000000 batt_mv=650 batt_pct=0
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=72  t=55125 msg=rx_fwd to=jetson type=STATUS seq=11 node=2 bytes=26 written=26 result=OK
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=73  t=57223 msg=health_link cmd_fwd=0 uart_err=0 uart_bytes=0 sync_tx=2 ack_tx=0 time_src=base_local
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=74  t=57225 msg=health_rx rx_fwd=15 awaken=1 bundle=0 status=14 full=0 cmd_ack=0 raw=0 rx_fail=0 last_rx_ms_ago=2102 jetson_sync_age_ms=4294967295
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=75  t=58734 msg=rx_lora from=2 type=STATUS seq=9 node=2 len=21 rssi=-57
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=76  t=58736 msg=status_rx count=15 node=2 seq=9 gps_valid=0 batt_valid=1 lat=0.000000 lon=0.000000 batt_mv=805 batt_pct=0
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=77  t=58739 msg=rx_fwd to=jetson type=STATUS seq=9 node=2 bytes=26 written=26 result=OK
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=78  t=62226 msg=health_link cmd_fwd=0 uart_err=0 uart_bytes=0 sync_tx=2 ack_tx=0 time_src=base_local
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=79  t=62228 msg=health_rx rx_fwd=16 awaken=1 bundle=0 status=15 full=0 cmd_ack=0 raw=0 rx_fail=0 last_rx_ms_ago=3491 jetson_sync_age_ms=4294967295
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=80  t=62323 msg=rx_lora from=2 type=STATUS seq=9 node=2 len=21 rssi=-57
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=81  t=62324 msg=status_rx count=16 node=2 seq=9 gps_valid=0 batt_valid=1 lat=0.000000 lon=0.000000 batt_mv=805 batt_pct=0
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=82  t=62326 msg=rx_fwd to=jetson type=STATUS seq=9 node=2 bytes=26 written=26 result=OK
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=83  t=65931 msg=rx_lora from=2 type=STATUS seq=14 node=2 len=21 rssi=-58
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=84  t=65933 msg=status_rx count=17 node=2 seq=14 gps_valid=0 batt_valid=1 lat=0.000000 lon=0.000000 batt_mv=1295 batt_pct=0
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=85  t=65936 msg=rx_fwd to=jetson type=STATUS seq=14 node=2 bytes=26 written=26 result=OK
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=86  t=67229 msg=health_link cmd_fwd=0 uart_err=0 uart_bytes=0 sync_tx=2 ack_tx=0 time_src=base_local
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=87  t=67231 msg=health_rx rx_fwd=18 awaken=1 bundle=0 status=17 full=0 cmd_ack=0 raw=0 rx_fail=0 last_rx_ms_ago=1298 jetson_sync_age_ms=4294967295
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=88  t=69541 msg=rx_lora from=2 type=STATUS seq=11 node=2 len=21 rssi=-56
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=89  t=69543 msg=status_rx count=18 node=2 seq=11 gps_valid=0 batt_valid=1 lat=0.000000 lon=0.000000 batt_mv=650 batt_pct=0
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=90  t=69546 msg=rx_fwd to=jetson type=STATUS seq=11 node=2 bytes=26 written=26 result=OK
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=91  t=72231 msg=health_link cmd_fwd=0 uart_err=0 uart_bytes=0 sync_tx=2 ack_tx=0 time_src=base_local
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=92  t=72233 msg=health_rx rx_fwd=19 awaken=1 bundle=0 status=18 full=0 cmd_ack=0 raw=0 rx_fail=0 last_rx_ms_ago=2690 jetson_sync_age_ms=4294967295
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=93  t=73125 msg=rx_lora from=2 type=STATUS seq=11 node=2 len=21 rssi=-57
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=94  t=73127 msg=status_rx count=19 node=2 seq=11 gps_valid=0 batt_valid=1 lat=0.000000 lon=0.000000 batt_mv=650 batt_pct=0
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=95  t=73129 msg=rx_fwd to=jetson type=STATUS seq=11 node=2 bytes=26 written=26 result=OK
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=96  t=76739 msg=rx_lora from=2 type=STATUS seq=16 node=2 len=21 rssi=-57
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=97  t=76741 msg=status_rx count=20 node=2 seq=16 gps_valid=0 batt_valid=1 lat=0.000000 lon=0.000000 batt_mv=1198 batt_pct=0
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=98  t=76743 msg=rx_fwd to=jetson type=STATUS seq=16 node=2 bytes=26 written=26 result=OK
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=99  t=77231 msg=health_link cmd_fwd=0 uart_err=0 uart_bytes=0 sync_tx=2 ack_tx=0 time_src=base_local
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=100 t=77233 msg=health_rx rx_fwd=21 awaken=1 bundle=0 status=20 full=0 cmd_ack=0 raw=0 rx_fail=0 last_rx_ms_ago=493 jetson_sync_age_ms=4294967295
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=101 t=80333 msg=rx_lora from=2 type=STATUS seq=14 node=2 len=21 rssi=-57
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=102 t=80335 msg=status_rx count=21 node=2 seq=14 gps_valid=0 batt_valid=1 lat=0.000000 lon=0.000000 batt_mv=1295 batt_pct=0
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=103 t=80337 msg=rx_fwd to=jetson type=STATUS seq=14 node=2 bytes=26 written=26 result=OK
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=104 t=82233 msg=health_link cmd_fwd=0 uart_err=0 uart_bytes=0 sync_tx=2 ack_tx=0 time_src=base_local
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=105 t=82235 msg=health_rx rx_fwd=22 awaken=1 bundle=0 status=21 full=0 cmd_ack=0 raw=0 rx_fail=0 last_rx_ms_ago=1900 jetson_sync_age_ms=4294967295
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=106 t=83921 msg=rx_lora from=2 type=STATUS seq=14 node=2 len=21 rssi=-56
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=107 t=83923 msg=status_rx count=22 node=2 seq=14 gps_valid=0 batt_valid=1 lat=0.000000 lon=0.000000 batt_mv=1295 batt_pct=0
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=108 t=83926 msg=rx_fwd to=jetson type=STATUS seq=14 node=2 bytes=26 written=26 result=OK
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=109 t=87236 msg=health_link cmd_fwd=0 uart_err=0 uart_bytes=0 sync_tx=2 ack_tx=0 time_src=base_local
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=110 t=87238 msg=health_rx rx_fwd=23 awaken=1 bundle=0 status=22 full=0 cmd_ack=0 raw=0 rx_fail=0 last_rx_ms_ago=3314 jetson_sync_age_ms=4294967295
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=111 t=87525 msg=rx_lora from=2 type=STATUS seq=18 node=2 len=21 rssi=-56
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=112 t=87527 msg=status_rx count=23 node=2 seq=18 gps_valid=0 batt_valid=1 lat=0.000000 lon=0.000000 batt_mv=1295 batt_pct=0
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=113 t=87529 msg=rx_fwd to=jetson type=STATUS seq=18 node=2 bytes=26 written=26 result=OK
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=114 t=91129 msg=rx_lora from=2 type=STATUS seq=16 node=2 len=21 rssi=-53
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=115 t=91131 msg=status_rx count=24 node=2 seq=16 gps_valid=0 batt_valid=1 lat=0.000000 lon=0.000000 batt_mv=1198 batt_pct=0
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=116 t=91133 msg=rx_fwd to=jetson type=STATUS seq=16 node=2 bytes=26 written=26 result=OK
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=117 t=92239 msg=health_link cmd_fwd=0 uart_err=0 uart_bytes=0 sync_tx=2 ack_tx=0 time_src=base_local
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=118 t=92241 msg=health_rx rx_fwd=25 awaken=1 bundle=0 status=24 full=0 cmd_ack=0 raw=0 rx_fail=0 last_rx_ms_ago=1109 jetson_sync_age_ms=4294967295
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=119 t=94738 msg=rx_lora from=2 type=STATUS seq=16 node=2 len=21 rssi=-53
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=120 t=94739 msg=status_rx count=25 node=2 seq=16 gps_valid=0 batt_valid=1 lat=0.000000 lon=0.000000 batt_mv=1198 batt_pct=0
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=121 t=94742 msg=rx_fwd to=jetson type=STATUS seq=16 node=2 bytes=26 written=26 result=OK
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=122 t=97240 msg=health_link cmd_fwd=0 uart_err=0 uart_bytes=0 sync_tx=2 ack_tx=0 time_src=base_local
+@SFDBG  v=1     node=1  src=base        lvl=I   seq=123 t=97242 msg=health_rx rx_fwd=26 awaken=1 bundle=0 status=25 full=0 cmd_ack=0 raw=0 rx_fail=0 last_rx_ms_ago=2502 jetson_sync_age_ms=4294967295

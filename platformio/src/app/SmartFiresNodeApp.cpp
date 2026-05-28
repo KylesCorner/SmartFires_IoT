@@ -85,6 +85,8 @@ bool SmartFiresNodeApp::begin() {
 
   LOG_INFO("app", "duty_begin_ok");
 
+  _packetHandler.setBundleEncodingEnabled(_cfg.enableTelemetryTx);
+
   if (!_radio.begin()) {
     LOG_ERROR("radio", "begin_failed caller=app");
     return false;

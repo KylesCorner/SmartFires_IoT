@@ -55,6 +55,10 @@ bool PacketHandler::push(const SensorSnapshot &snap) {
 
     tryEncodeStatus(snap);
 
+    if (!_bundleEncodingEnabled) {
+        return false;
+    }
+
     const BinaryPacket::FullStatePayload sample = quantize(snap);
 
     if (!_hasRef) {
@@ -135,22 +139,41 @@ void PacketHandler::setNodeId(uint8_t nodeId) {
     _cfg.nodeId = nodeId;
 }
 
+void PacketHandler::setBundleEncodingEnabled(bool enabled) {
+    if (_bundleEncodingEnabled == enabled) {
+        return;
+    }
+
+    _bundleEncodingEnabled = enabled;
+
+    if (!enabled) {
+        resetBundleState();
+    }
+
+    LOG_INFO("packet", "bundle_encoding=%s",
+             _bundleEncodingEnabled ? "ON" : "OFF");
+}
+
 // --- full reset ---
 
 void PacketHandler::reset() {
     _seq         = 0;
-    _hasRef      = false;
-    _deltaCount  = 0;
-    _bundleReady = false;
-    _bundleLen   = 0;
-    memset(&_ref,      0, sizeof(_ref));
-    memset(_deltas,    0, sizeof(_deltas));
-    memset(_bundleBuf, 0, sizeof(_bundleBuf));
+    resetBundleState();
     resetStatusTimer();
     memset(_statusBuf, 0, sizeof(_statusBuf));
 }
 
 // ---------- private ----------
+
+void PacketHandler::resetBundleState() {
+    _hasRef      = false;
+    _deltaCount  = 0;
+    _bundleReady = false;
+    _bundleLen   = 0;
+    memset(&_ref, 0, sizeof(_ref));
+    memset(_deltas, 0, sizeof(_deltas));
+    memset(_bundleBuf, 0, sizeof(_bundleBuf));
+}
 
 void PacketHandler::tryEncodeStatus(const SensorSnapshot &snap) {
     const bool intervalElapsed =
