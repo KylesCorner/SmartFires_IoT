@@ -68,6 +68,7 @@ private:
     uint32_t firstSentMs = 0;
     uint32_t lastSentMs = 0;
     uint8_t attempts = 0;
+    bool sentSuccessfully = false;
     bool ackGateOpened = false;  // set true when entry_age_ms >= retry_wait_ms first elapses
   };
 
@@ -92,7 +93,9 @@ private:
   uint32_t _lastAckSummarySessionMs = 0;
   bool _hasReceivedAckSummary = false;
   uint32_t _lastTxSlotIndex = 0xFFFFFFFFu;
+  uint32_t _lastRetxAttemptSlotIndex = 0xFFFFFFFFu;
   uint32_t _lastFreshTelemetrySentMs = 0;
+  uint32_t _lastRetxHealthLogMs = 0;
   bool _hasFreshTelemetrySent = false;
   bool _hasPendingCommand = false;
   ReceivedCommand _pendingCommand = {};
@@ -111,10 +114,12 @@ private:
 
   bool isTelemetryPacketForNode(const uint8_t *payload, uint8_t len,
                                 uint8_t &seqOut) const;
-  void rememberSentTelemetry(const uint8_t *payload, uint8_t len);
+  void rememberSentTelemetry(const uint8_t *payload, uint8_t len,
+                             bool sentSuccessfully);
   bool pickRetransmitCandidate(uint8_t *payloadOut, uint8_t &lenOut,
                                uint8_t &seqOut, uint8_t &pendingIndexOut);
   void markRetransmitSent(uint8_t pendingIndex);
   void applyAckSummary(const BinaryPacket::AckSummaryPayload &ack);
   void dropExpiredPending();
+  void maybeLogRetransmitHealth();
 };

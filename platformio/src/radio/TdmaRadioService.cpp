@@ -151,6 +151,7 @@ void TdmaRadioService::update() {
 
   checkIncomingTimeSync();
   drainTxQueue();
+  maybeLogRetransmitHealth();
 }
 
 bool TdmaRadioService::sendAwakenHandshake(const uint8_t *payload, uint8_t len) {
@@ -419,7 +420,18 @@ void TdmaRadioService::drainTxQueue() {
     uint8_t pendingIndex = 0;
     uint8_t retrySeq = 0;
 
-    if (!_queue.empty()) {
+    const bool allowRetxThisSlot =
+        useAppReliability && (_lastRetxAttemptSlotIndex != slotIndex);
+
+    bool selectedPacket = false;
+
+    if (allowRetxThisSlot &&
+        pickRetransmitCandidate(payload, len, retrySeq, pendingIndex)) {
+      _lastRetxAttemptSlotIndex = slotIndex;
+      selectedPacket = true;
+    }
+
+    if (!selectedPacket && !_queue.empty()) {
       if (!_queue.dequeue(payload, len)) {
         LOG_WARN("radio", "dequeue_failed q=%u/%u pending=%u dropped=%lu",
                  static_cast<unsigned int>(_queue.count()),
@@ -430,11 +442,17 @@ void TdmaRadioService::drainTxQueue() {
       }
 
       fromQueue = true;
-    } else if (useAppReliability) {
+      selectedPacket = true;
+    }
+
+    if (!selectedPacket && useAppReliability) {
       if (!pickRetransmitCandidate(payload, len, retrySeq, pendingIndex)) {
         return;
       }
-    } else {
+      selectedPacket = true;
+    }
+
+    if (!selectedPacket) {
       return;
     }
 
@@ -552,7 +570,7 @@ void TdmaRadioService::drainTxQueue() {
 
       if (useAppReliability) {
         if (fromQueue) {
-          rememberSentTelemetry(payload, len);
+          rememberSentTelemetry(payload, len, true);
           _lastFreshTelemetrySentMs = _tdmaClock.sessionNowMs();
           _hasFreshTelemetrySent = true;
 
@@ -635,9 +653,21 @@ void TdmaRadioService::drainTxQueue() {
                 static_cast<unsigned int>(_pendingCount),
                 static_cast<unsigned long>(_queue.droppedOldestCount()));
 
-      // Match original behavior for fresh telemetry: failed send is dropped,
-      // not requeued. Retransmit entries are retained unless expired/attempt-limited.
-      if (fromQueue) {
+      // In APP_ACK_SUMMARY mode, preserve first-send failures for bounded local
+      // retry so they can still become retransmit candidates.
+      if (fromQueue && useAppReliability) {
+        rememberSentTelemetry(payload, len, false);
+
+        LOG_WARN("radio",
+                 "tx_failed_retained pkt=%s seq=%u len=%u reason=send_failed_local_retry "
+                 "q=%u/%u pending=%u dropped=%lu",
+                 pktTypeName(hdr.pkt_type), static_cast<unsigned int>(hdr.seq),
+                 static_cast<unsigned int>(len),
+                 static_cast<unsigned int>(_queue.count()),
+                 static_cast<unsigned int>(_queue.capacity()),
+                 static_cast<unsigned int>(_pendingCount),
+                 static_cast<unsigned long>(_queue.droppedOldestCount()));
+      } else if (fromQueue) {
         LOG_WARN("radio",
                  "drop_tx_fail drop_count=%lu pkt=%s seq=%u len=%u "
                  "reason=send_failed q=%u/%u pending=%u dropped=%lu",
@@ -847,7 +877,8 @@ bool TdmaRadioService::isTelemetryPacketForNode(const uint8_t *payload,
 }
 
 void TdmaRadioService::rememberSentTelemetry(const uint8_t *payload,
-                                             uint8_t len) {
+                                             uint8_t len,
+                                             bool sentSuccessfully) {
   uint8_t seq = 0;
 
   if (!isTelemetryPacketForNode(payload, len, seq)) {
@@ -887,11 +918,16 @@ void TdmaRadioService::rememberSentTelemetry(const uint8_t *payload,
       memcpy(e.payload, payload, len);
       e.len = len;
       e.lastSentMs = nowMs;
-      e.attempts = 1;
+      if (sentSuccessfully) {
+        e.sentSuccessfully = true;
+        e.firstSentMs = nowMs;
+        e.attempts = 1;
+        e.ackGateOpened = false;
+      }
 
-      LOG_DEBUG("radio", "pending_refresh seq=%u index=%d len=%u",
+      LOG_DEBUG("radio", "pending_refresh seq=%u index=%d len=%u sent_ok=%u",
                 static_cast<unsigned int>(seq), static_cast<int>(i),
-                static_cast<unsigned int>(len));
+                static_cast<unsigned int>(len), sentSuccessfully ? 1 : 0);
 
       return;
     }
@@ -931,6 +967,7 @@ void TdmaRadioService::rememberSentTelemetry(const uint8_t *payload,
   e.firstSentMs = nowMs;
   e.lastSentMs = nowMs;
   e.attempts = 1;
+  e.sentSuccessfully = sentSuccessfully;
   e.ackGateOpened = false;
 
   if (replacingPending) {
@@ -950,9 +987,10 @@ void TdmaRadioService::rememberSentTelemetry(const uint8_t *payload,
              static_cast<unsigned int>(_pendingCount),
              static_cast<unsigned long>(_queue.droppedOldestCount()));
   } else {
-    LOG_DEBUG("radio", "pending_add seq=%u index=%d len=%u pending=%u",
+    LOG_DEBUG("radio", "pending_add seq=%u index=%d len=%u sent_ok=%u pending=%u",
               static_cast<unsigned int>(seq), static_cast<int>(slot),
               static_cast<unsigned int>(len),
+              sentSuccessfully ? 1 : 0,
               static_cast<unsigned int>(_pendingCount));
   }
 }
@@ -973,7 +1011,17 @@ bool TdmaRadioService::pickRetransmitCandidate(uint8_t *payloadOut,
 
   const uint32_t nowMs = _tdmaClock.sessionNowMs();
 
+  bool hasUnsentPending = false;
+  for (uint8_t i = 0; i < windowDepth; ++i) {
+    const PendingEntry &e = _pending[i];
+    if (e.inUse && !e.sentSuccessfully) {
+      hasUnsentPending = true;
+      break;
+    }
+  }
+
   if (_cfg.reliabilityMode == TdmaReliabilityMode::AppLayerAckSummary &&
+      !hasUnsentPending &&
       _cfg.reliabilityFreshTrafficHoldoffMs > 0 && _hasFreshTelemetrySent &&
       (nowMs - _lastFreshTelemetrySentMs) <
           _cfg.reliabilityFreshTrafficHoldoffMs) {
@@ -1024,7 +1072,8 @@ bool TdmaRadioService::pickRetransmitCandidate(uint8_t *payloadOut,
       continue;
     }
 
-    if (_cfg.reliabilityMode == TdmaReliabilityMode::AppLayerAckSummary) {
+    if (_cfg.reliabilityMode == TdmaReliabilityMode::AppLayerAckSummary &&
+      e.sentSuccessfully) {
       const uint32_t retryWaitMs = computeRetryWaitMs();
 
       if (ageMs < retryWaitMs) {
@@ -1104,7 +1153,23 @@ void TdmaRadioService::markRetransmitSent(uint8_t pendingIndex) {
     return;
   }
 
-  e.lastSentMs = _tdmaClock.sessionNowMs();
+  const uint32_t nowMs = _tdmaClock.sessionNowMs();
+
+  if (!e.sentSuccessfully) {
+    e.sentSuccessfully = true;
+    e.firstSentMs = nowMs;
+    e.lastSentMs = nowMs;
+    e.attempts = 1;
+    e.ackGateOpened = false;
+
+    LOG_INFO("radio",
+             "pending_promoted seq=%u index=%u reason=first_successful_send",
+             static_cast<unsigned int>(e.seq),
+             static_cast<unsigned int>(pendingIndex));
+    return;
+  }
+
+  e.lastSentMs = nowMs;
 
   if (e.attempts < 0xFF) {
     e.attempts++;
@@ -1137,6 +1202,13 @@ void TdmaRadioService::applyAckSummary(
     PendingEntry &e = _pending[i];
 
     if (!e.inUse) {
+      continue;
+    }
+
+    if (!e.sentSuccessfully) {
+      LOG_DEBUG("radio",
+                "ack_summary_ignore seq=%u reason=never_sent_successfully",
+                static_cast<unsigned int>(e.seq));
       continue;
     }
 
@@ -1236,4 +1308,72 @@ void TdmaRadioService::dropExpiredPending() {
       }
     }
   }
+}
+
+void TdmaRadioService::maybeLogRetransmitHealth() {
+  if (!_cfg.enableAppReliability) {
+    return;
+  }
+
+  const uint32_t nowMs = _tdmaClock.sessionNowMs();
+  if ((nowMs - _lastRetxHealthLogMs) < 10000u) {
+    return;
+  }
+
+  const uint8_t windowDepth =
+      (_cfg.reliabilityWindowDepth > kMaxReliabilityWindow)
+          ? kMaxReliabilityWindow
+          : _cfg.reliabilityWindowDepth;
+
+  const uint32_t retryWaitMs = computeRetryWaitMs();
+
+  uint8_t unsentPending = 0;
+  uint8_t ackWaitPending = 0;
+  uint8_t retryReadyPending = 0;
+
+  for (uint8_t i = 0; i < windowDepth; ++i) {
+    const PendingEntry &e = _pending[i];
+    if (!e.inUse) {
+      continue;
+    }
+
+    if (!e.sentSuccessfully) {
+      unsentPending++;
+      continue;
+    }
+
+    const uint32_t ageMs = nowMs - e.firstSentMs;
+    const uint32_t sinceLastMs = nowMs - e.lastSentMs;
+
+    if (ageMs > _cfg.reliabilityMaxAgeMs ||
+        e.attempts >= _cfg.reliabilityMaxAttempts) {
+      continue;
+    }
+
+    if (sinceLastMs < _cfg.reliabilityMinRetryGapMs) {
+      continue;
+    }
+
+    if (_cfg.reliabilityMode == TdmaReliabilityMode::AppLayerAckSummary &&
+        ageMs < retryWaitMs) {
+      ackWaitPending++;
+      continue;
+    }
+
+    retryReadyPending++;
+  }
+
+  LOG_INFO("radio",
+           "retx_health q=%u/%u pending=%u unsent=%u ack_wait=%u retry_ready=%u fresh_holdoff_ms=%lu ack_seen=%u",
+           static_cast<unsigned int>(_queue.count()),
+           static_cast<unsigned int>(_queue.capacity()),
+           static_cast<unsigned int>(_pendingCount),
+           static_cast<unsigned int>(unsentPending),
+           static_cast<unsigned int>(ackWaitPending),
+           static_cast<unsigned int>(retryReadyPending),
+           static_cast<unsigned long>(
+               _hasFreshTelemetrySent ? (nowMs - _lastFreshTelemetrySentMs) : 0u),
+           _hasReceivedAckSummary ? 1 : 0);
+
+  _lastRetxHealthLogMs = nowMs;
 }
