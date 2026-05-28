@@ -175,16 +175,9 @@ void PacketHandler::tryEncodeStatus(const SensorSnapshot &snap) {
     }
 
     if (snap.imuValid) {
-        sp.mag_x = snap.magX;
-        sp.mag_y = snap.magY;
-        sp.mag_z = snap.magZ;
-        sp.accel_x = snap.accelX;
-        sp.accel_y = snap.accelY;
-        sp.accel_z = snap.accelZ;
+        sp.heading_deg_x10  = static_cast<uint16_t>(snap.headingDeg * 10.0f + 0.5f);
+        sp.heading_accuracy = snap.headingAccuracy;
         flags |= BinaryPacket::STATUS_IMU_VALID;
-        if (snap.imuDmp) {
-            flags |= BinaryPacket::STATUS_IMU_DMP;
-        }
     }
 
     sp.flags = flags;
@@ -205,23 +198,10 @@ void PacketHandler::tryEncodeStatus(const SensorSnapshot &snap) {
                  static_cast<unsigned long>(snap.sessionTimeMs));
         if ((sp.flags & BinaryPacket::STATUS_IMU_VALID) != 0u) {
             LOG_DEBUG("packet",
-                      "status_imu_payload node=%u mag_xyz=[%d,%d,%d] accel_xyz=[%d,%d,%d] units=mag_ut_x10,accel_mg",
+                      "status_imu_payload node=%u heading_deg=%.1f accuracy_deg=%.2f",
                       static_cast<unsigned int>(_cfg.nodeId),
-                      static_cast<int>(sp.mag_x),
-                      static_cast<int>(sp.mag_y),
-                      static_cast<int>(sp.mag_z),
-                      static_cast<int>(sp.accel_x),
-                      static_cast<int>(sp.accel_y),
-                      static_cast<int>(sp.accel_z));
-            LOG_DEBUG("calib",
-                      "status_imu_payload node=%u mag_xyz=[%d,%d,%d] accel_xyz=[%d,%d,%d] units=mag_ut_x10,accel_mg",
-                      static_cast<unsigned int>(_cfg.nodeId),
-                      static_cast<int>(sp.mag_x),
-                      static_cast<int>(sp.mag_y),
-                      static_cast<int>(sp.mag_z),
-                      static_cast<int>(sp.accel_x),
-                      static_cast<int>(sp.accel_y),
-                      static_cast<int>(sp.accel_z));
+                      static_cast<float>(sp.heading_deg_x10) / 10.0f,
+                      static_cast<float>(sp.heading_accuracy) / 4096.0f);
         }
     } else {
         LOG_WARN("packet", "status_encode_failed node=%u flags=0x%02X",

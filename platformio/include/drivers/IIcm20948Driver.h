@@ -5,24 +5,10 @@
 class IIcm20948Driver {
 public:
   struct Data {
-    float accelX = 0.0f;
-    float accelY = 0.0f;
-    float accelZ = 0.0f;
-
-    float gyroX = 0.0f;
-    float gyroY = 0.0f;
-    float gyroZ = 0.0f;
-
-    float magX = 0.0f;
-    float magY = 0.0f;
-    float magZ = 0.0f;
-
-    // DMP Geomag output — populated instead of raw mag/accel/gyro in DMP mode.
     float   headingDeg      = 0.0f;
-    int16_t headingAccuracy = 0;     // 0 (unreliable) – 3 (high)
+    int16_t headingAccuracy = 0;    // Q12 raw; divide by 4096 for degrees
     bool    headingValid    = false;
-
-    bool valid = false;
+    bool    valid           = false;
   };
 
   virtual ~IIcm20948Driver() = default;

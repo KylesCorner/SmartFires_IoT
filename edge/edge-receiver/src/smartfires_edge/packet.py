@@ -43,14 +43,12 @@ AWAKEN_PAYLOAD_FMT = "<I"
 AWAKEN_PAYLOAD_SIZE = struct.calcsize(AWAKEN_PAYLOAD_FMT)  # 4
 
 # StatusPayload: lat_e7(i32) lon_e7(i32) battery_mv(u16) battery_pct(u8) flags(u8)
-#                mag_xyz(i16x3) accel_xyz(i16x3)
-STATUS_PAYLOAD_FMT  = "<iiHBBhhhhhh"
-STATUS_PAYLOAD_SIZE = struct.calcsize(STATUS_PAYLOAD_FMT)  # 24
+#                heading_deg_x10(u16) heading_accuracy(u16)
+STATUS_PAYLOAD_FMT  = "<iiHBBHH"
+STATUS_PAYLOAD_SIZE = struct.calcsize(STATUS_PAYLOAD_FMT)  # 16
 STATUS_GPS_VALID  = 0x01
 STATUS_BATT_VALID = 0x02
 STATUS_IMU_VALID  = 0x04
-# When set alongside IMU_VALID: mag_x = heading_deg x 10, mag_y = accuracy (0-3)
-STATUS_IMU_DMP    = 0x08
 
 # CmdCalibratePayload: node_id(u8) duration_s(u8)
 CMD_CALIBRATE_PAYLOAD_FMT = "<BB"
@@ -59,12 +57,6 @@ CMD_CALIBRATE_PAYLOAD_SIZE = struct.calcsize(CMD_CALIBRATE_PAYLOAD_FMT)  # 2
 # CmdResetPayload: node_id(u8) reset_type(u8)
 CMD_RESET_PAYLOAD_FMT = "<BB"
 CMD_RESET_PAYLOAD_SIZE = struct.calcsize(CMD_RESET_PAYLOAD_FMT)  # 2
-
-# CalibrationDataPayload:
-#   uid_hash(u32), sample_count(u16), mag_mean(f32x3), mag_cov(f32x6),
-#   mag_min(f32x3), mag_max(f32x3), status(u8)
-CALIBRATION_DATA_PAYLOAD_FMT = "<IH3f6f3f3fB"
-CALIBRATION_DATA_PAYLOAD_SIZE = struct.calcsize(CALIBRATION_DATA_PAYLOAD_FMT)  # 67
 
 # CmdAckPayload: cmd_type(u8) uid_hash(u32) status(u8)
 CMD_ACK_PAYLOAD_FMT = "<BIB"
@@ -88,11 +80,10 @@ LORA_PAYLOAD_SIZE     = HEADER_SIZE + FULL_STATE_SIZE + 1
 LORA_BUNDLE_MAX_SIZE  = HEADER_SIZE + FULL_STATE_SIZE + 1 + BUNDLE_MAX_DELTAS * DELTA_SIZE + 1
 TIME_SYNC_LORA_SIZE   = HEADER_SIZE + TIME_SYNC_PAYLOAD_SIZE + 1
 ACK_SUMMARY_LORA_SIZE = HEADER_SIZE + ACK_SUMMARY_PAYLOAD_SIZE + 1
-AWAKEN_LORA_SIZE = HEADER_SIZE + AWAKEN_PAYLOAD_SIZE + 1
+AWAKEN_LORA_SIZE      = HEADER_SIZE + AWAKEN_PAYLOAD_SIZE + 1
 CMD_CALIBRATE_LORA_SIZE = HEADER_SIZE + CMD_CALIBRATE_PAYLOAD_SIZE + 1
-CMD_RESET_LORA_SIZE = HEADER_SIZE + CMD_RESET_PAYLOAD_SIZE + 1
-CALIBRATION_DATA_LORA_SIZE = HEADER_SIZE + CALIBRATION_DATA_PAYLOAD_SIZE + 1
-CMD_ACK_LORA_SIZE = HEADER_SIZE + CMD_ACK_PAYLOAD_SIZE + 1
+CMD_RESET_LORA_SIZE   = HEADER_SIZE + CMD_RESET_PAYLOAD_SIZE + 1
+CMD_ACK_LORA_SIZE     = HEADER_SIZE + CMD_ACK_PAYLOAD_SIZE + 1
 
 BASE_FRAME_MIN_DATA_LEN = 5
 BASE_FRAME_MAX_DATA_LEN = 1 + LORA_BUNDLE_MAX_SIZE
@@ -215,7 +206,7 @@ def decode_gps(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Optional[
     if magic != PKT_MAGIC or pkt_type != PKT_STATUS:
         return None
 
-    lat_e7, lon_e7, _battery_mv, _battery_pct, flags, *_imu = struct.unpack_from(
+    lat_e7, lon_e7, _battery_mv, _battery_pct, flags, _hdg, _acc = struct.unpack_from(
         STATUS_PAYLOAD_FMT,
         raw_lora_payload,
         HEADER_SIZE,
@@ -243,26 +234,12 @@ def decode_status(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Option
     if magic != PKT_MAGIC or pkt_type != PKT_STATUS:
         return None
 
-    (
-        lat_e7,
-        lon_e7,
-        battery_mv,
-        battery_pct,
-        flags,
-        mag_x,
-        mag_y,
-        mag_z,
-        accel_x,
-        accel_y,
-        accel_z,
-    ) = struct.unpack_from(
-        STATUS_PAYLOAD_FMT,
-        raw_lora_payload,
-        HEADER_SIZE,
-    )
-    gps_valid = (flags & STATUS_GPS_VALID) != 0
+    lat_e7, lon_e7, battery_mv, battery_pct, flags, heading_deg_x10, heading_accuracy = \
+        struct.unpack_from(STATUS_PAYLOAD_FMT, raw_lora_payload, HEADER_SIZE)
+
+    gps_valid  = (flags & STATUS_GPS_VALID)  != 0
     batt_valid = (flags & STATUS_BATT_VALID) != 0
-    imu_valid = (flags & STATUS_IMU_VALID) != 0
+    imu_valid  = (flags & STATUS_IMU_VALID)  != 0
 
     return {
         "node_id": node_id,
@@ -276,12 +253,8 @@ def decode_status(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Option
         "lon": round(lon_e7 / 1e7, 7) if gps_valid else "",
         "battery_mv": battery_mv if batt_valid else "",
         "battery_pct": battery_pct if batt_valid else "",
-        "mag_x": mag_x if imu_valid else "",
-        "mag_y": mag_y if imu_valid else "",
-        "mag_z": mag_z if imu_valid else "",
-        "accel_x": accel_x if imu_valid else "",
-        "accel_y": accel_y if imu_valid else "",
-        "accel_z": accel_z if imu_valid else "",
+        "heading_deg": round(heading_deg_x10 / 10.0, 1) if imu_valid else "",
+        "heading_accuracy": heading_accuracy if imu_valid else "",
     }
 
 
@@ -339,39 +312,6 @@ def decode_cmd_reset(raw_lora_payload: bytes) -> Optional[dict]:
         "seq": seq,
         "node_id": node_id,
         "reset_type": reset_type,
-    }
-
-
-def decode_calibration_data(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Optional[dict]:
-    if len(raw_lora_payload) < CALIBRATION_DATA_LORA_SIZE:
-        return None
-    if crc8(raw_lora_payload[:-1]) != raw_lora_payload[-1]:
-        return None
-
-    magic, pkt_type, node_id, seq = struct.unpack_from(HEADER_FMT, raw_lora_payload, 0)
-    if magic != PKT_MAGIC or pkt_type != PKT_CALIBRATION_DATA:
-        return None
-
-    fields = struct.unpack_from(CALIBRATION_DATA_PAYLOAD_FMT, raw_lora_payload, HEADER_SIZE)
-    uid_hash = fields[0]
-    sample_count = fields[1]
-    mag_mean = list(fields[2:5])
-    mag_cov = list(fields[5:11])
-    mag_min = list(fields[11:14])
-    mag_max = list(fields[14:17])
-    status = fields[17]
-
-    return {
-        "node_id": node_id,
-        "seq": seq,
-        "rssi": rssi,
-        "uid_hash": uid_hash,
-        "sample_count": sample_count,
-        "mag_mean": mag_mean,
-        "mag_cov": mag_cov,
-        "mag_min": mag_min,
-        "mag_max": mag_max,
-        "status": status,
     }
 
 

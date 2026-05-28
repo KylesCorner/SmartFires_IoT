@@ -114,7 +114,6 @@ private:
   uint32_t _bundleRxCount = 0;
   uint32_t _statusRxCount = 0;
   uint32_t _fullStateRxCount = 0;
-  uint32_t _calibrationDataRxCount = 0;
   uint32_t _cmdAckRxCount = 0;
   uint32_t _rawRxCount = 0;
   uint32_t _timeSyncTxCount = 0;

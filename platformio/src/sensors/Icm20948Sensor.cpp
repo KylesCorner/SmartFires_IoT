@@ -6,16 +6,6 @@
 
 namespace {
 
-int16_t clampToInt16(float value) {
-  if (value > 32767.0f) {
-    return 32767;
-  }
-  if (value < -32768.0f) {
-    return -32768;
-  }
-  return static_cast<int16_t>(value);
-}
-
 const char *sensorPowerStateName(SensorPowerState state) {
   switch (state) {
   case SensorPowerState::Ready:
@@ -176,28 +166,12 @@ bool Icm20948Sensor::sample() {
   _reading.timestampMs = _clock.millis();
   _lastSampleMs = _reading.timestampMs;
 
-  if (_reading.headingValid) {
-    LOG_DEBUG(
-        "IMU",
-        "imu_dmp_heading heading_deg=%.1f accuracy_deg=%.2f t_ms=%lu",
-        _reading.headingDeg,
-        static_cast<float>(_reading.headingAccuracy) / 4096.0f,
-        static_cast<unsigned long>(_reading.timestampMs));
-  } else {
-    LOG_DEBUG(
-        "IMU",
-        "imu_raw_sample mag_ut=[%.3f,%.3f,%.3f] accel_mg=[%.1f,%.1f,%.1f] gyro_dps=[%.3f,%.3f,%.3f] t_ms=%lu",
-        _reading.magX,
-        _reading.magY,
-        _reading.magZ,
-        _reading.accelX,
-        _reading.accelY,
-        _reading.accelZ,
-        _reading.gyroX,
-        _reading.gyroY,
-        _reading.gyroZ,
-        static_cast<unsigned long>(_reading.timestampMs));
-  }
+  LOG_DEBUG(
+      "IMU",
+      "imu_dmp_heading heading_deg=%.1f accuracy_deg=%.2f t_ms=%lu",
+      _reading.headingDeg,
+      static_cast<float>(_reading.headingAccuracy) / 4096.0f,
+      static_cast<unsigned long>(_reading.timestampMs));
 
   return true;
 }
@@ -225,13 +199,9 @@ size_t Icm20948Sensor::writeTelemetry(char *out, size_t maxLen) const {
   if (!out || maxLen == 0) return 0;
 
   int n = snprintf(out, maxLen,
-                   "imu,ax=%.3f,ay=%.3f,az=%.3f,gx=%.3f,gy=%.3f,gz=%.3f,valid=%u,t_ms=%lu",
-                   _reading.accelX,
-                   _reading.accelY,
-                   _reading.accelZ,
-                   _reading.gyroX,
-                   _reading.gyroY,
-                   _reading.gyroZ,
+                   "imu,heading_deg=%.1f,accuracy_deg=%.2f,valid=%u,t_ms=%lu",
+                   _reading.headingDeg,
+                   static_cast<float>(_reading.headingAccuracy) / 4096.0f,
                    _reading.valid ? 1 : 0,
                    static_cast<unsigned long>(_reading.timestampMs));
 
@@ -240,32 +210,13 @@ size_t Icm20948Sensor::writeTelemetry(char *out, size_t maxLen) const {
 }
 
 void Icm20948Sensor::fillSnapshot(SensorSnapshot &snap) const {
-  if (!_reading.valid) {
+  if (!_reading.valid || !_reading.headingValid) {
     snap.imuValid = false;
-    snap.imuDmp   = false;
     return;
   }
 
-  if (_reading.headingValid) {
-    // DMP mode: pack heading into the mag fields for STATUS transport.
-    snap.magX   = clampToInt16(_reading.headingDeg * 10.0f); // heading x 10
-    snap.magY   = _reading.headingAccuracy;                   // 0-3
-    snap.magZ   = 0;
-    snap.accelX = 0;
-    snap.accelY = 0;
-    snap.accelZ = 0;
-    snap.imuDmp = true;
-  } else {
-    // Raw mode: driver reports magnetometer in uT, accelerometer in milli-g.
-    snap.magX   = clampToInt16(_reading.magX * 10.0f);
-    snap.magY   = clampToInt16(_reading.magY * 10.0f);
-    snap.magZ   = clampToInt16(_reading.magZ * 10.0f);
-    snap.accelX = clampToInt16(_reading.accelX);
-    snap.accelY = clampToInt16(_reading.accelY);
-    snap.accelZ = clampToInt16(_reading.accelZ);
-    snap.imuDmp = false;
-  }
-
-  snap.imuValid     = true;
-  snap.sensorFlags |= 0x08; // IMU
+  snap.headingDeg      = _reading.headingDeg;
+  snap.headingAccuracy = static_cast<uint16_t>(_reading.headingAccuracy);
+  snap.imuValid        = true;
+  snap.sensorFlags    |= 0x08; // IMU
 }

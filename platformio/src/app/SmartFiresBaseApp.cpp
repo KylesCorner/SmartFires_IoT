@@ -25,8 +25,6 @@ const char *pktTypeName(uint8_t pktType) {
       return "CMD_CALIBRATE";
     case BinaryPacket::PKT_CMD_RESET:
       return "CMD_RESET";
-    case BinaryPacket::PKT_CALIBRATION_DATA:
-      return "CALIBRATION_DATA";
     case BinaryPacket::PKT_CMD_ACK:
       return "CMD_ACK";
     default:
@@ -237,8 +235,6 @@ void SmartFiresBaseApp::processIncomingLoRa() {
       _statusRxCount++;
     } else if (hdr.pkt_type == BinaryPacket::PKT_FULL_STATE) {
       _fullStateRxCount++;
-    } else if (hdr.pkt_type == BinaryPacket::PKT_CALIBRATION_DATA) {
-      _calibrationDataRxCount++;
     } else if (hdr.pkt_type == BinaryPacket::PKT_CMD_ACK) {
       _cmdAckRxCount++;
     }
@@ -309,26 +305,6 @@ void SmartFiresBaseApp::processIncomingLoRa() {
                  static_cast<unsigned int>(battValid ? status.battery_mv : 0),
                  static_cast<unsigned int>(battValid ? status.battery_pct : 0));
       }
-    } else if (validHeader && hdr.pkt_type == BinaryPacket::PKT_CALIBRATION_DATA) {
-      BinaryPacket::PktHeader calibHdr = {};
-      BinaryPacket::CalibrationDataPayload calib = {};
-
-      if (BinaryPacket::decodeCalibrationData(pkt.data, pkt.len, calibHdr, calib)) {
-        CalibrationDebug::logCalibrationDataSummary(calib, calibHdr.node_id,
-                                                    calibHdr.seq, "calib");
-      } else {
-        LOG_WARN("calib",
-                 "calibration_data_decode_failed node=%u seq=%u len=%u",
-                 static_cast<unsigned int>(hdr.node_id),
-                 static_cast<unsigned int>(hdr.seq),
-                 static_cast<unsigned int>(pkt.len));
-      }
-
-      LOG_INFO("base",
-               "calibration_data_rx count=%lu node=%u seq=%u action=forward_to_jetson",
-               static_cast<unsigned long>(_calibrationDataRxCount),
-               static_cast<unsigned int>(hdr.node_id),
-               static_cast<unsigned int>(hdr.seq));
     } else if (validHeader && hdr.pkt_type == BinaryPacket::PKT_CMD_ACK) {
       BinaryPacket::PktHeader ackHdr = {};
       BinaryPacket::CmdAckPayload ack = {};
@@ -948,13 +924,12 @@ void SmartFiresBaseApp::maybeLogHealth() {
 
     LOG_INFO(
       "base",
-      "health_rx rx_fwd=%lu awaken=%lu bundle=%lu status=%lu full=%lu calib=%lu cmd_ack=%lu raw=%lu rx_fail=%lu last_rx_ms_ago=%lu jetson_sync_age_ms=%lu",
+      "health_rx rx_fwd=%lu awaken=%lu bundle=%lu status=%lu full=%lu cmd_ack=%lu raw=%lu rx_fail=%lu last_rx_ms_ago=%lu jetson_sync_age_ms=%lu",
       static_cast<unsigned long>(_rxForwardCount),
       static_cast<unsigned long>(_awakenRxCount),
       static_cast<unsigned long>(_bundleRxCount),
       static_cast<unsigned long>(_statusRxCount),
       static_cast<unsigned long>(_fullStateRxCount),
-      static_cast<unsigned long>(_calibrationDataRxCount),
       static_cast<unsigned long>(_cmdAckRxCount),
       static_cast<unsigned long>(_rawRxCount),
       static_cast<unsigned long>(_radioReceiveFailCount),

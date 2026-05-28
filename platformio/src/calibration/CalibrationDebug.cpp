@@ -28,23 +28,6 @@ const char *statusName(uint8_t status) {
   }
 }
 
-void logCalibrationDataSummary(const BinaryPacket::CalibrationDataPayload &payload,
-                               uint8_t nodeId,
-                               uint8_t seq,
-                               const char *src) {
-  LOG_INFO(src ? src : "calib",
-           "calibration_data node=%u seq=%u status=%s samples=%u uid_hash=0x%08lX "
-           "mean=[%.3f,%.3f,%.3f] min=[%.3f,%.3f,%.3f] max=[%.3f,%.3f,%.3f]",
-           static_cast<unsigned int>(nodeId),
-           static_cast<unsigned int>(seq),
-           statusName(payload.status),
-           static_cast<unsigned int>(payload.sample_count),
-           static_cast<unsigned long>(payload.uid_hash),
-           payload.mag_mean[0], payload.mag_mean[1], payload.mag_mean[2],
-           payload.mag_min[0], payload.mag_min[1], payload.mag_min[2],
-           payload.mag_max[0], payload.mag_max[1], payload.mag_max[2]);
-}
-
 void logCmdAckSummary(const BinaryPacket::CmdAckPayload &ack,
                       uint8_t nodeId,
                       uint8_t seq,

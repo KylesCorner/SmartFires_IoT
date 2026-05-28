@@ -23,8 +23,7 @@ Wildfire IoT sensor network. Remote drone nodes collect environmental data (temp
     | LoRa 915 MHz (RadioHead RHReliableDatagram, 13 dBm)
     |   Node → Base: AWAKEN payload (8 bytes, on boot until TIME_SYNC received)
     |                BUNDLE payload (≤193 bytes, 1 retry, 100 ms timeout, TDMA-gated)
-    |                STATUS payload (28 bytes, GPS + battery + raw IMU, every 15 min)
-    |                CALIBRATION_DATA (72 bytes, one-shot after calibration session)
+    |                STATUS payload (21 bytes, GPS + battery + DMP heading, every 15 min)
     |                CMD_ACK (11 bytes, acknowledges CALIBRATE/RESET commands)
     |   Base → Node: TIME_SYNC broadcast (12 bytes, fire-and-forget, RH_BROADCAST_ADDRESS)
     |                CMD_CALIBRATE (7 bytes, forwarded from Jetson)
@@ -42,7 +41,7 @@ Wildfire IoT sensor network. Remote drone nodes collect environmental data (temp
 [Jetson Orin Nano]
   edge/edge-receiver/src/smartfires_edge/ingest_service.py → rotated telemetry CSV
     Sends periodic TIME_SYNC frames to keep all nodes on a common session clock.
-    Computes node heading from raw IMU in STATUS using stored calibration (numpy).
+    Reads DMP-computed heading from STATUS packet (on-chip fusion, no Jetson calibration pipeline).
     Heading CLI (in development): split-screen terminal for calibrate/reset commands.
 ```
 
@@ -223,9 +222,7 @@ RadioHeadTdmaDriver::send()               non-blocking LoRa TX for fresh telemet
 ```
 AWAKEN:  [PktHeader: 4][AwakenPayload: 4][crc8: 1]                                    =  9 bytes
 BUNDLE:  [PktHeader: 4][FullStatePayload: 20][n_deltas: 1][DeltaPayload×n: n×12][crc8] ≤ 194 bytes
-STATUS:  [PktHeader: 4][StatusPayload: 12][crc8: 1]                                    = 17 bytes  (current)
-         [PktHeader: 4][StatusPayload: 24][crc8: 1]                                    = 29 bytes  (planned — adds raw IMU)
-CALIBRATION_DATA: [PktHeader: 4][CalibrationDataPayload: 67][crc8: 1]                 = 72 bytes  (planned)
+STATUS:  [PktHeader: 4][StatusPayload: 16][crc8: 1]                                    = 21 bytes
 CMD_ACK: [PktHeader: 4][CmdAckPayload: 6][crc8: 1]                                    = 11 bytes  (planned)
 ```
 
@@ -247,7 +244,7 @@ slots and call `TdmaClock::applySync(sessionMs)`.
 ```
 [0xAA][0x55][len: u8][rssi: i8][LoRa payload][crc8]
   AWAKEN: len=5   → total frame  9 bytes
-  STATUS: len=17  → total frame 21 bytes
+  STATUS: len=22  → total frame 26 bytes
   BUNDLE: len≤194 → total frame ≤198 bytes
 ```
 
@@ -274,15 +271,15 @@ slots and call `TdmaClock::applySync(sessionMs)`.
 | `0x02` | PKT_HEARTBEAT | — | — | Reserved |
 | `0x03` | PKT_TIME_SYNC | Base→Nodes | 13 bytes | Broadcast, fire-and-forget |
 | `0x04` | PKT_BUNDLE | Node→Jetson | ≤194 bytes | 15 samples (ref + 14 deltas) |
-| `0x05` | PKT_STATUS | Node→Jetson | 29 bytes | GPS + battery + raw IMU, every 15 min |
+| `0x05` | PKT_STATUS | Node→Jetson | 21 bytes | GPS + battery + DMP heading, every 15 min |
 | `0x06` | PKT_AWAKEN | Node→Base | 9 bytes | Boot handshake; contains uid_hash |
 | `0x07` | PKT_ACK_SUMMARY | Jetson→Node | 9 bytes | App-layer reliability bitmap |
 | `0x10` | PKT_CMD_CALIBRATE | Jetson→Node | 7 bytes | Trigger 60 s calibration session |
 | `0x11` | PKT_CMD_RESET | Jetson→Node | 7 bytes | Soft or hard reset |
-| `0x12` | PKT_CALIBRATION_DATA | Node→Jetson | 72 bytes | Statistical summary (mean+covariance) |
+| `0x12` | PKT_CALIBRATION_DATA | — | — | Reserved (calibration pipeline removed) |
 | `0x13` | PKT_CMD_ACK | Node→Jetson | 11 bytes | Acknowledge CALIBRATE or RESET |
 
-Types 0x10–0x13 are **planned but not yet implemented** — see `documentation/Heading_CLI_Development/`.
+Types 0x10, 0x11, 0x13 are **planned but not yet implemented** — see `documentation/Heading_CLI_Development/`.
 
 ### FullStatePayload (20 bytes, packed, little-endian)
 
@@ -298,25 +295,19 @@ Types 0x10–0x13 are **planned but not yet implemented** — see `documentation
 | `pm4_0_ug10` | `uint16_t` | µg/m³ × 10 |
 | `pm10_ug10` | `uint16_t` | µg/m³ × 10 |
 
-### StatusPayload (24 bytes, planned — currently 12) — sent every 15 min via PKT_STATUS
+### StatusPayload (16 bytes) — sent every 15 min via PKT_STATUS
 
-The 12-byte layout below is what is currently on the wire. The 6 raw IMU fields are
-**planned** as part of the heading system (Phase 0 of Heading_CLI_Development). Do not
-implement StatusPayload changes without reading ORIENTATION_CALIBRATION_PLAN.md first.
+flags bits: STATUS_GPS_VALID=0x01 · STATUS_BATT_VALID=0x02 · STATUS_IMU_VALID=0x04
 
-| Field | Type | Encoding | Status |
-|---|---|---|---|
-| `lat_e7` | `int32_t` | degrees × 1e7 (valid if STATUS_GPS_VALID) | Exists |
-| `lon_e7` | `int32_t` | degrees × 1e7 (valid if STATUS_GPS_VALID) | Exists |
-| `battery_mv` | `uint16_t` | millivolts (valid if STATUS_BATT_VALID) | Exists |
-| `battery_pct` | `uint8_t` | 0–100 (valid if STATUS_BATT_VALID) | Exists |
-| `flags` | `uint8_t` | GPS_VALID=0x01 · BATT_VALID=0x02 · IMU_VALID=0x04 | Exists (IMU flag planned) |
-| `mag_x` | `int16_t` | µT × 10, raw magnetometer (valid if IMU_VALID) | **Planned** |
-| `mag_y` | `int16_t` | µT × 10 | **Planned** |
-| `mag_z` | `int16_t` | µT × 10 | **Planned** |
-| `accel_x` | `int16_t` | mg (milli-g), raw accelerometer (valid if IMU_VALID) | **Planned** |
-| `accel_y` | `int16_t` | mg | **Planned** |
-| `accel_z` | `int16_t` | mg | **Planned** |
+| Field | Type | Encoding |
+|---|---|---|
+| `lat_e7` | `int32_t` | degrees × 1e7 (valid if STATUS_GPS_VALID) |
+| `lon_e7` | `int32_t` | degrees × 1e7 (valid if STATUS_GPS_VALID) |
+| `battery_mv` | `uint16_t` | millivolts (valid if STATUS_BATT_VALID) |
+| `battery_pct` | `uint8_t` | 0–100 (valid if STATUS_BATT_VALID) |
+| `flags` | `uint8_t` | GPS_VALID=0x01 · BATT_VALID=0x02 · IMU_VALID=0x04 |
+| `heading_deg_x10` | `uint16_t` | heading × 10, 0–3590 (valid if STATUS_IMU_VALID) |
+| `heading_accuracy` | `uint16_t` | Q12 raw; divide by 4096 for degrees |
 
 ### DeltaPayload (12 bytes, packed, little-endian)
 
@@ -432,59 +423,30 @@ Sizing and scaling math tables are in `documentation/BANDWIDTH_SCALING.md`.
 
 ## Heading and Calibration System (In Development)
 
-The ICM-20948 IMU is wired and the driver/sensor classes exist, but IMU data does not yet
-enter the wire protocol. The heading system design is fully specified in
-`documentation/Heading_CLI_Development/` — read those three documents before touching
-anything IMU, calibration, or CLI related.
+The ICM-20948 IMU uses the DMP 9DOF Rotation Vector (gyro + accel + mag fusion) to compute
+heading on-chip. No Jetson-side calibration pipeline exists — the DMP self-calibrates via
+figure-8 motion at boot. Heading is transmitted in each STATUS packet.
 
-### Summary of the design
+### How it works
 
-**Calibration flow (one-time per node):**
+**Calibration (on boot):**
+Perform slow figure-8 motion with the sensor for ~30–60 seconds. The DMP compass
+self-calibrates internally. Biases are RAM-only and lost on power cycle — recalibrate
+after each reboot. (Future: save/restore biases to flash using `getBiasCPassX/Y/Z()`.)
 
-1. Operator issues `calibrate node <id>` from the Jetson CLI.
-2. Jetson sends `CMD_CALIBRATE (0x10)` → base station routes to node via LoRa.
-3. Node enters calibration mode (~60 s), rotating through all orientations.
-4. Node computes running statistics (Welford algorithm — O(N), constant memory):
-   mean, covariance matrix upper triangle, min/max per axis.
-5. Node transmits one `CALIBRATION_DATA (0x12)` packet (72 bytes) to Jetson.
-6. Jetson runs eigendecomposition (`numpy.linalg.eigh`) on the covariance matrix →
-   derives hard iron offset (mean) and full 3×3 soft iron matrix.
-7. Jetson stores calibration keyed by `uid_hash` in `~/.smartfires/session.json`.
+**Normal operation:**
 
-**Normal operation (post-calibration):**
+- Every PKT_STATUS (15 min) carries `heading_deg_x10` and `heading_accuracy` (Q12 degrees).
+- Jetson reads heading directly from the decoded STATUS packet. No calibration math needed.
+- Heading is stored in `node_status["heading_true_deg"]` in `session.json` and displayed in the CLI.
 
-- Every PKT_STATUS (15 min) carries raw `mag_x/y/z` and `accel_x/y/z` as int16.
-- Jetson applies stored calibration + tilt compensation + WMM magnetic declination →
-  computes true heading, pitch, roll.
-- Heading is stored in session and displayed in the CLI. It is never transmitted back
-  to the node — the node holds no calibration data.
+**Node identity:** `uid_hash` (32-bit FNV-1a of the SAMD21 128-bit serial). Present in
+every AWAKEN payload. Used as the node identity key on the Jetson. The base station
+assigns `node_id` from this hash in `findOrCreateNodeAssignment()`.
 
-**Node identity:** `uid_hash` (32-bit FNV-1a of the SAMD21 128-bit serial, computed by
-`BoardIdentity::hash32()`). Already present in every AWAKEN payload. Used as the
-calibration dictionary key on the Jetson. The base station assigns `node_id` from this
-hash in `findOrCreateNodeAssignment()`.
-
-**Expected accuracy:** ±2–5° (1σ) after calibration with adequate rotation coverage and
-declination correction. Single STATUS sample noise is ±4–5°; an optional Jetson-side IIR
-filter can reduce this.
-
-### What needs to change in the codebase
-
-See `DEPLOYMENT_SCHEDULE.md` for the full phased plan. In brief:
-
-| Layer | Change |
-| --- | --- |
-| `BinaryPacket.h` | Add PKT_CMD_CALIBRATE/RESET/CALIBRATION_DATA/CMD_ACK structs + encoders |
-| `SensorSnapshot.h` | Add magX/Y/Z, accelX/Y/Z, imuValid fields |
-| `StatusPayload` | Extend 12 → 24 bytes with raw IMU int16 fields |
-| `Icm20948Sensor` | Implement fillSnapshot() — quantize to int16 and set imuValid |
-| `PacketHandler` | Encode IMU fields into STATUS; add IMU_VALID flag |
-| `SmartFiresBaseApp` | Extend handleJetsonCommandPayload() for 0x10, 0x11; forward 0x12, 0x13 to Jetson |
-| `SmartFiresNodeApp` | Add CalibrationManager state machine (Welford stats, CMD_ACK, CALIBRATION_DATA TX) |
-| `packet.py` | Add new packet types, update STATUS struct format |
-| `ingest_service.py` | Parse uid_hash from AWAKEN; add SessionManager; compute heading on STATUS |
-| New: `session.py` | SessionManager class — uid_hash↔node_id mapping, calibration storage, heading compute |
-| New: `cli.py` | Curses split-screen CLI — calibrate/reset commands, live log, heading display |
+**Expected accuracy:** ±2–5° when calibrated; raw Q12 accuracy field gives the DMP's own
+estimate (divide by 4096 for degrees). Magnetic declination correction (`_magnetic_declination`
+stub in session.py) is not yet implemented — readings are magnetic bearing, not true bearing.
 
 ---
 

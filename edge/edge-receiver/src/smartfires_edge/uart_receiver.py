@@ -6,7 +6,6 @@ import serial
 from smartfires_edge.packet import (
     BASE_FRAME_MAX_DATA_LEN,
     BASE_FRAME_MIN_DATA_LEN,
-    PKT_CALIBRATION_DATA,
     PKT_CMD_ACK,
     FRAME_M0,
     FRAME_M1,
@@ -19,7 +18,6 @@ from smartfires_edge.packet import (
     PKT_STATUS,
     crc8,
     decode_awaken,
-    decode_calibration_data,
     decode_bundle,
     decode_cmd_ack,
     decode_full_state,
@@ -94,7 +92,6 @@ class FrameReceiver:
             gps = None
             status = None
             awaken = None
-            calibration_data = None
             cmd_ack = None
             packets: list[dict] = []
             if pkt_type == PKT_AWAKEN:
@@ -108,8 +105,6 @@ class FrameReceiver:
                     packets = [pkt]
             elif pkt_type == PKT_BUNDLE:
                 packets = decode_bundle(raw_payload, rssi)
-            elif pkt_type == PKT_CALIBRATION_DATA:
-                calibration_data = decode_calibration_data(raw_payload, rssi)
             elif pkt_type == PKT_CMD_ACK:
                 cmd_ack = decode_cmd_ack(raw_payload, rssi)
 
@@ -125,7 +120,6 @@ class FrameReceiver:
                 "awaken": awaken,
                 "gps": gps,
                 "status": status,
-                "calibration_data": calibration_data,
                 "cmd_ack": cmd_ack,
                 "packets": packets,
             }

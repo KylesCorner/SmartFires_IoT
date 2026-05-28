@@ -5,8 +5,7 @@
 // LoRa payloads — node -> base:
 //   AWAKEN:     [PktHeader:4][AwakenPayload:4][crc8:1]                                    =   9 bytes
 //   BUNDLE:     [PktHeader:4][FullStatePayload:20][n_deltas:1][DeltaPayload×n][crc8:1]  ≤ 194 bytes
-//   STATUS:     [PktHeader:4][StatusPayload:24][crc8:1]                                 =  29 bytes
-//   CALIB_DATA: [PktHeader:4][CalibrationDataPayload:67][crc8:1]                        =  72 bytes
+//   STATUS:     [PktHeader:4][StatusPayload:16][crc8:1]                                 =  21 bytes
 //   CMD_ACK:    [PktHeader:4][CmdAckPayload:6][crc8:1]                                  =  11 bytes
 //
 // LoRa TIME_SYNC — base -> node or all nodes:
@@ -68,28 +67,20 @@ struct __attribute__((packed)) FullStatePayload {
     uint16_t pm10_ug10;
 };
 
-// Sent every 15 minutes — GPS position + battery level.
+// Sent every 15 minutes — GPS position + battery level + DMP heading.
 // flags bits: STATUS_GPS_VALID=0x01, STATUS_BATT_VALID=0x02, STATUS_IMU_VALID=0x04
-//             STATUS_IMU_DMP=0x08 (set alongside IMU_VALID when DMP heading is present)
 static constexpr uint8_t STATUS_GPS_VALID  = 0x01;
 static constexpr uint8_t STATUS_BATT_VALID = 0x02;
 static constexpr uint8_t STATUS_IMU_VALID  = 0x04;
-// When STATUS_IMU_DMP is set the imu fields carry DMP-computed data:
-//   mag_x = heading_deg x 10 (int16, 0-3590), mag_y = accuracy (0-3), others = 0
-static constexpr uint8_t STATUS_IMU_DMP    = 0x08;
 
 struct __attribute__((packed)) StatusPayload {
-    int32_t  lat_e7;        // degrees × 1e7  (valid if STATUS_GPS_VALID)
-    int32_t  lon_e7;        // degrees × 1e7  (valid if STATUS_GPS_VALID)
-    uint16_t battery_mv;    // millivolts      (valid if STATUS_BATT_VALID)
-    uint8_t  battery_pct;   // 0–100           (valid if STATUS_BATT_VALID)
-    uint8_t  flags;         // STATUS_GPS_VALID | STATUS_BATT_VALID | STATUS_IMU_VALID
-    int16_t  mag_x;         // uT x 10         (valid if STATUS_IMU_VALID)
-    int16_t  mag_y;
-    int16_t  mag_z;
-    int16_t  accel_x;       // mg              (valid if STATUS_IMU_VALID)
-    int16_t  accel_y;
-    int16_t  accel_z;
+    int32_t  lat_e7;            // degrees × 1e7  (valid if STATUS_GPS_VALID)
+    int32_t  lon_e7;            // degrees × 1e7  (valid if STATUS_GPS_VALID)
+    uint16_t battery_mv;        // millivolts      (valid if STATUS_BATT_VALID)
+    uint8_t  battery_pct;       // 0–100           (valid if STATUS_BATT_VALID)
+    uint8_t  flags;             // STATUS_GPS_VALID | STATUS_BATT_VALID | STATUS_IMU_VALID
+    uint16_t heading_deg_x10;   // heading × 10, 0–3590  (valid if STATUS_IMU_VALID)
+    uint16_t heading_accuracy;  // Q12 raw; divide by 4096 for degrees
 };
 
 struct __attribute__((packed)) CmdCalibratePayload {
@@ -100,16 +91,6 @@ struct __attribute__((packed)) CmdCalibratePayload {
 struct __attribute__((packed)) CmdResetPayload {
     uint8_t node_id;
     uint8_t reset_type;
-};
-
-struct __attribute__((packed)) CalibrationDataPayload {
-    uint32_t uid_hash;
-    uint16_t sample_count;
-    float    mag_mean[3];
-    float    mag_cov[6];
-    float    mag_min[3];
-    float    mag_max[3];
-    uint8_t  status;
 };
 
 struct __attribute__((packed)) CmdAckPayload {
@@ -155,17 +136,16 @@ static constexpr uint8_t DELTA_FLAG_PM2_5_CLAMPED    = 0x10;
 static constexpr uint8_t DELTA_FLAG_PM4_CLAMPED      = 0x20;
 static constexpr uint8_t DELTA_FLAG_PM10_CLAMPED     = 0x40;
 
-static_assert(sizeof(PktHeader)        ==  4, "PktHeader must be 4 bytes");
-static_assert(sizeof(AwakenPayload)    ==  4, "AwakenPayload must be 4 bytes");
-static_assert(sizeof(FullStatePayload) == 20, "FullStatePayload must be 20 bytes");
-static_assert(sizeof(StatusPayload)    == 24, "StatusPayload must be 24 bytes");
-static_assert(sizeof(TimeSyncPayload)  ==  8, "TimeSyncPayload must be 8 bytes");
-static_assert(sizeof(AckSummaryPayload) == 4, "AckSummaryPayload must be 4 bytes");
-static_assert(sizeof(DeltaPayload)     == 12, "DeltaPayload must be 12 bytes");
-static_assert(sizeof(CmdCalibratePayload) == 2, "CmdCalibratePayload must be 2 bytes");
-static_assert(sizeof(CmdResetPayload) == 2, "CmdResetPayload must be 2 bytes");
-static_assert(sizeof(CalibrationDataPayload) == 67, "CalibrationDataPayload must be 67 bytes");
-static_assert(sizeof(CmdAckPayload) == 6, "CmdAckPayload must be 6 bytes");
+static_assert(sizeof(PktHeader)           ==  4, "PktHeader must be 4 bytes");
+static_assert(sizeof(AwakenPayload)       ==  4, "AwakenPayload must be 4 bytes");
+static_assert(sizeof(FullStatePayload)    == 20, "FullStatePayload must be 20 bytes");
+static_assert(sizeof(StatusPayload)       == 16, "StatusPayload must be 16 bytes");
+static_assert(sizeof(TimeSyncPayload)     ==  8, "TimeSyncPayload must be 8 bytes");
+static_assert(sizeof(AckSummaryPayload)   ==  4, "AckSummaryPayload must be 4 bytes");
+static_assert(sizeof(DeltaPayload)        == 12, "DeltaPayload must be 12 bytes");
+static_assert(sizeof(CmdCalibratePayload) ==  2, "CmdCalibratePayload must be 2 bytes");
+static_assert(sizeof(CmdResetPayload)     ==  2, "CmdResetPayload must be 2 bytes");
+static_assert(sizeof(CmdAckPayload)       ==  6, "CmdAckPayload must be 6 bytes");
 
 static constexpr uint8_t kBundleMaxDeltas = 14;
 
@@ -173,7 +153,7 @@ static constexpr uint8_t kBundleMaxDeltas = 14;
 static constexpr size_t kAwakenLoRaSize =
     sizeof(PktHeader) + sizeof(AwakenPayload) + 1;                      //   9
 static constexpr size_t kStatusLoRaSize =
-    sizeof(PktHeader) + sizeof(StatusPayload) + 1;                      //  29
+    sizeof(PktHeader) + sizeof(StatusPayload) + 1;                      //  21
 static constexpr size_t kTimeSyncLoRaSize =
     sizeof(PktHeader) + sizeof(TimeSyncPayload) + 1;                    //  13
 static constexpr size_t kAckSummaryLoRaSize =
@@ -182,8 +162,6 @@ static constexpr size_t kCmdCalibrateLoRaSize =
     sizeof(PktHeader) + sizeof(CmdCalibratePayload) + 1;                //   7
 static constexpr size_t kCmdResetLoRaSize =
     sizeof(PktHeader) + sizeof(CmdResetPayload) + 1;                    //   7
-static constexpr size_t kCalibrationDataLoRaSize =
-    sizeof(PktHeader) + sizeof(CalibrationDataPayload) + 1;             //  72
 static constexpr size_t kCmdAckLoRaSize =
     sizeof(PktHeader) + sizeof(CmdAckPayload) + 1;                      //  11
 static constexpr size_t kFullStateLoRaSize =
@@ -226,7 +204,7 @@ inline uint8_t encodeAwakenPayload(
     return static_cast<uint8_t>(kAwakenLoRaSize);
 }
 
-// ---------- encode: raw LoRa STATUS payload (29 bytes) ----------
+// ---------- encode: raw LoRa STATUS payload (21 bytes) ----------
 
 inline uint8_t encodeStatusPayload(
     uint8_t node_id, uint8_t seq,
@@ -323,24 +301,6 @@ inline uint8_t encodeCmdResetPayload(
     buf[sizeof(PktHeader) + sizeof(CmdResetPayload)] =
         crc8(buf, sizeof(PktHeader) + sizeof(CmdResetPayload));
     return static_cast<uint8_t>(kCmdResetLoRaSize);
-}
-
-inline uint8_t encodeCalibrationDataPayload(
-    uint8_t node_id, uint8_t seq,
-    const CalibrationDataPayload& calib,
-    uint8_t* buf, size_t buf_size)
-{
-    if (buf_size < kCalibrationDataLoRaSize) return 0;
-    PktHeader hdr;
-    hdr.magic    = PKT_MAGIC;
-    hdr.pkt_type = PKT_CALIBRATION_DATA;
-    hdr.node_id  = node_id;
-    hdr.seq      = seq;
-    memcpy(buf,                    &hdr, sizeof(PktHeader));
-    memcpy(buf + sizeof(PktHeader), &calib, sizeof(CalibrationDataPayload));
-    buf[sizeof(PktHeader) + sizeof(CalibrationDataPayload)] =
-        crc8(buf, sizeof(PktHeader) + sizeof(CalibrationDataPayload));
-    return static_cast<uint8_t>(kCalibrationDataLoRaSize);
 }
 
 inline uint8_t encodeCmdAckPayload(
@@ -541,17 +501,6 @@ inline bool decodeCmdReset(
     memcpy(&hdr_out, raw, sizeof(PktHeader));
     memcpy(&cmd_out, raw + sizeof(PktHeader), sizeof(CmdResetPayload));
     return hdr_out.magic == PKT_MAGIC && hdr_out.pkt_type == PKT_CMD_RESET;
-}
-
-inline bool decodeCalibrationData(
-    const uint8_t* raw, size_t len,
-    PktHeader& hdr_out, CalibrationDataPayload& calib_out)
-{
-    if (len < kCalibrationDataLoRaSize) return false;
-    if (crc8(raw, len - 1) != raw[len - 1]) return false;
-    memcpy(&hdr_out, raw, sizeof(PktHeader));
-    memcpy(&calib_out, raw + sizeof(PktHeader), sizeof(CalibrationDataPayload));
-    return hdr_out.magic == PKT_MAGIC && hdr_out.pkt_type == PKT_CALIBRATION_DATA;
 }
 
 inline bool decodeCmdAck(
