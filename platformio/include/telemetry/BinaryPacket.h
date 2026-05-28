@@ -70,9 +70,13 @@ struct __attribute__((packed)) FullStatePayload {
 
 // Sent every 15 minutes — GPS position + battery level.
 // flags bits: STATUS_GPS_VALID=0x01, STATUS_BATT_VALID=0x02, STATUS_IMU_VALID=0x04
+//             STATUS_IMU_DMP=0x08 (set alongside IMU_VALID when DMP heading is present)
 static constexpr uint8_t STATUS_GPS_VALID  = 0x01;
 static constexpr uint8_t STATUS_BATT_VALID = 0x02;
 static constexpr uint8_t STATUS_IMU_VALID  = 0x04;
+// When STATUS_IMU_DMP is set the imu fields carry DMP-computed data:
+//   mag_x = heading_deg x 10 (int16, 0-3590), mag_y = accuracy (0-3), others = 0
+static constexpr uint8_t STATUS_IMU_DMP    = 0x08;
 
 struct __attribute__((packed)) StatusPayload {
     int32_t  lat_e7;        // degrees × 1e7  (valid if STATUS_GPS_VALID)

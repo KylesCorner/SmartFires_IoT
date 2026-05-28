@@ -46,9 +46,11 @@ AWAKEN_PAYLOAD_SIZE = struct.calcsize(AWAKEN_PAYLOAD_FMT)  # 4
 #                mag_xyz(i16x3) accel_xyz(i16x3)
 STATUS_PAYLOAD_FMT  = "<iiHBBhhhhhh"
 STATUS_PAYLOAD_SIZE = struct.calcsize(STATUS_PAYLOAD_FMT)  # 24
-STATUS_GPS_VALID = 0x01
+STATUS_GPS_VALID  = 0x01
 STATUS_BATT_VALID = 0x02
-STATUS_IMU_VALID = 0x04
+STATUS_IMU_VALID  = 0x04
+# When set alongside IMU_VALID: mag_x = heading_deg x 10, mag_y = accuracy (0-3)
+STATUS_IMU_DMP    = 0x08
 
 # CmdCalibratePayload: node_id(u8) duration_s(u8)
 CMD_CALIBRATE_PAYLOAD_FMT = "<BB"

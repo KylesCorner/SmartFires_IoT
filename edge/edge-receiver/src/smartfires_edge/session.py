@@ -234,6 +234,22 @@ class SessionManager:
 
     @classmethod
     def _compute_heading(cls, status: dict[str, Any], calibration: dict[str, Any]) -> dict[str, float] | None:
+        # DMP mode: the node computed heading on-chip. mag_x carries heading x 10,
+        # mag_y carries the DMP accuracy (0-3). Skip the Jetson pipeline entirely.
+        _STATUS_IMU_DMP = 0x08
+        if int(status.get("flags", 0)) & _STATUS_IMU_DMP:
+            try:
+                heading_deg = float(status["mag_x"]) / 10.0 % 360.0
+                accuracy = int(status.get("mag_y", 0))
+            except (KeyError, TypeError, ValueError):
+                return None
+            return {
+                "heading_true_deg": round(heading_deg, 1),
+                "pitch_deg": 0.0,
+                "roll_deg": 0.0,
+                "dmp_accuracy": accuracy,
+            }
+
         try:
             mag_raw = np.array(
                 [
@@ -257,14 +273,14 @@ class SessionManager:
         hard_iron = np.array(calibration["hard_iron"], dtype=float)
         soft_iron = np.array(calibration["soft_iron"], dtype=float)
 
-        # The SparkFun ICM-20948 library returns magnetometer data in the AK09916
-        # sub-chip frame, which is rotated relative to the ICM-20948 accel/gyro frame.
-        # Permute to the ICM-20948 body frame before applying calibration so that
-        # mag and accel share the same coordinate system for tilt compensation.
-        # AK09916-X → body-Y, AK09916-Y → body-X, AK09916-Z → -body-Z
-        mag_icm = np.array([mag_raw[1], mag_raw[0], -mag_raw[2]], dtype=float)
+        # Apply hard/soft iron calibration in the AK09916 frame — that is the frame
+        # in which the node collected Welford statistics during calibration.
+        mag_c_ak = soft_iron @ (mag_raw - hard_iron)
 
-        mag_c = soft_iron @ (mag_icm - hard_iron)
+        # Permute the corrected vector from AK09916 frame into ICM-20948 body frame
+        # so that mag and accel share the same coordinate system for tilt compensation.
+        # AK09916-X → ICM-Y, AK09916-Y → ICM-X, AK09916-Z → -ICM-Z
+        mag_c = np.array([mag_c_ak[1], mag_c_ak[0], -mag_c_ak[2]], dtype=float)
 
         # Rotate both mag and accel from the ICM-20948 board frame into the vehicle
         # body frame. Defaults to identity when no alignment has been fitted yet.

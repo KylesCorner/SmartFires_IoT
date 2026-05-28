@@ -13,7 +13,7 @@ public:
   bool read(Data &out) override;
 
 private:
-  bool configureNormalMode();
+  bool configureDmp9Dof();
 
   ICM_20948_I2C _imu;
   TwoWire &_wire;

@@ -28,12 +28,15 @@ struct SensorSnapshot {
     uint8_t  batteryPct    = -1;
     bool     batteryValid  = false;
 
-    // Raw IMU values for STATUS packet transport.
-    int16_t magX           = 0;   // uT x 10
+    // IMU fields for STATUS packet transport.
+    // In raw mode: mag uT x 10, accel mg.
+    // In DMP mode (imuDmp=true): magX = heading_deg x 10, magY = accuracy (0-3), rest = 0.
+    int16_t magX           = 0;
     int16_t magY           = 0;
     int16_t magZ           = 0;
-    int16_t accelX         = 0;   // mg
+    int16_t accelX         = 0;
     int16_t accelY         = 0;
     int16_t accelZ         = 0;
     bool    imuValid       = false;
+    bool    imuDmp         = false;
 };

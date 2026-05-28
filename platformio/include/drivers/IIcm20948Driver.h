@@ -17,6 +17,11 @@ public:
     float magY = 0.0f;
     float magZ = 0.0f;
 
+    // DMP Geomag output — populated instead of raw mag/accel/gyro in DMP mode.
+    float   headingDeg      = 0.0f;
+    int16_t headingAccuracy = 0;     // 0 (unreliable) – 3 (high)
+    bool    headingValid    = false;
+
     bool valid = false;
   };
 

@@ -182,6 +182,9 @@ void PacketHandler::tryEncodeStatus(const SensorSnapshot &snap) {
         sp.accel_y = snap.accelY;
         sp.accel_z = snap.accelZ;
         flags |= BinaryPacket::STATUS_IMU_VALID;
+        if (snap.imuDmp) {
+            flags |= BinaryPacket::STATUS_IMU_DMP;
+        }
     }
 
     sp.flags = flags;
