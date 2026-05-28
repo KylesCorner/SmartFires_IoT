@@ -28,6 +28,7 @@ CSV_COLUMNS = [
     "rssi",
     "uid_hash",
     "heading_true_deg",
+    "location_corrected_heading",
     "jetson_wind_mps",
     "jetson_wind_dir_deg",
 ]

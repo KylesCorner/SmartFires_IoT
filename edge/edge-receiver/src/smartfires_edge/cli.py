@@ -97,7 +97,7 @@ class CliRuntime:
 
 def _format_nodes(session: SessionManager) -> list[str]:
     snap = session.snapshot()
-    lines = ["node_id uid_hash         last_seen  heading        accuracy"]
+    lines = ["node_id uid_hash         last_seen  heading        loc_heading    accuracy"]
     node_map = snap.get("node_id_to_uid_hash", {})
     node_status = snap.get("node_status", {})
 
@@ -112,11 +112,15 @@ def _format_nodes(session: SessionManager) -> list[str]:
         last_seen = status.get("last_seen", "--")
         heading_value = status.get("heading_true_deg", "--")
         heading = f"{heading_value:.1f}°" if isinstance(heading_value, float) else "--"
+        loc_heading_value = status.get("location_corrected_heading", "--")
+        loc_heading = (
+            f"{loc_heading_value:.1f}°" if isinstance(loc_heading_value, float) else "--"
+        )
         acc_value = status.get("heading_accuracy_deg", "--")
         accuracy = f"±{acc_value:.2f}°" if isinstance(acc_value, float) else "--"
         uid_str = f"0x{uid_hash:08x}" if uid_hash is not None else "--"
         lines.append(
-            f"{node_id:<7} {uid_str:<16} {last_seen!s:<10} {heading:<14} {accuracy}"
+            f"{node_id:<7} {uid_str:<16} {last_seen!s:<10} {heading:<14} {loc_heading:<14} {accuracy}"
         )
     if len(lines) == 1:
         lines.append("(no nodes seen)")

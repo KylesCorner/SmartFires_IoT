@@ -6,6 +6,6 @@ setup(
     description="Edge telemetry ingest and packet-loss monitoring for SmartFires",
     package_dir={"":"src"},
     packages=find_packages(where="src"),
-    install_requires=["pyserial>=3.5", "minimalmodbus>=2.1", "numpy>=1.24"],
+    install_requires=["pyserial>=3.5", "minimalmodbus>=2.1", "numpy>=1.24", "geomag>=0.9.2015"],
     entry_points={ "console_scripts": [
             "smartfires-edge=smartfires_edge.main:main", ] },)

@@ -1,4 +1,5 @@
 import copy
+import importlib
 import threading
 import time
 from pathlib import Path
@@ -142,14 +143,51 @@ class SessionManager:
 
             heading_deg = status.get("heading_deg")
             if status.get("imu_valid") and heading_deg != "" and heading_deg is not None:
-                node_status["heading_true_deg"] = float(heading_deg)
+                heading_true_deg = float(heading_deg)
+                node_status["heading_true_deg"] = heading_true_deg
                 raw_acc = status.get("heading_accuracy")
                 if raw_acc != "" and raw_acc is not None:
                     node_status["heading_accuracy_deg"] = round(int(raw_acc) / 4096.0, 2)
+                corrected_heading = self._location_corrected_heading(
+                    heading_true_deg=heading_true_deg,
+                    lat=status.get("lat"),
+                    lon=status.get("lon"),
+                    gps_valid=bool(status.get("gps_valid")),
+                )
+                if corrected_heading is not None:
+                    node_status["location_corrected_heading"] = corrected_heading
                 node_status["last_heading_ts"] = int(time.time())
-                return {"computed": True, "heading_true_deg": float(heading_deg)}
+                return {
+                    "computed": True,
+                    "heading_true_deg": heading_true_deg,
+                    "location_corrected_heading": corrected_heading,
+                }
 
             return {"computed": False}
+
+    @staticmethod
+    def _location_corrected_heading(
+        heading_true_deg: float,
+        lat: Any,
+        lon: Any,
+        gps_valid: bool,
+    ) -> float | None:
+        if not gps_valid or lat in ("", None) or lon in ("", None):
+            return None
+
+        try:
+            geomag_module = importlib.import_module("geomag")
+        except ImportError:
+            return None
+
+        try:
+            lat_f = float(lat)
+            lon_f = float(lon)
+            declination_deg = float(geomag_module.declination(lat_f, lon_f))
+        except (TypeError, ValueError, AttributeError):
+            return None
+
+        return round((heading_true_deg + declination_deg) % 360.0, 1)
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:

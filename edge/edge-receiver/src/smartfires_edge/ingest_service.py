@@ -297,6 +297,11 @@ def run_receive(
                     "battery_pct": status.get("battery_pct"),
                     "uid_hash": f"0x{uid_hash:08x}" if isinstance(uid_hash, int) else "",
                     "heading_true_deg": heading.get("heading_true_deg") if heading.get("computed") else "",
+                    "location_corrected_heading": (
+                        heading.get("location_corrected_heading")
+                        if heading.get("computed") and heading.get("location_corrected_heading") is not None
+                        else ""
+                    ),
                     "jetson_wind_mps": "",
                     "jetson_wind_dir_deg": "",
                 }
@@ -310,7 +315,8 @@ def run_receive(
                     f"[STATUS] node={status_row['node_id']} seq={status_row['seq']} "
                     f"gps_valid={status_row['gps_valid']} batt_valid={status_row['battery_valid']} "
                     f"batt_mv={status_row['battery_mv']} rssi={status_row['rssi']} "
-                    f"heading={status_row['heading_true_deg']}"
+                    f"heading={status_row['heading_true_deg']} "
+                    f"location_corrected_heading={status_row['location_corrected_heading']}"
                 )
 
             cmd_ack = event.get("cmd_ack")
