@@ -254,7 +254,14 @@ class SessionManager:
         hard_iron = np.array(calibration["hard_iron"], dtype=float)
         soft_iron = np.array(calibration["soft_iron"], dtype=float)
 
-        mag_c = soft_iron @ (mag_raw - hard_iron)
+        # The SparkFun ICM-20948 library returns magnetometer data in the AK09916
+        # sub-chip frame, which is rotated relative to the ICM-20948 accel/gyro frame.
+        # Permute to the ICM-20948 body frame before applying calibration so that
+        # mag and accel share the same coordinate system for tilt compensation.
+        # AK09916-X → body-Y, AK09916-Y → body-X, AK09916-Z → -body-Z
+        mag_icm = np.array([mag_raw[1], mag_raw[0], -mag_raw[2]], dtype=float)
+
+        mag_c = soft_iron @ (mag_icm - hard_iron)
 
         roll = math.atan2(accel_raw[1], accel_raw[2])
         pitch = math.atan2(-accel_raw[0], math.sqrt(accel_raw[1] ** 2 + accel_raw[2] ** 2))
