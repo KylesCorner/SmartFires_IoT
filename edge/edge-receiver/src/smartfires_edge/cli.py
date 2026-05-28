@@ -149,10 +149,19 @@ def _pkt_type_name(pkt_type: int | None) -> str:
 
 def _rx_payload_text(event: dict[str, Any]) -> str:
     payload: Any = None
+    status_payload = None
     if event.get("awaken"):
         payload = event["awaken"]
     elif event.get("status"):
-        payload = event["status"]
+        status_payload = event["status"]
+        payload = dict(status_payload)
+        raw_acc = payload.get("heading_accuracy")
+        if raw_acc not in (None, ""):
+            try:
+                raw_acc_i = int(raw_acc)
+                payload["heading_accuracy_deg"] = round(raw_acc_i / 4096.0, 2)
+            except (TypeError, ValueError):
+                pass
     elif event.get("cmd_ack"):
         payload = event["cmd_ack"]
     elif event.get("packets"):
@@ -315,8 +324,16 @@ def _listener_worker(port: str, baud: int, runtime: CliRuntime, session: Session
                     uid_hash = session.get_uid_hash_for_node(int(status["node_id"]))
                     heading = session.on_status(int(status["node_id"]), uid_hash, status)
                     if heading.get("computed"):
+                        raw_acc = status.get("heading_accuracy")
+                        accuracy_text = "--"
+                        if raw_acc not in (None, ""):
+                            try:
+                                accuracy_text = f"{(int(raw_acc) / 4096.0):.2f}°"
+                            except (TypeError, ValueError):
+                                accuracy_text = "--"
                         runtime.log(
-                            f"STATUS node={status['node_id']} heading={heading['heading_true_deg']:.1f}°"
+                            f"STATUS node={status['node_id']} heading={heading['heading_true_deg']:.1f}° "
+                            f"accuracy={accuracy_text}"
                         )
 
                 cmd_ack = event.get("cmd_ack")
