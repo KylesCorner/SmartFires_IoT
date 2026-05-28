@@ -430,6 +430,11 @@ bool SmartFiresBaseApp::handleTelemetryAckSummary(uint8_t nodeId, uint8_t seq) {
   recordTelemetrySequence(*tracker, seq);
   tracker->dirty = true;
   tracker->dirtyTriggerSeq = seq;
+  LOG_DEBUG("base", "ack_dirty node=%u seq=%u ack_base=%u mask=0x%04X",
+            static_cast<unsigned int>(nodeId),
+            static_cast<unsigned int>(seq),
+            static_cast<unsigned int>(tracker->ackBaseSeq),
+            static_cast<unsigned int>(tracker->ackMask));
   return true;
 }
 
@@ -554,6 +559,12 @@ void SmartFiresBaseApp::maybeSendPendingAckSummaries() {
         tracker.lastSentAckMask == tracker.ackMask;
 
     if (unchangedFromLastSent) {
+      LOG_INFO("base",
+               "ack_summary_suppress node=%u ack_base=%u mask=0x%04X trigger_seq=%u reason=unchanged",
+               static_cast<unsigned int>(tracker.nodeId),
+               static_cast<unsigned int>(tracker.ackBaseSeq),
+               static_cast<unsigned int>(tracker.ackMask),
+               static_cast<unsigned int>(tracker.dirtyTriggerSeq));
       tracker.dirty = false;
       continue;
     }
@@ -902,6 +913,26 @@ void SmartFiresBaseApp::maybeLogHealth() {
   }
 
   const uint32_t lastRxAgoMs = (_lastRxMs == 0) ? 0xFFFFFFFFu : (now - _lastRxMs);
+  uint8_t trackedAckCount = 0;
+  uint8_t dirtyAckCount = 0;
+  for (uint8_t i = 0; i < kMaxAckTrackedNodes; ++i) {
+    const AckTracker &tracker = _ackTrackers[i];
+    if (!tracker.inUse) {
+      continue;
+    }
+    trackedAckCount = static_cast<uint8_t>(trackedAckCount + 1u);
+    if (tracker.dirty) {
+      dirtyAckCount = static_cast<uint8_t>(dirtyAckCount + 1u);
+    }
+  }
+
+  const BinaryPacket::TimeSyncPayload ts = currentTimeSyncPayload();
+  const uint32_t slotIndex =
+      (_cfg.tdmaSlotWidthMs == 0) ? 0u : (ts.session_time_ms / _cfg.tdmaSlotWidthMs);
+  const uint32_t slotPosMs =
+      (_cfg.tdmaSlotWidthMs == 0) ? 0u : (ts.session_time_ms % _cfg.tdmaSlotWidthMs);
+  const uint8_t slotRole =
+      (_cfg.tdmaNumSlots == 0) ? 0u : static_cast<uint8_t>(slotIndex % _cfg.tdmaNumSlots);
 
     LOG_INFO(
       "base",
@@ -927,6 +958,19 @@ void SmartFiresBaseApp::maybeLogHealth() {
       static_cast<unsigned long>(lastRxAgoMs),
       static_cast<unsigned long>(_hasJetsonTime ? (now - _localMsAtJetsonUpdate)
                           : 0xFFFFFFFFu));
+
+    LOG_INFO(
+      "base",
+      "health_ack tracked=%u dirty=%u session_ms=%lu slot=%lu role=%u pos_ms=%lu last_flush_slot=%ld",
+      static_cast<unsigned int>(trackedAckCount),
+      static_cast<unsigned int>(dirtyAckCount),
+      static_cast<unsigned long>(ts.session_time_ms),
+      static_cast<unsigned long>(slotIndex),
+      static_cast<unsigned int>(slotRole),
+      static_cast<unsigned long>(slotPosMs),
+      static_cast<long>(_lastAckSummaryFlushSlotIndex == 0xFFFFFFFFu
+                            ? -1L
+                            : static_cast<long>(_lastAckSummaryFlushSlotIndex)));
 
   _lastHealthLogMs = now;
 }
