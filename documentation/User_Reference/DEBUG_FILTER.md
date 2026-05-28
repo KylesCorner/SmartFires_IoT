@@ -82,3 +82,8 @@ traffic on the base station:
 SFDBG_SRC=base,app,calibration SFDBG_MIN_LEVEL=D pio device monitor -e feather_m0_lora_base
 SFDBG_SRC=base,app,calibration pio device monitor -e feather_m0_lora_base
 ```
+
+
+
+Monitor Node Reliability and Packets:
+SFDBG_SRC=boot,tdma,radio,packet SFDBG_MIN_LEVEL=D SFDBG_SHOW_RAW=0 pio device monitor -e feather_m0_lora_node_debug | tee /tmp/sf-node-debug.log
