@@ -147,7 +147,9 @@ class SessionManager:
                 node_status["heading_true_deg"] = heading_true_deg
                 raw_acc = status.get("heading_accuracy")
                 if raw_acc != "" and raw_acc is not None:
-                    node_status["heading_accuracy_deg"] = round(int(raw_acc) / 4096.0, 2)
+                    raw_acc_i = int(raw_acc)
+                    node_status["heading_accuracy_raw"] = raw_acc_i
+                    node_status["heading_accuracy_deg"] = raw_acc_i / 4096.0
                 corrected_heading = self._location_corrected_heading(
                     heading_true_deg=heading_true_deg,
                     lat=status.get("lat"),

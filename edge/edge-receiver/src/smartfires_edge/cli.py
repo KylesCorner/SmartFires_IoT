@@ -116,8 +116,12 @@ def _format_nodes(session: SessionManager) -> list[str]:
         loc_heading = (
             f"{loc_heading_value:.1f}°" if isinstance(loc_heading_value, float) else "--"
         )
-        acc_value = status.get("heading_accuracy_deg", "--")
-        accuracy = f"±{acc_value:.2f}°" if isinstance(acc_value, float) else "--"
+        raw_acc_value = status.get("heading_accuracy_raw", "--")
+        if isinstance(raw_acc_value, int):
+            accuracy = f"±{(raw_acc_value / 4096.0):.2f}°"
+        else:
+            acc_value = status.get("heading_accuracy_deg", "--")
+            accuracy = f"±{acc_value:.2f}°" if isinstance(acc_value, float) else "--"
         uid_str = f"0x{uid_hash:08x}" if uid_hash is not None else "--"
         lines.append(
             f"{node_id:<7} {uid_str:<16} {last_seen!s:<10} {heading:<14} {loc_heading:<14} {accuracy}"
