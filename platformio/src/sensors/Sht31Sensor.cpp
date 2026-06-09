@@ -232,20 +232,70 @@ void Sht31Sensor::fillSnapshot(SensorSnapshot &snap) const {
 }
 
 size_t Sht31Sensor::writeTelemetry(char *out, size_t maxLen) const {
+  return 0;
   if (!out || maxLen == 0) {
     return 0;
   }
 
-  const int n = snprintf(
-      out, maxLen, "sht31,temp_c=%.2f,humidity_pct=%.2f,valid=%u,t_ms=%lu",
-      _reading.tempC, _reading.humidityPct, _reading.valid ? 1 : 0,
-      static_cast<unsigned long>(_reading.timestampMs));
+  const bool tempNeg = _reading.tempC < 0.0f;
+  const float tempAbs = tempNeg ? -_reading.tempC : _reading.tempC;
+  const long tempScaled = isnan(_reading.tempC)
+                              ? 0
+                              : static_cast<long>(tempAbs * 100.0f + 0.5f);
+  const long tempWhole = tempScaled / 100;
+  const long tempFrac = tempScaled % 100;
+
+  const bool humNeg = _reading.humidityPct < 0.0f;
+  const float humAbs = humNeg ? -_reading.humidityPct : _reading.humidityPct;
+  const long humScaled = isnan(_reading.humidityPct)
+                             ? 0
+                             : static_cast<long>(humAbs * 100.0f + 0.5f);
+  const long humWhole = humScaled / 100;
+  const long humFrac = humScaled % 100;
+
+  int n = 0;
+
+  if (isnan(_reading.tempC) && isnan(_reading.humidityPct)) {
+    n = snprintf(out, maxLen,
+                 "sht31,temp_c=nan,humidity_pct=nan,valid=%u,t_ms=%lu",
+                 _reading.valid ? 1 : 0,
+                 static_cast<unsigned long>(_reading.timestampMs));
+  } else if (isnan(_reading.tempC)) {
+    n = snprintf(out, maxLen,
+                 "sht31,temp_c=nan,humidity_pct=%s%ld.%02ld,valid=%u,t_ms=%lu",
+                 humNeg ? "-" : "",
+                 humWhole,
+                 humFrac,
+                 _reading.valid ? 1 : 0,
+                 static_cast<unsigned long>(_reading.timestampMs));
+  } else if (isnan(_reading.humidityPct)) {
+    n = snprintf(out, maxLen,
+                 "sht31,temp_c=%s%ld.%02ld,humidity_pct=nan,valid=%u,t_ms=%lu",
+                 tempNeg ? "-" : "",
+                 tempWhole,
+                 tempFrac,
+                 _reading.valid ? 1 : 0,
+                 static_cast<unsigned long>(_reading.timestampMs));
+  } else {
+    n = snprintf(out, maxLen,
+                 "sht31,temp_c=%s%ld.%02ld,humidity_pct=%s%ld.%02ld,valid=%u,t_ms=%lu",
+                 tempNeg ? "-" : "",
+                 tempWhole,
+                 tempFrac,
+                 humNeg ? "-" : "",
+                 humWhole,
+                 humFrac,
+                 _reading.valid ? 1 : 0,
+                 static_cast<unsigned long>(_reading.timestampMs));
+  }
 
   if (n < 0) {
+    out[0] = '\0';
     return 0;
   }
 
   if (static_cast<size_t>(n) >= maxLen) {
+    out[maxLen - 1] = '\0';
     return maxLen - 1;
   }
 

@@ -59,15 +59,18 @@ void loop() {
 
 #include "platform/AdafruitGpsDriver.h"
 #include "platform/AdafruitSht31Driver.h"
-#include "platform/SensirionUartSps30Driver.h"
+// #include "platform/SensirionUartSps30Driver.h"
 #include "platform/SparkfunIcm20948Driver.h"
 #include "platform/TPSDriver.h"
+#include "platform/SparkfunBmv080Driver.h"
 
 #include "sensors/Icm20948Sensor.h"
 #include "sensors/Pa1010dGpsSensor.h"
 #include "sensors/Sht31Sensor.h"
-#include "sensors/Sps30Sensor.h"
+// #include "sensors/Sps30Sensor.h"
 #include "sensors/WindSensorRevC.h"
+#include "sensors/Bmv080Sensor.h"
+
 
 // #ifndef nodeId
 // #define nodeId 1
@@ -181,17 +184,27 @@ SparkfunIcm20948Driver imuDriver;
 Icm20948Sensor::Config imuCfg = Icm20948Sensor::Config::makeImuCfg();
 Icm20948Sensor imu(imuCfg, imuDriver, clock);
 
-Sps30Sensor::Config sps30Cfg = Sps30Sensor::Config::makeSps30Cfg();
-SensirionUartSps30Driver sps30Driver(Serial1);
-Sps30Sensor sps30(sps30Cfg, sps30Driver, clock);
+// Sps30Sensor::Config sps30Cfg = Sps30Sensor::Config::makeSps30Cfg();
+// SensirionUartSps30Driver sps30Driver(Serial1);
+// Sps30Sensor sps30(sps30Cfg, sps30Driver, clock);
+
+Bmv080Sensor::Config bmv080Cfg =
+    Bmv080Sensor::Config::makeBmv080Cfg(
+        0x57,                       // Bosch BMV080 shuttle board address
+        1000,                       // min sample period ms
+        1000,                       // wake delay ms
+        SensorDutyClass::AlwaysOn);
+SparkfunBmv080Driver bmv080Driver(Wire);
+Bmv080Sensor bmv080(bmv080Cfg, bmv080Driver, clock);
 
 ISensor *sensors[] = {
-    &sht31, &gps, &imu, &sps30, &wind,
+    &sht31, &gps, &imu, &bmv080, &wind,
 };
 
 // ISensor *sensors[] = {
-//     &sht31, &imu,
+//     &sht31,
 // };
+
 constexpr size_t sensorCount = sizeof(sensors) / sizeof(sensors[0]);
 
 // -----------------------------------------------------------------------------
@@ -262,57 +275,146 @@ void scanI2C() {
 }
 
 void testBeginSensors() {
-  battery.begin();
-  for (int i = 0; i < sensorCount; ++i) {
-    Serial.print(sensors[i]->name());
-    if (!sensors[i]->begin()) {
-      Serial.print(" begin FAILED.");
-    } else {
+  LOG_INFO("test_begin", "begin_sensors_start count=%u",
+           static_cast<unsigned int>(sensorCount));
 
-      Serial.print(" begin OK.");
-    }
+  battery.begin();
+
+  for (size_t i = 0; i < sensorCount; ++i) {
+    ISensor *sensor = sensors[i];
+
+    LOG_INFO("test_begin", "sensor_begin_start index=%u name=%s",
+             static_cast<unsigned int>(i), sensor->name());
+
+    const bool beginOk = sensor->begin();
+
+    LOG_INFO("test_begin", "sensor_begin_done index=%u name=%s ok=%u healthy=%u state=%u",
+             static_cast<unsigned int>(i),
+             sensor->name(),
+             beginOk ? 1 : 0,
+             sensor->healthy() ? 1 : 0,
+             static_cast<unsigned int>(sensor->powerState()));
+
     delay(1000);
 
-    if (!sensors[i]->wake()) {
-      Serial.println(" wake FAILED");
-    } else {
+    const bool wakeOk = sensor->wake();
 
-      Serial.println(" wake OK");
-    }
-  }
-}
-
-void testSampleSensors() {
-  for (int i = 0; i < sensorCount; ++i) {
-    sensors[i]->service();
-    if (sensors[i]->ready()) {
-      if (sensors[i]->sample()) {
-        char buf[180];
-        sensors[i]->writeTelemetry(buf, sizeof(buf));
-        Serial.println(buf);
-      } else {
-        Serial.print(sensors[i]->name());
-        Serial.println(" sample failed");
-        scanI2C();
-      }
-    } else {
-      Serial.print(sensors[i]->name());
-      Serial.println(" not ready");
-      scanI2C();
-    }
+    LOG_INFO("test", "sensor_wake_done index=%u name=%s ok=%u ready=%u healthy=%u state=%u",
+             static_cast<unsigned int>(i),
+             sensor->name(),
+             wakeOk ? 1 : 0,
+             sensor->ready() ? 1 : 0,
+             sensor->healthy() ? 1 : 0,
+             static_cast<unsigned int>(sensor->powerState()));
   }
 
-  battery.sample();
-  char buf[180];
-  battery.writeTelemetry(buf, sizeof(buf));
-  Serial.println(buf);
-  Serial.println("-------------------------");
+  LOG_INFO("test", "begin_sensors_done");
 }
-
 void testServiceSensors() {
-  for (int i = 0; i < sensorCount; ++i) {
-    sensors[i]->service();
+  for (size_t i = 0; i < sensorCount; ++i) {
+    ISensor *sensor = sensors[i];
+
+    const bool serviceOk = sensor->service();
+    const bool ready = sensor->ready();
+
+    // LOG_DEBUG("test",
+    //           "sensor_service index=%u name=%s service_ok=%u ready=%u healthy=%u state=%u",
+    //           static_cast<unsigned int>(i),
+    //           sensor->name(),
+    //           serviceOk ? 1 : 0,
+    //           ready ? 1 : 0,
+    //           sensor->healthy() ? 1 : 0,
+    //           static_cast<unsigned int>(sensor->powerState()));
   }
+}
+void testSampleSensors() {
+  // LOG_DEBUG("test", "sample_sensors_start count=%u",
+  //           static_cast<unsigned int>(sensorCount));
+
+  for (size_t i = 0; i < sensorCount; ++i) {
+    ISensor *sensor = sensors[i];
+
+    // LOG_DEBUG("test", "sensor_loop_start index=%u name=%s",
+    //           static_cast<unsigned int>(i), sensor->name());
+
+    // LOG_DEBUG("test", "sensor_service_start index=%u name=%s",
+    //           static_cast<unsigned int>(i), sensor->name());
+
+    const bool serviceOk = sensor->service();
+
+    LOG_DEBUG("test_sample",
+              "sensor_service_done index=%u name=%s service_ok=%u ready=%u healthy=%u state=%u",
+              static_cast<unsigned int>(i),
+              sensor->name(),
+              serviceOk ? 1 : 0,
+              sensor->ready() ? 1 : 0,
+              sensor->healthy() ? 1 : 0,
+              static_cast<unsigned int>(sensor->powerState()));
+
+    if (!sensor->healthy()) {
+      LOG_WARN("test_sample", "sensor_sample_skip index=%u name=%s reason=not_healthy state=%u",
+               static_cast<unsigned int>(i),
+               sensor->name(),
+               static_cast<unsigned int>(sensor->powerState()));
+      continue;
+    }
+
+    if (!sensor->ready()) {
+      LOG_DEBUG("test_sample", "sensor_sample_skip index=%u name=%s reason=not_ready state=%u",
+                static_cast<unsigned int>(i),
+                sensor->name(),
+                static_cast<unsigned int>(sensor->powerState()));
+      continue;
+    }
+
+    // LOG_INFO("test", "sensor_sample_start index=%u name=%s",
+    //          static_cast<unsigned int>(i), sensor->name());
+
+    const bool sampleOk = sensor->sample();
+
+    // LOG_INFO("test", "sensor_sample_done index=%u name=%s ok=%u",
+    //          static_cast<unsigned int>(i),
+    //          sensor->name(),
+    //          sampleOk ? 1 : 0);
+
+    // char buf[180];
+    // sensor->writeTelemetry(buf, sizeof(buf));
+
+    // LOG_INFO("test", "sensor_sample_ok index=%u name=%s telemetry=%s",
+    //          static_cast<unsigned int>(i),
+    //          sensor->name(),
+    //          buf);
+  //   char buf[180];
+
+  //   LOG_INFO("test", "sensor_write_telemetry_start index=%u name=%s",
+  //           static_cast<unsigned int>(i),
+  //           sensor->name());
+
+  //   const size_t written = sensor->writeTelemetry(buf, sizeof(buf));
+
+  //   LOG_INFO("test", "sensor_write_telemetry_done index=%u name=%s written=%u",
+  //           static_cast<unsigned int>(i),
+  //           sensor->name(),
+  //           static_cast<unsigned int>(written));
+
+  //   LOG_INFO("test", "sensor_sample_ok index=%u name=%s telemetry=%s",
+  //           static_cast<unsigned int>(i),
+  //           sensor->name(),
+  //           buf);
+  // }
+
+  // LOG_DEBUG("test", "battery_sample_start");
+
+  // if (battery.sample()) {
+  //   char buf[180];
+  //   battery.writeTelemetry(buf, sizeof(buf));
+  //   LOG_INFO("test", "battery_sample_ok telemetry=%s", buf);
+  // } else {
+  //   LOG_WARN("test", "battery_sample_failed");
+  // }
+
+  // LOG_DEBUG("test", "sample_sensors_done");
+}
 }
 
 void setup() {
@@ -327,71 +429,72 @@ void setup() {
   LOG_INFO("boot", "SmartFires node starting");
   LOG_INFO("boot", "node_id=%u", initialRadioAddr);
 
-  gps.reset();
+  // gps.reset();
 
   Wire.begin();
   delay(100);
   scanI2C();
   // duty.resetSensors();
-  // testBeginSensors();
-  LOG_INFO("boot", "SmartFires Feather TDMA node starting");
+  testBeginSensors();
+  // LOG_INFO("boot", "SmartFires Feather TDMA node starting");
 
-  LOG_INFO("boot", "uid_hash=0x%08lX", static_cast<unsigned long>(nodeUidHash));
-  LOG_INFO("boot", "radio_addr_init=%u",
-           static_cast<unsigned int>(initialRadioAddr));
+  // LOG_INFO("boot", "uid_hash=0x%08lX", static_cast<unsigned long>(nodeUidHash));
+  // LOG_INFO("boot", "radio_addr_init=%u",
+  //          static_cast<unsigned int>(initialRadioAddr));
 
-  LOG_INFO("tdma", "entities=%u", static_cast<unsigned int>(numSlots));
-  LOG_INFO("tdma", "slot_width_ms=%lu",
-           static_cast<unsigned long>(tdmaCfg.slotWidthMs));
-  LOG_INFO("tdma", "guard_ms=%lu", static_cast<unsigned long>(tdmaCfg.guardMs));
-  LOG_INFO("tdma", "sync_stale_s=%lu",
-           static_cast<unsigned long>(tdmaCfg.syncStaleMs / 1000UL));
+  // LOG_INFO("tdma", "entities=%u", static_cast<unsigned int>(numSlots));
+  // LOG_INFO("tdma", "slot_width_ms=%lu",
+  //          static_cast<unsigned long>(tdmaCfg.slotWidthMs));
+  // LOG_INFO("tdma", "guard_ms=%lu", static_cast<unsigned long>(tdmaCfg.guardMs));
+  // LOG_INFO("tdma", "sync_stale_s=%lu",
+  //          static_cast<unsigned long>(tdmaCfg.syncStaleMs / 1000UL));
 
-  LOG_INFO("tdma", "app_reliability=%s",
-           tdmaCfg.enableAppReliability ? "ON" : "OFF");
-  LOG_INFO("tdma", "link_ack=%s",
-           tdmaCfg.enableLinkAck ? "WAIT_FOR_ACK" : "FIRE_AND_FORGET");
-  LOG_INFO("tdma", "retx_window=%u",
-           static_cast<unsigned int>(tdmaCfg.reliabilityWindowDepth));
-  LOG_INFO("tdma", "retx_max_attempts=%u",
-           static_cast<unsigned int>(tdmaCfg.reliabilityMaxAttempts));
-  LOG_INFO("tdma", "link_retries=%u",
-           static_cast<unsigned int>(tdmaCfg.maxRetries));
-  LOG_INFO("tdma", "ack_timeout_ms=%lu",
-           static_cast<unsigned long>(tdmaCfg.ackTimeoutMs));
-  LOG_INFO("tdma", "telem_rel_mode=%s",
-           reliabilityModeName(tdmaCfg.reliabilityMode));
+  // LOG_INFO("tdma", "app_reliability=%s",
+  //          tdmaCfg.enableAppReliability ? "ON" : "OFF");
+  // LOG_INFO("tdma", "link_ack=%s",
+  //          tdmaCfg.enableLinkAck ? "WAIT_FOR_ACK" : "FIRE_AND_FORGET");
+  // LOG_INFO("tdma", "retx_window=%u",
+  //          static_cast<unsigned int>(tdmaCfg.reliabilityWindowDepth));
+  // LOG_INFO("tdma", "retx_max_attempts=%u",
+  //          static_cast<unsigned int>(tdmaCfg.reliabilityMaxAttempts));
+  // LOG_INFO("tdma", "link_retries=%u",
+  //          static_cast<unsigned int>(tdmaCfg.maxRetries));
+  // LOG_INFO("tdma", "ack_timeout_ms=%lu",
+  //          static_cast<unsigned long>(tdmaCfg.ackTimeoutMs));
+  // LOG_INFO("tdma", "telem_rel_mode=%s",
+  //          reliabilityModeName(tdmaCfg.reliabilityMode));
 
-  LOG_INFO("packet", "status_interval_ms=%lu",
-           static_cast<unsigned long>(packetHandlerCfg.statusIntervalMs));
-  LOG_INFO(
-      "packet", "status_interval_s=%lu",
-      static_cast<unsigned long>(packetHandlerCfg.statusIntervalMs / 1000UL));
-  LOG_INFO(
-      "packet", "status_interval_min=%lu",
-      static_cast<unsigned long>(packetHandlerCfg.statusIntervalMs / 60000UL));
+  // LOG_INFO("packet", "status_interval_ms=%lu",
+  //          static_cast<unsigned long>(packetHandlerCfg.statusIntervalMs));
+  // LOG_INFO(
+  //     "packet", "status_interval_s=%lu",
+  //     static_cast<unsigned long>(packetHandlerCfg.statusIntervalMs / 1000UL));
+  // LOG_INFO(
+  //     "packet", "status_interval_min=%lu",
+  //     static_cast<unsigned long>(packetHandlerCfg.statusIntervalMs / 60000UL));
 
-  if (!app.begin()) {
-    LOG_INFO("boot", "smart_fires_app_status=%d", 1);
-    while (true) {
-      delay(500);
-    }
-  }
+  // if (!app.begin()) {
+  //   LOG_INFO("boot", "smart_fires_app_status=%d", 1);
+  //   while (true) {
+  //     delay(500);
+  //   }
+  // }
 
-  LOG_INFO("boot", "smart_fires_app_status=%d", 0);
+  // LOG_INFO("boot", "smart_fires_app_status=%d", 0);
 }
 
 unsigned long previousMillis = 0; // Stores last time event triggered
-const long interval = 500;        // Interval (milliseconds)
+const long interval = 1000;        // Interval (milliseconds)
 
 void loop() {
-  // unsigned long currentMillis = millis();
-  // testServiceSensors();
-  // if (currentMillis - previousMillis >= interval) {
-  //   previousMillis = currentMillis;
-  //   testSampleSensors();
-  // }
-  app.update();
+  unsigned long currentMillis = millis();
+  testServiceSensors();
+  if (currentMillis - previousMillis >= interval) {
+    previousMillis = currentMillis;
+    testSampleSensors();
+    Serial.println("sampled");
+  }
+  // app.update();
   delay(25);
 }
 
