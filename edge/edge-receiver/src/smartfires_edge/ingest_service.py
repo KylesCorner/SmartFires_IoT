@@ -271,7 +271,8 @@ def run_receive(
                     f"gps_valid={status_row['gps_valid']} batt_valid={status_row['battery_valid']} "
                     f"batt_mv={status_row['battery_mv']} rssi={status_row['rssi']} "
                     f"heading={status_row['heading_true_deg']} "
-                    f"location_corrected_heading={status_row['location_corrected_heading']}"
+                    f"location_corrected_heading={status_row['location_corrected_heading']} "
+                    f"retx_total={status_row['retx_total']} fail_total={status_row['fail_total']}"
                 )
 
             cmd_ack = event.get("cmd_ack")
