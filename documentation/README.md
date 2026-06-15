@@ -45,3 +45,4 @@ the code is now the authoritative record.
 | [DEPLOYMENT_SCHEDULE.md](Completed_Plans/DEPLOYMENT_SCHEDULE.md) | Phased heading/CLI deployment schedule (7 phases) |
 | [JETSON_CLI_AND_COMMAND_SYSTEM.md](Completed_Plans/JETSON_CLI_AND_COMMAND_SYSTEM.md) | Jetson split-screen CLI and command system design |
 | [ORIENTATION_CALIBRATION_PLAN.md](Completed_Plans/ORIENTATION_CALIBRATION_PLAN.md) | Node orientation calibration and absolute heading plan |
+| [LINK_STATS_PACKET_PLAN.md](Completed_Plans/LINK_STATS_PACKET_PLAN.md) | Extending PKT_STATUS with lifetime retransmit/fail counters |

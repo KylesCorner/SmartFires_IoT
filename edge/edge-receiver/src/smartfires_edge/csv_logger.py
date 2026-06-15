@@ -31,6 +31,8 @@ CSV_COLUMNS = [
     "location_corrected_heading",
     "jetson_wind_mps",
     "jetson_wind_dir_deg",
+    "retx_total",
+    "fail_total",
 ]
 
 

@@ -23,7 +23,7 @@ Wildfire IoT sensor network. Remote drone nodes collect environmental data (temp
     | LoRa 915 MHz (RadioHead RHReliableDatagram, 13 dBm)
     |   Node → Base: AWAKEN payload (8 bytes, on boot until TIME_SYNC received)
     |                BUNDLE payload (≤193 bytes, 1 retry, 100 ms timeout, TDMA-gated)
-    |                STATUS payload (21 bytes, GPS + battery + DMP heading, every 15 min)
+    |                STATUS payload (25 bytes, GPS + battery + DMP heading + link stats, every 15 min)
     |                CMD_ACK (11 bytes, acknowledges CALIBRATE/RESET commands)
     |   Base → Node: TIME_SYNC broadcast (12 bytes, fire-and-forget, RH_BROADCAST_ADDRESS)
     |                CMD_CALIBRATE (7 bytes, forwarded from Jetson)
@@ -194,7 +194,7 @@ SmartFiresNodeApp::update()
     buildSnapshot()        ← calls sensor.fillSnapshot() + battery reading;
                               timestamps via TdmaClock::sessionNowMs()
     packetHandler.push(snapshot)
-    if statusPacketReady() → enqueueTelemetry(STATUS payload, 17 bytes now / 29 bytes planned)
+    if statusPacketReady() → enqueueTelemetry(STATUS payload, 25 bytes)
     if bundleReady()       → enqueueTelemetry(BUNDLE payload, ≤193 bytes)
 
 PacketHandler
@@ -234,7 +234,7 @@ RadioHeadTdmaDriver::send()               non-blocking LoRa TX for fresh telemet
 ```
 AWAKEN:  [PktHeader: 4][AwakenPayload: 4][crc8: 1]                                    =  9 bytes
 BUNDLE:  [PktHeader: 4][FullStatePayload: 20][n_deltas: 1][DeltaPayload×n: n×12][crc8] ≤ 194 bytes
-STATUS:  [PktHeader: 4][StatusPayload: 16][crc8: 1]                                    = 21 bytes
+STATUS:  [PktHeader: 4][StatusPayload: 20][crc8: 1]                                    = 25 bytes
 CMD_ACK: [PktHeader: 4][CmdAckPayload: 6][crc8: 1]                                    = 11 bytes  (planned)
 ```
 
@@ -256,7 +256,7 @@ slots and call `TdmaClock::applySync(sessionMs)`.
 ```
 [0xAA][0x55][len: u8][rssi: i8][LoRa payload][crc8]
   AWAKEN: len=5   → total frame  9 bytes
-  STATUS: len=22  → total frame 26 bytes
+  STATUS: len=26  → total frame 30 bytes
   BUNDLE: len≤194 → total frame ≤198 bytes
 ```
 
@@ -283,7 +283,7 @@ slots and call `TdmaClock::applySync(sessionMs)`.
 | `0x02` | PKT_HEARTBEAT | — | — | Reserved |
 | `0x03` | PKT_TIME_SYNC | Base→Nodes | 13 bytes | Broadcast, fire-and-forget |
 | `0x04` | PKT_BUNDLE | Node→Jetson | ≤194 bytes | 15 samples (ref + 14 deltas) |
-| `0x05` | PKT_STATUS | Node→Jetson | 21 bytes | GPS + battery + DMP heading, every 15 min |
+| `0x05` | PKT_STATUS | Node→Jetson | 25 bytes | GPS + battery + DMP heading + link stats, every 15 min |
 | `0x06` | PKT_AWAKEN | Node→Base | 9 bytes | Boot handshake; contains uid_hash |
 | `0x07` | PKT_ACK_SUMMARY | Jetson→Node | 9 bytes | App-layer reliability bitmap |
 | `0x10` | PKT_CMD_CALIBRATE | Jetson→Node | 7 bytes | Trigger 60 s calibration session |
@@ -307,7 +307,7 @@ Types 0x10, 0x11, 0x13 are **planned but not yet implemented** — see `document
 | `pm4_0_ug10` | `uint16_t` | µg/m³ × 10 |
 | `pm10_ug10` | `uint16_t` | µg/m³ × 10 |
 
-### StatusPayload (16 bytes) — sent every 15 min via PKT_STATUS
+### StatusPayload (20 bytes) — sent every 15 min via PKT_STATUS
 
 flags bits: STATUS_GPS_VALID=0x01 · STATUS_BATT_VALID=0x02 · STATUS_IMU_VALID=0x04
 
@@ -320,6 +320,13 @@ flags bits: STATUS_GPS_VALID=0x01 · STATUS_BATT_VALID=0x02 · STATUS_IMU_VALID=
 | `flags` | `uint8_t` | GPS_VALID=0x01 · BATT_VALID=0x02 · IMU_VALID=0x04 |
 | `heading_deg_x10` | `uint16_t` | heading × 10, 0–3590 (valid if STATUS_IMU_VALID) |
 | `heading_accuracy` | `uint16_t` | Q12 raw; divide by 4096 for degrees |
+| `retx_total` | `uint16_t` | lifetime LoRa retransmit count, saturated at 65535 |
+| `fail_total` | `uint16_t` | lifetime LoRa send-failure count, saturated at 65535 |
+
+`retx_total`/`fail_total` are lifetime totals from node boot (never reset), fed by
+`TdmaRadioService::retransmitCount()`/`failedSendCount()` via `PacketHandler::setLinkStats()`.
+The Jetson computes per-interval deltas by differencing consecutive STATUS packets — this
+lets retry-density be correlated with GPS position with no separate packet type or join.
 
 ### DeltaPayload (12 bytes, packed, little-endian)
 

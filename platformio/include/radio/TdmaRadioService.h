@@ -52,6 +52,7 @@ public:
 
   uint8_t queuedCount() const;
   uint32_t sentCount() const;
+  uint32_t retransmitCount() const;
   uint32_t failedSendCount() const;
   uint32_t droppedOldestCount() const;
 

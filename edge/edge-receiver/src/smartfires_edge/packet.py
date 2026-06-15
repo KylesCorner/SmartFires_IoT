@@ -44,11 +44,16 @@ AWAKEN_PAYLOAD_SIZE = struct.calcsize(AWAKEN_PAYLOAD_FMT)  # 4
 
 # StatusPayload: lat_e7(i32) lon_e7(i32) battery_mv(u16) battery_pct(u8) flags(u8)
 #                heading_deg_x10(u16) heading_accuracy(u16)
-STATUS_PAYLOAD_FMT  = "<iiHBBHH"
-STATUS_PAYLOAD_SIZE = struct.calcsize(STATUS_PAYLOAD_FMT)  # 16
+#                retx_total(u16) fail_total(u16)
+STATUS_PAYLOAD_FMT  = "<iiHBBHHHH"
+STATUS_PAYLOAD_SIZE = struct.calcsize(STATUS_PAYLOAD_FMT)  # 20
 STATUS_GPS_VALID  = 0x01
 STATUS_BATT_VALID = 0x02
 STATUS_IMU_VALID  = 0x04
+
+# Legacy format before link-stats extension (pre-v2 firmware).
+_LEGACY_STATUS_PAYLOAD_FMT  = "<iiHBBHH"
+_LEGACY_STATUS_LORA_SIZE    = HEADER_SIZE + struct.calcsize(_LEGACY_STATUS_PAYLOAD_FMT) + 1  # 21
 
 # CmdCalibratePayload: node_id(u8) duration_s(u8)
 CMD_CALIBRATE_PAYLOAD_FMT = "<BB"
@@ -197,7 +202,8 @@ def _full_state_fields(
 
 def decode_gps(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Optional[dict]:
     """Decode a raw LoRa STATUS payload and return GPS fields when valid."""
-    if len(raw_lora_payload) < STATUS_LORA_SIZE:
+    n = len(raw_lora_payload)
+    if n < _LEGACY_STATUS_LORA_SIZE:
         return None
     if crc8(raw_lora_payload[:-1]) != raw_lora_payload[-1]:
         return None
@@ -206,11 +212,8 @@ def decode_gps(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Optional[
     if magic != PKT_MAGIC or pkt_type != PKT_STATUS:
         return None
 
-    lat_e7, lon_e7, _battery_mv, _battery_pct, flags, _hdg, _acc = struct.unpack_from(
-        STATUS_PAYLOAD_FMT,
-        raw_lora_payload,
-        HEADER_SIZE,
-    )
+    fmt = STATUS_PAYLOAD_FMT if n >= STATUS_LORA_SIZE else _LEGACY_STATUS_PAYLOAD_FMT
+    lat_e7, lon_e7, _battery_mv, _battery_pct, flags = struct.unpack_from(fmt, raw_lora_payload, HEADER_SIZE)[:5]
     if (flags & STATUS_GPS_VALID) == 0:
         return None
 
@@ -224,8 +227,13 @@ def decode_gps(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Optional[
 
 
 def decode_status(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Optional[dict]:
-    """Decode a raw LoRa STATUS payload into GPS + battery fields."""
-    if len(raw_lora_payload) < STATUS_LORA_SIZE:
+    """Decode a raw LoRa STATUS payload into GPS + battery + link-stats fields.
+
+    Supports both the legacy 21-byte format (retx_total/fail_total absent → None)
+    and the current 25-byte format.
+    """
+    n = len(raw_lora_payload)
+    if n < _LEGACY_STATUS_LORA_SIZE:
         return None
     if crc8(raw_lora_payload[:-1]) != raw_lora_payload[-1]:
         return None
@@ -234,8 +242,14 @@ def decode_status(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Option
     if magic != PKT_MAGIC or pkt_type != PKT_STATUS:
         return None
 
-    lat_e7, lon_e7, battery_mv, battery_pct, flags, heading_deg_x10, heading_accuracy = \
-        struct.unpack_from(STATUS_PAYLOAD_FMT, raw_lora_payload, HEADER_SIZE)
+    if n >= STATUS_LORA_SIZE:
+        lat_e7, lon_e7, battery_mv, battery_pct, flags, heading_deg_x10, heading_accuracy, retx_total, fail_total = \
+            struct.unpack_from(STATUS_PAYLOAD_FMT, raw_lora_payload, HEADER_SIZE)
+    else:
+        lat_e7, lon_e7, battery_mv, battery_pct, flags, heading_deg_x10, heading_accuracy = \
+            struct.unpack_from(_LEGACY_STATUS_PAYLOAD_FMT, raw_lora_payload, HEADER_SIZE)
+        retx_total = None
+        fail_total = None
 
     gps_valid  = (flags & STATUS_GPS_VALID)  != 0
     batt_valid = (flags & STATUS_BATT_VALID) != 0
@@ -255,6 +269,8 @@ def decode_status(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Option
         "battery_pct": battery_pct if batt_valid else "",
         "heading_deg": round(heading_deg_x10 / 10.0, 1) if imu_valid else "",
         "heading_accuracy": heading_accuracy if imu_valid else "",
+        "retx_total": retx_total,
+        "fail_total": fail_total,
     }
 
 

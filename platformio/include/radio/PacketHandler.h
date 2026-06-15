@@ -63,6 +63,7 @@ public:
     void resetStatusTimer();
     void setNodeId(uint8_t nodeId);
     void setBundleEncodingEnabled(bool enabled);
+    void setLinkStats(uint32_t retxTotal, uint32_t failTotal);
 
     // Full reset (new node session / reboot).
     void reset();
@@ -87,6 +88,8 @@ private:
     uint8_t  _statusBuf[BinaryPacket::kStatusLoRaSize] = {};
     uint8_t  _statusLen         = 0;
     bool     _bundleEncodingEnabled = true;
+    uint32_t _retxTotal  = 0;
+    uint32_t _failTotal  = 0;
 
     static BinaryPacket::FullStatePayload quantize(const SensorSnapshot &snap);
     static BinaryPacket::DeltaPayload     makeDelta(

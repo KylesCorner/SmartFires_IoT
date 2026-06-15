@@ -368,6 +368,8 @@ uint8_t TdmaRadioService::queuedCount() const { return _queue.count(); }
 
 uint32_t TdmaRadioService::sentCount() const { return _sentCount; }
 
+uint32_t TdmaRadioService::retransmitCount() const { return _retransmitCount; }
+
 uint32_t TdmaRadioService::failedSendCount() const { return _failedSendCount; }
 
 uint32_t TdmaRadioService::droppedOldestCount() const {

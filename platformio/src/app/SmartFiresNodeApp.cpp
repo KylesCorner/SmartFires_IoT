@@ -184,6 +184,8 @@ void SmartFiresNodeApp::update() {
   if (_duty.telemetryReady()) {
     const SensorSnapshot snap = buildSnapshot();
 
+    // Must precede push() so the STATUS encoder sees current counters.
+    _packetHandler.setLinkStats(_radio.retransmitCount(), _radio.failedSendCount());
     const bool bundleReadyFromPush = _packetHandler.push(snap);
 
     LOG_INFO("app",

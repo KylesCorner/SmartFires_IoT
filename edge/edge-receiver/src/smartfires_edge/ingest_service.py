@@ -257,6 +257,8 @@ def run_receive(
                     ),
                     "jetson_wind_mps": "",
                     "jetson_wind_dir_deg": "",
+                    "retx_total": status.get("retx_total") if status.get("retx_total") is not None else "",
+                    "fail_total": status.get("fail_total") if status.get("fail_total") is not None else "",
                 }
                 status_path = (
                     status_dir

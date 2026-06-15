@@ -5,7 +5,7 @@
 // LoRa payloads — node -> base:
 //   AWAKEN:     [PktHeader:4][AwakenPayload:4][crc8:1]                                    =   9 bytes
 //   BUNDLE:     [PktHeader:4][FullStatePayload:20][n_deltas:1][DeltaPayload×n][crc8:1]  ≤ 194 bytes
-//   STATUS:     [PktHeader:4][StatusPayload:16][crc8:1]                                 =  21 bytes
+//   STATUS:     [PktHeader:4][StatusPayload:20][crc8:1]                                 =  25 bytes
 //   CMD_ACK:    [PktHeader:4][CmdAckPayload:6][crc8:1]                                  =  11 bytes
 //
 // LoRa TIME_SYNC — base -> node or all nodes:
@@ -81,6 +81,8 @@ struct __attribute__((packed)) StatusPayload {
     uint8_t  flags;             // STATUS_GPS_VALID | STATUS_BATT_VALID | STATUS_IMU_VALID
     uint16_t heading_deg_x10;   // heading × 10, 0–3590  (valid if STATUS_IMU_VALID)
     uint16_t heading_accuracy;  // Q12 raw; divide by 4096 for degrees
+    uint16_t retx_total;        // lifetime retransmit count, saturated at 65535
+    uint16_t fail_total;        // lifetime send-failure count, saturated at 65535
 };
 
 struct __attribute__((packed)) CmdCalibratePayload {
@@ -139,7 +141,7 @@ static constexpr uint8_t DELTA_FLAG_PM10_CLAMPED     = 0x40;
 static_assert(sizeof(PktHeader)           ==  4, "PktHeader must be 4 bytes");
 static_assert(sizeof(AwakenPayload)       ==  4, "AwakenPayload must be 4 bytes");
 static_assert(sizeof(FullStatePayload)    == 20, "FullStatePayload must be 20 bytes");
-static_assert(sizeof(StatusPayload)       == 16, "StatusPayload must be 16 bytes");
+static_assert(sizeof(StatusPayload)       == 20, "StatusPayload must be 20 bytes");
 static_assert(sizeof(TimeSyncPayload)     ==  8, "TimeSyncPayload must be 8 bytes");
 static_assert(sizeof(AckSummaryPayload)   ==  4, "AckSummaryPayload must be 4 bytes");
 static_assert(sizeof(DeltaPayload)        == 12, "DeltaPayload must be 12 bytes");
@@ -153,7 +155,7 @@ static constexpr uint8_t kBundleMaxDeltas = 14;
 static constexpr size_t kAwakenLoRaSize =
     sizeof(PktHeader) + sizeof(AwakenPayload) + 1;                      //   9
 static constexpr size_t kStatusLoRaSize =
-    sizeof(PktHeader) + sizeof(StatusPayload) + 1;                      //  21
+    sizeof(PktHeader) + sizeof(StatusPayload) + 1;                      //  25
 static constexpr size_t kTimeSyncLoRaSize =
     sizeof(PktHeader) + sizeof(TimeSyncPayload) + 1;                    //  13
 static constexpr size_t kAckSummaryLoRaSize =
@@ -204,7 +206,7 @@ inline uint8_t encodeAwakenPayload(
     return static_cast<uint8_t>(kAwakenLoRaSize);
 }
 
-// ---------- encode: raw LoRa STATUS payload (21 bytes) ----------
+// ---------- encode: raw LoRa STATUS payload (25 bytes) ----------
 
 inline uint8_t encodeStatusPayload(
     uint8_t node_id, uint8_t seq,
