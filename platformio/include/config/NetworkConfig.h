@@ -135,7 +135,13 @@ constexpr uint32_t kAwakenIntervalMs = 5000;
 // ---------------------------------------------------------------------------
 // Compile-time invariants
 // ---------------------------------------------------------------------------
-static_assert(kSlotWidthMs > 2 * (kBundleTxBudgetMs + kLinkAckTimeoutMs) + 2 * kGuardMs,
+// Worst-case per-slot occupancy: ONE TX burst + ONE ACK timeout + guard bands.
+// (TdmaRadioService checks budget before each send, so at most one bundle can
+// start in a slot regardless of kLinkRetries.  In APP_ACK_SUMMARY mode
+// enableLinkAck=false, so kLinkAckTimeoutMs doesn't apply at all — this
+// assertion is a conservative upper bound that also covers StrictLinkAck mode.)
+// 340 (bundle TX) + 250 (ACK timeout) + 2×20 (guard) = 630 ms < 900 ms ✓
+static_assert(kSlotWidthMs > kBundleTxBudgetMs + kLinkAckTimeoutMs + 2 * kGuardMs,
               "slotWidthMs too small for worst-case bundle TX + ACK + guard");
 static_assert(kRetryWaitMinMs <= kRetryWaitMaxMs,
               "retryWaitMinMs must not exceed retryWaitMaxMs");

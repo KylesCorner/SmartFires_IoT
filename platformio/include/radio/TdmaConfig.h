@@ -19,14 +19,14 @@ enum class TdmaReliabilityMode : uint8_t {
   AppLayerAckSummary = 1,
 };
 
+// Written as a ternary rather than a switch so it is valid constexpr under
+// C++11 (the Arduino SAMD toolchain's default standard).  C++11 constexpr
+// functions may only contain a single return statement; switch/if bodies
+// require C++14 or later.
 constexpr TdmaReliabilityMode tdmaReliabilityModeFromValue(uint8_t value) {
-  switch (value) {
-    case static_cast<uint8_t>(TdmaReliabilityMode::AppLayerAckSummary):
-      return TdmaReliabilityMode::AppLayerAckSummary;
-    case static_cast<uint8_t>(TdmaReliabilityMode::StrictLinkAck):
-    default:
-      return TdmaReliabilityMode::StrictLinkAck;
-  }
+  return (value == static_cast<uint8_t>(TdmaReliabilityMode::AppLayerAckSummary))
+      ? TdmaReliabilityMode::AppLayerAckSummary
+      : TdmaReliabilityMode::StrictLinkAck;
 }
 
 struct TdmaConfig {
