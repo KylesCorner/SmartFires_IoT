@@ -265,53 +265,62 @@ edge/edge-receiver/src/smartfires_edge/
 
 ## Migration Phases
 
-### Phase 0 — Freeze (no code changes)
+### Phase 0 — Freeze (no code changes) ✅ DONE
+
 Confirm the inventory above against current `main` (already done in this
 session). Snapshot current build outputs (`pio run -e <env> --target
 size`... not required, but note current behavior is the regression
 baseline).
 
-### Phase 1 — Introduce `config/` headers (additive only)
-Create `NetworkConfig.h`, `SensingConfig.h`, `PowerConfig.h`, `BaseConfig.h`
-with values copied verbatim from current defaults/overrides. Nothing
-includes them yet. Add a native unit test (`test/test_config/`) that
-`static_assert`s/asserts these new values equal the old call-site values, as
-a tripwire against accidental drift during the copy.
+### Phase 1 — Introduce `config/` headers (additive only) ✅ DONE
 
-### Phase 2 — Migrate node call sites
-Point `main.cpp`'s node role, `SmartFiresNodeApp`, `PacketHandler`, and each
-sensor's construction at the new headers. Delete the now-redundant
-positional-default factories in favor of thin wrappers, and delete
-`makeNodeTdmaCfg()`'s manual override block. Run native tests + a bench
-flash to confirm identical boot log output (the existing `LOG_INFO("tdma",
-...)` lines at boot are a convenient before/after diff).
+Created `NetworkConfig.h`, `SensingConfig.h`, `PowerConfig.h`, `BaseConfig.h`
+in `platformio/include/config/`.  Added native unit test `test/test_config/`
+as the tripwire.
 
-### Phase 3 — Migrate base call sites
-Point `SmartFiresBaseApp::Config::baseCfg()` at the shared TDMA geometry type
-from `NetworkConfig.h`. Move the four private `constexpr`s into `BaseConfig.h`.
+### Phase 2 — Migrate node call sites ✅ DONE
 
-### Phase 4 — Add validation
-Add the `static_assert`s and the sensor-floor-vs-duty-cycle boot warning
-described above. Confirm they currently pass (they should, since Phase 1–3
-didn't change values) — this is what proves the invariants were real and
-just undocumented.
+`main.cpp` node role, `SmartFiresNodeApp`, `PacketHandler`, each sensor
+factory, `DutyCycleController`, `BatteryMonitor`, `TdmaTxQueue`,
+`TdmaRadioService`, and `RadioHeadTdmaDriver` all source from `config/` headers.
+`makeNodeTdmaCfg()` and `makeNodeRadioCfg()` wrappers removed; all replaced by
+`NetworkConfig::nodeTdmaProfile()` + thin `radioHeadCfg(addr)`.
 
-### Phase 5 — Jetson config consolidation
-Add `config.py`, refactor `main.py` subcommands to use it, add the shared
-argparse helpers, add optional config-file loading. Keep CLI behavior
-backward compatible — same flags, same defaults, same precedence for anyone
-not using a config file.
+### Phase 3 — Migrate base call sites ✅ DONE
 
-### Phase 6 — Documentation
-Write `TUNABLE_PARAMETERS.md`, link it from `documentation/README.md` and
-from Appendix A below, and trim the now-duplicated numeric tables out of
-`TDMA_PROTOCOL.md`/`DUTY_CYCLING.md` in favor of a link.
+`SmartFiresBaseApp::Config::baseCfg()` now sources geometry from
+`NetworkConfig.h` via `BaseConfig.h`.  `kTotalEntities` and `kTdmaNumSlots`
+no longer independently hardcoded; both track `NetworkConfig::kNumSlots`.
 
-### Phase 7 — Cleanup
-Remove dead `TelemetryBuilder.h`/`RadioService.h` (confirmed unused — not
-included from anywhere) while in the area, since leaving unused config-like
-headers around undermines "one source of truth" for anyone grepping for a
-parameter.
+### Phase 4 — Add validation ✅ DONE
+
+`static_assert`s added in `NetworkConfig.h` (slot-width budget, retry-wait
+ordering, queue/window vs hard caps, MaxPayloadLen vs kMaxBundleLoRaSize).
+Sensor-floor-vs-cadence boot warning added in `main.cpp` (`logSensorFloorVsCadence()`).
+
+### Phase 5 — Jetson config consolidation ✅ DONE
+
+`config.py` created with `IngestConfig`, `AnemometerConfig`, `EdgeConfig`
+dataclasses, `add_common_ingest_args()` / `add_anemometer_args()` helpers,
+`EdgeConfig.from_args()`, and JSON config-file layering.  `ingest_service.py`,
+`web_service.py`, `visualize_service.py`, `main.py`, and `cli.py` all
+refactored; `CLI_CMD_ACK_TIMEOUT_S` and `CLI_CALIBRATION_DURATION_S` moved
+from hardcoded literals in `cli.py` into `config.py`.
+
+### Phase 6 — Documentation ✅ DONE
+
+`documentation/Current_Architecture/TUNABLE_PARAMETERS.md` created with tables
+for all six domains.  `documentation/README.md` updated.  Forward-link
+blockquotes added to `TDMA_PROTOCOL.md` and `DUTY_CYCLING.md`.  `CLAUDE.md`
+repo layout updated (added `include/config/` listing, removed dummy-node row
+from build environments table, added `config.py` to edge-receiver layout).
+
+### Phase 7 — Cleanup ✅ DONE
+
+Dead `TelemetryBuilder.h`/`RadioService.h`/`TelemetryBuilder.cpp`/`RadioService.cpp`,
+dead `DummySensor.h`/`DummySht31Driver.h`, dead `main_node_dummy.cpp`,
+dead `main_test.cpp`, and dead `NETWORK_TEST.md` all removed.
+Dummy node PlatformIO environment fully deleted from `platformio.ini`.
 
 ## Risks / Things to Watch
 
@@ -352,10 +361,9 @@ parameter.
 ## Appendix A: Network Parameter Catalog & Governance
 
 *Merged from the former `NETWORK_PARAMETER_CONSOLIDATION_PLAN.md`. This is
-the operational/governance layer for the **Network** domain specifically —
-it assumes the structural work in the main body of this plan (a single
-`NetworkConfig.h`) has landed, and "Current Source" columns below should be
-updated to point there once Phases 1–3 are done.*
+the operational/governance layer for the **Network** domain specifically.
+Structural work (Phases 1–7) is complete; "Current Source" columns reflect
+the new `config/` headers as of this update.*
 
 ### Purpose
 
@@ -401,11 +409,10 @@ Out of scope:
 
 Primary code/config sources:
 
-1. `platformio/platformio.ini`
-2. `platformio/include/radio/TdmaConfig.h` (target: `platformio/include/config/NetworkConfig.h` once main-body Phase 1–3 lands)
-3. `platformio/include/radio/TdmaTxQueue.h`
-4. `platformio/src/main.cpp`
-5. `edge/edge-receiver/src/smartfires_edge/main.py` (target: `smartfires_edge/config.py` once main-body Phase 5 lands)
+1. `platformio/platformio.ini` — build-time flags only (`NUM_SLOTS`, `SMARTFIRES_TDMA_RELIABILITY_MODE`, `SMARTFIRES_STATUS_INTERVAL_MS`)
+2. `platformio/include/config/NetworkConfig.h` — all TDMA timing, radio link, reliability, TX budgets
+3. `platformio/include/config/BaseConfig.h` — base-station geometry mirror + bridge constants
+4. `edge/edge-receiver/src/smartfires_edge/config.py` — all Jetson-side runtime defaults
 
 Supporting architecture docs:
 
@@ -418,60 +425,58 @@ Supporting architecture docs:
 
 | Parameter | Layer | Current Default | Current Source | Owner | Change Frequency | Notes |
 |---|---|---:|---|---|---|---|
-| `NUM_SLOTS` | Node firmware | `4` | `platformio.ini` | Firmware | Low | Must match all nodes in deployment |
-| `SMARTFIRES_TDMA_RELIABILITY_MODE` | Node firmware | `1` (`APP_ACK_SUMMARY`) | `platformio.ini` | Firmware | Low | Keep `1` in this plan |
-| `SMARTFIRES_STATUS_INTERVAL_MS` | Node app packet generation | `1000` debug / `2500` node env / fallback 15 min | `platformio.ini`, `main.cpp` | Firmware + Ops | Medium | Directly influences offered load |
+| `NUM_SLOTS` | Node firmware | `4` | `platformio.ini` (→ `NetworkConfig::kNumSlots`) | Firmware | Low | Must match all nodes in deployment |
+| `SMARTFIRES_TDMA_RELIABILITY_MODE` | Node firmware | `1` (`APP_ACK_SUMMARY`) | `platformio.ini` (→ `NetworkConfig::kReliabilityMode`) | Firmware | Low | Keep `1` in this plan |
+| `SMARTFIRES_STATUS_INTERVAL_MS` | Node app packet generation | `1000` debug / `900000` ms prod | `platformio.ini` (→ `NetworkConfig::kStatusIntervalMs`) | Firmware + Ops | Medium | Directly influences offered load |
 | `monitor_speed` | Serial monitor | `115200` | `platformio.ini` | Ops | Low | Debug transport only |
 
 #### B) TDMA Timing Parameters (Node)
 
 | Parameter | Layer | Current Default | Current Source | Owner | Safe Initial Range |
 |---|---|---:|---|---|---|
-| `slotWidthMs` | TDMA | `900` | `TdmaConfig` | Firmware | 800 to 1200 |
-| `guardMs` | TDMA | `20` | `TdmaConfig` | Firmware | 10 to 40 |
-| `syncStaleMs` | TDMA | `1320000` (22 min) | `TdmaConfig` | Firmware | 600000 to 1800000 |
+| `slotWidthMs` | TDMA | `900` | `config/NetworkConfig.h` (`kSlotWidthMs`) | Firmware | 800 to 1200 |
+| `guardMs` | TDMA | `20` | `config/NetworkConfig.h` (`kGuardMs`) | Firmware | 10 to 40 |
+| `syncStaleMs` | TDMA | `1320000` (22 min) | `config/NetworkConfig.h` (`kSyncStaleMs`) | Firmware | 600000 to 1800000 |
 
 #### C) Queue and Buffering Parameters (Node)
 
 | Parameter | Layer | Current Default | Current Source | Owner | Hard Cap / Range |
 |---|---|---:|---|---|---|
-| `queueDepth` | TX queue | `4` default / `8` node override | `TdmaConfig` and node setup | Firmware | Runtime <= 8 (current hard cap) |
-| `TdmaTxQueue::MaxDepth` | TX queue capacity cap | `8` | `TdmaTxQueue.h` | Firmware | Compile-time cap |
-| `reliabilityWindowDepth` | Pending reliability window | `4` default / `8` node override | `TdmaConfig` | Firmware | Runtime <= 8 |
-| `kMaxReliabilityWindow` | Pending window cap | `8` | `TdmaRadioService.h` | Firmware | Compile-time cap |
-| `MaxPayloadLen` | Payload buffer capacity | `220` | `TdmaConfig` | Firmware | Must stay >= max packet size |
+| `queueDepth` | TX queue | `8` | `config/NetworkConfig.h` (`kQueueDepth`) | Firmware | Runtime <= `kQueueCapacityHardCap` |
+| `TdmaTxQueue::MaxDepth` | TX queue capacity cap | `8` | `config/NetworkConfig.h` (`kQueueCapacityHardCap`) | Firmware | Compile-time cap; static_assert enforced |
+| `reliabilityWindowDepth` | Pending reliability window | `8` | `config/NetworkConfig.h` (`kReliabilityWindowDepth`) | Firmware | Runtime <= `kReliabilityWindowHardCap` |
+| `kMaxReliabilityWindow` | Pending window cap | `8` | `config/NetworkConfig.h` (`kReliabilityWindowHardCap`) | Firmware | Compile-time cap; static_assert enforced |
+| `MaxPayloadLen` | Payload buffer capacity | `220` | `TdmaConfig.h` (struct field) | Firmware | static_assert in NetworkConfig.h verifies >= kMaxBundleLoRaSize |
 
 #### D) Link-ACK Path Parameters (Node)
 
 | Parameter | Layer | Current Default | Current Source | Owner | Safe Initial Range |
 |---|---|---:|---|---|---|
-| `enableLinkAck` | Link-layer behavior | computed by mode | `main.cpp` | Firmware | mode dependent |
-| `maxRetries` | Link ACK retries | `3` (node setup override) | `main.cpp` | Firmware | 0 to 5 |
-| `ackTimeoutMs` | Link ACK timeout | `250` (node setup override) | `main.cpp` | Firmware | 80 to 400 |
+| `enableLinkAck` | Link-layer behavior | derived from `kReliabilityMode` | `config/NetworkConfig.h` (`nodeTdmaProfile()`) | Firmware | mode dependent |
+| `maxRetries` | Link ACK retries | `3` | `config/NetworkConfig.h` (`kLinkRetries`) | Firmware | 0 to 5 |
+| `ackTimeoutMs` | Link ACK timeout | `250` | `config/NetworkConfig.h` (`kLinkAckTimeoutMs`) | Firmware | 80 to 400 |
 
 #### E) App Reliability Parameters (Node)
 
 | Parameter | Layer | Current Default | Current Source | Owner | Safe Initial Range |
 |---|---|---:|---|---|---|
-| `enableAppReliability` | App reliability | `true` | `TdmaConfig` | Firmware | true for this plan |
-| `reliabilityMaxAttempts` | Pending retry limit | `3` | `TdmaConfig` | Firmware | 2 to 5 |
-| `reliabilityMaxAgeMs` | Pending age limit | `15000` default / `30000` node override | `TdmaConfig` | Firmware | 10000 to 45000 |
-| `reliabilityMinRetryGapMs` | Minimum retry spacing | `2000` | `TdmaConfig` | Firmware | 1500 to 8000 |
-| `reliabilityFreshTrafficHoldoffMs` | Holdoff after fresh send | `2000` | `TdmaConfig` | Firmware | 1000 to 8000 |
-| `expectedAckIntervalMs` | ACK-paced retry gate | `4000` | `TdmaConfig` | Firmware | see Appendix B |
-| `retryWaitMultiplierPermille` | ACK-paced retry gate | `2000` (2.0x) | `TdmaConfig` | Firmware | see Appendix B |
-| `retryWaitMinMs` / `retryWaitMaxMs` | ACK-paced retry gate | `4500` / `10000` | `TdmaConfig` | Firmware | see Appendix B |
-| `requireAckSummaryBeforeFirstRetry` | ACK-paced retry gate | `false` | `TdmaConfig` | Firmware | see Appendix B |
+| `enableAppReliability` | App reliability | `true` | `config/NetworkConfig.h` (`nodeTdmaProfile()`) | Firmware | true for this plan |
+| `reliabilityMaxAttempts` | Pending retry limit | `5` | `config/NetworkConfig.h` (`kReliabilityMaxAttempts`) | Firmware | 2 to 5 |
+| `reliabilityMaxAgeMs` | Pending age limit | `30000` | `config/NetworkConfig.h` (`kReliabilityMaxAgeMs`) | Firmware | 10000 to 45000 |
+| `expectedAckIntervalMs` | ACK-paced retry gate | `4000` | `config/NetworkConfig.h` (`kExpectedAckIntervalMs`) | Firmware | see Appendix B |
+| `retryWaitMultiplierPermille` | ACK-paced retry gate | `2000` (2.0x) | `config/NetworkConfig.h` (`kRetryWaitMultiplierPermille`) | Firmware | see Appendix B |
+| `retryWaitMinMs` / `retryWaitMaxMs` | ACK-paced retry gate | `4500` / `10000` | `config/NetworkConfig.h` (`kRetryWaitMinMs` / `kRetryWaitMaxMs`) | Firmware | see Appendix B |
+| `requireAckSummaryBeforeFirstRetry` | ACK-paced retry gate | `false` | `config/NetworkConfig.h` (`kRequireAckSummaryBeforeFirstRetry`) | Firmware | see Appendix B |
 
 #### F) Edge Runtime Parameters
 
 | Parameter | Layer | Current Default | Current Source | Owner | Safe Initial Range |
 |---|---|---:|---|---|---|
-| `--sync-interval` | TIME_SYNC cadence (Jetson → base over UART) | `600` s | edge CLI parser | Edge/Ops | 120 to 900 |
-| `--metrics-interval` | Metrics persistence | `10` s | edge CLI parser | Edge/Ops | 5 to 30 |
-| `--nodes` | tracked node IDs | `[1, 2]` | edge CLI parser | Edge/Ops | deployment dependent |
-| `--raw-log` | frame logging toggle | off by default | edge CLI parser | Ops | debug only |
-| `kPeriodicTimeSyncMs` | Base firmware fallback TIME_SYNC broadcast | `50000` ms | `SmartFiresBaseApp.h` (private `constexpr`) | Firmware | distinct from `--sync-interval`; see main-body problem statement |
+| `--sync-interval` | TIME_SYNC cadence (Jetson → base over UART) | `600` s | `smartfires_edge/config.py` (`DEFAULT_SYNC_INTERVAL_S`) | Edge/Ops | 120 to 900 |
+| `--metrics-interval` | Metrics persistence | `10` s | `smartfires_edge/config.py` (`DEFAULT_METRICS_INTERVAL_S`) | Edge/Ops | 5 to 30 |
+| `--nodes` | tracked node IDs | `[1, 2]` | `smartfires_edge/config.py` (`DEFAULT_NODES`) | Edge/Ops | deployment dependent |
+| `--raw-log` | frame logging toggle | off by default | `smartfires_edge/config.py` (`DEFAULT_*` n/a — boolean flag) | Ops | debug only |
+| `kPeriodicTimeSyncMs` | Base firmware fallback TIME_SYNC broadcast | `50000` ms | `config/BaseConfig.h` (`kPeriodicTimeSyncMs`) | Firmware | distinct from `--sync-interval` |
 
 ### Compatibility Rules (Must Hold)
 

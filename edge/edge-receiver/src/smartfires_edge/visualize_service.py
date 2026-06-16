@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 import serial
 
+from smartfires_edge.config import EdgeConfig
 from smartfires_edge.ingest_service import (
     _send_time_sync,
     _time_sync_sender,
@@ -106,13 +107,15 @@ def _render_screen(
     _print_table("Battery and Location", status_columns, status_rows)
 
 
-def run_visualize(
-    port: str,
-    baud: int,
-    sync_interval_s: int,
-    telemetry_rows_max: int,
-) -> int:
-    telemetry_rows: deque = deque(maxlen=telemetry_rows_max)
+def run_visualize(cfg: EdgeConfig) -> int:
+    """Run the live terminal visualizer.
+
+    Args:
+        cfg: Top-level config.  Visualizer uses ``cfg.ingest.port``,
+             ``cfg.ingest.baud``, ``cfg.ingest.sync_interval_s``, and
+             ``cfg.telemetry_rows``.
+    """
+    telemetry_rows: deque = deque(maxlen=cfg.telemetry_rows)
     status_by_node: dict[int, dict] = {}
 
     sync_state = {"next_seq": 0}
@@ -123,11 +126,11 @@ def run_visualize(
         sync_thread_started = False
         write_lock = threading.Lock()
 
-        for event, _receiver, ser in iter_packets(port, baud):
+        for event, _receiver, ser in iter_packets(cfg.ingest.port, cfg.ingest.baud):
             if not sync_thread_started:
                 sync_thread = threading.Thread(
                     target=_time_sync_sender,
-                    args=(ser, write_lock, sync_state, session_id, session_start, sync_interval_s),
+                    args=(ser, write_lock, sync_state, session_id, session_start, cfg.ingest.sync_interval_s),
                     daemon=True,
                 )
                 sync_thread.start()
@@ -160,6 +163,7 @@ def run_visualize(
                         trigger_node=int(hdr_node),
                         trigger_seq=int(hdr_seq),
                     )
+
 
             status = event.get("status")
             if status:
@@ -203,7 +207,7 @@ def run_visualize(
                     }
                 )
 
-            _render_screen(port, baud, telemetry_rows, status_by_node)
+            _render_screen(cfg.ingest.port, cfg.ingest.baud, telemetry_rows, status_by_node)
 
     except KeyboardInterrupt:
         print("\nStopped visualizer.")

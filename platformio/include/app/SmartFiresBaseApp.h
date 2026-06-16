@@ -1,5 +1,6 @@
 #pragma once
 
+#include "config/BaseConfig.h"
 #include "interfaces/IClock.h"
 #include "radio/ITdmaRadioDriver.h"
 #include "telemetry/BinaryPacket.h"
@@ -13,29 +14,22 @@ class Print;
 class SmartFiresBaseApp {
 public:
   struct Config {
-    uint8_t baseAddr = 0x01;
-    uint8_t timeSyncBroadcastAddr = 0xFF;
-    uint32_t uartBaud = 115200;
-    uint32_t ackSummaryMinIntervalMs = 25;
-    uint8_t tdmaNumSlots = 4;
-    uint32_t tdmaSlotWidthMs = 900;
-    uint32_t tdmaGuardMs = 20;
+    uint8_t baseAddr = BaseConfig::kBaseAddr;
+    uint8_t timeSyncBroadcastAddr = BaseConfig::kTimeSyncBroadcastAddr;
+    uint32_t uartBaud = BaseConfig::kUartBaud;
+    uint32_t ackSummaryMinIntervalMs = BaseConfig::kAckSummaryMinIntervalMs;
+    uint8_t tdmaNumSlots = BaseConfig::kTdmaNumSlots;
+    uint32_t tdmaSlotWidthMs = BaseConfig::kTdmaSlotWidthMs;
+    uint32_t tdmaGuardMs = BaseConfig::kTdmaGuardMs;
 
-    static Config baseCfg(uint8_t baseAddr_ = 0x01,
-                          uint8_t timeSyncBroadcastAddr_ = 0xFF,
-                          uint32_t uartBaud_ = 115200,
-                          uint32_t ackSummaryMinIntervalMs_ = 25,
-                          uint8_t tdmaNumSlots_ = 4,
-                          uint32_t tdmaSlotWidthMs_ = 900,
-                          uint32_t tdmaGuardMs_ = 20) {
+    // Thin wrapper: every field comes from config/BaseConfig.h, which in
+    // turn shares its TDMA geometry with config/NetworkConfig.h so the base
+    // and node builds can no longer drift apart on NUM_SLOTS/slotWidthMs/
+    // guardMs the way they used to (this factory used to hardcode its own
+    // independent 4/900/20 defaults).
+    static Config baseCfg(uint8_t baseAddr_ = BaseConfig::kBaseAddr) {
       Config cfg;
       cfg.baseAddr = baseAddr_;
-      cfg.timeSyncBroadcastAddr = timeSyncBroadcastAddr_;
-      cfg.uartBaud = uartBaud_;
-      cfg.ackSummaryMinIntervalMs = ackSummaryMinIntervalMs_;
-      cfg.tdmaNumSlots = tdmaNumSlots_;
-      cfg.tdmaSlotWidthMs = tdmaSlotWidthMs_;
-      cfg.tdmaGuardMs = tdmaGuardMs_;
       return cfg;
     }
   };
@@ -50,10 +44,10 @@ public:
   void update();
 
 private:
-  static constexpr uint8_t kTotalEntities = 4;
-  static constexpr uint8_t kMaxAssignedNodes = kTotalEntities - 1;
-  static constexpr uint8_t kFirstNodeId = 0x02;
-  static constexpr uint8_t kMaxAckTrackedNodes = 16;
+  static constexpr uint8_t kTotalEntities = BaseConfig::kTotalEntities;
+  static constexpr uint8_t kMaxAssignedNodes = BaseConfig::kMaxAssignedNodes;
+  static constexpr uint8_t kFirstNodeId = BaseConfig::kFirstNodeId;
+  static constexpr uint8_t kMaxAckTrackedNodes = BaseConfig::kMaxAckTrackedNodes;
 
   struct NodeAssignment {
     bool inUse = false;
@@ -93,8 +87,8 @@ private:
     uint32_t receiptWindowMask = 0;
   };
 
-  static constexpr uint32_t kHealthLogPeriodMs = 5000;
-  static constexpr uint32_t kPeriodicTimeSyncMs = 50000;
+  static constexpr uint32_t kHealthLogPeriodMs = BaseConfig::kHealthLogPeriodMs;
+  static constexpr uint32_t kPeriodicTimeSyncMs = BaseConfig::kPeriodicTimeSyncMs;
 
   Config _cfg;
   IClock &_clock;

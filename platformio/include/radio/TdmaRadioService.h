@@ -1,5 +1,6 @@
 #pragma once
 
+#include "config/NetworkConfig.h"
 #include "radio/ITdmaRadioDriver.h"
 #include "radio/TdmaClock.h"
 #include "radio/TdmaConfig.h"
@@ -59,7 +60,11 @@ public:
   uint32_t lastTxSlotIndex() const;
 
 private:
-  static constexpr uint8_t kMaxReliabilityWindow = 8;
+  // Compile-time capacity ceiling. Single source: NetworkConfig.h's
+  // kReliabilityWindowHardCap, so the operating kReliabilityWindowDepth
+  // value and this cap can never silently diverge.
+  static constexpr uint8_t kMaxReliabilityWindow =
+      NetworkConfig::kReliabilityWindowHardCap;
 
   struct PendingEntry {
     bool inUse = false;

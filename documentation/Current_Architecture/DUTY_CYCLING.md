@@ -34,6 +34,9 @@ Two preset configurations are defined in `DutyCycleConfig`:
 Used when `enabled = true`. Sensors are powered down between active windows to
 reduce current draw.
 
+> **Authoritative values:** `platformio/include/config/SensingConfig.h` — `SensingConfig::DutyCycle` namespace.
+> For the full parameter table see [TUNABLE_PARAMETERS.md](TUNABLE_PARAMETERS.md#sensing--duty-cycle).
+
 | Parameter | Default value | Meaning |
 |---|---|---|
 | `minSleepMs` | 3 000 ms | Minimum time in `IdleSleeping` before waking |

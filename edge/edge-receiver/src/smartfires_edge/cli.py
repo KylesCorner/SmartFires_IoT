@@ -12,6 +12,7 @@ from typing import Any
 
 import serial
 
+from smartfires_edge.config import CLI_CALIBRATION_DURATION_S, CLI_CMD_ACK_TIMEOUT_S
 from smartfires_edge.packet import (
     PKT_AWAKEN,
     PKT_BUNDLE,
@@ -87,10 +88,11 @@ class CliRuntime:
         now = time.time()
         with self.state_lock:
             for pending in self.pending_commands:
-                if not pending.ack_warned and (now - pending.sent_at) >= 5.0:
+                if not pending.ack_warned and (now - pending.sent_at) >= CLI_CMD_ACK_TIMEOUT_S:
                     pending.ack_warned = True
                     warnings.append(
-                        f"[Warning] No CMD_ACK from node {pending.node_id} after 5s for cmd=0x{pending.cmd_type:02x}."
+                        f"[Warning] No CMD_ACK from node {pending.node_id} "
+                        f"after {CLI_CMD_ACK_TIMEOUT_S:.0f}s for cmd=0x{pending.cmd_type:02x}."
                     )
         return warnings
 
@@ -223,7 +225,7 @@ def _process_command(line: str, runtime: CliRuntime, session: SessionManager) ->
         uid_hash = session.get_uid_hash_for_node(node_id)
 
         seq = runtime.next_command_seq()
-        frame = encode_cmd_calibrate_frame(node_id=node_id, duration_s=60, seq=seq)
+        frame = encode_cmd_calibrate_frame(node_id=node_id, duration_s=CLI_CALIBRATION_DURATION_S, seq=seq)
         if runtime.serial_conn is None:
             runtime.log("[Error] Serial not ready yet.")
             return
@@ -240,7 +242,12 @@ def _process_command(line: str, runtime: CliRuntime, session: SessionManager) ->
             )
 
         runtime.add_pending(
-            PendingCommand(node_id=node_id, cmd_type=PKT_CMD_CALIBRATE, sent_at=time.time(), duration_s=60)
+            PendingCommand(
+                node_id=node_id,
+                cmd_type=PKT_CMD_CALIBRATE,
+                sent_at=time.time(),
+                duration_s=CLI_CALIBRATION_DURATION_S,
+            )
         )
         if uid_hash is None:
             runtime.log(

@@ -1,0 +1,222 @@
+# SmartFires — Tunable Parameters
+
+Single reference for every configurable value in the system.  After the
+tunable-parameter consolidation (see `documentation/Pending_Plans/TUNABLE_PARAMETER_ARCHITECTURE_PLAN.md`),
+each constant lives in exactly one place; all consuming code imports it from
+there.  Change a value in its source header/module and it propagates everywhere
+automatically.
+
+---
+
+## Network and TDMA
+
+**Source (firmware):** `platformio/include/config/NetworkConfig.h` — `NetworkConfig` namespace
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `kNumSlots` | 4 (from `NUM_SLOTS` build flag) | TDMA slots per frame; must match across all node Feathers |
+| `kSlotWidthMs` | 900 ms | Slot duration; fits worst-case 2× TX + ACK round trip + 2× guard |
+| `kGuardMs` | 20 ms | Guard time at slot edges; covers ≤50 ppm crystal drift at 22 min max sync interval |
+| `kSyncStaleMs` | 1 320 000 ms (22 min) | Node transmits unconditionally after this long without a TIME_SYNC |
+| `kBaseAddr` | 0x01 | RadioHead address of the base station |
+| `kRadioFrequencyMhz` | 915.0 MHz | LoRa carrier frequency |
+| `kRadioTxPowerDbm` | 13 dBm | RadioHead TX power |
+| `kRadioCadTimeoutMs` | 10 ms | CAD (channel activity detection) timeout |
+| `kLinkRetries` | 3 | RadioHead `RHReliableDatagram` retransmit attempts per send |
+| `kLinkAckTimeoutMs` | 250 ms | Per-attempt link-layer ACK timeout |
+| `kQueueDepth` | 8 | `TdmaTxQueue` capacity (drop-oldest when full) |
+| `kQueueCapacityHardCap` | 8 | Compile-time upper bound enforced by static_assert |
+| `kReliabilityWindowDepth` | 8 | App-layer pending-retry window size |
+| `kReliabilityWindowHardCap` | 8 | Compile-time upper bound enforced by static_assert |
+| `kReliabilityMaxAttempts` | 5 | Max app-layer retransmit attempts per packet |
+| `kReliabilityMaxAgeMs` | 30 000 ms | Evict pending packet from window after this age |
+| `kReliabilityMode` | `AppLayerAckSummary` | Active reliability mode (build-flag selectable via `SMARTFIRES_TDMA_RELIABILITY_MODE`) |
+| `kExpectedAckIntervalMs` | 4 000 ms | ACK-paced retry gate: expected time between ACK_SUMMARY packets |
+| `kRetryWaitMultiplierPermille` | 2000 (×2.0) | ACK-paced retry gate: back-off multiplier in permille |
+| `kRetryWaitMinMs` | 4 500 ms | Minimum retry wait |
+| `kRetryWaitMaxMs` | 10 000 ms | Maximum retry wait |
+| `kRequireAckSummaryBeforeFirstRetry` | false | Whether to wait for an ACK_SUMMARY before the first retransmit |
+| `kAwakenIntervalMs` | 5 000 ms | Re-broadcast PKT_AWAKEN every N ms while waiting for TIME_SYNC |
+| `kStatusIntervalMs` | 900 000 ms (15 min) | How often PKT_STATUS is emitted (overridable via `SMARTFIRES_STATUS_INTERVAL_MS`) |
+| `kBundleTxBudgetMs` | 340 ms | Estimated on-air time for a PKT_BUNDLE (used for slot budget check) |
+| `kStatusTxBudgetMs` | 120 ms | Estimated on-air time for a PKT_STATUS |
+| `kAwakenTxBudgetMs` | 90 ms | Estimated on-air time for a PKT_AWAKEN |
+| `kDefaultTxBudgetMs` | 140 ms | Fallback estimate for unknown packet types |
+
+---
+
+## Base Station Bridge
+
+**Source (firmware):** `platformio/include/config/BaseConfig.h` — `BaseConfig` namespace
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `kTdmaNumSlots` | = `NetworkConfig::kNumSlots` | Mirrors node's NUM_SLOTS — both must agree for ACK-summary slot-window math |
+| `kTdmaSlotWidthMs` | = `NetworkConfig::kSlotWidthMs` | Mirrors node's slot width |
+| `kTdmaGuardMs` | = `NetworkConfig::kGuardMs` | Mirrors node's guard time |
+| `kTotalEntities` | = `NetworkConfig::kNumSlots` | Size of base's node-assignment table (1 base + N nodes → N slots) |
+| `kMaxAssignedNodes` | `kTotalEntities − 1` | Derives automatically; base is entity 0 |
+| `kFirstNodeId` | 0x02 | Lowest assignable node ID (0x01 = base, 0x00 = unassigned) |
+| `kMaxAckTrackedNodes` | 16 | Upper bound for ACK-summary bitmap tracking table |
+| `kPeriodicTimeSyncMs` | 50 000 ms | Base firmware fallback TIME_SYNC interval (Jetson normally sends every 600 s) |
+| `kHealthLogPeriodMs` | 5 000 ms | Periodic health-log print interval in base firmware |
+
+---
+
+## Sensing — Duty Cycle
+
+**Source (firmware):** `platformio/include/config/SensingConfig.h` — `SensingConfig::DutyCycle` namespace
+
+Two presets, selectable via `DutyCycleConfig::dutyCycleCfgContinuous()` or `dutyCycleCfg()`.
+
+### Continuous (currently shipped)
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `kContinuousEnabled` | false | `enabled=false` → always-on; duty cycle gate is skipped |
+| `kContinuousSamplePeriodMs` | 500 ms | Master loop cadence — how often the sensor-service tick fires |
+| `kContinuousWarmupMs` | 10 000 ms | One-time warmup delay at boot before first sample |
+
+### ThresholdTriggered (alternate preset, not currently deployed)
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `kThresholdEnabled` | true | Trigger-based duty cycle on |
+| `kThresholdMinSleepMs` | 3 000 ms | Minimum idle sleep before wake |
+| `kThresholdSamplePeriodMs` | 50 000 ms | Target wake-to-wake cycle period |
+| `kThresholdWarmupMs` | 10 000 ms | Sensor stabilization delay after wake |
+| `kThresholdTempDeltaThresholdC` | 1.0 °C | Temperature delta to trigger early wake |
+| `kThresholdHumidityDeltaThresholdPct` | 5.0 %RH | Humidity delta to trigger early wake |
+
+---
+
+## Sensing — Per-Sensor
+
+Each sensor has its own independently-tuned namespace in `SensingConfig.h`.
+Values are NOT generalized across sensors (e.g., Wind and SPS30 happen to share
+some timing coincidentally; they are still listed separately so each can be
+changed independently without affecting the other).
+
+**Source (firmware):** `platformio/include/config/SensingConfig.h`
+
+### SHT31 — Temperature / Humidity (trigger sensor)
+
+Namespace `SensingConfig::Sht31`
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `kAddress` | 0x44 | I²C address |
+| `kMinSamplePeriodMs` | 100 ms | Minimum interval between samples |
+| `kWakeDelayMs` | 0 ms | No settling delay needed |
+| `kDutyClass` | `AlwaysOn` | Always powered — used as the trigger sensor for ThresholdTriggered duty cycle |
+
+### Wind — RevC Hot-Wire Anemometer
+
+Namespace `SensingConfig::Wind`
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `kDividerRatio` | 1.6818 | Voltage divider ratio applied to both RV and TMP ADC channels |
+| `kZeroWindAdjustmentVolts` | −1.0 V | Calibration offset: voltage at zero wind speed |
+| `kMinSamplePeriodMs` | 10 ms | Sample floor (ADC read is fast) |
+| `kWakeDelayMs` | 10 000 ms | Hot-wire / TPS settling time after power-on |
+| `kDutyClass` | `DutyCycled` | Powered by TPSDriver; woken and slept by DutyCycleController |
+
+### SPS30 — Particulate Matter (PM1.0 / PM2.5 / PM4.0 / PM10)
+
+Namespace `SensingConfig::Sps30`
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `kMinSamplePeriodMs` | 1 000 ms | Sensor fan spin-up produces one reading per second |
+| `kWakeDelayMs` | 8 000 ms | Fan/laser warmup time after power-on |
+| `kDutyClass` | `WarmupHeavy` | Managed by DutyCycleController warm-up state |
+
+### ICM-20948 — IMU / DMP Heading
+
+Namespace `SensingConfig::Imu`
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `kAddress` | 0x69 | I²C address (AD0 = high) |
+| `kMinSamplePeriodMs` | 10 ms | DMP output rate |
+| `kWakeDelayMs` | 0 ms | No additional settling beyond driver init |
+| `kDutyClass` | `DutyCycled` | Follows duty-cycle controller |
+
+### PA1010D GPS
+
+Namespace `SensingConfig::Gps` — five factory variants, each with its own constants.
+
+| Constant | Value | Mode(s) | Meaning |
+|---|---|---|---|
+| `kAddress` | 0x10 | all | I²C address |
+| `kContinuousMinSamplePeriodMs` | 100 ms | Continuous | Sample floor for full-power continuous mode |
+| `kContinuousWakeDelayMs` | 0 ms | Continuous | No delay |
+| `kPeriodicRunTimeMs` | 4 000 ms | Periodic Standby/Backup | Active GPS window per cycle |
+| `kPeriodicSleepTimeMs` | 15 000 ms | Periodic Standby/Backup | First sleep window |
+| `kPeriodicSecondRunTimeMs` | 24 000 ms | Periodic Standby/Backup | Second active window per cycle |
+| `kPeriodicSecondSleepTimeMs` | 90 000 ms | Periodic Standby/Backup | Second sleep window |
+| `kPeriodicMinSamplePeriodMs` | 1 000 ms | Periodic Standby/Backup | Sample floor while active |
+| `kAlwaysLocateMinSamplePeriodMs` | 1 000 ms | AlwaysLocate Standby/Backup | Sample floor |
+
+---
+
+## Power — Battery Monitor
+
+**Source (firmware):** `platformio/include/config/PowerConfig.h` — `PowerConfig::Battery` namespace
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `kAdcRefVolts` | 3.3 V | ADC reference voltage (Feather M0 AREF) |
+| `kAdcMax` | 1023 | ADC full-scale count (10-bit) |
+| `kDividerRatio` | 2.0 | Voltage divider ratio on the battery sense pin |
+| `kMinVoltage` | 3.2 V | Voltage reported as 0 % |
+| `kMaxVoltage` | 4.2 V | Voltage reported as 100 % |
+| `kLowVoltage` | 3.5 V | Threshold logged as low-battery warning |
+| `kMinSamplePeriodMs` | 1 000 ms | Minimum interval between ADC reads |
+
+---
+
+## Edge Runtime (Jetson)
+
+**Source (Python):** `edge/edge-receiver/src/smartfires_edge/config.py`
+
+### Ingest / UART
+
+| Constant | Default | CLI flag | Meaning |
+|---|---|---|---|
+| `DEFAULT_PORT` | `/dev/ttyTHS1` | `--port` | Serial port for base-station UART |
+| `DEFAULT_BAUD` | 115200 | `--baud` | UART baud rate |
+| `DEFAULT_DATA_DIR` | `/mnt/nvme_drive/data` | `--data-dir` | Root output directory |
+| `DEFAULT_NODES` | `[1, 2]` | `--nodes` | Node IDs tracked for packet-loss metrics |
+| `DEFAULT_METRICS_INTERVAL_S` | 10 s | `--metrics-interval` | Packet-loss state flush interval |
+| `DEFAULT_SYNC_INTERVAL_S` | 600 s (10 min) | `--sync-interval` | Periodic TIME_SYNC broadcast interval |
+
+### Anemometer (ES-W302, optional)
+
+| Constant | Default | CLI flag | Meaning |
+|---|---|---|---|
+| `DEFAULT_ANEMOMETER_PORT` | `None` (disabled) | `--anemometer-port` | Serial port; omit to disable |
+| `DEFAULT_ANEMOMETER_BAUD` | 9600 | `--anemometer-baud` | Modbus baud rate |
+| `DEFAULT_ANEMOMETER_ADDRESS` | 1 | `--anemometer-address` | Modbus device address |
+| `DEFAULT_ANEMOMETER_INTERVAL_S` | 1.0 s | `--anemometer-interval` | Modbus poll interval |
+
+### Web dashboard
+
+| Constant | Default | CLI flag | Meaning |
+|---|---|---|---|
+| `DEFAULT_WEB_HOST` | `0.0.0.0` | `--host` | FastAPI/uvicorn bind address |
+| `DEFAULT_WEB_HTTP_PORT` | 8080 | `--http-port` | HTTP port |
+
+### Visualizer
+
+| Constant | Default | CLI flag | Meaning |
+|---|---|---|---|
+| `DEFAULT_TELEMETRY_ROWS` | 20 | `--telemetry-rows` | Max telemetry rows shown on screen |
+
+### CLI (calibrate / reset commands)
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `CLI_CMD_ACK_TIMEOUT_S` | 5.0 s | Warn if no CMD_ACK received within this window |
+| `CLI_CALIBRATION_DURATION_S` | 60 s | Duration sent in CMD_CALIBRATE frame |

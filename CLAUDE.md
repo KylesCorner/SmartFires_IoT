@@ -61,6 +61,11 @@ SmartFires_IoT/
 ├── platformio/                    PlatformIO project (all embedded firmware)
 │   ├── platformio.ini             Build environments — see table below
 │   ├── include/
+│   │   ├── config/                       ← tunable constants (single source of truth)
+│   │   │   ├── NetworkConfig.h           TDMA geometry, radio link, reliability, TX budgets
+│   │   │   ├── SensingConfig.h           Duty-cycle presets + per-sensor timing/calibration
+│   │   │   ├── PowerConfig.h             Battery monitor constants
+│   │   │   └── BaseConfig.h              Base-station bridge constants (shares NetworkConfig)
 │   │   ├── app/
 │   │   │   └── SmartFiresNodeApp.h       Top-level application class
 │   │   ├── interfaces/
@@ -117,6 +122,7 @@ SmartFires_IoT/
 │       ├── pyproject.toml         Package + dependencies (pyserial, minimalmodbus)
 │       ├── README.md
 │       └── src/smartfires_edge/
+│           ├── config.py          All tunable defaults (port/baud/intervals/timeouts) + argparse helpers
 │           ├── ingest_service.py  UART ingest + TIME_SYNC + ACK summary + CSV logging
 │           ├── packet.py          Python mirror of BinaryPacket.h (FULL_STATE/STATUS/BUNDLE)
 │           ├── uart_receiver.py   UART frame parser state machine
@@ -127,6 +133,7 @@ SmartFires_IoT/
 │   ├── SOFTWARE_DESIGN.md         Master system architecture
 │   ├── SOFTWARE_DESIGN_DIAGRAM.md
 │   ├── Current_Architecture/      ← subsystem deep-dives (current state)
+│   │   ├── TUNABLE_PARAMETERS.md  Every tunable constant — TDMA, sensors, power, Jetson
 │   │   ├── TDMA_PROTOCOL.md       Slot timing, session clock, boot handshake, TX budget
 │   │   ├── PACKET_RELIABILITY.md  StrictLinkAck vs AppLayerAckSummary, pending window, ACK_SUMMARY
 │   │   ├── DUTY_CYCLING.md        DutyCycleController phases, config, trigger sensor
@@ -135,8 +142,7 @@ SmartFires_IoT/
 │   ├── User_Reference/            ← practical how-to guides
 │   │   ├── FLASHING.md
 │   │   ├── DEBUG_FILTER.md
-│   │   ├── JETSON_CHEATSHEET.md
-│   │   └── NETWORK_TEST.md
+│   │   └── JETSON_CHEATSHEET.md
 │   └── Completed_Plans/           ← historical design docs (code is now authoritative)
 └── lora/                          Legacy experimental LoRa sketches (ignore)
 ```
@@ -149,7 +155,6 @@ SmartFires_IoT/
 |---|---|---|---|
 | `feather_m0_lora_node` | Feather M0 | `LORA_NODE=1` `NUM_SLOTS=4` `SMARTFIRES_TDMA_RELIABILITY_MODE=1` | Real sensor node firmware |
 | `feather_m0_lora_node_debug` | Feather M0 | same + `SMARTFIRES_STATUS_INTERVAL_MS=1000` | Default env; debug filter, faster STATUS |
-| `feather_m0_lora_node_dummy` | Feather M0 | `LORA_NODE=1` `NODE_ID=2` `SMARTFIRES_DUMMY_NODE=1` `NUM_SLOTS=4` | Synthetic-data test node |
 | `feather_m0_lora_base` | Feather M0 | `LORA_BASE=1` | Base station firmware |
 | `feather_m0_lora_sniffer` | Feather M0 | `SMARTFIRES_LORA_SNIFFER=1` | Passive LoRa packet monitor |
 | `native` | Desktop | `UNIT_TEST` | Unity unit tests — no hardware required |
@@ -159,7 +164,7 @@ SmartFires_IoT/
 ### Adding a node
 
 1. Add a new `[env:feather_m0_lora_node_N]` section in `platformio.ini` based on `feather_m0_lora_node`.
-2. **Update `NUM_SLOTS` to the new total node count in ALL node environments (including dummy and debug).**
+2. **Update `NUM_SLOTS` to the new total node count in ALL node environments (node and debug).**
 3. Reflash every node Feather — they all need the same `NUM_SLOTS` for TDMA to work.
 
 `NUM_SLOTS` is the only flag that must match across all node Feathers.

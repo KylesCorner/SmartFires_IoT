@@ -69,30 +69,32 @@ bool decodeHeader(const uint8_t *payload,
 }
 
 // Conservative slot-budget estimates to prevent crossing slot boundaries.
-// Values include airtime plus software/radio overhead margin.
+// Values include airtime plus software/radio overhead margin. Named
+// constants live in config/NetworkConfig.h (single source, also used by its
+// slotWidthMs static_assert) rather than as magic numbers here.
 uint16_t estimateTxBudgetMs(const uint8_t *payload, uint8_t len) {
   if (!payload || len < sizeof(BinaryPacket::PktHeader)) {
-    return 140;
+    return NetworkConfig::kDefaultTxBudgetMs;
   }
 
   BinaryPacket::PktHeader hdr;
   memcpy(&hdr, payload, sizeof(BinaryPacket::PktHeader));
 
   if (hdr.magic != BinaryPacket::PKT_MAGIC) {
-    return 140;
+    return NetworkConfig::kDefaultTxBudgetMs;
   }
 
   switch (hdr.pkt_type) {
   case BinaryPacket::PKT_BUNDLE:
-    return 340;
+    return NetworkConfig::kBundleTxBudgetMs;
   case BinaryPacket::PKT_STATUS:
-    return 120;
+    return NetworkConfig::kStatusTxBudgetMs;
   case BinaryPacket::PKT_AWAKEN:
-    return 90;
+    return NetworkConfig::kAwakenTxBudgetMs;
   case BinaryPacket::PKT_FULL_STATE:
-    return 140;
+    return NetworkConfig::kDefaultTxBudgetMs;
   default:
-    return 140;
+    return NetworkConfig::kDefaultTxBudgetMs;
   }
 }
 

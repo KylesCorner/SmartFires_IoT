@@ -1,5 +1,6 @@
 #pragma once
 
+#include "config/PowerConfig.h"
 #include "interfaces/IAnalogReader.h"
 #include "interfaces/IClock.h"
 #include <Arduino.h>
@@ -28,11 +29,15 @@ public:
 
     uint32_t minSamplePeriodMs;
 
-    static BatteryMonitor::Config
-    makeBatConfig(float adcRefVolts_ = 3.3f,
-                  uint16_t adcMax_ = 1023, float dividerRatio_ = 2.0f,
-                  float minVoltage_ = 3.2f, float maxVoltage_ = 4.2f,
-                  float lowVoltage_ = 3.5f, uint32_t minSamplePeriodMs_=1000) {
+    // Thin wrapper: defaults come from config/PowerConfig.h.
+    static BatteryMonitor::Config makeBatConfig(
+        float adcRefVolts_ = PowerConfig::Battery::kAdcRefVolts,
+        uint16_t adcMax_ = PowerConfig::Battery::kAdcMax,
+        float dividerRatio_ = PowerConfig::Battery::kDividerRatio,
+        float minVoltage_ = PowerConfig::Battery::kMinVoltage,
+        float maxVoltage_ = PowerConfig::Battery::kMaxVoltage,
+        float lowVoltage_ = PowerConfig::Battery::kLowVoltage,
+        uint32_t minSamplePeriodMs_ = PowerConfig::Battery::kMinSamplePeriodMs) {
       BatteryMonitor::Config cfg;
       cfg.pin = PIN_BATTERY_ADC;
       cfg.adcRefVolts = adcRefVolts_;

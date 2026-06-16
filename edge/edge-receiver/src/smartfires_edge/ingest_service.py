@@ -10,6 +10,7 @@ from pathlib import Path
 import serial
 
 from smartfires_edge.anemometer import AnemometerPoller
+from smartfires_edge.config import IngestConfig
 from smartfires_edge.csv_logger import DurableCsvLogger
 from smartfires_edge.live_state import LiveState
 from smartfires_edge.packet import (
@@ -101,27 +102,24 @@ def _time_sync_sender(
 
 
 def run_receive(
-    port: str,
-    baud: int,
-    data_dir: Path,
-    nodes: list[int],
-    metrics_interval_s: int,
-    sync_interval_s: int,
-    fsync_every_row: bool,
-    raw_log: bool,
-    anemometer_port: str | None,
-    anemometer_baud: int,
-    anemometer_address: int,
-    anemometer_interval_s: float,
+    cfg: IngestConfig,
     live_state: LiveState | None = None,
 ) -> int:
-    telemetry_dir = data_dir / "telemetry"
-    metrics_dir = data_dir / "metrics"
-    raw_dir = data_dir / "raw"
-    status_dir = data_dir / "status"
+    """Run the UART ingest loop.
 
-    logger = DurableCsvLogger(telemetry_dir, fsync_every_row=fsync_every_row)
-    tracker = PacketLossTracker(nodes)
+    Args:
+        cfg: All ingest settings sourced from :class:`~smartfires_edge.config.IngestConfig`
+             (single source of truth — no more 10-parameter call sites).
+        live_state: Optional shared state object injected by ``web`` subcommand
+                    for live dashboard updates.
+    """
+    telemetry_dir = cfg.data_dir / "telemetry"
+    metrics_dir = cfg.data_dir / "metrics"
+    raw_dir = cfg.data_dir / "raw"
+    status_dir = cfg.data_dir / "status"
+
+    logger = DurableCsvLogger(telemetry_dir, fsync_every_row=cfg.fsync_every_row)
+    tracker = PacketLossTracker(cfg.nodes)
     if live_state is not None:
         live_state.tracker = tracker
     node_gps: dict[int, tuple[float, float]] = {}
@@ -132,12 +130,12 @@ def run_receive(
     session_start = time.time()
 
     anemometer: AnemometerPoller | None = None
-    if anemometer_port:
+    if cfg.anemometer.enabled:
         anemometer = AnemometerPoller(
-            port=anemometer_port,
-            baud=anemometer_baud,
-            address=anemometer_address,
-            interval_s=anemometer_interval_s,
+            port=cfg.anemometer.port,
+            baud=cfg.anemometer.baud,
+            address=cfg.anemometer.address,
+            interval_s=cfg.anemometer.interval_s,
         )
         anemometer.start()
 
@@ -145,15 +143,15 @@ def run_receive(
     last_metrics_write = 0.0
 
     print(f"SmartFires edge receive")
-    print(f"Port: {port}  Baud: {baud}")
-    print(f"Data dir: {data_dir}")
-    print(f"Tracked nodes: {nodes}")
-    print(f"Session ID: 0x{session_id:08x}  TIME_SYNC interval: {sync_interval_s}s")
-    if anemometer_port:
+    print(f"Port: {cfg.port}  Baud: {cfg.baud}")
+    print(f"Data dir: {cfg.data_dir}")
+    print(f"Tracked nodes: {cfg.nodes}")
+    print(f"Session ID: 0x{session_id:08x}  TIME_SYNC interval: {cfg.sync_interval_s}s")
+    if cfg.anemometer.enabled:
         print(
             "Anemometer: "
-            f"{anemometer_port} @ {anemometer_baud} addr={anemometer_address} "
-            f"interval={anemometer_interval_s}s"
+            f"{cfg.anemometer.port} @ {cfg.anemometer.baud} addr={cfg.anemometer.address} "
+            f"interval={cfg.anemometer.interval_s}s"
         )
     print()
 
@@ -161,11 +159,11 @@ def run_receive(
         sync_thread_started = False
         write_lock = threading.Lock()
 
-        for event, receiver, ser in iter_packets(port, baud):
+        for event, receiver, ser in iter_packets(cfg.port, cfg.baud):
             if not sync_thread_started:
                 sync_thread = threading.Thread(
                     target=_time_sync_sender,
-                    args=(ser, write_lock, sync_state, session_id, session_start, sync_interval_s),
+                    args=(ser, write_lock, sync_state, session_id, session_start, cfg.sync_interval_s),
                     daemon=True,
                 )
                 sync_thread.start()
@@ -339,7 +337,7 @@ def run_receive(
                 if live_state is not None:
                     live_state.record_telemetry(pkt)
 
-                if raw_log:
+                if cfg.raw_log:
                     raw_path = (
                         raw_dir
                         / f"frames-{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.jsonl"
@@ -354,7 +352,7 @@ def run_receive(
                 )
 
             now = time.monotonic()
-            if now - last_metrics_write >= metrics_interval_s:
+            if now - last_metrics_write >= cfg.metrics_interval_s:
                 tracker.save(state_path)
                 last_metrics_write = now
 

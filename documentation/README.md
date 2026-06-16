@@ -11,6 +11,7 @@ In-depth reference for subsystems as they exist in the current codebase.
 
 | Document | Covers |
 |---|---|
+| [TUNABLE_PARAMETERS.md](Current_Architecture/TUNABLE_PARAMETERS.md) | Every tunable constant — TDMA timing, sensor floors, duty cycle, battery, Jetson edge runtime |
 | [TDMA_PROTOCOL.md](Current_Architecture/TDMA_PROTOCOL.md) | Slot assignment, frame layout, session clock, TX budget, TIME_SYNC, boot handshake, scaling |
 | [PACKET_RELIABILITY.md](Current_Architecture/PACKET_RELIABILITY.md) | StrictLinkAck vs AppLayerAckSummary modes, pending window, ACK_SUMMARY format and dispatch |
 | [DUTY_CYCLING.md](Current_Architecture/DUTY_CYCLING.md) | DutyCycleController phases, config presets, trigger sensor, sample dispatch, error handling |
@@ -26,7 +27,6 @@ Practical how-to guides for day-to-day development and deployment.
 | [FLASHING.md](User_Reference/FLASHING.md) | PlatformIO CLI commands to flash node and base firmware |
 | [DEBUG_FILTER.md](User_Reference/DEBUG_FILTER.md) | Debug build structured logging and PlatformIO monitor filter |
 | [JETSON_CHEATSHEET.md](User_Reference/JETSON_CHEATSHEET.md) | Jetson one-time setup, UART enable, edge-receiver install and run |
-| [NETWORK_TEST.md](User_Reference/NETWORK_TEST.md) | End-to-end integration test guide (synthetic node → base → Jetson) |
 
 ## Completed Plans
 

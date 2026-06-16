@@ -1,5 +1,6 @@
 #pragma once
 
+#include "config/SensingConfig.h"
 #include "drivers/IIcm20948Driver.h"
 #include "interfaces/IClock.h"
 #include "interfaces/ISensor.h"
@@ -12,10 +13,13 @@ public:
     SensorDutyClass dutyClass;
     uint8_t address;
 
-    static Icm20948Sensor::Config
-    makeImuCfg(uint32_t minSamplePeriodMs_ = 10, uint32_t wakeDelayMs_ = 0,
-               SensorDutyClass dutyClass_ = SensorDutyClass::DutyCycled,
-               uint8_t address_ = 1) {
+    // Thin wrapper: defaults come from config/SensingConfig.h's Imu
+    // namespace (this sensor's own independently-tuned values).
+    static Icm20948Sensor::Config makeImuCfg(
+        uint32_t minSamplePeriodMs_ = SensingConfig::Imu::kMinSamplePeriodMs,
+        uint32_t wakeDelayMs_ = SensingConfig::Imu::kWakeDelayMs,
+        SensorDutyClass dutyClass_ = SensingConfig::Imu::kDutyClass,
+        uint8_t address_ = SensingConfig::Imu::kAddress) {
       Icm20948Sensor::Config cfg;
       cfg.minSamplePeriodMs = minSamplePeriodMs_;
       cfg.wakeDelayMs = wakeDelayMs_;

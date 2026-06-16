@@ -46,6 +46,8 @@ void loop() {
 #include "app/SmartFiresNodeApp.h"
 #include "platform/BoardIdentify.h"
 
+#include "config/NetworkConfig.h"
+#include "config/SensingConfig.h"
 #include "interfaces/ISensor.h"
 #include "platform/ArduinoAnalogReader.h"
 #include "platform/ArduinoClock.h"
@@ -72,30 +74,9 @@ void loop() {
 #include "sensors/Sps30Sensor.h"
 #include "sensors/WindSensorRevC.h"
 
-// #ifndef nodeId
-// #define nodeId 1
-// #endif
-
-#ifndef NUM_SLOTS
-#define NUM_SLOTS 4
-#endif
-
-#ifndef SMARTFIRES_TDMA_RELIABILITY_MODE
-#define SMARTFIRES_TDMA_RELIABILITY_MODE 0
-#endif
-
-#ifndef SMARTFIRES_STATUS_INTERVAL_MS
-#define SMARTFIRES_STATUS_INTERVAL_MS (15UL * 60UL * 1000UL)
-#endif
-
 namespace {
 
-constexpr uint8_t kBaseRadioAddr = 0x01;
 constexpr uint8_t kUnassignedNodeId = 0x00;
-
-TdmaReliabilityMode telemetryReliabilityMode() {
-  return tdmaReliabilityModeFromValue(SMARTFIRES_TDMA_RELIABILITY_MODE);
-}
 
 const char *reliabilityModeName(TdmaReliabilityMode mode) {
   switch (mode) {
@@ -116,31 +97,23 @@ uint8_t makeInitialRadioAddr(uint32_t uidHash) {
   return addr;
 }
 
-TdmaConfig makeNodeTdmaCfg(uint8_t numSlots) {
-  TdmaConfig cfg =
-      TdmaConfig::tdmaCfg(kUnassignedNodeId, kBaseRadioAddr, numSlots);
-  cfg.reliabilityMode = telemetryReliabilityMode();
-  cfg.enableLinkAck =
-      (cfg.reliabilityMode == TdmaReliabilityMode::StrictLinkAck);
-  cfg.maxRetries = 3;
-  cfg.ackTimeoutMs = 250;
-  cfg.queueDepth = 8;
-  cfg.reliabilityWindowDepth = 8;
-  cfg.reliabilityMaxAgeMs = 30000;
-  cfg.expectedAckIntervalMs = 4000;
-  cfg.retryWaitMultiplierPermille = 2000;
-  cfg.retryWaitMinMs = 4500;
-  cfg.retryWaitMaxMs = 10000;
-  cfg.requireAckSummaryBeforeFirstRetry = false;
-  return cfg;
-}
-
-RadioHeadTdmaDriver::Config makeNodeRadioCfg(uint8_t radioAddr,
-                                             uint16_t ackTimeoutMs) {
-  RadioHeadTdmaDriver::Config cfg =
-      RadioHeadTdmaDriver::Config::radioHeadCfg(radioAddr);
-  cfg.timeoutMs = ackTimeoutMs;
-  return cfg;
+// Boot-time validation: warns if a sensor's own minSamplePeriodMs floor
+// (config/SensingConfig.h) is slower than the duty-cycle cadence actually
+// driving it (config/SensingConfig.h's DutyCycle::kContinuousSamplePeriodMs).
+// This is not necessarily a bug — a sensor slower than the master loop
+// simply won't produce a fresh sample on every cycle, by design — but it
+// was previously impossible to even check, since the two values lived in
+// unrelated files with no comparison between them.
+void logSensorFloorVsCadence(const char *sensorName, uint32_t minSamplePeriodMs) {
+  if (minSamplePeriodMs > SensingConfig::DutyCycle::kContinuousSamplePeriodMs) {
+    LOG_WARN("sensing",
+             "sensor_floor_above_cadence sensor=%s min_period_ms=%lu "
+             "cadence_ms=%lu (expected if intentional; sensor will not "
+             "produce a fresh sample on every cycle)",
+             sensorName, static_cast<unsigned long>(minSamplePeriodMs),
+             static_cast<unsigned long>(
+                 SensingConfig::DutyCycle::kContinuousSamplePeriodMs));
+  }
 }
 
 } // namespace
@@ -159,22 +132,17 @@ constexpr uint8_t PIN_WIND_RV = A1;
 constexpr uint8_t PIN_WIND_TMP = A2;
 constexpr uint8_t PIN_WIND_ENABLE = A3;
 
-constexpr float WIND_DIVIDER_RATIO = 1.6818f;
-
 TPSDriver::Config windPowerCfg = TPSDriver::Config::make(PIN_WIND_ENABLE, true);
 
 TPSDriver windPower(windPowerCfg);
 
-WindSensorRevC::Config windCfg = WindSensorRevC::Config::makeRevCCfg(
-    PIN_WIND_RV, PIN_WIND_TMP,
-    3.3f,               // Feather ADC reference voltage
-    1023,               // 10-bit ADC by default
-    WIND_DIVIDER_RATIO, // RV divider reconstruction
-    WIND_DIVIDER_RATIO, // TMP divider reconstruction
-    -1.0f,              // zero-wind adjustment, calibrate later
-    10,                 // minSamplePeriodMs
-    10000,              // wakeDelayMs for hot-wire/TPS settling
-    SensorDutyClass::DutyCycled);
+// Pins are board wiring, passed explicitly; every other field now comes
+// from config/SensingConfig.h's Wind namespace via makeRevCCfg()'s own
+// defaults (verified identical to the values this call used to override by
+// hand: divider ratio 1.6818, zero-wind adjustment -1.0 V, 10 ms sample
+// floor, 10000 ms hot-wire/TPS settling wake delay).
+WindSensorRevC::Config windCfg =
+    WindSensorRevC::Config::makeRevCCfg(PIN_WIND_RV, PIN_WIND_TMP);
 
 WindSensorRevC wind(windCfg, analog, windPower, clock);
 
@@ -223,21 +191,28 @@ DutyCycleController duty(dutyCfg, sht31, sensors, sensorCount, clock, battery);
 // Networking
 // -----------------------------------------------------------------------------
 
-constexpr uint8_t numSlots = NUM_SLOTS;
+constexpr uint8_t numSlots = NetworkConfig::kNumSlots;
 const uint32_t nodeUidHash = BoardIdentity::hash32();
 const uint8_t initialRadioAddr = makeInitialRadioAddr(nodeUidHash);
 
 PacketHandler::Config packetHandlerCfg = PacketHandler::Config::make(
     kUnassignedNodeId, BinaryPacket::kBundleMaxDeltas,
-    SMARTFIRES_STATUS_INTERVAL_MS);
+    NetworkConfig::kStatusIntervalMs);
 PacketHandler packetHandler(packetHandlerCfg);
 
-TdmaConfig tdmaCfg = makeNodeTdmaCfg(numSlots);
+// Single named profile from config/NetworkConfig.h — replaces the old
+// makeNodeTdmaCfg() helper, which built a TdmaConfig from TdmaConfig's own
+// (unused-in-practice) defaults and then re-assigned 11 fields by hand.
+TdmaConfig tdmaCfg = NetworkConfig::nodeTdmaProfile();
 TdmaClock tdmaClock(tdmaCfg, clock);
 TdmaTxQueue tdmaQueue(tdmaCfg.queueDepth);
 
+// radioHeadCfg() now sources every field besides `address` from
+// NetworkConfig.h directly, so there is no separate makeNodeRadioCfg()
+// wrapper threading tdmaCfg.ackTimeoutMs into it by hand anymore — both
+// already come from the same NetworkConfig::kLinkAckTimeoutMs constant.
 RadioHeadTdmaDriver::Config radioDriverCfg =
-    makeNodeRadioCfg(initialRadioAddr, tdmaCfg.ackTimeoutMs);
+    RadioHeadTdmaDriver::Config::radioHeadCfg(initialRadioAddr);
 RadioHeadTdmaDriver radioDriver(radioDriverCfg);
 
 TdmaRadioService tdmaRadio(tdmaCfg, tdmaClock, tdmaQueue, radioDriver);
@@ -392,6 +367,15 @@ void setup() {
   LOG_INFO(
       "packet", "status_interval_min=%lu",
       static_cast<unsigned long>(packetHandlerCfg.statusIntervalMs / 60000UL));
+
+  LOG_INFO("sensing", "cadence_ms=%lu",
+           static_cast<unsigned long>(
+               SensingConfig::DutyCycle::kContinuousSamplePeriodMs));
+  logSensorFloorVsCadence("sht31", sht31Cfg.minSamplePeriodMs);
+  logSensorFloorVsCadence("wind", windCfg.minSamplePeriodMs);
+  logSensorFloorVsCadence("gps", gpsCfg.minSamplePeriodMs);
+  logSensorFloorVsCadence("imu", imuCfg.minSamplePeriodMs);
+  logSensorFloorVsCadence("sps30", sps30Cfg.minSamplePeriodMs);
 
   if (!app.begin()) {
     LOG_INFO("boot", "smart_fires_app_status=%d", 1);

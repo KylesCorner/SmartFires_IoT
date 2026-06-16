@@ -1,5 +1,6 @@
 #pragma once
 
+#include "config/NetworkConfig.h"
 #include "radio/ITdmaRadioDriver.h"
 #include <Arduino.h>
 #include <RHReliableDatagram.h>
@@ -18,22 +19,23 @@ public:
     uint16_t timeoutMs;
     uint16_t cadTimeoutMs;
 
-    static RadioHeadTdmaDriver::Config
-    radioHeadCfg(uint8_t address_ = 1, uint8_t csPin_ = 8, uint8_t intPin_ = 3,
-                 uint8_t rstPin_ = 4, float frequencyMhz_ = 915.0f,
-                 int8_t txPowerDbm_ = 13, uint8_t retries_ = 1,
-                 uint16_t timeoutMs_ = 100, uint16_t cadTimeoutMs_ = 10) {
-
+    // Thin wrapper: every field besides `address` (which varies per board,
+    // assigned from uid_hash) comes straight from config/NetworkConfig.h.
+    // `retries`/`timeoutMs` are the same NetworkConfig::kLinkRetries /
+    // kLinkAckTimeoutMs constants that TdmaConfig::maxRetries/ackTimeoutMs
+    // use, so the two can no longer drift apart the way they used to when
+    // main.cpp threaded one into the other by hand.
+    static RadioHeadTdmaDriver::Config radioHeadCfg(uint8_t address_) {
       RadioHeadTdmaDriver::Config cfg;
       cfg.address = address_;
-      cfg.csPin = csPin_;
-      cfg.intPin = intPin_;
-      cfg.rstPin = rstPin_;
-      cfg.frequencyMhz = frequencyMhz_;
-      cfg.txPowerDbm = txPowerDbm_;
-      cfg.retries = retries_;
-      cfg.timeoutMs = timeoutMs_;
-      cfg.cadTimeoutMs = cadTimeoutMs_;
+      cfg.csPin = NetworkConfig::kRadioCsPin;
+      cfg.intPin = NetworkConfig::kRadioIntPin;
+      cfg.rstPin = NetworkConfig::kRadioRstPin;
+      cfg.frequencyMhz = NetworkConfig::kRadioFrequencyMhz;
+      cfg.txPowerDbm = NetworkConfig::kRadioTxPowerDbm;
+      cfg.retries = NetworkConfig::kLinkRetries;
+      cfg.timeoutMs = NetworkConfig::kLinkAckTimeoutMs;
+      cfg.cadTimeoutMs = NetworkConfig::kRadioCadTimeoutMs;
       return cfg;
     }
   };

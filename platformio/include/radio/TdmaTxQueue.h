@@ -1,5 +1,6 @@
 #pragma once
 
+#include "config/NetworkConfig.h"
 #include "radio/TdmaConfig.h"
 
 #include <stddef.h>
@@ -12,7 +13,10 @@ public:
     uint8_t len = 0;
   };
 
-  static constexpr uint8_t MaxDepth = 8;
+  // Compile-time capacity ceiling. Single source: NetworkConfig.h's
+  // kQueueCapacityHardCap, so the operating kQueueDepth value and this cap
+  // can never silently diverge.
+  static constexpr uint8_t MaxDepth = NetworkConfig::kQueueCapacityHardCap;
 
   explicit TdmaTxQueue(uint8_t depth = 4);
 

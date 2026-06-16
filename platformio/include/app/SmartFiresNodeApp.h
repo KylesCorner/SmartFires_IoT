@@ -1,5 +1,6 @@
 #pragma once
 
+#include "config/NetworkConfig.h"
 #include "interfaces/IClock.h"
 #include "interfaces/ISensor.h"
 #include "power/BatteryMonitor.h"
@@ -42,7 +43,7 @@ public:
     void update();
 
 private:
-    static constexpr uint32_t kAwakenIntervalMs = 5000;  // re-send AWAKEN every 5 s until sync
+    static constexpr uint32_t kAwakenIntervalMs = NetworkConfig::kAwakenIntervalMs;
     static constexpr uint8_t kCalStatusSuccess = 0x00;
 
     Config _cfg;

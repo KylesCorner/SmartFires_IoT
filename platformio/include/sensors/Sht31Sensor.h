@@ -1,5 +1,6 @@
 #pragma once
 
+#include "config/SensingConfig.h"
 #include "drivers/ISht31Driver.h"
 #include "interfaces/IClock.h"
 #include "interfaces/ISensor.h"
@@ -15,9 +16,13 @@ public:
     uint8_t address;
     uint32_t minSamplePeriodMs;
     SensorDutyClass dutyClass;
-    static Sht31Sensor::Config
-    makeSht31Cfg(uint8_t address_ = 0x45, uint32_t minSamplesPeriodMs_ = 100,
-                 SensorDutyClass dutyClass_ = SensorDutyClass::AlwaysOn) {
+
+    // Thin wrapper: defaults come from config/SensingConfig.h's Sht31
+    // namespace (this sensor's own independently-tuned values).
+    static Sht31Sensor::Config makeSht31Cfg(
+        uint8_t address_ = SensingConfig::Sht31::kAddress,
+        uint32_t minSamplesPeriodMs_ = SensingConfig::Sht31::kMinSamplePeriodMs,
+        SensorDutyClass dutyClass_ = SensingConfig::Sht31::kDutyClass) {
       Sht31Sensor::Config cfg;
       cfg.address = address_;
       cfg.minSamplePeriodMs = minSamplesPeriodMs_;

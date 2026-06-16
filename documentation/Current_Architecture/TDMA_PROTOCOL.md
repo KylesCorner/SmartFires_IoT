@@ -29,6 +29,9 @@ enforce TDMA — only nodes respect slot boundaries.
    20 ms     860 ms     20 ms     860 ms
 ```
 
+> **Authoritative values:** `platformio/include/config/NetworkConfig.h`.
+> For the full parameter table see [TUNABLE_PARAMETERS.md](TUNABLE_PARAMETERS.md#network-and-tdma).
+
 | Parameter | Value | Notes |
 |---|---|---|
 | `slotWidthMs` | 900 ms | Fits worst-case 2×(313 ms TX + 100 ms ACK timeout) + 2×20 ms guard |

@@ -2,6 +2,17 @@ import argparse
 from pathlib import Path
 
 from smartfires_edge.cli import run_cli
+from smartfires_edge.config import (
+    DEFAULT_BAUD,
+    DEFAULT_PORT,
+    DEFAULT_SYNC_INTERVAL_S,
+    DEFAULT_TELEMETRY_ROWS,
+    DEFAULT_WEB_HOST,
+    DEFAULT_WEB_HTTP_PORT,
+    EdgeConfig,
+    add_anemometer_args,
+    add_common_ingest_args,
+)
 from smartfires_edge.ingest_service import run_receive
 from smartfires_edge.packet_loss import print_summary
 from smartfires_edge.visualize_service import run_visualize
@@ -12,49 +23,49 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="smartfires-edge")
     sub = p.add_subparsers(dest="command", required=True)
 
+    # ------------------------------------------------------------------
+    # receive — UART ingest + durable CSV logging
+    # ------------------------------------------------------------------
     recv = sub.add_parser("receive", help="Run UART ingest and durable CSV logging")
-    recv.add_argument("--port", default="/dev/ttyTHS1")
-    recv.add_argument("--baud", type=int, default=115200)
-    recv.add_argument("--data-dir", type=Path, default=Path("/mnt/nvme_drive/data"))
-    recv.add_argument("--nodes", nargs="+", type=int, default=[1, 2])
-    recv.add_argument("--metrics-interval", type=int, default=10)
-    recv.add_argument("--sync-interval", type=int, default=600)
-    recv.add_argument("--fsync-every-row", action="store_true")
-    recv.add_argument("--raw-log", action="store_true")
-    recv.add_argument("--anemometer-port", default=None)
-    recv.add_argument("--anemometer-baud", type=int, default=9600)
-    recv.add_argument("--anemometer-address", type=int, default=1)
-    recv.add_argument("--anemometer-interval", type=float, default=1.0)
+    add_common_ingest_args(recv)
+    add_anemometer_args(recv)
 
+    # ------------------------------------------------------------------
+    # summary — print current packet-loss summary from saved state
+    # ------------------------------------------------------------------
     summary = sub.add_parser("summary", help="Print current packet-loss summary")
     summary.add_argument("--data-dir", type=Path, default=Path("/mnt/nvme_drive/data"))
 
+    # ------------------------------------------------------------------
+    # visualize — live terminal telemetry/status tables
+    # ------------------------------------------------------------------
     visualize = sub.add_parser("visualize", help="Render live telemetry/status tables")
-    visualize.add_argument("--port", default="/dev/ttyTHS1")
-    visualize.add_argument("--baud", type=int, default=115200)
-    visualize.add_argument("--sync-interval", type=int, default=600)
-    visualize.add_argument("--telemetry-rows", type=int, default=20)
+    visualize.add_argument("--port", default=DEFAULT_PORT)
+    visualize.add_argument("--baud", type=int, default=DEFAULT_BAUD)
+    visualize.add_argument(
+        "--sync-interval",
+        type=int,
+        default=DEFAULT_SYNC_INTERVAL_S,
+        metavar="SEC",
+    )
+    visualize.add_argument("--telemetry-rows", type=int, default=DEFAULT_TELEMETRY_ROWS)
 
+    # ------------------------------------------------------------------
+    # cli — interactive curses CLI for calibrate/reset commands
+    # ------------------------------------------------------------------
     cli = sub.add_parser("cli", help="Interactive Jetson CLI")
-    cli.add_argument("--port", default="/dev/ttyTHS1")
-    cli.add_argument("--baud", type=int, default=115200)
+    cli.add_argument("--port", default=DEFAULT_PORT)
+    cli.add_argument("--baud", type=int, default=DEFAULT_BAUD)
     cli.add_argument("--session-file", type=Path, default=None)
 
+    # ------------------------------------------------------------------
+    # web — UART ingest + live FastAPI/uvicorn web dashboard
+    # ------------------------------------------------------------------
     web = sub.add_parser("web", help="Run UART ingest + live web dashboard")
-    web.add_argument("--port", default="/dev/ttyTHS1")
-    web.add_argument("--baud", type=int, default=115200)
-    web.add_argument("--data-dir", type=Path, default=Path("/mnt/nvme_drive/data"))
-    web.add_argument("--nodes", nargs="+", type=int, default=[1, 2])
-    web.add_argument("--metrics-interval", type=int, default=10)
-    web.add_argument("--sync-interval", type=int, default=600)
-    web.add_argument("--fsync-every-row", action="store_true")
-    web.add_argument("--raw-log", action="store_true")
-    web.add_argument("--anemometer-port", default=None)
-    web.add_argument("--anemometer-baud", type=int, default=9600)
-    web.add_argument("--anemometer-address", type=int, default=1)
-    web.add_argument("--anemometer-interval", type=float, default=1.0)
-    web.add_argument("--host", default="0.0.0.0")
-    web.add_argument("--http-port", type=int, default=8080)
+    add_common_ingest_args(web)
+    add_anemometer_args(web)
+    web.add_argument("--host", default=DEFAULT_WEB_HOST)
+    web.add_argument("--http-port", type=int, default=DEFAULT_WEB_HTTP_PORT)
 
     return p
 
@@ -64,32 +75,16 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.command == "receive":
-        return run_receive(
-            port=args.port,
-            baud=args.baud,
-            data_dir=args.data_dir,
-            nodes=args.nodes,
-            metrics_interval_s=args.metrics_interval,
-            sync_interval_s=args.sync_interval,
-            fsync_every_row=args.fsync_every_row,
-            raw_log=args.raw_log,
-            anemometer_port=args.anemometer_port,
-            anemometer_baud=args.anemometer_baud,
-            anemometer_address=args.anemometer_address,
-            anemometer_interval_s=args.anemometer_interval,
-        )
+        cfg = EdgeConfig.from_args(args, subcommand="receive")
+        return run_receive(cfg.ingest)
 
     if args.command == "summary":
         print_summary(args.data_dir)
         return 0
 
     if args.command == "visualize":
-        return run_visualize(
-            port=args.port,
-            baud=args.baud,
-            sync_interval_s=args.sync_interval,
-            telemetry_rows_max=max(1, int(args.telemetry_rows)),
-        )
+        cfg = EdgeConfig.from_args(args, subcommand="visualize")
+        return run_visualize(cfg)
 
     if args.command == "cli":
         return run_cli(
@@ -99,22 +94,8 @@ def main() -> int:
         )
 
     if args.command == "web":
-        return run_web(
-            port=args.port,
-            baud=args.baud,
-            data_dir=args.data_dir,
-            nodes=args.nodes,
-            metrics_interval_s=args.metrics_interval,
-            sync_interval_s=args.sync_interval,
-            fsync_every_row=args.fsync_every_row,
-            raw_log=args.raw_log,
-            anemometer_port=args.anemometer_port,
-            anemometer_baud=args.anemometer_baud,
-            anemometer_address=args.anemometer_address,
-            anemometer_interval_s=args.anemometer_interval,
-            host=args.host,
-            http_port=args.http_port,
-        )
+        cfg = EdgeConfig.from_args(args, subcommand="web")
+        return run_web(cfg)
 
     parser.error("Unknown command")
     return 2

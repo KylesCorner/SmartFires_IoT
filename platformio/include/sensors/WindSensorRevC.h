@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include "config/SensingConfig.h"
 #include "interfaces/IAnalogReader.h"
 #include "interfaces/IClock.h"
 #include "interfaces/ISensor.h"
@@ -60,17 +61,25 @@ public:
 
     SensorDutyClass dutyClass = SensorDutyClass::DutyCycled;
 
+    // Thin wrapper: defaults come from config/SensingConfig.h's Wind
+    // namespace, which holds this sensor's own independently-tuned values
+    // (these are the values that actually ship — main.cpp used to
+    // re-override several of them by hand at the call site instead of the
+    // factory's own bare defaults representing real flight values).
+    // pinRv_/pinTmp_ stay as explicit parameters since they're board wiring,
+    // not a tuning value.
     static Config makeRevCCfg(uint8_t pinRv_ = 1,
                               uint8_t pinTmp_ = 2,
-                              float adcRefVolts_ = 3.3f,
-                              uint16_t adcMax_ = 1023,
-                              float rvDividerRatio_ = 1.0f,
-                              float tmpDividerRatio_ = 1.0f,
-                              float zeroWindAdjustmentVolts_ = 0.20f,
-                              uint32_t minSamplePeriodMs_ = 10,
-                              uint32_t wakeDelayMs_ = 2000,
-                              SensorDutyClass dutyClass_ =
-                                  SensorDutyClass::DutyCycled) {
+                              float adcRefVolts_ = SensingConfig::Wind::kAdcRefVolts,
+                              uint16_t adcMax_ = SensingConfig::Wind::kAdcMax,
+                              float rvDividerRatio_ = SensingConfig::Wind::kDividerRatio,
+                              float tmpDividerRatio_ = SensingConfig::Wind::kDividerRatio,
+                              float zeroWindAdjustmentVolts_ =
+                                  SensingConfig::Wind::kZeroWindAdjustmentVolts,
+                              uint32_t minSamplePeriodMs_ =
+                                  SensingConfig::Wind::kMinSamplePeriodMs,
+                              uint32_t wakeDelayMs_ = SensingConfig::Wind::kWakeDelayMs,
+                              SensorDutyClass dutyClass_ = SensingConfig::Wind::kDutyClass) {
       Config cfg;
       cfg.pinRv = pinRv_;
       cfg.pinTmp = pinTmp_;

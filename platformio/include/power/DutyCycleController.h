@@ -1,5 +1,6 @@
 #pragma once
 
+#include "config/SensingConfig.h"
 #include "interfaces/IClock.h"
 #include "interfaces/ISensor.h"
 
@@ -40,15 +41,22 @@ struct DutyCycleConfig {
   bool failOnSampleError;
   bool enabled;
 
+  // Threshold-triggered profile (DutyCyclePhase wake/sleep state machine).
+  // Not used by any build today — kept available as a documented alternate
+  // operating mode. Defaults come from config/SensingConfig.h's
+  // DutyCycle::kThreshold* constants (single source; values unchanged from
+  // before this consolidation, including the carried-over samplePeriodMs
+  // "//TEMP" marker).
   static DutyCycleConfig dutyCycleCfg(
-                                      bool enabled_ = true,uint32_t minSleepMs_ = 3000,
-                                      uint32_t maxWakeMs_ = 1000,
-                                      uint32_t activeSampleMs_ = 30000,
-                                      uint32_t samplePeriodMs_ = 50000, //TEMP
-                                      uint32_t warmupMs_ = 10000,
-                                      float tempDeltaThresholdC_ = 1.0f,
-                                      float humidityDeltaThresholdPct_ = 5.0f,
-                                      bool failOnSampleError_ = false) {
+      bool enabled_ = SensingConfig::DutyCycle::kThresholdEnabled,
+      uint32_t minSleepMs_ = SensingConfig::DutyCycle::kThresholdMinSleepMs,
+      uint32_t maxWakeMs_ = SensingConfig::DutyCycle::kThresholdMaxWakeMs,
+      uint32_t activeSampleMs_ = SensingConfig::DutyCycle::kThresholdActiveSampleMs,
+      uint32_t samplePeriodMs_ = SensingConfig::DutyCycle::kThresholdSamplePeriodMs,
+      uint32_t warmupMs_ = SensingConfig::DutyCycle::kThresholdWarmupMs,
+      float tempDeltaThresholdC_ = SensingConfig::DutyCycle::kThresholdTempDeltaThresholdC,
+      float humidityDeltaThresholdPct_ = SensingConfig::DutyCycle::kThresholdHumidityDeltaThresholdPct,
+      bool failOnSampleError_ = SensingConfig::DutyCycle::kThresholdFailOnSampleError) {
     DutyCycleConfig cfg;
     cfg.minSleepMs = minSleepMs_;
     cfg.maxWakeMs = maxWakeMs_;
@@ -63,15 +71,19 @@ struct DutyCycleConfig {
     return cfg;
   }
 
+  // Continuous profile — what every production node build ships today
+  // (called with no arguments from main.cpp). Defaults come from
+  // config/SensingConfig.h's DutyCycle::kContinuous* constants.
   static DutyCycleConfig dutyCycleCfgContinuous(
-                                      bool enabled_ = false ,uint32_t minSleepMs_ = 0,
-                                      uint32_t maxWakeMs_ = 0,
-                                      uint32_t activeSampleMs_ = 0,
-                                      uint32_t samplePeriodMs_ = 500,
-                                      uint32_t warmupMs_ = 10000,
-                                      float tempDeltaThresholdC_ = 0,
-                                      float humidityDeltaThresholdPct_ = 0,
-                                      bool failOnSampleError_ = false) {
+      bool enabled_ = SensingConfig::DutyCycle::kContinuousEnabled,
+      uint32_t minSleepMs_ = SensingConfig::DutyCycle::kContinuousMinSleepMs,
+      uint32_t maxWakeMs_ = SensingConfig::DutyCycle::kContinuousMaxWakeMs,
+      uint32_t activeSampleMs_ = SensingConfig::DutyCycle::kContinuousActiveSampleMs,
+      uint32_t samplePeriodMs_ = SensingConfig::DutyCycle::kContinuousSamplePeriodMs,
+      uint32_t warmupMs_ = SensingConfig::DutyCycle::kContinuousWarmupMs,
+      float tempDeltaThresholdC_ = SensingConfig::DutyCycle::kContinuousTempDeltaThresholdC,
+      float humidityDeltaThresholdPct_ = SensingConfig::DutyCycle::kContinuousHumidityDeltaThresholdPct,
+      bool failOnSampleError_ = SensingConfig::DutyCycle::kContinuousFailOnSampleError) {
     DutyCycleConfig cfg;
     cfg.minSleepMs = minSleepMs_;
     cfg.maxWakeMs = maxWakeMs_;
