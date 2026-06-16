@@ -11,6 +11,7 @@ import serial
 
 from smartfires_edge.anemometer import AnemometerPoller
 from smartfires_edge.csv_logger import DurableCsvLogger
+from smartfires_edge.live_state import LiveState
 from smartfires_edge.packet import (
     PKT_AWAKEN,
     PKT_BUNDLE,
@@ -112,6 +113,7 @@ def run_receive(
     anemometer_baud: int,
     anemometer_address: int,
     anemometer_interval_s: float,
+    live_state: LiveState | None = None,
 ) -> int:
     telemetry_dir = data_dir / "telemetry"
     metrics_dir = data_dir / "metrics"
@@ -120,6 +122,8 @@ def run_receive(
 
     logger = DurableCsvLogger(telemetry_dir, fsync_every_row=fsync_every_row)
     tracker = PacketLossTracker(nodes)
+    if live_state is not None:
+        live_state.tracker = tracker
     node_gps: dict[int, tuple[float, float]] = {}
     sync_state = {"next_seq": 0}
     session_manager = SessionManager()
@@ -266,6 +270,8 @@ def run_receive(
                 )
                 _append_jsonl(status_path, status_row)
                 logger.write_row(status_row)
+                if live_state is not None:
+                    live_state.record_status(status)
                 print(
                     f"[STATUS] node={status_row['node_id']} seq={status_row['seq']} "
                     f"gps_valid={status_row['gps_valid']} batt_valid={status_row['battery_valid']} "
@@ -330,6 +336,8 @@ def run_receive(
                     seq=int(pkt["seq"]),
                     rssi=int(pkt["rssi"]),
                 )
+                if live_state is not None:
+                    live_state.record_telemetry(pkt)
 
                 if raw_log:
                     raw_path = (

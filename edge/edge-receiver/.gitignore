@@ -1,2 +1,6 @@
 **/__pycache__/
 *.egg-info/
+
+# Offline map tile pyramid is prepared locally per-deployment, not committed.
+src/smartfires_edge/web/tiles/*
+!src/smartfires_edge/web/tiles/README.md

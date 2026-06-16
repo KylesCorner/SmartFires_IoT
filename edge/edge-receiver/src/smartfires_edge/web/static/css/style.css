@@ -1,0 +1,164 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  background: #1b1f24;
+  color: #e6e6e6;
+}
+
+nav.topnav {
+  display: flex;
+  gap: 1rem;
+  padding: 0.75rem 1.5rem;
+  background: #11151a;
+  border-bottom: 1px solid #2a2f36;
+}
+
+nav.topnav a {
+  color: #aab4c0;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+nav.topnav a.active {
+  color: #ffffff;
+  border-bottom: 2px solid #e8743a;
+}
+
+main {
+  padding: 1rem 1.5rem;
+}
+
+h1, h2 {
+  font-weight: 600;
+  margin: 0 0 0.5rem 0;
+}
+
+.layout {
+  display: flex;
+  gap: 1.5rem;
+  align-items: flex-start;
+}
+
+.panel {
+  background: #20262d;
+  border: 1px solid #2a2f36;
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.left-panel {
+  flex: 2;
+  min-width: 0;
+}
+
+.right-panel {
+  flex: 1;
+  min-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+#sensor-chart {
+  background: #15191e;
+  border-radius: 6px;
+}
+
+.checkbox-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0.5rem 0 1rem 0;
+}
+
+.checkbox-row label {
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+#node-map, #history-map {
+  height: 320px;
+  border-radius: 6px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+table th, table td {
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid #2a2f36;
+}
+
+table th {
+  color: #aab4c0;
+  font-weight: 600;
+}
+
+.base-station-form {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.base-station-form input {
+  width: 7rem;
+  background: #15191e;
+  color: #e6e6e6;
+  border: 1px solid #2a2f36;
+  border-radius: 4px;
+  padding: 0.25rem 0.4rem;
+}
+
+.base-station-form button {
+  background: #e8743a;
+  color: #15191e;
+  border: none;
+  border-radius: 4px;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.reception-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.reception-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.reception-row .node-label {
+  width: 4.5rem;
+  font-size: 0.8rem;
+  color: #aab4c0;
+  flex-shrink: 0;
+}
+
+.reception-bins {
+  display: flex;
+  gap: 2px;
+  flex: 1;
+}
+
+.reception-bin {
+  flex: 1;
+  height: 1.1rem;
+  background: #2a2f36;
+  border-radius: 2px;
+}

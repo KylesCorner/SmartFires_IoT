@@ -5,6 +5,7 @@ from smartfires_edge.cli import run_cli
 from smartfires_edge.ingest_service import run_receive
 from smartfires_edge.packet_loss import print_summary
 from smartfires_edge.visualize_service import run_visualize
+from smartfires_edge.web_service import run_web
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -38,6 +39,22 @@ def build_parser() -> argparse.ArgumentParser:
     cli.add_argument("--port", default="/dev/ttyTHS1")
     cli.add_argument("--baud", type=int, default=115200)
     cli.add_argument("--session-file", type=Path, default=None)
+
+    web = sub.add_parser("web", help="Run UART ingest + live web dashboard")
+    web.add_argument("--port", default="/dev/ttyTHS1")
+    web.add_argument("--baud", type=int, default=115200)
+    web.add_argument("--data-dir", type=Path, default=Path("/mnt/nvme_drive/data"))
+    web.add_argument("--nodes", nargs="+", type=int, default=[1, 2])
+    web.add_argument("--metrics-interval", type=int, default=10)
+    web.add_argument("--sync-interval", type=int, default=600)
+    web.add_argument("--fsync-every-row", action="store_true")
+    web.add_argument("--raw-log", action="store_true")
+    web.add_argument("--anemometer-port", default=None)
+    web.add_argument("--anemometer-baud", type=int, default=9600)
+    web.add_argument("--anemometer-address", type=int, default=1)
+    web.add_argument("--anemometer-interval", type=float, default=1.0)
+    web.add_argument("--host", default="0.0.0.0")
+    web.add_argument("--http-port", type=int, default=8080)
 
     return p
 
@@ -79,6 +96,24 @@ def main() -> int:
             port=args.port,
             baud=args.baud,
             session_file=args.session_file,
+        )
+
+    if args.command == "web":
+        return run_web(
+            port=args.port,
+            baud=args.baud,
+            data_dir=args.data_dir,
+            nodes=args.nodes,
+            metrics_interval_s=args.metrics_interval,
+            sync_interval_s=args.sync_interval,
+            fsync_every_row=args.fsync_every_row,
+            raw_log=args.raw_log,
+            anemometer_port=args.anemometer_port,
+            anemometer_baud=args.anemometer_baud,
+            anemometer_address=args.anemometer_address,
+            anemometer_interval_s=args.anemometer_interval,
+            host=args.host,
+            http_port=args.http_port,
         )
 
     parser.error("Unknown command")

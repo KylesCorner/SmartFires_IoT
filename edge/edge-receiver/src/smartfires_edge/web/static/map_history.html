@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>SmartFires Dashboard — Map & History</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css" />
+</head>
+<body>
+  <main>
+    <div class="layout">
+      <section class="panel left-panel">
+        <h1>Signal Map</h1>
+        <div id="history-map"></div>
+
+        <h2>Reception Timeline</h2>
+        <div id="reception-grid" class="reception-grid"></div>
+      </section>
+
+      <section class="right-panel">
+        <div class="panel">
+          <h2>Link Quality</h2>
+          <table id="loss-table">
+            <thead>
+              <tr>
+                <th>Node</th>
+                <th>Loss %</th>
+                <th>Received</th>
+                <th>Missing</th>
+                <th>Retx</th>
+                <th>Fail</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script src="/static/vendor/leaflet/leaflet.js"></script>
+  <script src="/static/js/nav.js"></script>
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/map_history_page.js"></script>
+</body>
+</html>
