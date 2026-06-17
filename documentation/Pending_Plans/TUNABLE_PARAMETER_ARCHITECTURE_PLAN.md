@@ -8,7 +8,8 @@ firmware, base firmware, and Jetson edge receiver so that:
 1. Every tunable has exactly **one** place where its default lives.
 2. Related tunables are grouped by domain, not by which class happens to own
    them.
-3. Changing a value is a one-line edit with no hunting across files.
+3. Changing a value is a 
+one-line edit with no hunting across files.
 4. Invalid/incompatible combinations are caught at compile time (firmware) or
    startup (edge receiver) instead of in the field.
 
