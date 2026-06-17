@@ -274,6 +274,30 @@ void SmartFiresBaseApp::processIncomingLoRa() {
       LOG_INFO("base", "awaken_local_time_sync_result count=%lu result=%s",
                static_cast<unsigned long>(_awakenRxCount),
                syncOk ? "OK" : "FAIL");
+
+      uint8_t patched[BinaryPacket::kAwakenLoRaSize];
+      memcpy(patched, pkt.data, pkt.len);
+      if (assignment) {
+        patched[offsetof(BinaryPacket::PktHeader, node_id)] = assignment->nodeId;
+      }
+      uint8_t awakenFrame[2 + 1 + 1 + 255 + 1] = {};
+      const size_t awakenOutLen = BinaryPacket::encodeBaseFrame(
+          pkt.rssi, patched, pkt.len, awakenFrame, sizeof(awakenFrame));
+      if (awakenOutLen > 0) {
+        const size_t written = _jetsonUart.write(awakenFrame, awakenOutLen);
+        _rxForwardCount++;
+        LOG_INFO("base",
+                 "rx_fwd to=jetson type=AWAKEN seq=%u node=%u bytes=%u written=%u result=%s",
+                 static_cast<unsigned int>(hdr.seq),
+                 static_cast<unsigned int>(assignment ? assignment->nodeId : 0u),
+                 static_cast<unsigned int>(awakenOutLen),
+                 static_cast<unsigned int>(written),
+                 written == awakenOutLen ? "OK" : "PARTIAL");
+        LOG_DEBUG("base", "awaken_forwarded count=%lu bytes=%u",
+                  static_cast<unsigned long>(_awakenRxCount),
+                  static_cast<unsigned int>(awakenOutLen));
+      }
+      continue;
     } else if (validHeader && hdr.pkt_type == BinaryPacket::PKT_STATUS) {
       BinaryPacket::PktHeader statusHdr = {};
       BinaryPacket::StatusPayload status = {};
@@ -351,12 +375,6 @@ void SmartFiresBaseApp::processIncomingLoRa() {
              static_cast<unsigned int>(outLen),
              static_cast<unsigned int>(written),
              written == outLen ? "OK" : "PARTIAL");
-
-    if (validHeader && hdr.pkt_type == BinaryPacket::PKT_AWAKEN) {
-      LOG_DEBUG("base", "awaken_forwarded count=%lu bytes=%u",
-                static_cast<unsigned long>(_awakenRxCount),
-                static_cast<unsigned int>(outLen));
-    }
   }
 }
 

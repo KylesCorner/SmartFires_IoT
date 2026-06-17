@@ -90,10 +90,9 @@ const char *reliabilityModeName(TdmaReliabilityMode mode) {
 }
 
 uint8_t makeInitialRadioAddr(uint32_t uidHash) {
-  uint8_t addr = static_cast<uint8_t>(0x80u | (uidHash & 0x3Fu));
-  if (addr == 0xFFu) {
-    addr = 0x80u;
-  }
+  uint8_t addr = static_cast<uint8_t>(uidHash & 0xFFu);
+  if (addr == 0x00u) addr = 0x01u;
+  if (addr == 0xFFu) addr = 0xFEu;
   return addr;
 }
 
