@@ -23,6 +23,15 @@ const Api = {
       })
     ).json();
   },
+  async postCommand(command) {
+    return (
+      await fetch("/api/command", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command }),
+      })
+    ).json();
+  },
 };
 
 function fmt(value) {

@@ -24,7 +24,7 @@ def run_web(cfg: EdgeConfig) -> int:
 
     ingest_thread = threading.Thread(
         target=run_receive,
-        kwargs=dict(cfg=cfg.ingest, live_state=live_state),
+        kwargs=dict(cfg=cfg.ingest, live_state=live_state, log_fn=live_state.push_log),
         daemon=True,
     )
     ingest_thread.start()

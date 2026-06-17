@@ -8,6 +8,8 @@ const METRICS = [
   { key: "pm10_ug_m3", label: "PM10" },
 ];
 
+const LOG_MAX_LINES = 2000;
+
 const state = {
   selectedNodes: new Set(),
   knownNodes: new Set(),
@@ -18,6 +20,17 @@ const state = {
   baseMarker: null,
   mapFitted: false,
 };
+
+const logState = {
+  entries: [],        // {t, msg, node_id} — ring of up to LOG_MAX_LINES
+  activeTab: null,    // null = "All", number = specific node_id
+  knownNodeIds: new Set(),
+  ws: null,
+};
+
+// ---------------------------------------------------------------------------
+// Sensor chart
+// ---------------------------------------------------------------------------
 
 function buildMetricCheckboxes() {
   const container = document.getElementById("metric-checkboxes");
@@ -125,6 +138,10 @@ async function refreshChart() {
   state.chart.update();
 }
 
+// ---------------------------------------------------------------------------
+// Map
+// ---------------------------------------------------------------------------
+
 function initMap() {
   L.Icon.Default.imagePath = "/static/vendor/leaflet/images/";
   state.map = L.map("node-map").setView([0, 0], 2);
@@ -208,12 +225,125 @@ function wireBaseStationForm() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Log panel
+// ---------------------------------------------------------------------------
+
+function renderLogTabs() {
+  const container = document.getElementById("log-tabs");
+  container.innerHTML = "";
+
+  const tabs = [null, ...Array.from(logState.knownNodeIds).sort((a, b) => a - b)];
+  for (const tabId of tabs) {
+    const btn = document.createElement("button");
+    btn.className = "log-tab" + (logState.activeTab === tabId ? " active" : "");
+    btn.textContent = tabId === null ? "All" : `Node ${tabId}`;
+    btn.addEventListener("click", () => {
+      logState.activeTab = tabId;
+      renderLogTabs();
+      renderLogOutput();
+    });
+    container.appendChild(btn);
+  }
+}
+
+function renderLogOutput() {
+  const el = document.getElementById("log-output");
+  const active = logState.activeTab;
+  const visible = active === null
+    ? logState.entries
+    : logState.entries.filter((e) => e.node_id === active || e.node_id === null);
+
+  const atBottom = el.scrollHeight - el.scrollTop <= el.clientHeight + 4;
+  el.textContent = visible.map((e) => `${e.t.slice(11, 23)}  ${e.msg}`).join("\n");
+  if (atBottom) {
+    el.scrollTop = el.scrollHeight;
+  }
+}
+
+function onLogEntry(entry) {
+  logState.entries.push(entry);
+  if (logState.entries.length > LOG_MAX_LINES) {
+    logState.entries.splice(0, logState.entries.length - LOG_MAX_LINES);
+  }
+
+  let tabsChanged = false;
+  if (entry.node_id !== null && entry.node_id !== undefined && !logState.knownNodeIds.has(entry.node_id)) {
+    logState.knownNodeIds.add(entry.node_id);
+    tabsChanged = true;
+  }
+
+  if (tabsChanged) {
+    renderLogTabs();
+  }
+
+  const active = logState.activeTab;
+  if (active === null || entry.node_id === active || entry.node_id === null) {
+    const el = document.getElementById("log-output");
+    const atBottom = el.scrollHeight - el.scrollTop <= el.clientHeight + 4;
+    el.textContent += `${entry.t.slice(11, 23)}  ${entry.msg}\n`;
+    if (logState.entries.length > LOG_MAX_LINES) {
+      // Trim first line from the display too
+      const firstNewline = el.textContent.indexOf("\n");
+      if (firstNewline !== -1) {
+        el.textContent = el.textContent.slice(firstNewline + 1);
+      }
+    }
+    if (atBottom) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }
+}
+
+function connectLogSocket() {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(`${proto}//${location.host}/ws/log`);
+  logState.ws = ws;
+
+  ws.onmessage = (ev) => {
+    try {
+      onLogEntry(JSON.parse(ev.data));
+    } catch (_) {}
+  };
+
+  ws.onclose = () => {
+    logState.ws = null;
+    setTimeout(connectLogSocket, 2000);
+  };
+}
+
+function wireCommandInput() {
+  const input = document.getElementById("cmd-input");
+  const btn = document.getElementById("cmd-send");
+
+  async function sendCommand() {
+    const cmd = input.value.trim();
+    if (!cmd) return;
+    input.value = "";
+    try {
+      await Api.postCommand(cmd);
+    } catch (_) {}
+  }
+
+  btn.addEventListener("click", sendCommand);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") sendCommand();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Init
+// ---------------------------------------------------------------------------
+
 async function init() {
   renderNav(window.location.pathname);
   buildMetricCheckboxes();
   initChart();
   initMap();
   wireBaseStationForm();
+  renderLogTabs();
+  connectLogSocket();
+  wireCommandInput();
   await pollNodes();
   await refreshChart();
   setInterval(pollNodes, 2000);

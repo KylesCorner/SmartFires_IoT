@@ -1,6 +1,7 @@
 import threading
 import time
 from collections import deque
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from smartfires_edge.packet_loss import PacketLossTracker
@@ -33,6 +34,32 @@ class LiveState:
         self.tracker: Optional[PacketLossTracker] = None
         self._session_start_retx: dict[int, int] = {}
         self._session_start_fail: dict[int, int] = {}
+        self._log_ring: deque[dict] = deque(maxlen=2000)
+        self._log_lock = threading.Lock()
+        self._log_total = 0
+
+    def push_log(self, msg: str, node_id: int | None = None) -> None:
+        with self._log_lock:
+            self._log_ring.append({
+                "t": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+                "msg": msg,
+                "node_id": node_id,
+            })
+            self._log_total += 1
+
+    def drain_log(self, since_idx: int) -> tuple[list[dict], int]:
+        """Return log entries after since_idx and the new cursor.
+
+        Uses a monotonic total counter so the index stays valid across ring
+        evictions — callers that trail behind get all currently-retained entries.
+        """
+        with self._log_lock:
+            items = list(self._log_ring)
+            total = self._log_total
+        oldest_idx = total - len(items)
+        if since_idx <= oldest_idx:
+            return items, total
+        return items[since_idx - oldest_idx:], total
 
     def _events_for(self, node_id: int) -> deque:
         return self.reception_events.setdefault(node_id, deque(maxlen=500))

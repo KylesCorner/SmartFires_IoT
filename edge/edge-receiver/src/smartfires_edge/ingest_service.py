@@ -6,6 +6,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 import serial
 
@@ -23,6 +24,7 @@ from smartfires_edge.packet import (
 )
 from smartfires_edge.packet_loss import PacketLossTracker
 from smartfires_edge.session import SessionManager
+from smartfires_edge.session_meta import SessionMetaLogger
 from smartfires_edge.uart_receiver import iter_packets
 
 
@@ -55,6 +57,7 @@ def _send_time_sync(
     session_id: int,
     session_start: float,
     reason: str,
+    log_fn: Callable[[str, int | None], None],
     trigger_node: int | None = None,
     trigger_seq: int | None = None,
 ) -> bool:
@@ -77,7 +80,7 @@ def _send_time_sync(
         msg += f" trigger_node={trigger_node}"
     if trigger_seq is not None:
         msg += f" trigger_seq={trigger_seq}"
-    print(msg)
+    log_fn(msg, None)
     return True
 
 
@@ -88,6 +91,7 @@ def _time_sync_sender(
     session_id: int,
     session_start: float,
     interval_s: int,
+    log_fn: Callable[[str, int | None], None],
 ) -> None:
     while True:
         time.sleep(interval_s)
@@ -98,12 +102,14 @@ def _time_sync_sender(
             session_id=session_id,
             session_start=session_start,
             reason="periodic",
+            log_fn=log_fn,
         )
 
 
 def run_receive(
     cfg: IngestConfig,
     live_state: LiveState | None = None,
+    log_fn: Callable[[str, int | None], None] | None = None,
 ) -> int:
     """Run the UART ingest loop.
 
@@ -112,7 +118,12 @@ def run_receive(
              (single source of truth — no more 10-parameter call sites).
         live_state: Optional shared state object injected by ``web`` subcommand
                     for live dashboard updates.
+        log_fn: Optional log callback ``(msg, node_id)`` injected by ``web`` subcommand
+                to stream log lines to the browser. Defaults to plain ``print``.
     """
+    if log_fn is None:
+        log_fn = lambda msg, node_id=None: print(msg)  # noqa: E731
+
     telemetry_dir = cfg.data_dir / "telemetry"
     metrics_dir = cfg.data_dir / "metrics"
     raw_dir = cfg.data_dir / "raw"
@@ -129,6 +140,14 @@ def run_receive(
     session_id = random.randint(1, 0xFFFFFFFF)
     session_start = time.time()
 
+    session_meta = SessionMetaLogger(
+        session_id=session_id,
+        session_start=session_start,
+        port=cfg.port,
+        baud=cfg.baud,
+        data_dir=cfg.data_dir,
+    )
+
     anemometer: AnemometerPoller | None = None
     if cfg.anemometer.enabled:
         anemometer = AnemometerPoller(
@@ -142,18 +161,19 @@ def run_receive(
     state_path = metrics_dir / "packet_loss_state.json"
     last_metrics_write = 0.0
 
-    print(f"SmartFires edge receive")
-    print(f"Port: {cfg.port}  Baud: {cfg.baud}")
-    print(f"Data dir: {cfg.data_dir}")
-    print(f"Tracked nodes: {cfg.nodes}")
-    print(f"Session ID: 0x{session_id:08x}  TIME_SYNC interval: {cfg.sync_interval_s}s")
+    log_fn(f"SmartFires edge receive", None)
+    log_fn(f"Port: {cfg.port}  Baud: {cfg.baud}", None)
+    log_fn(f"Data dir: {cfg.data_dir}", None)
+    log_fn(f"Tracked nodes: {cfg.nodes}", None)
+    log_fn(f"Session ID: 0x{session_id:08x}  TIME_SYNC interval: {cfg.sync_interval_s}s", None)
     if cfg.anemometer.enabled:
-        print(
+        log_fn(
             "Anemometer: "
             f"{cfg.anemometer.port} @ {cfg.anemometer.baud} addr={cfg.anemometer.address} "
-            f"interval={cfg.anemometer.interval_s}s"
+            f"interval={cfg.anemometer.interval_s}s",
+            None,
         )
-    print()
+    log_fn("", None)
 
     try:
         sync_thread_started = False
@@ -163,7 +183,15 @@ def run_receive(
             if not sync_thread_started:
                 sync_thread = threading.Thread(
                     target=_time_sync_sender,
-                    args=(ser, write_lock, sync_state, session_id, session_start, cfg.sync_interval_s),
+                    args=(
+                        ser,
+                        write_lock,
+                        sync_state,
+                        session_id,
+                        session_start,
+                        cfg.sync_interval_s,
+                        log_fn,
+                    ),
                     daemon=True,
                 )
                 sync_thread.start()
@@ -176,9 +204,10 @@ def run_receive(
             hdr_seq = event.get("seq")
             pkt_type = event.get("pkt_type")
 
-            print(
+            log_fn(
                 f"[EDGE][LORA-RX] type={_pkt_type_name(pkt_type)} node={hdr_node} "
-                f"seq={hdr_seq} rssi={event.get('rssi')}"
+                f"seq={hdr_seq} rssi={event.get('rssi')}",
+                int(hdr_node) if hdr_node is not None else None,
             )
 
             if hdr_node is not None and hdr_seq is not None and pkt_type == PKT_AWAKEN:
@@ -186,12 +215,15 @@ def run_receive(
                 uid_hash = awaken.get("uid_hash")
                 if uid_hash is not None:
                     aw = session_manager.on_awaken(int(hdr_node), int(uid_hash))
-                    print(
-                        f"[EDGE][AWAKEN] node={aw['node_id']} uid=0x{aw['uid_hash']:08x}"
+                    session_meta.on_awaken(int(hdr_node), int(uid_hash))
+                    log_fn(
+                        f"[EDGE][AWAKEN] node={aw['node_id']} uid=0x{aw['uid_hash']:08x}",
+                        int(hdr_node),
                     )
-                print(
+                log_fn(
                     f"[EDGE][AWAKEN] node={hdr_node} seq={hdr_seq} "
-                    f"action=send_time_sync"
+                    f"action=send_time_sync",
+                    int(hdr_node),
                 )
                 _send_time_sync(
                     ser=ser,
@@ -200,6 +232,7 @@ def run_receive(
                     session_id=session_id,
                     session_start=session_start,
                     reason="awaken",
+                    log_fn=log_fn,
                     trigger_node=int(hdr_node),
                     trigger_seq=int(hdr_seq),
                 )
@@ -211,6 +244,7 @@ def run_receive(
                     session_id=session_id,
                     session_start=session_start,
                     reason="receiver_start",
+                    log_fn=log_fn,
                     trigger_node=int(hdr_node),
                     trigger_seq=int(hdr_seq),
                 ) if sync_state["next_seq"] == 0 else None
@@ -270,13 +304,14 @@ def run_receive(
                 logger.write_row(status_row)
                 if live_state is not None:
                     live_state.record_status(status)
-                print(
+                log_fn(
                     f"[STATUS] node={status_row['node_id']} seq={status_row['seq']} "
                     f"gps_valid={status_row['gps_valid']} batt_valid={status_row['battery_valid']} "
                     f"batt_mv={status_row['battery_mv']} rssi={status_row['rssi']} "
                     f"heading={status_row['heading_true_deg']} "
                     f"location_corrected_heading={status_row['location_corrected_heading']} "
-                    f"retx_total={status_row['retx_total']} fail_total={status_row['fail_total']}"
+                    f"retx_total={status_row['retx_total']} fail_total={status_row['fail_total']}",
+                    int(status_row["node_id"]) if status_row["node_id"] is not None else None,
                 )
 
             cmd_ack = event.get("cmd_ack")
@@ -302,12 +337,13 @@ def run_receive(
                     / f"status-{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.jsonl"
                 )
                 _append_jsonl(status_path, cmd_ack_row)
-                print(
+                log_fn(
                     "[CMD_ACK] "
                     f"node={cmd_ack_row['node_id']} seq={cmd_ack_row['seq']} "
                     f"cmd=0x{int(cmd_ack_row['cmd_type']):02x} "
                     f"uid=0x{int(cmd_ack_row['uid_hash']):08x} "
-                    f"status={cmd_ack_row['status']} rssi={cmd_ack_row['rssi']}"
+                    f"status={cmd_ack_row['status']} rssi={cmd_ack_row['rssi']}",
+                    int(cmd_ack_row["node_id"]) if cmd_ack_row["node_id"] is not None else None,
                 )
 
             for pkt in event.get("packets", []):
@@ -344,11 +380,12 @@ def run_receive(
                     )
                     _append_jsonl(raw_path, pkt)
 
-                print(
+                log_fn(
                     f"[RX] node={pkt['node_id']} seq={pkt['seq']:3d} "
                     f"T={pkt['temp_c']:5.1f}C H={pkt['humidity_pct']:4.1f}% "
                     f"wind={pkt['wind_mps']:.2f} PM2.5={pkt['pm2_5_ug_m3']:.1f} "
-                    f"rssi={pkt['rssi']:4d}"
+                    f"rssi={pkt['rssi']:4d}",
+                    int(pkt["node_id"]),
                 )
 
             now = time.monotonic()
@@ -357,7 +394,7 @@ def run_receive(
                 last_metrics_write = now
 
     except KeyboardInterrupt:
-        print("\nStopped by user.")
+        log_fn("\nStopped by user.", None)
     except Exception as exc:
         print(f"\n[FATAL] {exc}", file=sys.stderr)
         tracker.save(state_path)

@@ -1,7 +1,6 @@
 import argparse
 from pathlib import Path
 
-from smartfires_edge.cli import run_cli
 from smartfires_edge.config import (
     DEFAULT_BAUD,
     DEFAULT_PORT,
@@ -51,14 +50,6 @@ def build_parser() -> argparse.ArgumentParser:
     visualize.add_argument("--telemetry-rows", type=int, default=DEFAULT_TELEMETRY_ROWS)
 
     # ------------------------------------------------------------------
-    # cli — interactive curses CLI for calibrate/reset commands
-    # ------------------------------------------------------------------
-    cli = sub.add_parser("cli", help="Interactive Jetson CLI")
-    cli.add_argument("--port", default=DEFAULT_PORT)
-    cli.add_argument("--baud", type=int, default=DEFAULT_BAUD)
-    cli.add_argument("--session-file", type=Path, default=None)
-
-    # ------------------------------------------------------------------
     # web — UART ingest + live FastAPI/uvicorn web dashboard
     # ------------------------------------------------------------------
     web = sub.add_parser("web", help="Run UART ingest + live web dashboard")
@@ -85,13 +76,6 @@ def main() -> int:
     if args.command == "visualize":
         cfg = EdgeConfig.from_args(args, subcommand="visualize")
         return run_visualize(cfg)
-
-    if args.command == "cli":
-        return run_cli(
-            port=args.port,
-            baud=args.baud,
-            session_file=args.session_file,
-        )
 
     if args.command == "web":
         cfg = EdgeConfig.from_args(args, subcommand="web")

@@ -1,9 +1,11 @@
+import asyncio
 import csv
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -28,6 +30,10 @@ TELEMETRY_METRICS = {
 class BaseStationPayload(BaseModel):
     lat: float
     lon: float
+
+
+class CommandPayload(BaseModel):
+    command: str
 
 
 def _read_telemetry_history(
@@ -133,5 +139,22 @@ def create_app(
     @app.post("/api/base_station")
     def set_base_station(payload: BaseStationPayload) -> dict:
         return store.set(payload.lat, payload.lon)
+
+    @app.post("/api/command")
+    def post_command(payload: CommandPayload) -> dict:
+        return {"status": "queued", "command": payload.command}
+
+    @app.websocket("/ws/log")
+    async def websocket_log(ws: WebSocket) -> None:
+        await ws.accept()
+        idx = 0
+        try:
+            while True:
+                entries, idx = live_state.drain_log(idx)
+                for entry in entries:
+                    await ws.send_text(json.dumps(entry))
+                await asyncio.sleep(0.05)
+        except (WebSocketDisconnect, Exception):
+            pass
 
     return app
