@@ -2,9 +2,19 @@
 
 ## Problem
 
-The base station's `uid_hash → node_id` table is RAM-only (`_nodeAssignments`). After
-a base reboot, IDs are assigned in first-AWAKEN-first-served order. If nodes come up in
-a different order than the previous session, they receive different IDs, which corrupts
+Two related bugs cause nodes to converge on the same `node_id`:
+
+**Bug 1 — `initialRadioAddr` collision (runtime, reproducible):**
+`makeInitialRadioAddr` uses only the lower 6 bits of `uid_hash`, giving 64 possible
+temporary radio addresses (0x80–0xBF). If two boards' uid_hashes share the same lower
+6 bits they always get the same `initialRadioAddr`. The base then unicasts a TIME_SYNC
+to that address and both nodes receive it, both applying the same assigned `node_id`.
+This is the cause of "both nodes converging to the same id" during the boot handshake.
+
+**Bug 2 — Base assignment is RAM-only (across-reboot):**
+The base station's `uid_hash → node_id` table (`_nodeAssignments`) is lost on reboot.
+IDs are then re-assigned in first-AWAKEN-first-served order. If nodes come up in a
+different order than the previous session they receive different IDs, corrupting
 per-node data correlation in the Jetson's CSV and `session.json`.
 
 ### Existing state worth noting
@@ -16,14 +26,51 @@ time), so `on_awaken(0, uid_hash)` maps everything to node 0 and is effectively 
 
 ## Approach
 
-Three changes, layered bottom-up:
-
+Four changes, layered bottom-up:
+v
+0. **Fix `makeInitialRadioAddr`** — expand from 6-bit to 8-bit address space to
+   eliminate the radio address collision that causes both nodes to accept the same
+   assignment during the AWAKEN handshake.
 1. **Base firmware** — store the node's temporary radio address, and patch the forwarded
    AWAKEN UART frame so the Jetson sees the actual assigned `node_id`.
 2. **New command `CMD_REASSIGN`** — Jetson can instruct the base to move a node to a
    different `node_id` and push that correction to the node via a unicast TIME_SYNC.
 3. **Jetson** — maintain a permanent `node_registry.json`, detect mismatches on AWAKEN,
    send `CMD_REASSIGN` when needed.
+
+---
+
+## Change 0 — Fix `makeInitialRadioAddr` (single line, node firmware only)
+
+`platformio/src/main.cpp:92`:
+
+```cpp
+// Before: 6-bit space (64 values, 0x80–0xBF) — collision-prone
+uint8_t makeInitialRadioAddr(uint32_t uidHash) {
+    uint8_t addr = static_cast<uint8_t>(0x80u | (uidHash & 0x3Fu));
+    if (addr == 0xFFu) { addr = 0x80u; }  // dead code — can never reach 0xFF
+    return addr;
+}
+
+// After: 8-bit space (254 values) — avoids only reserved addresses
+uint8_t makeInitialRadioAddr(uint32_t uidHash) {
+    uint8_t addr = static_cast<uint8_t>(uidHash & 0xFF);
+    if (addr == 0x00u) addr = 0x01u;   // 0x00 = RH unassigned
+    if (addr == 0xFFu) addr = 0xFEu;   // 0xFF = RH_BROADCAST_ADDRESS
+    return addr;
+}
+```
+
+To verify whether your current boards collide before flashing:
+
+```bash
+# Run on each node and compare radio_addr_init values:
+SFDBG_SRC=boot SFDBG_MIN_LEVEL=I pio device monitor -e feather_m0_lora_node_debug
+```
+
+Both nodes log `radio_addr_init=0xXX` at boot. Identical values confirm the collision.
+
+This is a **node-only** change — no base or Jetson change needed. Reflash both nodes.
 
 ---
 
@@ -211,6 +258,7 @@ session_manager.on_awaken(canonical_id, uid_hash)
 
 | File | Change |
 |---|---|
+| `platformio/src/main.cpp` | Fix `makeInitialRadioAddr` — use 8-bit address space |
 | `platformio/include/telemetry/BinaryPacket.h` | Add `PKT_CMD_REASSIGN`, `CmdReassignPayload`, encoder + decoder |
 | `platformio/include/app/SmartFiresBaseApp.h` | Add `radioAddr` to `NodeAssignment`; declare `findAssignmentByUidHash` |
 | `platformio/src/app/SmartFiresBaseApp.cpp` | `findOrCreateNodeAssignment` takes `radioAddr`; patch AWAKEN forward; handle `CMD_REASSIGN` |
