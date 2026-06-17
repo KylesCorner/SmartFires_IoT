@@ -56,8 +56,8 @@ public:
     float formulaRefVolts = 5.0f;
     uint16_t formulaAdcMax = 1023;
 
-    uint32_t minSamplePeriodMs = 1000;
-    uint32_t wakeDelayMs = 2000;
+    uint32_t minSamplePeriodMs = SensingConfig::Wind::kMinSamplePeriodMs;
+    uint32_t wakeDelayMs = SensingConfig::Wind::kWakeDelayMs;
 
     SensorDutyClass dutyClass = SensorDutyClass::DutyCycled;
 

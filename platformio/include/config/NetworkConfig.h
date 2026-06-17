@@ -132,6 +132,11 @@ constexpr uint32_t kStatusIntervalMs = SMARTFIRES_STATUS_INTERVAL_MS;
 // first TIME_SYNC is received; sensors are withheld until then.
 constexpr uint32_t kAwakenIntervalMs = 5000;
 
+// --- Telemetry TX gate -------------------------------------------------------
+// Set false to suppress bundle encoding and transmission (STATUS still flows).
+// Flip to true for normal operation.
+constexpr bool kEnableTelemetryTx = true;
+
 // ---------------------------------------------------------------------------
 // Compile-time invariants
 // ---------------------------------------------------------------------------

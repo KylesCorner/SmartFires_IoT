@@ -219,7 +219,7 @@ TdmaRadioService tdmaRadio(tdmaCfg, tdmaClock, tdmaQueue, radioDriver);
 
 SmartFiresNodeApp::Config appCfg = SmartFiresNodeApp::Config::appCfg(
   kUnassignedNodeId, nodeUidHash, true, false,
-  false); // set false to keep STATUS and skip bundle encoding/transmit
+  NetworkConfig::kEnableTelemetryTx);
 
 // -----------------------------------------------------------------------------
 // App
