@@ -272,15 +272,14 @@ The current PlatformIO environments are:
 | Environment | Purpose | Key flags |
 | --- | --- | --- |
 | `native` | host-based unit tests | `UNIT_TEST` |
-| `feather_m0_lora_node` | real sensor node firmware | `LORA_NODE=1` `NUM_SLOTS=4` `SMARTFIRES_TDMA_RELIABILITY_MODE=1` |
-| `feather_m0_lora_node_debug` | debug node (default env, debug filter) | same as node + `SMARTFIRES_STATUS_INTERVAL_MS=1000` |
-| `feather_m0_lora_node_dummy` | synthetic-data test node | `LORA_NODE=1` `NODE_ID=2` `SMARTFIRES_DUMMY_NODE=1` |
+| `feather_m0_lora_node` | real sensor node firmware | `LORA_NODE=2` `NUM_SLOTS=4` `SMARTFIRES_TDMA_RELIABILITY_MODE=1` `SMARTFIRES_STATUS_INTERVAL_MS=5000` `ICM_20948_USE_DMP` |
+| `feather_m0_lora_node_debug` | debug node (default env, debug filter) | `LORA_NODE=1` `NUM_SLOTS=4` `SMARTFIRES_TDMA_RELIABILITY_MODE=1` `SMARTFIRES_STATUS_INTERVAL_MS=1000` `ICM_20948_USE_DMP` |
 | `feather_m0_lora_base` | base station firmware | `LORA_BASE=1` |
 | `feather_m0_lora_sniffer` | passive LoRa packet monitor | `SMARTFIRES_LORA_SNIFFER=1` |
 
 Key compile-time flags:
 
-- `NODE_ID` — overrides runtime uid_hash node identity for dummy/test nodes; real nodes derive identity from the SAMD21 serial number
+- `NODE_ID` — overrides runtime uid_hash node identity for test nodes; real nodes derive identity from the SAMD21 serial number
 - `NUM_SLOTS` — must match across all deployed node Feathers; mismatch causes slot collisions
 - `LORA_NODE` / `LORA_BASE` — selects node vs base firmware role in `main.cpp`
 - `SMARTFIRES_TDMA_RELIABILITY_MODE` — `0` = StrictLinkAck, `1` = AppLayerAckSummary (production default)

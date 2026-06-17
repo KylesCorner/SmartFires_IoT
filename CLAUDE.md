@@ -25,7 +25,7 @@ Wildfire IoT sensor network. Remote drone nodes collect environmental data (temp
     |                BUNDLE payload (≤193 bytes, 1 retry, 100 ms timeout, TDMA-gated)
     |                STATUS payload (25 bytes, GPS + battery + DMP heading + link stats, every 15 min)
     |                CMD_ACK (11 bytes, acknowledges CALIBRATE/RESET commands)
-    |   Base → Node: TIME_SYNC broadcast (12 bytes, fire-and-forget, RH_BROADCAST_ADDRESS)
+    |   Base → Node: TIME_SYNC broadcast (13 bytes, fire-and-forget, RH_BROADCAST_ADDRESS)
     |                CMD_CALIBRATE (7 bytes, forwarded from Jetson)
     |                CMD_RESET (7 bytes, forwarded from Jetson)
     v
@@ -153,8 +153,8 @@ SmartFires_IoT/
 
 | Environment | Board | Key flags | Purpose |
 |---|---|---|---|
-| `feather_m0_lora_node` | Feather M0 | `LORA_NODE=1` `NUM_SLOTS=4` `SMARTFIRES_TDMA_RELIABILITY_MODE=1` | Real sensor node firmware |
-| `feather_m0_lora_node_debug` | Feather M0 | same + `SMARTFIRES_STATUS_INTERVAL_MS=1000` | Default env; debug filter, faster STATUS |
+| `feather_m0_lora_node` | Feather M0 | `LORA_NODE=2` `NUM_SLOTS=4` `SMARTFIRES_TDMA_RELIABILITY_MODE=1` `SMARTFIRES_STATUS_INTERVAL_MS=5000` `ICM_20948_USE_DMP` | Real sensor node firmware |
+| `feather_m0_lora_node_debug` | Feather M0 | `LORA_NODE=1` `NUM_SLOTS=4` `SMARTFIRES_TDMA_RELIABILITY_MODE=1` `SMARTFIRES_STATUS_INTERVAL_MS=1000` `ICM_20948_USE_DMP` | Default env; debug filter, faster STATUS |
 | `feather_m0_lora_base` | Feather M0 | `LORA_BASE=1` | Base station firmware |
 | `feather_m0_lora_sniffer` | Feather M0 | `SMARTFIRES_LORA_SNIFFER=1` | Passive LoRa packet monitor |
 | `native` | Desktop | `UNIT_TEST` | Unity unit tests — no hardware required |
@@ -247,10 +247,10 @@ RadioHead `RHReliableDatagram` handles LoRa framing and addressing.
 Node fresh telemetry uses non-blocking `sendto()` with app-layer reliability; the
 base still receives via `recvfromAck()` and auto-ACKs at the LoRa link layer.
 
-### LoRa TIME_SYNC broadcast — base → all nodes (12 bytes)
+### LoRa TIME_SYNC broadcast — base → all nodes (13 bytes)
 
 ```
-[PktHeader: 4][TimeSyncPayload: 8]
+[PktHeader: 4][TimeSyncPayload: 8][crc8: 1]
 ```
 
 Sent to `RH_BROADCAST_ADDRESS (0xFF)` — fire-and-forget. Nodes receive it between TX
@@ -260,9 +260,9 @@ slots and call `TdmaClock::applySync(sessionMs)`.
 
 ```
 [0xAA][0x55][len: u8][rssi: i8][LoRa payload][crc8]
-  AWAKEN: len=5   → total frame  9 bytes
+  AWAKEN: len=10  → total frame 14 bytes
   STATUS: len=26  → total frame 30 bytes
-  BUNDLE: len≤194 → total frame ≤198 bytes
+  BUNDLE: len≤195 → total frame ≤199 bytes
 ```
 
 ### UART TIME_SYNC frame — Jetson → base (16 bytes)
@@ -296,7 +296,7 @@ slots and call `TdmaClock::applySync(sessionMs)`.
 | `0x12` | PKT_CALIBRATION_DATA | — | — | Reserved (calibration pipeline removed) |
 | `0x13` | PKT_CMD_ACK | Node→Jetson | 11 bytes | Acknowledge CALIBRATE or RESET |
 
-Types 0x10, 0x11, 0x13 are **planned but not yet implemented** — see `documentation/Heading_CLI_Development/`.
+Types 0x10, 0x11, 0x13 are **planned but not yet implemented** — see `documentation/Completed_Plans/JETSON_CLI_AND_COMMAND_SYSTEM.md` and `documentation/Completed_Plans/ORIENTATION_CALIBRATION_PLAN.md`.
 
 ### FullStatePayload (20 bytes, packed, little-endian)
 

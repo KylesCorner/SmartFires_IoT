@@ -28,8 +28,8 @@ the driver retries up to `maxRetries` times before declaring failure.
 | Parameter | Value |
 |---|---:|
 | `enableLinkAck` | `true` |
-| `maxRetries` | 1 |
-| `ackTimeoutMs` | 100 ms |
+| `maxRetries` | 3 |
+| `ackTimeoutMs` | 250 ms |
 
 A failed packet (no ACK after all retries) is dropped. There is no app-layer
 retransmit in this mode.
@@ -58,9 +58,9 @@ re-sends the oldest unacknowledged entry from this window.
 | Parameter | Value | Notes |
 |---|---|---|
 | `kMaxReliabilityWindow` | 8 | Hard cap in firmware |
-| `reliabilityWindowDepth` | 4 | Effective window size (configurable) |
+| `reliabilityWindowDepth` | 8 | Effective window size (configurable) |
 | `reliabilityMaxAttempts` | 3 | Pending entry dropped after this many retransmits |
-| `reliabilityMaxAgeMs` | 15 000 ms | Pending entry dropped after 15 s regardless of attempts |
+| `reliabilityMaxAgeMs` | 30 000 ms | Pending entry dropped after 30 s regardless of attempts |
 | `reliabilityMinRetryGapMs` | 2 000 ms | Minimum gap between retransmits of the same seq |
 | `reliabilityFreshTrafficHoldoffMs` | 2 000 ms | Retransmits are suppressed for 2 s after a fresh send |
 
@@ -84,11 +84,10 @@ dirty, and later emits a targeted `ACK_SUMMARY` in the base TDMA slot window.
 The `ACK_SUMMARY` wire format encodes this as:
 
 ```
-AckSummaryPayload (5 bytes)
+AckSummaryPayload (4 bytes)
   node_id:      uint8_t   — target node
   ack_base_seq: uint8_t   — highest contiguous seq acknowledged
   ack_mask:     uint16_t  — bit N set means (ack_base_seq + N + 1) is acked
-  _pad:         uint8_t
 ```
 
 ACK summaries are paced on the base side with a small minimum flush interval

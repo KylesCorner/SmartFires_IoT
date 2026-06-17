@@ -42,8 +42,8 @@ Wraps a received LoRa payload with RSSI metadata.
 | Packet type | LoRa payload | `len` | Total frame |
 |---|---|---:|---:|
 | `AWAKEN` | 9 bytes | 10 | 14 bytes |
-| `STATUS` | 21 bytes | 22 | 26 bytes |
-| `BUNDLE` | ≤193 bytes | ≤194 | ≤198 bytes |
+| `STATUS` | 25 bytes | 26 | 30 bytes |
+| `BUNDLE` | ≤194 bytes | ≤195 | ≤199 bytes |
 | `CMD_ACK` | 11 bytes | 12 | 16 bytes |
 
 ### Jetson → Feather: TIME_SYNC frame (16 bytes)

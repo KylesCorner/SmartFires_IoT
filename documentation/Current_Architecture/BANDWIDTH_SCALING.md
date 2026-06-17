@@ -11,7 +11,7 @@ This document summarizes sensing, bundle production, TDMA service capacity, and 
 - TDMA guard: `20 ms` on each edge
 - Usable slot window: `860 ms`
 - Multi-send budget in node radio service: up to `2 bundle-class sends/slot` (conservative `340 ms` budget each)
-- ACK summary payload (`PKT_ACK_SUMMARY`): `8 bytes` on LoRa (`PktHeader + AckSummaryPayload`)
+- ACK summary payload (`PKT_ACK_SUMMARY`): `9 bytes` on LoRa (`PktHeader + AckSummaryPayload + crc8`)
 - ACK summary cadence (edge default): `1 summary per node every 4 seconds` (`0.25 Hz`)
 
 ## Airtime Model
@@ -19,7 +19,7 @@ This document summarizes sensing, bundle production, TDMA service capacity, and 
 Using SF7/BW125/CR 4/5 with RadioHead 4-byte over-the-air header:
 
 - Bundle airtime (193-byte payload): `312.576 ms`
-- ACK summary airtime (8-byte payload): `41.216 ms`
+- ACK summary airtime (9-byte payload): `41.216 ms` (approximate; 1-byte delta from previous estimate)
 
 ## Core Formulas
 

@@ -1,7 +1,7 @@
 # SmartFires — Tunable Parameters
 
 Single reference for every configurable value in the system.  After the
-tunable-parameter consolidation (see `documentation/Pending_Plans/TUNABLE_PARAMETER_ARCHITECTURE_PLAN.md`),
+tunable-parameter consolidation (see `documentation/Completed_Plans/TUNABLE_PARAMETER_ARCHITECTURE_PLAN.md`),
 each constant lives in exactly one place; all consuming code imports it from
 there.  Change a value in its source header/module and it propagates everywhere
 automatically.
@@ -28,7 +28,7 @@ automatically.
 | `kQueueCapacityHardCap` | 8 | Compile-time upper bound enforced by static_assert |
 | `kReliabilityWindowDepth` | 8 | App-layer pending-retry window size |
 | `kReliabilityWindowHardCap` | 8 | Compile-time upper bound enforced by static_assert |
-| `kReliabilityMaxAttempts` | 5 | Max app-layer retransmit attempts per packet |
+| `kReliabilityMaxAttempts` | 3 | Max app-layer retransmit attempts per packet |
 | `kReliabilityMaxAgeMs` | 30 000 ms | Evict pending packet from window after this age |
 | `kReliabilityMode` | `AppLayerAckSummary` | Active reliability mode (build-flag selectable via `SMARTFIRES_TDMA_RELIABILITY_MODE`) |
 | `kExpectedAckIntervalMs` | 4 000 ms | ACK-paced retry gate: expected time between ACK_SUMMARY packets |
@@ -38,6 +38,7 @@ automatically.
 | `kRequireAckSummaryBeforeFirstRetry` | false | Whether to wait for an ACK_SUMMARY before the first retransmit |
 | `kAwakenIntervalMs` | 5 000 ms | Re-broadcast PKT_AWAKEN every N ms while waiting for TIME_SYNC |
 | `kStatusIntervalMs` | 900 000 ms (15 min) | How often PKT_STATUS is emitted (overridable via `SMARTFIRES_STATUS_INTERVAL_MS`) |
+| `kEnableTelemetryTx` | true | Set false to suppress BUNDLE TX (STATUS still flows); flip for normal operation |
 | `kBundleTxBudgetMs` | 340 ms | Estimated on-air time for a PKT_BUNDLE (used for slot budget check) |
 | `kStatusTxBudgetMs` | 120 ms | Estimated on-air time for a PKT_STATUS |
 | `kAwakenTxBudgetMs` | 90 ms | Estimated on-air time for a PKT_AWAKEN |
@@ -74,8 +75,14 @@ Two presets, selectable via `DutyCycleConfig::dutyCycleCfgContinuous()` or `duty
 | Constant | Value | Meaning |
 |---|---|---|
 | `kContinuousEnabled` | false | `enabled=false` → always-on; duty cycle gate is skipped |
-| `kContinuousSamplePeriodMs` | 500 ms | Master loop cadence — how often the sensor-service tick fires |
+| `kContinuousMinSleepMs` | 0 ms | Not used in continuous mode |
+| `kContinuousMaxWakeMs` | 0 ms | Not used in continuous mode |
+| `kContinuousActiveSampleMs` | 0 ms | Not used in continuous mode |
+| `kContinuousSamplePeriodMs` | 2 000 ms | Master loop cadence — how often the sensor-service tick fires |
 | `kContinuousWarmupMs` | 10 000 ms | One-time warmup delay at boot before first sample |
+| `kContinuousTempDeltaThresholdC` | 0.0 °C | Not used in continuous mode |
+| `kContinuousHumidityDeltaThresholdPct` | 0.0 %RH | Not used in continuous mode |
+| `kContinuousFailOnSampleError` | false | Sensor errors do not halt the node |
 
 ### ThresholdTriggered (alternate preset, not currently deployed)
 
@@ -83,10 +90,13 @@ Two presets, selectable via `DutyCycleConfig::dutyCycleCfgContinuous()` or `duty
 |---|---|---|
 | `kThresholdEnabled` | true | Trigger-based duty cycle on |
 | `kThresholdMinSleepMs` | 3 000 ms | Minimum idle sleep before wake |
+| `kThresholdMaxWakeMs` | 1 000 ms | Max additional wake delay |
+| `kThresholdActiveSampleMs` | 30 000 ms | Duration of the `ActiveSampling` window |
 | `kThresholdSamplePeriodMs` | 50 000 ms | Target wake-to-wake cycle period |
 | `kThresholdWarmupMs` | 10 000 ms | Sensor stabilization delay after wake |
 | `kThresholdTempDeltaThresholdC` | 1.0 °C | Temperature delta to trigger early wake |
 | `kThresholdHumidityDeltaThresholdPct` | 5.0 %RH | Humidity delta to trigger early wake |
+| `kThresholdFailOnSampleError` | false | Sensor errors do not halt the node |
 
 ---
 
@@ -105,9 +115,8 @@ Namespace `SensingConfig::Sht31`
 
 | Constant | Value | Meaning |
 |---|---|---|
-| `kAddress` | 0x44 | I²C address |
+| `kAddress` | 0x45 | I²C address |
 | `kMinSamplePeriodMs` | 100 ms | Minimum interval between samples |
-| `kWakeDelayMs` | 0 ms | No settling delay needed |
 | `kDutyClass` | `AlwaysOn` | Always powered — used as the trigger sensor for ThresholdTriggered duty cycle |
 
 ### Wind — RevC Hot-Wire Anemometer
@@ -138,7 +147,7 @@ Namespace `SensingConfig::Imu`
 
 | Constant | Value | Meaning |
 |---|---|---|
-| `kAddress` | 0x69 | I²C address (AD0 = high) |
+| `kAddress` | 1 | `ad0Val` passed to `IIcm20948Driver::begin()` — value 1 means AD0 pin high, giving I²C address 0x69 |
 | `kMinSamplePeriodMs` | 10 ms | DMP output rate |
 | `kWakeDelayMs` | 0 ms | No additional settling beyond driver init |
 | `kDutyClass` | `DutyCycled` | Follows duty-cycle controller |

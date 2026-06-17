@@ -51,7 +51,7 @@ reduce current draw.
 ### Continuous mode
 
 Used when `enabled = false`. Sensors run continuously at the fastest practical
-rate. `samplePeriodMs = 500 ms` gives approximately 2 Hz ground truth, but
+rate. `samplePeriodMs = 2 000 ms` gives approximately 0.5 Hz ground truth, but
 the bundle system accumulates 15 samples before emitting a packet, so the
 effective bundle rate depends on the sample rate fed into `PacketHandler`.
 
