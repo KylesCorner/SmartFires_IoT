@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -13,10 +13,7 @@ class NodeStats:
     node_id: int
     first_seq: Optional[int] = None
     last_seq: Optional[int] = None
-    received: int = 0
-    missing: int = 0
-    duplicates: int = 0
-    out_of_order: int = 0
+    seen_seqs: set = field(default_factory=set)
     crc_valid_packets: int = 0
     last_rssi: Optional[int] = None
 
@@ -28,37 +25,63 @@ class NodeStats:
         if self.first_seq is None:
             self.first_seq = seq
             self.last_seq = seq
-            self.received = 1
+            self.seen_seqs.add(seq)
             return
 
-        assert self.last_seq is not None
+        self.seen_seqs.add(seq)
 
-        if seq == self.last_seq:
-            self.duplicates += 1
-            return
-
+        # Advance last_seq when this packet is forward progress (within 127 ahead).
+        # Packets behind last_seq are retransmissions or reorders — they are already
+        # in seen_seqs and will reduce missing automatically at query time.
         forward_gap = (seq - self.last_seq) & 0xFF
-        backward_gap = (self.last_seq - seq) & 0xFF
-
         if 1 <= forward_gap <= 127:
-            if forward_gap > 1:
-                self.missing += forward_gap - 1
             self.last_seq = seq
-            self.received += 1
-            return
 
-        if backward_gap >= 1:
-            self.out_of_order += 1
+    @property
+    def _span(self) -> int:
+        """Number of sequence positions from first_seq to last_seq inclusive."""
+        if self.first_seq is None:
+            return 0
+        return ((self.last_seq - self.first_seq) & 0xFF) + 1
+
+    @property
+    def received(self) -> int:
+        """Unique sequence numbers received within the [first_seq, last_seq] window."""
+        if self.first_seq is None:
+            return 0
+        span = (self.last_seq - self.first_seq) & 0xFF
+        return sum(1 for s in self.seen_seqs if (s - self.first_seq) & 0xFF <= span)
+
+    @property
+    def missing(self) -> int:
+        return max(0, self._span - self.received)
+
+    @property
+    def duplicates(self) -> int:
+        """Extra transmissions received beyond the first copy of each unique seq."""
+        return max(0, self.crc_valid_packets - self.received)
 
     @property
     def expected(self) -> int:
-        return self.received + self.missing
+        return self._span
 
     @property
     def loss_percent(self) -> float:
-        if self.expected <= 0:
+        if self._span <= 0:
             return 0.0
-        return 100.0 * self.missing / self.expected
+        return 100.0 * self.missing / self._span
+
+    def to_dict(self) -> dict:
+        return {
+            "node_id": self.node_id,
+            "first_seq": self.first_seq,
+            "last_seq": self.last_seq,
+            "received": self.received,
+            "missing": self.missing,
+            "duplicates": self.duplicates,
+            "crc_valid_packets": self.crc_valid_packets,
+            "last_rssi": self.last_rssi,
+        }
 
 
 class PacketLossTracker:
@@ -84,7 +107,7 @@ class PacketLossTracker:
             "crc_failures": self.crc_failures,
             "length_failures": self.length_failures,
             "untracked_packets": self.untracked_packets,
-            "nodes": {str(k): asdict(v) for k, v in self.nodes.items()},
+            "nodes": {str(k): v.to_dict() for k, v in self.nodes.items()},
         }
 
     def save(self, path: Path) -> None:
@@ -109,10 +132,11 @@ def print_summary(data_dir: Path) -> None:
         expected = stats["received"] + stats["missing"]
         loss = 0.0 if expected == 0 else 100.0 * stats["missing"] / expected
         print(f"Node {node_id}")
+        print(f"  First seq:     {stats['first_seq']}")
+        print(f"  Last seq:      {stats['last_seq']}")
         print(f"  Received:      {stats['received']}")
         print(f"  Missing:       {stats['missing']}")
         print(f"  Duplicates:    {stats['duplicates']}")
-        print(f"  Out-of-order:  {stats['out_of_order']}")
         print(f"  Loss %:        {loss:.2f}")
         print(f"  Last RSSI:     {stats['last_rssi']}")
         print()
