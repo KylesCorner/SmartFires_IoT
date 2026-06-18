@@ -40,6 +40,7 @@ def run_web(cfg: EdgeConfig) -> int:
         data_dir=cfg.ingest.data_dir,
         base_station_store=BaseStationStore(),
         reset_event=reset_event,
+        tile_cache_dir=cfg.ingest.data_dir / "tiles",
     )
     uvicorn.run(app, host=cfg.web_host, port=cfg.web_http_port, log_level="info")
     return 0

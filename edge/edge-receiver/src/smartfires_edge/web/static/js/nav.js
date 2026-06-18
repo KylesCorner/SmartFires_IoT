@@ -3,6 +3,8 @@ const NAV_LINKS = [
   { href: "/map-history", label: "Map & History" },
 ];
 
+let _connDot = null;
+
 function renderNav(activePath) {
   const nav = document.createElement("nav");
   nav.className = "topnav";
@@ -15,5 +17,27 @@ function renderNav(activePath) {
     }
     nav.appendChild(a);
   }
+
+  _connDot = document.createElement("span");
+  _connDot.className = "conn-dot";
+  _connDot.title = "Checking map tile connectivity…";
+  nav.appendChild(_connDot);
+
   document.body.prepend(nav);
+
+  _pollConnectivity();
+  setInterval(_pollConnectivity, 30_000);
+}
+
+async function _pollConnectivity() {
+  try {
+    const resp = await fetch("/api/connectivity");
+    const { online } = await resp.json();
+    if (_connDot) {
+      _connDot.className = "conn-dot " + (online ? "online" : "offline");
+      _connDot.title = online
+        ? "Map tiles: online — new areas will be cached automatically"
+        : "Map tiles: offline — using cached tiles";
+    }
+  } catch (_) {}
 }

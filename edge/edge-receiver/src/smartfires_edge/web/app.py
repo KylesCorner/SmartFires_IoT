@@ -7,15 +7,17 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from smartfires_edge.base_station_store import BaseStationStore
 from smartfires_edge.live_state import LiveState
+from smartfires_edge.tile_cache import TileCache
 
 STATIC_DIR = Path(__file__).parent / "static"
-TILES_DIR = Path(__file__).parent / "tiles"
+# Legacy static-tile directory — used when no tile_cache_dir is provided.
+_LEGACY_TILES_DIR = Path(__file__).parent / "tiles"
 
 TELEMETRY_METRICS = {
     "temp_c",
@@ -85,18 +87,54 @@ def _read_telemetry_history(
     return results
 
 
+async def _gps_prefetch_watcher(
+    tile_cache: TileCache,
+    live_state: LiveState,
+    store: BaseStationStore,
+) -> None:
+    """Background task: pre-fetch tiles whenever a new GPS position is seen."""
+    while True:
+        await asyncio.sleep(30)
+        try:
+            for node in live_state.nodes_snapshot().values():
+                lat = node.get("lat")
+                lon = node.get("lon")
+                if lat is not None and lon is not None and lat != "" and lon != "":
+                    tile_cache.prefetch_location(float(lat), float(lon))
+            base = store.get()
+            if base and base.get("lat") is not None:
+                tile_cache.prefetch_location(float(base["lat"]), float(base["lon"]))
+        except Exception:
+            pass
+
+
 def create_app(
     live_state: LiveState,
     data_dir: Path,
     base_station_store: Optional[BaseStationStore] = None,
     reset_event: Optional[threading.Event] = None,
+    tile_cache_dir: Optional[Path] = None,
 ) -> FastAPI:
     app = FastAPI(title="SmartFires Dashboard")
     store = base_station_store or BaseStationStore()
 
+    # Resolve tile cache directory: caller-supplied > legacy static tiles dir.
+    _tile_dir = tile_cache_dir if tile_cache_dir is not None else _LEGACY_TILES_DIR
+    tile_cache = TileCache(_tile_dir)
+
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-    if TILES_DIR.exists() and any(TILES_DIR.iterdir()):
-        app.mount("/tiles", StaticFiles(directory=TILES_DIR), name="tiles")
+
+    # ------------------------------------------------------------------
+    # Startup: launch GPS prefetch watcher
+    # ------------------------------------------------------------------
+
+    @app.on_event("startup")
+    async def _startup() -> None:
+        asyncio.create_task(_gps_prefetch_watcher(tile_cache, live_state, store))
+
+    # ------------------------------------------------------------------
+    # Pages
+    # ------------------------------------------------------------------
 
     @app.get("/")
     def index() -> FileResponse:
@@ -105,6 +143,36 @@ def create_app(
     @app.get("/map-history")
     def map_history() -> FileResponse:
         return FileResponse(STATIC_DIR / "map_history.html")
+
+    # ------------------------------------------------------------------
+    # Tile proxy with disk cache
+    # ------------------------------------------------------------------
+
+    @app.get("/tiles/{z}/{x}/{y}.png")
+    async def get_tile(z: int, x: int, y: int) -> Response:
+        """Serve a map tile from disk cache; fetch from OSM when online and uncached."""
+        data = await tile_cache.get_tile(z, x, y)
+        if data is None:
+            raise HTTPException(status_code=404, detail="Tile not available")
+        return Response(
+            content=data,
+            media_type="image/png",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+
+    # ------------------------------------------------------------------
+    # Connectivity probe
+    # ------------------------------------------------------------------
+
+    @app.get("/api/connectivity")
+    async def connectivity() -> dict:
+        loop = asyncio.get_running_loop()
+        online = await loop.run_in_executor(None, tile_cache.is_online)
+        return {"online": online}
+
+    # ------------------------------------------------------------------
+    # Data API
+    # ------------------------------------------------------------------
 
     @app.get("/api/nodes")
     def get_nodes() -> dict:
@@ -139,7 +207,9 @@ def create_app(
 
     @app.post("/api/base_station")
     def set_base_station(payload: BaseStationPayload) -> dict:
-        return store.set(payload.lat, payload.lon)
+        result = store.set(payload.lat, payload.lon)
+        tile_cache.prefetch_location(payload.lat, payload.lon)
+        return result
 
     @app.post("/api/command")
     def post_command(payload: CommandPayload) -> dict:
