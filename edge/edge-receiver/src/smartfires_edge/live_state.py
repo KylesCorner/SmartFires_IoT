@@ -128,6 +128,8 @@ class LiveState:
                     "loss_percent": round(loss_percent, 2),
                     "received": tstats.get("received", 0),
                     "missing": tstats.get("missing", 0),
+                    "duplicates": tstats.get("duplicates", 0),
+                    "last_rssi": tstats.get("last_rssi"),
                 }
             return result
 

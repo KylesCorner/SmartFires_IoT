@@ -2,19 +2,21 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>SmartFires Dashboard — Map & History</title>
+  <title>SmartFires — Link Quality</title>
   <link rel="stylesheet" href="/static/css/style.css" />
   <link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css" />
 </head>
 <body>
   <main>
     <div class="layout">
+
       <section class="panel left-panel">
-        <h1>Signal Map</h1>
+        <h2>Signal Map</h2>
         <div id="history-map"></div>
 
-        <h2>Reception Timeline</h2>
-        <div id="reception-grid" class="reception-grid"></div>
+        <h2 class="section-spacer">Reception Timeline</h2>
+        <p class="section-hint">Each box is one seq number. Green = received, red = missing, grey = before session. Highest seq is on the right; data shifts left as new packets arrive.</p>
+        <div id="reception-timeline"></div>
       </section>
 
       <section class="right-panel">
@@ -24,9 +26,11 @@
             <thead>
               <tr>
                 <th>Node</th>
-                <th>Loss %</th>
-                <th>Received</th>
-                <th>Missing</th>
+                <th>Loss%</th>
+                <th>Rcvd</th>
+                <th>Miss</th>
+                <th>Dup</th>
+                <th>RSSI</th>
                 <th>Retx</th>
                 <th>Fail</th>
               </tr>
@@ -35,6 +39,7 @@
           </table>
         </div>
       </section>
+
     </div>
   </main>
 

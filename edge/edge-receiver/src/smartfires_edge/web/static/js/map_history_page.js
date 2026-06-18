@@ -1,4 +1,5 @@
-const state = {
+// ── Map state ──────────────────────────────────────────────────────────────
+const mapState = {
   map: null,
   plottedCount: 0,
   mapFitted: false,
@@ -6,59 +7,57 @@ const state = {
   bounds: [],
 };
 
+// ── Colours ────────────────────────────────────────────────────────────────
 function rssiColor(rssi) {
-  if (rssi === null || rssi === undefined || rssi === "") {
-    return "#888888";
-  }
+  if (rssi === null || rssi === undefined || rssi === "") return "#888888";
   const clamped = Math.max(-120, Math.min(-30, Number(rssi)));
-  const t = (clamped + 120) / 90; // 0 weak -> 1 strong
-  const r = Math.round(255 * (1 - t));
-  const g = Math.round(255 * t);
-  return `rgb(${r},${g},80)`;
+  const t = (clamped + 120) / 90;
+  return `rgb(${Math.round(255 * (1 - t))},${Math.round(255 * t)},80)`;
 }
 
-function binColor(state) {
-  if (state === "received") return "#28a055";
-  if (state === "missing")  return "#7a2020";
-  return "#2a2f36"; // "before" / placeholder — same as default bin background
+function binColor(slotState) {
+  if (slotState === "received") return "#28a055";
+  if (slotState === "missing")  return "#7a2020";
+  return "#2a2f36";
 }
 
+function slotTitle(slot) {
+  if (slot.seq === null || slot.seq === undefined) return "(awaiting data)";
+  if (slot.state === "before")  return `seq ${slot.seq} (before session)`;
+  if (slot.state === "missing") return `seq ${slot.seq} — missing`;
+  return `seq ${slot.seq}`;
+}
+
+// ── Map ────────────────────────────────────────────────────────────────────
 function initMap() {
   L.Icon.Default.imagePath = "/static/vendor/leaflet/images/";
-  state.map = L.map("history-map").setView([0, 0], 2);
-  L.tileLayer("/tiles/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(state.map);
+  mapState.map = L.map("history-map").setView([0, 0], 2);
+  L.tileLayer("/tiles/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(mapState.map);
 }
 
 function updateBaseMarker(baseStation) {
-  if (!baseStation || baseStation.lat === undefined) {
-    return;
-  }
+  if (!baseStation || baseStation.lat === undefined) return;
   const latlng = [baseStation.lat, baseStation.lon];
-  state.bounds.push(latlng);
-  if (!state.baseMarker) {
-    state.baseMarker = L.circleMarker(latlng, {
-      radius: 9,
-      color: "#e8743a",
-      fillColor: "#e8743a",
-      fillOpacity: 0.9,
-    }).addTo(state.map);
+  mapState.bounds.push(latlng);
+  if (!mapState.baseMarker) {
+    mapState.baseMarker = L.circleMarker(latlng, {
+      radius: 9, color: "#e8743a", fillColor: "#e8743a", fillOpacity: 0.9,
+    }).addTo(mapState.map);
   } else {
-    state.baseMarker.setLatLng(latlng);
+    mapState.baseMarker.setLatLng(latlng);
   }
-  state.baseMarker.bindPopup("Base station");
+  mapState.baseMarker.bindPopup("Base station");
 }
 
 async function pollStatusHistory() {
   const history = await Api.statusHistory(5000);
-  const newFixes = history.slice(state.plottedCount);
-  state.plottedCount = history.length;
+  const newFixes = history.slice(mapState.plottedCount);
+  mapState.plottedCount = history.length;
 
   for (const fix of newFixes) {
-    if (fix.lat === null || fix.lat === undefined || fix.lat === "") {
-      continue;
-    }
+    if (fix.lat === null || fix.lat === undefined || fix.lat === "") continue;
     const latlng = [fix.lat, fix.lon];
-    state.bounds.push(latlng);
+    mapState.bounds.push(latlng);
     L.circleMarker(latlng, {
       radius: 5,
       color: rssiColor(fix.rssi),
@@ -67,86 +66,147 @@ async function pollStatusHistory() {
       weight: 1,
     })
       .bindPopup(`Node ${fix.node_id}<br>rssi ${fmt(fix.rssi)}`)
-      .addTo(state.map);
+      .addTo(mapState.map);
   }
 
-  if (state.bounds.length && !state.mapFitted) {
-    state.map.fitBounds(state.bounds, { maxZoom: 16 });
-    state.mapFitted = true;
+  if (mapState.bounds.length && !mapState.mapFitted) {
+    mapState.map.fitBounds(mapState.bounds, { maxZoom: 16 });
+    mapState.mapFitted = true;
   }
 }
 
-function updateReceptionGrid(timeline) {
-  const container = document.getElementById("reception-grid");
-  const nodeIds = Object.keys(timeline)
-    .map(Number)
-    .sort((a, b) => a - b);
+// ── Reception Timeline ──────────────────────────────────────────────────────
+const PLACEHOLDER_BINS = 50;
 
-  for (const nodeId of nodeIds) {
+function makeBinCol(slot) {
+  const col = document.createElement("div");
+  col.className = "rt-bin-col";
+
+  const label = document.createElement("div");
+  label.className = "rt-bin-label";
+  label.textContent =
+    slot.seq !== null && slot.seq !== undefined ? String(slot.seq) : "—";
+
+  const box = document.createElement("div");
+  box.className = "rt-bin-box";
+  box.style.background = binColor(slot.state);
+  box.title = slotTitle(slot);
+
+  col.appendChild(label);
+  col.appendChild(box);
+  return col;
+}
+
+function renderBins(wrapper, bins) {
+  wrapper.innerHTML = "";
+  if (!bins || bins.length === 0) {
+    for (let i = 0; i < PLACEHOLDER_BINS; i++) {
+      wrapper.appendChild(makeBinCol({ seq: null, state: "before" }));
+    }
+    return;
+  }
+  for (const slot of bins) {
+    wrapper.appendChild(makeBinCol(slot));
+  }
+}
+
+function updateReceptionTimeline(allNodes, timeline) {
+  const container = document.getElementById("reception-timeline");
+
+  // Union of node IDs seen in either source.
+  const nodeIds = new Set([
+    ...Object.keys(allNodes).map(Number),
+    ...Object.keys(timeline).map(Number),
+  ]);
+  const sorted = [...nodeIds].sort((a, b) => a - b);
+
+  for (const nodeId of sorted) {
     const nodeData = timeline[nodeId];
-    const nodeBins = nodeData.bins || [];
+    const bins     = nodeData ? (nodeData.bins || []) : [];
+    const lastSeq  = nodeData ? nodeData.last_seq : null;
 
-    let row = document.getElementById(`reception-row-${nodeId}`);
-    if (!row) {
-      row = document.createElement("div");
-      row.className = "reception-row";
-      row.id = `reception-row-${nodeId}`;
+    // Create the node block on first appearance.
+    let block = document.getElementById(`rt-node-${nodeId}`);
+    if (!block) {
+      block = document.createElement("div");
+      block.className = "rt-node-block";
+      block.id = `rt-node-${nodeId}`;
 
-      const label = document.createElement("div");
-      label.className = "node-label";
-      label.textContent = `Node ${nodeId}`;
+      const header = document.createElement("div");
+      header.className = "rt-node-header";
 
-      const binsEl = document.createElement("div");
-      binsEl.className = "reception-bins";
+      const nameEl = document.createElement("span");
+      nameEl.className = "rt-node-name";
+      nameEl.textContent = `Node ${nodeId}`;
 
-      row.appendChild(label);
-      row.appendChild(binsEl);
-      container.appendChild(row);
+      const seqBadge = document.createElement("span");
+      seqBadge.className = "rt-last-seq";
+      seqBadge.id = `rt-lastseq-${nodeId}`;
+
+      header.appendChild(nameEl);
+      header.appendChild(seqBadge);
+
+      const scroll = document.createElement("div");
+      scroll.className = "rt-scroll";
+
+      const binsWrapper = document.createElement("div");
+      binsWrapper.className = "rt-bins-wrapper";
+      binsWrapper.id = `rt-bins-${nodeId}`;
+
+      scroll.appendChild(binsWrapper);
+      block.appendChild(header);
+      block.appendChild(scroll);
+      container.appendChild(block);
     }
 
-    const binsContainer = row.querySelector(".reception-bins");
-
-    // Ensure the DOM has exactly nodeBins.length cells.
-    while (binsContainer.children.length < nodeBins.length) {
-      const cell = document.createElement("div");
-      cell.className = "reception-bin";
-      binsContainer.appendChild(cell);
-    }
-    while (binsContainer.children.length > nodeBins.length) {
-      binsContainer.removeChild(binsContainer.lastChild);
+    // Update last-seq badge.
+    const badge = document.getElementById(`rt-lastseq-${nodeId}`);
+    if (badge) {
+      badge.textContent =
+        lastSeq !== null && lastSeq !== undefined
+          ? `last seq ${lastSeq}`
+          : "no packets yet";
     }
 
-    nodeBins.forEach((slot, i) => {
-      const el = binsContainer.children[i];
-      el.style.background = binColor(slot.state);
-      if (slot.seq === null) {
-        el.title = "(awaiting data)";
-      } else if (slot.state === "before") {
-        el.title = `seq ${slot.seq} (before session)`;
-      } else if (slot.state === "missing") {
-        el.title = `seq ${slot.seq} — missing`;
-      } else {
-        el.title = `seq ${slot.seq}`;
-      }
-    });
+    // Re-render bin columns (the window shifts every poll, so full rebuild is correct).
+    const binsWrapper = document.getElementById(`rt-bins-${nodeId}`);
+    renderBins(binsWrapper, bins);
+  }
+
+  // Remove blocks for nodes that have disappeared (e.g. session reset).
+  for (const el of container.querySelectorAll(".rt-node-block")) {
+    const id = Number(el.id.replace("rt-node-", ""));
+    if (!nodeIds.has(id)) el.remove();
   }
 }
 
+// ── Link Quality table ──────────────────────────────────────────────────────
 function updateLossTable(nodes) {
   const tbody = document.querySelector("#loss-table tbody");
   tbody.innerHTML = "";
   const sorted = Object.values(nodes).sort((a, b) => a.node_id - b.node_id);
+
   for (const info of sorted) {
+    const loss = info.loss_percent ?? 0;
+    const lossClass =
+      loss > 10 ? "loss-high" : loss > 2 ? "loss-med" : "";
+
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${info.node_id}</td><td>${info.loss_percent}%</td><td>${
-      info.received
-    }</td><td>${info.missing}</td><td>${fmt(info.retx_session)}</td><td>${fmt(
-      info.fail_session
-    )}</td>`;
+    tr.innerHTML = `
+      <td>${info.node_id}</td>
+      <td class="${lossClass}">${loss.toFixed(1)}%</td>
+      <td>${fmt(info.received)}</td>
+      <td>${fmt(info.missing)}</td>
+      <td>${fmt(info.duplicates)}</td>
+      <td>${fmt(info.last_rssi)}</td>
+      <td>${fmt(info.retx_session)}</td>
+      <td>${fmt(info.fail_session)}</td>
+    `;
     tbody.appendChild(tr);
   }
 }
 
+// ── Poll loop ───────────────────────────────────────────────────────────────
 async function pollAll() {
   const [nodes, baseStation, timeline] = await Promise.all([
     Api.nodes(),
@@ -155,7 +215,7 @@ async function pollAll() {
   ]);
   updateBaseMarker(baseStation);
   await pollStatusHistory();
-  updateReceptionGrid(timeline);
+  updateReceptionTimeline(nodes, timeline);
   updateLossTable(nodes);
 }
 

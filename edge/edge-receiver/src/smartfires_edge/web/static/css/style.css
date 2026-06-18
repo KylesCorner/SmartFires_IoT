@@ -137,6 +137,106 @@ table th {
   font-weight: 600;
 }
 
+/* ── Section helpers ───────────────────────────────────────────────────── */
+
+.section-spacer {
+  margin-top: 1.25rem;
+}
+
+.section-hint {
+  font-size: 0.75rem;
+  color: #6a7480;
+  margin: 0 0 0.75rem 0;
+  line-height: 1.4;
+}
+
+/* ── Reception Timeline ────────────────────────────────────────────────── */
+
+.rt-node-block {
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #2a2f36;
+}
+
+.rt-node-block:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.rt-node-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin-bottom: 0.35rem;
+}
+
+.rt-node-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #c8d0d8;
+}
+
+.rt-last-seq {
+  font-size: 0.7rem;
+  color: #6a7480;
+  font-family: monospace;
+}
+
+.rt-scroll {
+  overflow-x: auto;
+}
+
+.rt-bins-wrapper {
+  display: flex;
+  gap: 2px;
+  min-width: max-content;
+  padding-bottom: 2px; /* space for scrollbar */
+}
+
+.rt-bin-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 14px;
+}
+
+.rt-bin-label {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: 0.5rem;
+  color: #6a7480;
+  height: 28px;
+  text-align: center;
+  line-height: 14px;
+  font-family: monospace;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.rt-bin-box {
+  width: 12px;
+  height: 18px;
+  border-radius: 2px;
+  background: #2a2f36;
+  cursor: default;
+  flex-shrink: 0;
+}
+
+/* ── Loss table colouring ──────────────────────────────────────────────── */
+
+.loss-high {
+  color: #e05252;
+  font-weight: 600;
+}
+
+.loss-med {
+  color: #e8a43a;
+}
+
+/* ── Legacy reception-grid (kept for reference, unused by page 2) ──────── */
+
 .reception-grid {
   display: flex;
   flex-direction: column;
