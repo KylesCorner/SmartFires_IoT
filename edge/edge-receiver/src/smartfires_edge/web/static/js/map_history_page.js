@@ -120,6 +120,20 @@ function updateReceptionTimeline(allNodes, timeline) {
   ]);
   const sorted = [...nodeIds].sort((a, b) => a - b);
 
+  // Empty state.
+  let notice = document.getElementById("rt-empty");
+  if (sorted.length === 0) {
+    if (!notice) {
+      notice = document.createElement("p");
+      notice.id = "rt-empty";
+      notice.className = "section-hint";
+      notice.textContent = "No nodes connected this session yet.";
+      container.appendChild(notice);
+    }
+    return;
+  }
+  if (notice) notice.remove();
+
   for (const nodeId of sorted) {
     const nodeData = timeline[nodeId];
     const bins     = nodeData ? (nodeData.bins || []) : [];
@@ -184,7 +198,13 @@ function updateReceptionTimeline(allNodes, timeline) {
 function updateLossTable(nodes) {
   const tbody = document.querySelector("#loss-table tbody");
   tbody.innerHTML = "";
-  const sorted = Object.values(nodes).sort((a, b) => a.node_id - b.node_id);
+  const sorted = Object.values(nodes || {}).sort((a, b) => a.node_id - b.node_id);
+  if (sorted.length === 0) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td colspan="8" style="color:#6a7480;font-style:italic">No nodes connected this session yet.</td>`;
+    tbody.appendChild(tr);
+    return;
+  }
 
   for (const info of sorted) {
     const loss = info.loss_percent ?? 0;
@@ -208,13 +228,20 @@ function updateLossTable(nodes) {
 
 // ── Poll loop ───────────────────────────────────────────────────────────────
 async function pollAll() {
-  const [nodes, baseStation, timeline] = await Promise.all([
-    Api.nodes(),
-    Api.getBaseStation(),
-    Api.receptionTimeline(50),
-  ]);
+  let nodes, baseStation, timeline;
+  try {
+    [nodes, baseStation, timeline] = await Promise.all([
+      Api.nodes(),
+      Api.getBaseStation(),
+      Api.receptionTimeline(50),
+    ]);
+  } catch (err) {
+    console.error("SmartFires API fetch failed:", err);
+    return;
+  }
+
   updateBaseMarker(baseStation);
-  await pollStatusHistory();
+  try { await pollStatusHistory(); } catch (_) {}
   updateReceptionTimeline(nodes, timeline);
   updateLossTable(nodes);
 }
