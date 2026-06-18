@@ -179,7 +179,7 @@ def run_receive(
         sync_thread_started = False
         write_lock = threading.Lock()
 
-        for event, receiver, ser in iter_packets(cfg.port, cfg.baud):
+        for event, receiver, ser in iter_packets(cfg.port, cfg.baud, session_start):
             if not sync_thread_started:
                 sync_thread = threading.Thread(
                     target=_time_sync_sender,

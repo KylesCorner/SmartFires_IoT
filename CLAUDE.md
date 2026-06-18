@@ -339,7 +339,7 @@ lets retry-density be correlated with GPS position with no separate packet type 
 
 | Field | Type | Encoding |
 |---|---|---|
-| `dt_ticks_250ms` | `uint8_t` | ticks since reference; `dt_ms = ticks × 250` |
+| `dt_ticks_250ms` | `uint8_t` | ticks since **previous sample** (not reference); `dt_ms = ticks × 250` |
 | `wind_cms` | `uint16_t` | absolute cm/s |
 | `temp_delta_deci_c` | `int8_t` | 0.1 °C delta |
 | `humidity_delta_0p2pct` | `int8_t` | 0.2 %RH delta |

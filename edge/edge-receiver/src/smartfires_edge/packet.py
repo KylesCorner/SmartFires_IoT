@@ -447,6 +447,7 @@ def decode_bundle(raw_lora_payload: bytes, rssi: Optional[int] = None) -> list[d
         )
     ]
 
+    current_session_time = session_time
     for _ in range(delta_count):
         (
             dt_ticks_250ms,
@@ -461,12 +462,12 @@ def decode_bundle(raw_lora_payload: bytes, rssi: Optional[int] = None) -> list[d
         ) = struct.unpack_from(DELTA_FMT, raw_lora_payload, offset)
         offset += DELTA_SIZE
 
-        dt_ms = dt_ticks_250ms * 250
+        current_session_time += dt_ticks_250ms * 250
         results.append(
             _full_state_fields(
                 node_id,
                 seq,
-                session_time + dt_ms,
+                current_session_time,
                 sensor_flags,
                 d_wind_cms,
                 temp_cdegc + (d_temp_deci_c * 10),

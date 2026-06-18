@@ -63,6 +63,7 @@ bool PacketHandler::push(const SensorSnapshot &snap) {
 
     if (!_hasRef) {
         _ref        = sample;
+        _prevSample = sample;
         _hasRef     = true;
         _deltaCount = 0;
 
@@ -72,7 +73,8 @@ bool PacketHandler::push(const SensorSnapshot &snap) {
         return false;
     }
 
-    _deltas[_deltaCount++] = makeDelta(_ref, sample);
+    _deltas[_deltaCount++] = makeDelta(_ref, _prevSample, sample);
+    _prevSample = sample;
 
     LOG_DEBUG("packet", "bundle_delta_added count=%u/%u",
               static_cast<unsigned int>(_deltaCount),
@@ -176,6 +178,7 @@ void PacketHandler::resetBundleState() {
     _bundleReady = false;
     _bundleLen   = 0;
     memset(&_ref, 0, sizeof(_ref));
+    memset(&_prevSample, 0, sizeof(_prevSample));
     memset(_deltas, 0, sizeof(_deltas));
     memset(_bundleBuf, 0, sizeof(_bundleBuf));
 }
@@ -263,11 +266,12 @@ BinaryPacket::FullStatePayload PacketHandler::quantize(const SensorSnapshot &sna
 
 BinaryPacket::DeltaPayload PacketHandler::makeDelta(
     const BinaryPacket::FullStatePayload &ref,
+    const BinaryPacket::FullStatePayload &prev,
     const BinaryPacket::FullStatePayload &s)
 {
     BinaryPacket::DeltaPayload d = {};
 
-    const uint32_t dtMs = static_cast<uint32_t>(s.session_time - ref.session_time);
+    const uint32_t dtMs = static_cast<uint32_t>(s.session_time - prev.session_time);
     uint8_t flags = 0;
 
     uint32_t dtTicks = (dtMs + 125u) / 250u;
@@ -275,6 +279,14 @@ BinaryPacket::DeltaPayload PacketHandler::makeDelta(
         dtTicks = 255u;
         flags |= BinaryPacket::DELTA_FLAG_DT_CLAMPED;
     }
+
+    LOG_DEBUG("packet",
+              "delta_dt ref_session_ms=%lu prev_session_ms=%lu sample_session_ms=%lu dtMs=%lu dtTicks=%u",
+              static_cast<unsigned long>(ref.session_time),
+              static_cast<unsigned long>(prev.session_time),
+              static_cast<unsigned long>(s.session_time),
+              static_cast<unsigned long>(dtMs),
+              static_cast<unsigned int>(dtTicks));
 
     d.dt_ticks_250ms      = static_cast<uint8_t>(dtTicks);
     d.wind_cms            = s.wind_cms;

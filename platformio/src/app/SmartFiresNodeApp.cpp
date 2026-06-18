@@ -312,6 +312,9 @@ SensorSnapshot SmartFiresNodeApp::buildSnapshot() const {
   SensorSnapshot snap;
   snap.sessionTimeMs = _tdmaClock.sessionNowMs();
 
+  LOG_DEBUG("app", "snapshot_session_ms=%lu",
+            static_cast<unsigned long>(snap.sessionTimeMs));
+
   LOG_DEBUG("app", "build_snapshot_start session_ms=%lu sensor_count=%u",
             static_cast<unsigned long>(snap.sessionTimeMs),
             static_cast<unsigned int>(_sensorCount));

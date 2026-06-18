@@ -33,7 +33,8 @@ _ST_CHECK_CRC = 4
 
 
 class FrameReceiver:
-    def __init__(self) -> None:
+    def __init__(self, session_start: float) -> None:
+        self._session_start = session_start
         self.state = _ST_WAIT_M0
         self.buf = bytearray()
         self.expected_len = 0
@@ -108,9 +109,11 @@ class FrameReceiver:
             elif pkt_type == PKT_CMD_ACK:
                 cmd_ack = decode_cmd_ack(raw_payload, rssi)
 
-            now_ts = datetime.datetime.utcnow().isoformat(timespec="milliseconds")
             for pkt in packets:
-                pkt["timestamp"] = now_ts
+                t = self._session_start + pkt["session_time_ms"] / 1000.0
+                pkt["timestamp"] = datetime.datetime.utcfromtimestamp(t).isoformat(
+                    timespec="milliseconds"
+                )
 
             return {
                 "pkt_type": pkt_type,
@@ -129,8 +132,8 @@ class FrameReceiver:
         return None
 
 
-def iter_packets(port: str, baud: int):
-    receiver = FrameReceiver()
+def iter_packets(port: str, baud: int, session_start: float):
+    receiver = FrameReceiver(session_start)
 
     with serial.Serial(port, baud, timeout=0.25) as ser:
         while True:

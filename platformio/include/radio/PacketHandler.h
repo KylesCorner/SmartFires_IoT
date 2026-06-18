@@ -73,7 +73,8 @@ private:
     uint8_t _seq = 0;
 
     // Bundle state
-    BinaryPacket::FullStatePayload _ref    = {};
+    BinaryPacket::FullStatePayload _ref        = {};
+    BinaryPacket::FullStatePayload _prevSample = {};
     BinaryPacket::DeltaPayload     _deltas[BinaryPacket::kBundleMaxDeltas] = {};
     uint8_t _deltaCount  = 0;
     bool    _hasRef      = false;
@@ -94,6 +95,7 @@ private:
     static BinaryPacket::FullStatePayload quantize(const SensorSnapshot &snap);
     static BinaryPacket::DeltaPayload     makeDelta(
         const BinaryPacket::FullStatePayload &ref,
+        const BinaryPacket::FullStatePayload &prev,
         const BinaryPacket::FullStatePayload &sample);
 
     void resetBundleState();
