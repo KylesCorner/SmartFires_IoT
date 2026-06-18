@@ -81,6 +81,29 @@ function buildNodeCheckboxes(nodeIds) {
   }
 }
 
+function buildChartScales() {
+  const scales = {
+    x: {
+      type: "linear",
+      ticks: {
+        callback: (value) => new Date(value).toLocaleTimeString(),
+        color: "#aab4c0",
+        maxTicksLimit: 8,
+      },
+      grid: { color: "#2a2f36" },
+    },
+  };
+  // One independent hidden Y-axis per metric so each variable auto-scales to its own range.
+  for (const metric of METRICS) {
+    scales[`y_${metric.key}`] = {
+      type: "linear",
+      display: false,
+      beginAtZero: false,
+    };
+  }
+  return scales;
+}
+
 function initChart() {
   const ctx = document.getElementById("sensor-chart").getContext("2d");
   state.chart = new Chart(ctx, {
@@ -89,15 +112,8 @@ function initChart() {
     options: {
       animation: false,
       parsing: false,
-      scales: {
-        x: {
-          type: "linear",
-          ticks: {
-            callback: (value) => new Date(value).toLocaleTimeString(),
-          },
-        },
-        y: { beginAtZero: false },
-      },
+      maintainAspectRatio: false,
+      scales: buildChartScales(),
       plugins: {
         legend: { labels: { color: "#e6e6e6" } },
       },
@@ -130,6 +146,7 @@ async function refreshChart() {
         borderWidth: 1.5,
         pointRadius: 0,
         tension: 0.15,
+        yAxisID: `y_${metric}`,
       });
     }
   });
