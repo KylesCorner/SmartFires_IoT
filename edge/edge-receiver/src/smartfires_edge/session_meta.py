@@ -18,7 +18,6 @@ class SessionMetaLogger:
         self,
         session_id: int,
         session_start: float,
-        session_stamp: str,
         port: str,
         baud: int,
         data_dir: Path,
@@ -28,7 +27,7 @@ class SessionMetaLogger:
         self._port = port
         self._baud = baud
         self._node_registry: dict[str, dict] = {}
-        self._path = data_dir / "telemetry" / f"session-{session_stamp}.json"
+        self._path = data_dir / "session.json"
         self._write()
 
     def _write(self) -> None:

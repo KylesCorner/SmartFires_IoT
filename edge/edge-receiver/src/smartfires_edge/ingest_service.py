@@ -129,11 +129,6 @@ def run_receive(
     if log_fn is None:
         log_fn = lambda msg, node_id=None: print(msg)  # noqa: E731
 
-    telemetry_dir = cfg.data_dir / "telemetry"
-    metrics_dir = cfg.data_dir / "metrics"
-    raw_dir = cfg.data_dir / "raw"
-    status_dir = cfg.data_dir / "status"
-
     tracker = PacketLossTracker(cfg.nodes)
     if live_state is not None:
         live_state.tracker = tracker
@@ -146,15 +141,18 @@ def run_receive(
     session_stamp = _make_session_stamp(session_start)
     session_ctx = {"session_id": session_id, "session_start": session_start}
 
-    logger = DurableCsvLogger(telemetry_dir, session_stamp, fsync_every_row=cfg.fsync_every_row)
+    session_dir = cfg.data_dir / session_stamp
+    state_path = session_dir / "packet_loss_state.json"
+    status_path = session_dir / "status.jsonl"
+
+    logger = DurableCsvLogger(session_dir, fsync_every_row=cfg.fsync_every_row)
 
     session_meta = SessionMetaLogger(
         session_id=session_id,
         session_start=session_start,
-        session_stamp=session_stamp,
         port=cfg.port,
         baud=cfg.baud,
-        data_dir=cfg.data_dir,
+        data_dir=session_dir,
     )
 
     anemometer: AnemometerPoller | None = None
@@ -167,7 +165,6 @@ def run_receive(
         )
         anemometer.start()
 
-    state_path = metrics_dir / "packet_loss_state.json"
     last_metrics_write = 0.0
 
     log_fn(f"SmartFires edge receive", None)
@@ -302,7 +299,6 @@ def run_receive(
                     "retx_total": status.get("retx_total") if status.get("retx_total") is not None else "",
                     "fail_total": status.get("fail_total") if status.get("fail_total") is not None else "",
                 }
-                status_path = status_dir / f"status-{session_stamp}.jsonl"
                 _append_jsonl(status_path, status_row)
                 logger.write_row(status_row)
                 if live_state is not None:
@@ -335,7 +331,6 @@ def run_receive(
                     "status": cmd_ack.get("status"),
                     "rssi": cmd_ack.get("rssi"),
                 }
-                status_path = status_dir / f"status-{session_stamp}.jsonl"
                 _append_jsonl(status_path, cmd_ack_row)
                 log_fn(
                     "[CMD_ACK] "
@@ -374,8 +369,7 @@ def run_receive(
                     live_state.record_telemetry(pkt)
 
                 if cfg.raw_log:
-                    raw_path = raw_dir / f"frames-{session_stamp}.jsonl"
-                    _append_jsonl(raw_path, pkt)
+                    _append_jsonl(session_dir / "frames.jsonl", pkt)
 
                 log_fn(
                     f"[RX] node={pkt['node_id']} seq={pkt['seq']:3d} "
@@ -403,16 +397,17 @@ def run_receive(
                 session_ctx["session_id"] = session_id
                 session_ctx["session_start"] = session_start
 
-                logger = DurableCsvLogger(
-                    telemetry_dir, session_stamp, fsync_every_row=cfg.fsync_every_row
-                )
+                session_dir = cfg.data_dir / session_stamp
+                state_path = session_dir / "packet_loss_state.json"
+                status_path = session_dir / "status.jsonl"
+
+                logger = DurableCsvLogger(session_dir, fsync_every_row=cfg.fsync_every_row)
                 session_meta = SessionMetaLogger(
                     session_id=session_id,
                     session_start=session_start,
-                    session_stamp=session_stamp,
                     port=cfg.port,
                     baud=cfg.baud,
-                    data_dir=cfg.data_dir,
+                    data_dir=session_dir,
                 )
 
                 tracker = PacketLossTracker(cfg.nodes)

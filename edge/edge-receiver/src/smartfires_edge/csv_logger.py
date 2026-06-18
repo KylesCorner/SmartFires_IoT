@@ -36,16 +36,15 @@ CSV_COLUMNS = [
 
 
 class DurableCsvLogger:
-    def __init__(self, root: Path, session_stamp: str, fsync_every_row: bool = False) -> None:
+    def __init__(self, root: Path, fsync_every_row: bool = False) -> None:
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
         self.fsync_every_row = fsync_every_row
-        self._session_stamp = session_stamp
         self._file = None
         self._writer = None
 
     def _current_path(self) -> Path:
-        return self.root / f"telemetry-{self._session_stamp}.csv"
+        return self.root / "telemetry.csv"
 
     def _ensure_open(self) -> None:
         if self._file is not None:
@@ -59,10 +58,9 @@ class DurableCsvLogger:
             self._file.flush()
             os.fsync(self._file.fileno())
 
-    def reset(self, session_stamp: str) -> None:
-        """Close the current file and switch to a new session stamp."""
+    def reset(self) -> None:
+        """Close the current file (caller creates a new logger for the new session)."""
         self.close()
-        self._session_stamp = session_stamp
 
     def write_row(self, row: dict) -> None:
         self._ensure_open()
