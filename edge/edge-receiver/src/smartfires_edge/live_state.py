@@ -170,7 +170,11 @@ class LiveState:
             result: dict[int, dict] = {}
             for node_id, stats in self.tracker.nodes.items():
                 if stats.first_seq is None:
-                    result[node_id] = {"last_seq": None, "bins": []}
+                    # No packets yet — fill with placeholders so the grid renders.
+                    result[node_id] = {
+                        "last_seq": None,
+                        "bins": [{"seq": None, "state": "before"} for _ in range(bins)],
+                    }
                     continue
 
                 last_seq = stats.last_seq

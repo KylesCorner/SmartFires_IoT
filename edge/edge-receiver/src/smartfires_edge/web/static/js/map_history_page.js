@@ -119,7 +119,9 @@ function updateReceptionGrid(timeline) {
     nodeBins.forEach((slot, i) => {
       const el = binsContainer.children[i];
       el.style.background = binColor(slot.state);
-      if (slot.state === "before") {
+      if (slot.seq === null) {
+        el.title = "(awaiting data)";
+      } else if (slot.state === "before") {
         el.title = `seq ${slot.seq} (before session)`;
       } else if (slot.state === "missing") {
         el.title = `seq ${slot.seq} — missing`;
