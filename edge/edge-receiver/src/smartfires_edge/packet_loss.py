@@ -94,11 +94,9 @@ class PacketLossTracker:
 
     def observe_packet(self, node_id: int, seq: int, rssi: int) -> None:
         self.total_decoded += 1
-        stats = self.nodes.get(node_id)
-        if stats is None:
-            self.untracked_packets += 1
-            return
-        stats.observe(seq=seq, rssi=rssi)
+        if node_id not in self.nodes:
+            self.nodes[node_id] = NodeStats(node_id=node_id)
+        self.nodes[node_id].observe(seq=seq, rssi=rssi)
 
     def to_dict(self) -> dict:
         return {

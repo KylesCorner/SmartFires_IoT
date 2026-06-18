@@ -20,7 +20,7 @@ function rssiColor(rssi) {
 function binColor(state) {
   if (state === "received") return "#28a055";
   if (state === "missing")  return "#7a2020";
-  return "#1e2328"; // "before" — predates session, blend into background
+  return "#2a2f36"; // "before" / placeholder — same as default bin background
 }
 
 function initMap() {
