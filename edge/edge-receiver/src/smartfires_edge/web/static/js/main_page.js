@@ -82,7 +82,7 @@ function buildNodeCheckboxes(nodeIds) {
 }
 
 function buildChartScales() {
-  const scales = {
+  return {
     x: {
       type: "linear",
       ticks: {
@@ -92,16 +92,15 @@ function buildChartScales() {
       },
       grid: { color: "#2a2f36" },
     },
-  };
-  // One independent hidden Y-axis per metric so each variable auto-scales to its own range.
-  for (const metric of METRICS) {
-    scales[`y_${metric.key}`] = {
+    y: {
       type: "linear",
       display: false,
-      beginAtZero: false,
-    };
-  }
-  return scales;
+      min: 0,
+      max: 1,
+      ticks: { color: "#aab4c0" },
+      grid: { color: "#2a2f36" },
+    },
+  };
 }
 
 function initChart() {
@@ -116,9 +115,25 @@ function initChart() {
       scales: buildChartScales(),
       plugins: {
         legend: { labels: { color: "#e6e6e6" } },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => {
+              const raw = ctx.raw?.raw;
+              return raw !== undefined
+                ? `${ctx.dataset.label}: ${raw}`
+                : ctx.dataset.label;
+            },
+          },
+        },
       },
     },
   });
+}
+
+function _fmtVal(v) {
+  if (Math.abs(v) >= 1000) return v.toFixed(1);
+  if (Math.abs(v) >= 10)   return v.toFixed(2);
+  return v.toFixed(3);
 }
 
 async function refreshChart() {
@@ -133,23 +148,63 @@ async function refreshChart() {
     nodeIds.map((nodeId) => Api.telemetryRecent(nodeId, 300))
   );
 
+  // Per-metric min/max across all nodes — used for normalization and axis labels.
+  const metricStats = {};
+  for (const metric of state.selectedMetrics) {
+    let lo = Infinity, hi = -Infinity;
+    for (const samples of perNodeSamples) {
+      for (const s of samples) {
+        if (s[metric] !== "" && s[metric] !== undefined && s[metric] !== null) {
+          const v = Number(s[metric]);
+          if (v < lo) lo = v;
+          if (v > hi) hi = v;
+        }
+      }
+    }
+    metricStats[metric] = {
+      min: isFinite(lo) ? lo : 0,
+      max: isFinite(hi) ? hi : 1,
+    };
+  }
+
+  // Normalize each metric to 0–1 so every variable fills the full chart height
+  // independently. Actual values are stored in `.raw` for tooltips and axis labels.
   const datasets = [];
   nodeIds.forEach((nodeId, idx) => {
     const samples = perNodeSamples[idx];
     for (const metric of state.selectedMetrics) {
+      const { min, max } = metricStats[metric];
+      const range = max - min || 1;
       const points = samples
         .filter((s) => s[metric] !== "" && s[metric] !== undefined && s[metric] !== null)
-        .map((s) => ({ x: Date.parse(s.timestamp), y: Number(s[metric]) }));
+        .map((s) => {
+          const raw = Number(s[metric]);
+          return { x: Date.parse(s.timestamp), y: (raw - min) / range, raw };
+        });
       datasets.push({
         label: `node ${nodeId} – ${metric}`,
         data: points,
         borderWidth: 1.5,
         pointRadius: 0,
         tension: 0.15,
-        yAxisID: `y_${metric}`,
       });
     }
   });
+
+  // Show actual Y-axis values only when a single metric is selected.
+  const yScale = state.chart.options.scales.y;
+  if (state.selectedMetrics.size === 1) {
+    const metric = [...state.selectedMetrics][0];
+    const { min, max } = metricStats[metric];
+    const range = max - min || 1;
+    yScale.display = true;
+    yScale.ticks = {
+      ...yScale.ticks,
+      callback: (v) => _fmtVal(min + v * range),
+    };
+  } else {
+    yScale.display = false;
+  }
 
   state.chart.data.datasets = datasets;
   state.chart.update();
