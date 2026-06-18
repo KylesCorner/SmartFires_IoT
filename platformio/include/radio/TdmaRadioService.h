@@ -112,6 +112,7 @@ private:
   uint32_t computeRetryWaitMs() const;
 
   bool isTimeSyncPacket(const ITdmaRadioDriver::ReceivedPacket &packet,
+                        uint32_t &sessionIdOut,
                         uint32_t &sessionMsOut,
                         uint8_t &assignedNodeIdOut) const;
   bool isAckSummaryPacket(const ITdmaRadioDriver::ReceivedPacket &packet,

@@ -8,10 +8,20 @@ void TdmaClock::applyAssignment(uint8_t nodeId, uint8_t numSlots) {
   _cfg.numSlots = numSlots;
 }
 
-void TdmaClock::applySync(uint32_t sessionTimeMs) {
+void TdmaClock::applySync(uint32_t sessionId, uint32_t sessionTimeMs) {
+  if (sessionId != _sessionId) {
+    _sessionId      = sessionId;
+    _sessionChanged = true;
+  }
   _syncSessionMs = sessionTimeMs;
-  _syncLocalMs = _clock.millis();
-  _hasSync = true;
+  _syncLocalMs   = _clock.millis();
+  _hasSync       = true;
+}
+
+bool TdmaClock::consumeSessionChanged() {
+  if (!_sessionChanged) return false;
+  _sessionChanged = false;
+  return true;
 }
 
 bool TdmaClock::hasSync() const {

@@ -713,18 +713,19 @@ void TdmaRadioService::checkIncomingTimeSync() {
               static_cast<unsigned int>(hasHdr ? hdr.seq : 0),
               static_cast<unsigned int>(packet.len), static_cast<int>(packet.rssi));
 
+    uint32_t sessionId = 0;
     uint32_t sessionMs = 0;
     uint8_t assignedNodeId = 0;
     BinaryPacket::AckSummaryPayload ack = {};
 
-    if (isTimeSyncPacket(packet, sessionMs, assignedNodeId)) {
+    if (isTimeSyncPacket(packet, sessionId, sessionMs, assignedNodeId)) {
       if (assignedNodeId != 0 && !applyAssignedNodeId(assignedNodeId)) {
         LOG_WARN("radio", "sync_ignore node=%u reason=assignment_apply_failed",
                  static_cast<unsigned int>(assignedNodeId));
         continue;
       }
 
-      _tdmaClock.applySync(sessionMs);
+      _tdmaClock.applySync(sessionId, sessionMs);
       _timeSyncCount++;
 
       LOG_INFO("tdma",
@@ -790,6 +791,7 @@ void TdmaRadioService::rememberPendingCommand(
 
 bool TdmaRadioService::isTimeSyncPacket(
     const ITdmaRadioDriver::ReceivedPacket &packet,
+    uint32_t &sessionIdOut,
     uint32_t &sessionMsOut,
     uint8_t &assignedNodeIdOut) const {
   BinaryPacket::PktHeader hdr;
@@ -813,6 +815,7 @@ bool TdmaRadioService::isTimeSyncPacket(
     assignedNodeIdOut = hdr.node_id;
   }
 
+  sessionIdOut = ts.session_id;
   sessionMsOut = ts.session_time_ms;
   return true;
 }

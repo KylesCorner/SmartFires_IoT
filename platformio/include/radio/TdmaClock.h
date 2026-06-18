@@ -10,9 +10,10 @@ public:
   explicit TdmaClock(const TdmaConfig &cfg, IClock &clock);
 
   void applyAssignment(uint8_t nodeId, uint8_t numSlots);
-  void applySync(uint32_t sessionTimeMs);
+  void applySync(uint32_t sessionId, uint32_t sessionTimeMs);
   bool hasSync() const;
   bool syncStale() const;
+  bool consumeSessionChanged();
 
   uint32_t sessionNowMs() const;
   uint32_t currentSlotIndex() const;
@@ -29,5 +30,7 @@ private:
 
   uint32_t _syncSessionMs = 0;
   uint32_t _syncLocalMs = 0;
+  uint32_t _sessionId = 0;
   bool _hasSync = false;
+  bool _sessionChanged = false;
 };

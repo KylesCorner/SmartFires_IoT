@@ -115,6 +115,12 @@ void SmartFiresNodeApp::update() {
 
   // Always poll radio so TIME_SYNC packets are processed.
   _radio.update();
+
+  if (_tdmaClock.consumeSessionChanged()) {
+    _packetHandler.reset();
+    LOG_INFO("app", "session_changed bundle_reset=1 seq_reset=1");
+  }
+
   handleIncomingCommands();
 
   if (_cfg.nodeId != _radio.nodeId()) {
