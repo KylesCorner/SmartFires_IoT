@@ -38,7 +38,7 @@ class CommandPayload(BaseModel):
 
 
 def _read_telemetry_history(
-    telemetry_dir: Path,
+    data_dir: Path,
     node_id: int,
     metric: str,
     start: Optional[str],
@@ -48,10 +48,10 @@ def _read_telemetry_history(
     end_dt = datetime.fromisoformat(end) if end else None
     results: list[dict] = []
 
-    if not telemetry_dir.exists():
+    if not data_dir.exists():
         return results
 
-    for path in sorted(telemetry_dir.glob("telemetry-*.csv")):
+    for path in sorted(data_dir.glob("*/telemetry.csv")):
         with open(path, newline="", encoding="utf-8") as f:
             for row in csv.DictReader(f):
                 if row.get("packet_type") != "telemetry":
@@ -93,7 +93,6 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(title="SmartFires Dashboard")
     store = base_station_store or BaseStationStore()
-    telemetry_dir = data_dir / "telemetry"
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     if TILES_DIR.exists() and any(TILES_DIR.iterdir()):
@@ -124,7 +123,7 @@ def create_app(
     ) -> list[dict]:
         if metric not in TELEMETRY_METRICS:
             raise HTTPException(status_code=400, detail=f"Unknown metric {metric!r}")
-        return _read_telemetry_history(telemetry_dir, node, metric, start, end)
+        return _read_telemetry_history(data_dir, node, metric, start, end)
 
     @app.get("/api/status_history")
     def status_history(limit: int = 5000) -> list[dict]:

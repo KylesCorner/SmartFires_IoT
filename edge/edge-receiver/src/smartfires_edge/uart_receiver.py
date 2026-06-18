@@ -111,8 +111,8 @@ class FrameReceiver:
 
             for pkt in packets:
                 t = self._session_start + pkt["session_time_ms"] / 1000.0
-                pkt["timestamp"] = datetime.datetime.utcfromtimestamp(t).isoformat(
-                    timespec="milliseconds"
+                pkt["timestamp"] = (
+                    datetime.datetime.utcfromtimestamp(t).isoformat(timespec="milliseconds") + "Z"
                 )
 
             return {

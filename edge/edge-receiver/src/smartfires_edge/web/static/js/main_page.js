@@ -180,7 +180,8 @@ async function refreshChart() {
         .map((s) => {
           const raw = Number(s[metric]);
           return { x: Date.parse(s.timestamp), y: (raw - min) / range, raw };
-        });
+        })
+        .sort((a, b) => a.x - b.x);
       datasets.push({
         label: `node ${nodeId} – ${metric}`,
         data: points,
