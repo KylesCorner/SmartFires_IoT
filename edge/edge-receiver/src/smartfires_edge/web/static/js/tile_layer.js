@@ -1,19 +1,37 @@
 /**
  * SmartFires map tile layer — browser-side cache/fetch/prefetch.
  *
- * Architecture:
- *  1. Leaflet requests a tile → browser tries Jetson cache (/tiles/z/x/y.png)
- *  2. Cache hit (200): served immediately (fast, works offline)
- *  3. Cache miss (404): browser fetches directly from OSM (browser UA = compliant)
- *  4. After OSM fetch: browser uploads the tile to the Jetson cache (PUT)
- *  5. Pre-fetch: JS walks all tiles in a 2-mile radius and fills the cache
+ * Tile source: CARTO Voyager (free, non-commercial, OSM data, separate CDN).
+ * Using fetch() throughout so HTTP 4xx responses are detected properly and
+ * never rendered as tile content (OSM returns 403 as a valid image, which
+ * img.onerror cannot detect — fetch() can).
  *
- * The Jetson backend NEVER contacts OSM — all internet access is from the
- * browser, which is what OSM's tile usage policy requires.
+ * Flow per tile:
+ *  1. GET /tiles/z/x/y.png → Jetson cache (fast, works offline)
+ *  2. If 404 → fetch from CARTO (browser request, not server-side)
+ *  3. If CARTO OK → PUT /tiles/z/x/y.png (Jetson stores it for offline)
+ *  4. Tile displayed; future loads served from Jetson cache
+ *
+ * Pre-fetch: when a GPS location is known, proactively fill the cache for
+ * the surrounding 2-mile radius at zoom 12-17 at ≤5 req/s.
  */
 
 // ---------------------------------------------------------------------------
-// Tile coordinate math (mirrors tile_cache.py Python implementation)
+// Tile source
+// ---------------------------------------------------------------------------
+
+function _tileUrl(z, x, y) {
+  // Rotate across CARTO's four subdomains for parallel loading.
+  const s = "abcd"[(x + y) % 4];
+  return `https://${s}.basemaps.cartocdn.com/rastertiles/voyager/${z}/${x}/${y}.png`;
+}
+
+const _TILE_ATTRIBUTION =
+  '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors ' +
+  '© <a href="https://carto.com/attributions">CARTO</a>';
+
+// ---------------------------------------------------------------------------
+// Tile coordinate math
 // ---------------------------------------------------------------------------
 
 const _PREFETCH_ZOOMS = [12, 13, 14, 15, 16, 17];
@@ -53,17 +71,17 @@ function _tilesInRadius(lat, lon, zoom, radiusM = _RADIUS_M) {
 }
 
 // ---------------------------------------------------------------------------
-// Tile upload helper (browser → Jetson cache)
+// Fetch helpers
 // ---------------------------------------------------------------------------
 
-async function _uploadTile(z, x, y, imgEl) {
+async function _fetchBlob(url) {
+  const resp = await fetch(url);
+  if (!resp.ok) return null;
+  return resp.blob();
+}
+
+async function _uploadTile(z, x, y, blob) {
   try {
-    const canvas = document.createElement("canvas");
-    canvas.width = 256;
-    canvas.height = 256;
-    canvas.getContext("2d").drawImage(imgEl, 0, 0);
-    const blob = await new Promise((res) => canvas.toBlob(res, "image/png"));
-    if (!blob) return;
     await fetch(`/tiles/${z}/${x}/${y}.png`, {
       method: "PUT",
       body: blob,
@@ -73,49 +91,65 @@ async function _uploadTile(z, x, y, imgEl) {
 }
 
 // ---------------------------------------------------------------------------
-// Custom Leaflet tile layer: cache-first, OSM fallback
+// Custom Leaflet tile layer
 // ---------------------------------------------------------------------------
 
 const SmartFiresTileLayer = L.TileLayer.extend({
+  /**
+   * Override createTile to use fetch() so we get proper HTTP status codes.
+   * img.onerror cannot distinguish a 403/404 from a network error — providers
+   * sometimes return 4xx with a valid image body (e.g. OSM "Access blocked").
+   */
   createTile(coords, done) {
     const tile = document.createElement("img");
     tile.alt = "";
     tile.setAttribute("role", "presentation");
 
     const { z, x, y } = coords;
-    const cacheUrl = `/tiles/${z}/${x}/${y}.png`;
-    const osmUrl = `https://tile.openstreetmap.org/${z}/${x}/${y}.png`;
 
-    // On OSM load: notify Leaflet and upload to Jetson cache.
-    const onOsmLoad = () => {
-      done(null, tile);
-      _uploadTile(z, x, y, tile);
-    };
+    (async () => {
+      let blob = null;
 
-    const tryOsm = () => {
-      tile.crossOrigin = "anonymous"; // needed for canvas readback (CORS)
-      tile.onload = onOsmLoad;
-      tile.onerror = () => done(new Error("Tile unavailable"), tile);
-      tile.src = osmUrl;
-    };
+      // 1. Try Jetson cache (same-origin; fast; works offline).
+      try {
+        blob = await _fetchBlob(`/tiles/${z}/${x}/${y}.png`);
+      } catch (_) {}
 
-    // Try Jetson cache first (same-origin, no CORS needed).
-    tile.onload = () => done(null, tile);
-    tile.onerror = tryOsm;
-    tile.src = cacheUrl;
+      // 2. Cache miss → fetch from CARTO (browser UA, different CDN from OSM).
+      if (!blob) {
+        try {
+          blob = await _fetchBlob(_tileUrl(z, x, y));
+          if (blob) {
+            // Store on Jetson for offline use (fire-and-forget).
+            _uploadTile(z, x, y, blob.slice(0));
+          }
+        } catch (_) {}
+      }
+
+      if (blob) {
+        const url = URL.createObjectURL(blob);
+        tile.onload = () => {
+          URL.revokeObjectURL(url);
+          done(null, tile);
+        };
+        tile.onerror = () => {
+          URL.revokeObjectURL(url);
+          done(new Error("Tile render failed"), tile);
+        };
+        tile.src = url;
+      } else {
+        // Offline and not cached — show blank tile.
+        done(null, tile);
+      }
+    })();
 
     return tile;
   },
 });
 
-/**
- * Create the shared SmartFires tile layer.
- * Call this instead of L.tileLayer(...) in page JS.
- */
 function createSmartFiresTileLayer() {
   return new SmartFiresTileLayer(null, {
-    attribution:
-      '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    attribution: _TILE_ATTRIBUTION,
     maxZoom: 19,
   });
 }
@@ -129,10 +163,9 @@ const _prefetchQueue = []; // [[z, x, y], ...]
 let _prefetchRunning = false;
 
 /**
- * Queue a background pre-fetch of all tiles within ~2 miles of (lat, lon)
- * for zoom levels 12-17. Deduplicates by location (rounds to ~100 m).
- * Each tile is fetched from OSM by the browser and uploaded to the Jetson
- * cache at ~5 req/s to stay within OSM's acceptable-use policy.
+ * Queue background pre-fetch of all tiles within ~2 miles of (lat, lon)
+ * for zoom 12-17. Deduplicates by location (±~100 m). Fetches from CARTO
+ * and stores on the Jetson at ≤5 req/s.
  */
 function prefetchTilesForLocation(lat, lon) {
   const key = `${lat.toFixed(3)},${lon.toFixed(3)}`;
@@ -154,30 +187,21 @@ async function _runPrefetchLoop() {
   while (_prefetchQueue.length > 0) {
     const [z, x, y] = _prefetchQueue.shift();
 
-    // Skip if already in Jetson cache.
+    // Skip if already cached on Jetson.
     try {
       const head = await fetch(`/tiles/${z}/${x}/${y}.png`, { method: "HEAD" });
-      if (head.ok) {
-        continue;
-      }
+      if (head.ok) continue;
     } catch (_) {}
 
-    // Fetch from OSM (browser request — compliant) and upload to Jetson.
+    // Fetch from CARTO and upload to Jetson.
     try {
-      const resp = await fetch(
-        `https://tile.openstreetmap.org/${z}/${x}/${y}.png`
-      );
-      if (resp.ok) {
-        const blob = await resp.blob();
-        await fetch(`/tiles/${z}/${x}/${y}.png`, {
-          method: "PUT",
-          body: blob,
-          headers: { "Content-Type": "image/png" },
-        });
+      const blob = await _fetchBlob(_tileUrl(z, x, y));
+      if (blob) {
+        await _uploadTile(z, x, y, blob);
       }
     } catch (_) {}
 
-    // ~5 req/s — well within OSM policy.
+    // ~5 req/s.
     await new Promise((r) => setTimeout(r, 200));
   }
 
