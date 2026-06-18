@@ -379,6 +379,7 @@ def run_receive(
 
                 log_fn(
                     f"[RX] node={pkt['node_id']} seq={pkt['seq']:3d} "
+                    f"t={pkt['timestamp'][11:]} "
                     f"T={pkt['temp_c']:5.1f}C H={pkt['humidity_pct']:4.1f}% "
                     f"wind={pkt['wind_mps']:.2f} PM2.5={pkt['pm2_5_ug_m3']:.1f} "
                     f"rssi={pkt['rssi']:4d}",
