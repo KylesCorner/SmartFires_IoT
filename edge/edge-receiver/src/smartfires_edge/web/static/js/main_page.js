@@ -266,7 +266,7 @@ async function refreshChart() {
 function initMap() {
   L.Icon.Default.imagePath = "/static/vendor/leaflet/images/";
   state.map = L.map("node-map").setView([0, 0], 2);
-  L.tileLayer("/tiles/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(state.map);
+  createSmartFiresTileLayer().addTo(state.map);
 }
 
 function updateMap(nodes, baseStation) {
@@ -278,6 +278,7 @@ function updateMap(nodes, baseStation) {
     }
     const latlng = [info.lat, info.lon];
     bounds.push(latlng);
+    prefetchTilesForLocation(info.lat, info.lon);
 
     if (!state.markers[info.node_id]) {
       state.markers[info.node_id] = L.marker(latlng).addTo(state.map);
@@ -292,6 +293,7 @@ function updateMap(nodes, baseStation) {
   if (baseStation && baseStation.lat !== undefined) {
     const latlng = [baseStation.lat, baseStation.lon];
     bounds.push(latlng);
+    prefetchTilesForLocation(baseStation.lat, baseStation.lon);
     if (!state.baseMarker) {
       state.baseMarker = L.circleMarker(latlng, {
         radius: 9,

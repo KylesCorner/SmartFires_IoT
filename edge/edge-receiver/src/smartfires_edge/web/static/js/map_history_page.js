@@ -32,7 +32,7 @@ function slotTitle(slot) {
 function initMap() {
   L.Icon.Default.imagePath = "/static/vendor/leaflet/images/";
   mapState.map = L.map("history-map").setView([0, 0], 2);
-  L.tileLayer("/tiles/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(mapState.map);
+  createSmartFiresTileLayer().addTo(mapState.map);
 }
 
 function updateBaseMarker(baseStation) {
@@ -58,6 +58,7 @@ async function pollStatusHistory() {
     if (fix.lat === null || fix.lat === undefined || fix.lat === "") continue;
     const latlng = [fix.lat, fix.lon];
     mapState.bounds.push(latlng);
+    prefetchTilesForLocation(fix.lat, fix.lon);
     L.circleMarker(latlng, {
       radius: 5,
       color: rssiColor(fix.rssi),

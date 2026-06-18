@@ -1,12 +1,13 @@
 import asyncio
 import csv
 import json
+import socket
 import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -16,7 +17,8 @@ from smartfires_edge.live_state import LiveState
 from smartfires_edge.tile_cache import TileCache
 
 STATIC_DIR = Path(__file__).parent / "static"
-# Legacy static-tile directory — used when no tile_cache_dir is provided.
+# Legacy manual tile directory — used as the default cache when no tile_cache_dir
+# is supplied (preserves backward-compat with pre-loaded tile pyramids).
 _LEGACY_TILES_DIR = Path(__file__).parent / "tiles"
 
 TELEMETRY_METRICS = {
@@ -37,6 +39,16 @@ class BaseStationPayload(BaseModel):
 
 class CommandPayload(BaseModel):
     command: str
+
+
+def _check_online() -> bool:
+    """Return True if internet is reachable (TCP connect to Cloudflare DNS)."""
+    try:
+        s = socket.create_connection(("1.1.1.1", 443), timeout=3.0)
+        s.close()
+        return True
+    except OSError:
+        return False
 
 
 def _read_telemetry_history(
@@ -87,27 +99,6 @@ def _read_telemetry_history(
     return results
 
 
-async def _gps_prefetch_watcher(
-    tile_cache: TileCache,
-    live_state: LiveState,
-    store: BaseStationStore,
-) -> None:
-    """Background task: pre-fetch tiles whenever a new GPS position is seen."""
-    while True:
-        await asyncio.sleep(30)
-        try:
-            for node in live_state.nodes_snapshot().values():
-                lat = node.get("lat")
-                lon = node.get("lon")
-                if lat is not None and lon is not None and lat != "" and lon != "":
-                    tile_cache.prefetch_location(float(lat), float(lon))
-            base = store.get()
-            if base and base.get("lat") is not None:
-                tile_cache.prefetch_location(float(base["lat"]), float(base["lon"]))
-        except Exception:
-            pass
-
-
 def create_app(
     live_state: LiveState,
     data_dir: Path,
@@ -117,20 +108,9 @@ def create_app(
 ) -> FastAPI:
     app = FastAPI(title="SmartFires Dashboard")
     store = base_station_store or BaseStationStore()
-
-    # Resolve tile cache directory: caller-supplied > legacy static tiles dir.
-    _tile_dir = tile_cache_dir if tile_cache_dir is not None else _LEGACY_TILES_DIR
-    tile_cache = TileCache(_tile_dir)
+    tile_cache = TileCache(tile_cache_dir if tile_cache_dir is not None else _LEGACY_TILES_DIR)
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-
-    # ------------------------------------------------------------------
-    # Startup: launch GPS prefetch watcher
-    # ------------------------------------------------------------------
-
-    @app.on_event("startup")
-    async def _startup() -> None:
-        asyncio.create_task(_gps_prefetch_watcher(tile_cache, live_state, store))
 
     # ------------------------------------------------------------------
     # Pages
@@ -145,20 +125,29 @@ def create_app(
         return FileResponse(STATIC_DIR / "map_history.html")
 
     # ------------------------------------------------------------------
-    # Tile proxy with disk cache
+    # Tile cache endpoints
+    #
+    # The browser (not the Jetson) fetches tiles from OSM and uploads them
+    # here. GET serves the cache; PUT stores what the browser fetched.
     # ------------------------------------------------------------------
 
     @app.get("/tiles/{z}/{x}/{y}.png")
-    async def get_tile(z: int, x: int, y: int) -> Response:
-        """Serve a map tile from disk cache; fetch from OSM when online and uncached."""
-        data = await tile_cache.get_tile(z, x, y)
+    def get_tile(z: int, x: int, y: int) -> Response:
+        data = tile_cache.get(z, x, y)
         if data is None:
-            raise HTTPException(status_code=404, detail="Tile not available")
+            raise HTTPException(status_code=404, detail="Tile not cached")
         return Response(
             content=data,
             media_type="image/png",
             headers={"Cache-Control": "public, max-age=86400"},
         )
+
+    @app.put("/tiles/{z}/{x}/{y}.png")
+    async def put_tile(z: int, x: int, y: int, request: Request) -> dict:
+        data = await request.body()
+        if data:
+            tile_cache.put(z, x, y, data)
+        return {"status": "ok"}
 
     # ------------------------------------------------------------------
     # Connectivity probe
@@ -167,7 +156,7 @@ def create_app(
     @app.get("/api/connectivity")
     async def connectivity() -> dict:
         loop = asyncio.get_running_loop()
-        online = await loop.run_in_executor(None, tile_cache.is_online)
+        online = await loop.run_in_executor(None, _check_online)
         return {"online": online}
 
     # ------------------------------------------------------------------
@@ -207,9 +196,7 @@ def create_app(
 
     @app.post("/api/base_station")
     def set_base_station(payload: BaseStationPayload) -> dict:
-        result = store.set(payload.lat, payload.lon)
-        tile_cache.prefetch_location(payload.lat, payload.lon)
-        return result
+        return store.set(payload.lat, payload.lon)
 
     @app.post("/api/command")
     def post_command(payload: CommandPayload) -> dict:
