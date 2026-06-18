@@ -8,8 +8,8 @@ const Api = {
   async statusHistory(limit = 5000) {
     return (await fetch(`/api/status_history?limit=${limit}`)).json();
   },
-  async receptionTimeline(bins = 50, binWidthS = 5) {
-    return (await fetch(`/api/reception_timeline?bins=${bins}&bin_width_s=${binWidthS}`)).json();
+  async receptionTimeline(bins = 50) {
+    return (await fetch(`/api/reception_timeline?bins=${bins}`)).json();
   },
   async getBaseStation() {
     return (await fetch("/api/base_station")).json();

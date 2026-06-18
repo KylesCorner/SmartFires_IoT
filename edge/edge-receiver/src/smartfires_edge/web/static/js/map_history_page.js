@@ -17,13 +17,10 @@ function rssiColor(rssi) {
   return `rgb(${r},${g},80)`;
 }
 
-function binColor(count) {
-  if (count <= 0) {
-    return "#2a2f36";
-  }
-  const intensity = Math.min(1, count / 5);
-  const g = Math.round(80 + intensity * 150);
-  return `rgb(40,${g},90)`;
+function binColor(state) {
+  if (state === "received") return "#28a055";
+  if (state === "missing")  return "#7a2020";
+  return "#1e2328"; // "before" — predates session, blend into background
 }
 
 function initMap() {
@@ -86,6 +83,9 @@ function updateReceptionGrid(timeline) {
     .sort((a, b) => a - b);
 
   for (const nodeId of nodeIds) {
+    const nodeData = timeline[nodeId];
+    const nodeBins = nodeData.bins || [];
+
     let row = document.getElementById(`reception-row-${nodeId}`);
     if (!row) {
       row = document.createElement("div");
@@ -96,25 +96,36 @@ function updateReceptionGrid(timeline) {
       label.className = "node-label";
       label.textContent = `Node ${nodeId}`;
 
-      const bins = document.createElement("div");
-      bins.className = "reception-bins";
+      const binsEl = document.createElement("div");
+      binsEl.className = "reception-bins";
 
       row.appendChild(label);
-      row.appendChild(bins);
+      row.appendChild(binsEl);
       container.appendChild(row);
     }
 
     const binsContainer = row.querySelector(".reception-bins");
-    const counts = timeline[nodeId];
-    while (binsContainer.children.length < counts.length) {
+
+    // Ensure the DOM has exactly nodeBins.length cells.
+    while (binsContainer.children.length < nodeBins.length) {
       const cell = document.createElement("div");
       cell.className = "reception-bin";
       binsContainer.appendChild(cell);
     }
+    while (binsContainer.children.length > nodeBins.length) {
+      binsContainer.removeChild(binsContainer.lastChild);
+    }
 
-    counts.forEach((count, i) => {
-      binsContainer.children[i].style.background = binColor(count);
-      binsContainer.children[i].title = `${count} packet(s)`;
+    nodeBins.forEach((slot, i) => {
+      const el = binsContainer.children[i];
+      el.style.background = binColor(slot.state);
+      if (slot.state === "before") {
+        el.title = `seq ${slot.seq} (before session)`;
+      } else if (slot.state === "missing") {
+        el.title = `seq ${slot.seq} — missing`;
+      } else {
+        el.title = `seq ${slot.seq}`;
+      }
     });
   }
 }
@@ -138,7 +149,7 @@ async function pollAll() {
   const [nodes, baseStation, timeline] = await Promise.all([
     Api.nodes(),
     Api.getBaseStation(),
-    Api.receptionTimeline(50, 5),
+    Api.receptionTimeline(50),
   ]);
   updateBaseMarker(baseStation);
   await pollStatusHistory();

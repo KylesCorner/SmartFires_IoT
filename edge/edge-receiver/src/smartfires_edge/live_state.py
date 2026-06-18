@@ -154,20 +154,40 @@ class LiveState:
             samples = list(self.telemetry.get(node_id, ()))
         return samples[-limit:]
 
-    def reception_timeline(self, bins: int = 50, bin_width_s: float = 5.0) -> dict[int, list[int]]:
-        now = time.time()
-        window_start = now - bins * bin_width_s
-        with self._lock:
-            events_by_node = {n: list(events) for n, events in self.reception_events.items()}
+    def reception_timeline(self, bins: int = 50) -> dict[int, dict]:
+        """Return a seq-space sliding window for each node.
 
-        result: dict[int, list[int]] = {}
-        for node_id, events in events_by_node.items():
-            counts = [0] * bins
-            for ts, _seq in events:
-                if ts < window_start:
+        Each entry in ``bins`` corresponds to one sequence number slot,
+        ordered oldest-left to newest-right, with the rightmost slot always
+        being ``last_seq``.  State is one of:
+          ``"received"``  – seq in seen_seqs
+          ``"missing"``   – seq in [first_seq, last_seq] but not received
+          ``"before"``    – seq predates first_seq (no expectation)
+        """
+        with self._lock:
+            if self.tracker is None:
+                return {}
+            result: dict[int, dict] = {}
+            for node_id, stats in self.tracker.nodes.items():
+                if stats.first_seq is None:
+                    result[node_id] = {"last_seq": None, "bins": []}
                     continue
-                idx = int((ts - window_start) / bin_width_s)
-                idx = max(0, min(bins - 1, idx))
-                counts[idx] += 1
-            result[node_id] = counts
-        return result
+
+                last_seq = stats.last_seq
+                first_seq = stats.first_seq
+                span = (last_seq - first_seq) & 0xFF  # inclusive distance
+
+                slot_list = []
+                for i in range(bins):
+                    seq = (last_seq - (bins - 1 - i)) & 0xFF
+                    dist_from_first = (seq - first_seq) & 0xFF
+                    if dist_from_first > span:
+                        state = "before"
+                    elif seq in stats.seen_seqs:
+                        state = "received"
+                    else:
+                        state = "missing"
+                    slot_list.append({"seq": seq, "state": state})
+
+                result[node_id] = {"last_seq": last_seq, "bins": slot_list}
+            return result

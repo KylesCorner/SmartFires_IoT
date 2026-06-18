@@ -167,6 +167,7 @@ table th {
   height: 1.1rem;
   background: #2a2f36;
   border-radius: 2px;
+  cursor: default;
 }
 
 /* Log panel */

@@ -130,8 +130,8 @@ def create_app(
         return live_state.status_history_snapshot(limit=limit)
 
     @app.get("/api/reception_timeline")
-    def reception_timeline(bins: int = 50, bin_width_s: float = 5.0) -> dict:
-        return live_state.reception_timeline(bins=bins, bin_width_s=bin_width_s)
+    def reception_timeline(bins: int = 50) -> dict:
+        return live_state.reception_timeline(bins=bins)
 
     @app.get("/api/base_station")
     def get_base_station() -> dict:
