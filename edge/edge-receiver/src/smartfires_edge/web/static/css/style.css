@@ -351,6 +351,36 @@ table th {
   font-weight: 600;
 }
 
+.time-range-row {
+  display: flex;
+  gap: 0.4rem;
+  margin: 0.5rem 0 0.75rem 0;
+  flex-wrap: wrap;
+}
+
+.time-range-btn {
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  border: 1px solid #2a2f36;
+  background: #15191e;
+  color: #aab4c0;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  user-select: none;
+}
+
+.time-range-btn.active {
+  background: #e8743a;
+  color: #15191e;
+  border-color: #e8743a;
+}
+
+.time-range-btn:hover:not(.active) {
+  background: #20262d;
+  color: #e6e6e6;
+}
+
 .new-session-btn {
   margin-left: auto;
   background: #8b1a1a;
