@@ -38,11 +38,11 @@ namespace DutyCycle {
 // cycling disabled, sensors serviced back-to-back at samplePeriodMs. This is
 // the cadence each sensor's minSamplePeriodMs floor is checked against at
 // boot (see main.cpp's sensor-floor validation log).
-constexpr bool kContinuousEnabled = false;
+constexpr bool kContinuousEnabled = false;  // false = no sleep/wake cycling; sensors run back-to-back at samplePeriodMs
 constexpr uint32_t kContinuousMinSleepMs = 0;
 constexpr uint32_t kContinuousMaxWakeMs = 0;
 constexpr uint32_t kContinuousActiveSampleMs = 0;
-constexpr uint32_t kContinuousSamplePeriodMs = 20000;
+constexpr uint32_t kContinuousSamplePeriodMs = 750;
 constexpr uint32_t kContinuousWarmupMs = 10000;
 constexpr float kContinuousTempDeltaThresholdC = 0.0f;
 constexpr float kContinuousHumidityDeltaThresholdPct = 0.0f;
@@ -53,7 +53,7 @@ constexpr bool kContinuousFailOnSampleError = false;
 // available as a documented alternate operating mode. samplePeriodMs here
 // carries forward a pre-existing "//TEMP" marker from before this
 // consolidation; flagged as a real value, not silently dropped.
-constexpr bool kThresholdEnabled = true;
+constexpr bool kThresholdEnabled = true;   // true = sleep/wake cycling active between samples
 constexpr uint32_t kThresholdMinSleepMs = 3000;
 constexpr uint32_t kThresholdMaxWakeMs = 1000;
 constexpr uint32_t kThresholdActiveSampleMs = 30000;

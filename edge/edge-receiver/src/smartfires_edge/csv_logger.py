@@ -1,6 +1,5 @@
 import csv
 import os
-from datetime import datetime, timezone
 from pathlib import Path
 
 CSV_COLUMNS = [
@@ -37,39 +36,33 @@ CSV_COLUMNS = [
 
 
 class DurableCsvLogger:
-    def __init__(self, root: Path, fsync_every_row: bool = False) -> None:
+    def __init__(self, root: Path, session_stamp: str, fsync_every_row: bool = False) -> None:
         self.root = root
         self.root.mkdir(parents=True, exist_ok=True)
         self.fsync_every_row = fsync_every_row
+        self._session_stamp = session_stamp
         self._file = None
         self._writer = None
-        self._current_date = None
 
     def _current_path(self) -> Path:
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        return self.root / f"telemetry-{today}.csv"
+        return self.root / f"telemetry-{self._session_stamp}.csv"
 
     def _ensure_open(self) -> None:
-        path = self._current_path()
-        current_date = path.stem
-
-        if self._file is not None and self._current_date == current_date:
-            return
-
         if self._file is not None:
-            self._file.flush()
-            os.fsync(self._file.fileno())
-            self._file.close()
-
+            return
+        path = self._current_path()
         exists = path.exists()
         self._file = open(path, "a", newline="", buffering=1)
         self._writer = csv.DictWriter(self._file, fieldnames=CSV_COLUMNS)
-        self._current_date = current_date
-
         if not exists:
             self._writer.writeheader()
             self._file.flush()
             os.fsync(self._file.fileno())
+
+    def reset(self, session_stamp: str) -> None:
+        """Close the current file and switch to a new session stamp."""
+        self.close()
+        self._session_stamp = session_stamp
 
     def write_row(self, row: dict) -> None:
         self._ensure_open()

@@ -312,6 +312,52 @@ function connectLogSocket() {
   };
 }
 
+function wireNewSessionButton() {
+  const btn = document.getElementById("new-session-btn");
+  btn.addEventListener("click", async () => {
+    if (!confirm("Save the current session CSV and start a new one?\nAll live data in the dashboard will be cleared.")) {
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = "Resetting…";
+    try {
+      await Api.newSession();
+
+      // Clear chart
+      state.chart.data.datasets = [];
+      state.chart.update();
+
+      // Clear node checkboxes
+      state.knownNodes.clear();
+      state.selectedNodes.clear();
+      document.getElementById("node-checkboxes").innerHTML = "";
+
+      // Clear map markers
+      for (const marker of Object.values(state.markers)) {
+        marker.remove();
+      }
+      state.markers = {};
+      state.mapFitted = false;
+      if (state.baseMarker) {
+        state.baseMarker.remove();
+        state.baseMarker = null;
+      }
+
+      // Clear log
+      logState.entries = [];
+      logState.knownNodeIds.clear();
+      logState.activeTab = null;
+      renderLogTabs();
+      renderLogOutput();
+    } catch (e) {
+      alert("Failed to start new session: " + (e.message || e));
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "New Session";
+    }
+  });
+}
+
 function wireCommandInput() {
   const input = document.getElementById("cmd-input");
   const btn = document.getElementById("cmd-send");
@@ -344,6 +390,7 @@ async function init() {
   renderLogTabs();
   connectLogSocket();
   wireCommandInput();
+  wireNewSessionButton();
   await pollNodes();
   await refreshChart();
   setInterval(pollNodes, 2000);

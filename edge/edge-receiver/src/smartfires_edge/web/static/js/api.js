@@ -32,6 +32,14 @@ const Api = {
       })
     ).json();
   },
+  async newSession() {
+    return (
+      await fetch("/api/new_session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      })
+    ).json();
+  },
 };
 
 function fmt(value) {

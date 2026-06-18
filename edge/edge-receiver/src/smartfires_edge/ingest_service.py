@@ -50,17 +50,22 @@ def _pkt_type_name(pkt_type: int | None) -> str:
     return f"0x{(pkt_type or 0):02x}"
 
 
+def _make_session_stamp(ts: float) -> str:
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d_%H%M%S")
+
+
 def _send_time_sync(
     ser: serial.Serial,
     write_lock: threading.Lock,
     sync_state: dict,
-    session_id: int,
-    session_start: float,
+    session_ctx: dict,
     reason: str,
     log_fn: Callable[[str, int | None], None],
     trigger_node: int | None = None,
     trigger_seq: int | None = None,
 ) -> bool:
+    session_id = session_ctx["session_id"]
+    session_start = session_ctx["session_start"]
     session_ms = int((time.time() - session_start) * 1000) & 0xFFFFFFFF
     with write_lock:
         seq = int(sync_state.setdefault("next_seq", 0)) & 0xFF
@@ -88,8 +93,7 @@ def _time_sync_sender(
     ser: serial.Serial,
     write_lock: threading.Lock,
     sync_state: dict,
-    session_id: int,
-    session_start: float,
+    session_ctx: dict,
     interval_s: int,
     log_fn: Callable[[str, int | None], None],
 ) -> None:
@@ -99,8 +103,7 @@ def _time_sync_sender(
             ser=ser,
             write_lock=write_lock,
             sync_state=sync_state,
-            session_id=session_id,
-            session_start=session_start,
+            session_ctx=session_ctx,
             reason="periodic",
             log_fn=log_fn,
         )
@@ -110,6 +113,7 @@ def run_receive(
     cfg: IngestConfig,
     live_state: LiveState | None = None,
     log_fn: Callable[[str, int | None], None] | None = None,
+    reset_event: threading.Event | None = None,
 ) -> int:
     """Run the UART ingest loop.
 
@@ -120,6 +124,7 @@ def run_receive(
                     for live dashboard updates.
         log_fn: Optional log callback ``(msg, node_id)`` injected by ``web`` subcommand
                 to stream log lines to the browser. Defaults to plain ``print``.
+        reset_event: Optional threading.Event set by the web API to trigger a new session.
     """
     if log_fn is None:
         log_fn = lambda msg, node_id=None: print(msg)  # noqa: E731
@@ -129,7 +134,6 @@ def run_receive(
     raw_dir = cfg.data_dir / "raw"
     status_dir = cfg.data_dir / "status"
 
-    logger = DurableCsvLogger(telemetry_dir, fsync_every_row=cfg.fsync_every_row)
     tracker = PacketLossTracker(cfg.nodes)
     if live_state is not None:
         live_state.tracker = tracker
@@ -139,10 +143,15 @@ def run_receive(
 
     session_id = random.randint(1, 0xFFFFFFFF)
     session_start = time.time()
+    session_stamp = _make_session_stamp(session_start)
+    session_ctx = {"session_id": session_id, "session_start": session_start}
+
+    logger = DurableCsvLogger(telemetry_dir, session_stamp, fsync_every_row=cfg.fsync_every_row)
 
     session_meta = SessionMetaLogger(
         session_id=session_id,
         session_start=session_start,
+        session_stamp=session_stamp,
         port=cfg.port,
         baud=cfg.baud,
         data_dir=cfg.data_dir,
@@ -165,7 +174,7 @@ def run_receive(
     log_fn(f"Port: {cfg.port}  Baud: {cfg.baud}", None)
     log_fn(f"Data dir: {cfg.data_dir}", None)
     log_fn(f"Tracked nodes: {cfg.nodes}", None)
-    log_fn(f"Session ID: 0x{session_id:08x}  TIME_SYNC interval: {cfg.sync_interval_s}s", None)
+    log_fn(f"Session ID: 0x{session_id:08x}  Stamp: {session_stamp}  TIME_SYNC interval: {cfg.sync_interval_s}s", None)
     if cfg.anemometer.enabled:
         log_fn(
             "Anemometer: "
@@ -187,8 +196,7 @@ def run_receive(
                         ser,
                         write_lock,
                         sync_state,
-                        session_id,
-                        session_start,
+                        session_ctx,
                         cfg.sync_interval_s,
                         log_fn,
                     ),
@@ -229,8 +237,7 @@ def run_receive(
                     ser=ser,
                     write_lock=write_lock,
                     sync_state=sync_state,
-                    session_id=session_id,
-                    session_start=session_start,
+                    session_ctx=session_ctx,
                     reason="awaken",
                     log_fn=log_fn,
                     trigger_node=int(hdr_node),
@@ -241,8 +248,7 @@ def run_receive(
                     ser=ser,
                     write_lock=write_lock,
                     sync_state=sync_state,
-                    session_id=session_id,
-                    session_start=session_start,
+                    session_ctx=session_ctx,
                     reason="receiver_start",
                     log_fn=log_fn,
                     trigger_node=int(hdr_node),
@@ -296,10 +302,7 @@ def run_receive(
                     "retx_total": status.get("retx_total") if status.get("retx_total") is not None else "",
                     "fail_total": status.get("fail_total") if status.get("fail_total") is not None else "",
                 }
-                status_path = (
-                    status_dir
-                    / f"status-{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.jsonl"
-                )
+                status_path = status_dir / f"status-{session_stamp}.jsonl"
                 _append_jsonl(status_path, status_row)
                 logger.write_row(status_row)
                 if live_state is not None:
@@ -332,10 +335,7 @@ def run_receive(
                     "status": cmd_ack.get("status"),
                     "rssi": cmd_ack.get("rssi"),
                 }
-                status_path = (
-                    status_dir
-                    / f"status-{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.jsonl"
-                )
+                status_path = status_dir / f"status-{session_stamp}.jsonl"
                 _append_jsonl(status_path, cmd_ack_row)
                 log_fn(
                     "[CMD_ACK] "
@@ -374,10 +374,7 @@ def run_receive(
                     live_state.record_telemetry(pkt)
 
                 if cfg.raw_log:
-                    raw_path = (
-                        raw_dir
-                        / f"frames-{datetime.now(timezone.utc).strftime('%Y-%m-%d')}.jsonl"
-                    )
+                    raw_path = raw_dir / f"frames-{session_stamp}.jsonl"
                     _append_jsonl(raw_path, pkt)
 
                 log_fn(
@@ -392,6 +389,48 @@ def run_receive(
             if now - last_metrics_write >= cfg.metrics_interval_s:
                 tracker.save(state_path)
                 last_metrics_write = now
+
+            # Check for new-session request from the web API
+            if reset_event is not None and reset_event.is_set():
+                reset_event.clear()
+                tracker.save(state_path)
+                logger.close()
+
+                session_id = random.randint(1, 0xFFFFFFFF)
+                session_start = time.time()
+                session_stamp = _make_session_stamp(session_start)
+                session_ctx["session_id"] = session_id
+                session_ctx["session_start"] = session_start
+
+                logger = DurableCsvLogger(
+                    telemetry_dir, session_stamp, fsync_every_row=cfg.fsync_every_row
+                )
+                session_meta = SessionMetaLogger(
+                    session_id=session_id,
+                    session_start=session_start,
+                    session_stamp=session_stamp,
+                    port=cfg.port,
+                    baud=cfg.baud,
+                    data_dir=cfg.data_dir,
+                )
+
+                tracker = PacketLossTracker(cfg.nodes)
+                if live_state is not None:
+                    live_state.tracker = tracker
+                    live_state.reset()
+
+                _send_time_sync(
+                    ser=ser,
+                    write_lock=write_lock,
+                    sync_state=sync_state,
+                    session_ctx=session_ctx,
+                    reason="new_session",
+                    log_fn=log_fn,
+                )
+                log_fn(
+                    f"[SESSION] New session started: 0x{session_id:08x}  stamp={session_stamp}",
+                    None,
+                )
 
     except KeyboardInterrupt:
         log_fn("\nStopped by user.", None)

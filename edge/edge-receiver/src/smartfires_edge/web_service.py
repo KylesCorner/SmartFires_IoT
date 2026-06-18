@@ -21,10 +21,16 @@ def run_web(cfg: EdgeConfig) -> int:
              ingest settings are in ``cfg.ingest``.
     """
     live_state = LiveState(cfg.ingest.nodes)
+    reset_event = threading.Event()
 
     ingest_thread = threading.Thread(
         target=run_receive,
-        kwargs=dict(cfg=cfg.ingest, live_state=live_state, log_fn=live_state.push_log),
+        kwargs=dict(
+            cfg=cfg.ingest,
+            live_state=live_state,
+            log_fn=live_state.push_log,
+            reset_event=reset_event,
+        ),
         daemon=True,
     )
     ingest_thread.start()
@@ -33,6 +39,7 @@ def run_web(cfg: EdgeConfig) -> int:
         live_state=live_state,
         data_dir=cfg.ingest.data_dir,
         base_station_store=BaseStationStore(),
+        reset_event=reset_event,
     )
     uvicorn.run(app, host=cfg.web_host, port=cfg.web_http_port, log_level="info")
     return 0

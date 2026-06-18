@@ -131,6 +131,19 @@ class LiveState:
                 }
             return result
 
+    def reset(self) -> None:
+        """Clear all live data buffers for a new session."""
+        with self._lock:
+            for q in self.telemetry.values():
+                q.clear()
+            self.status.clear()
+            self.status_history.clear()
+            for q in self.reception_events.values():
+                q.clear()
+            self._session_start_retx.clear()
+            self._session_start_fail.clear()
+        self.push_log("--- NEW SESSION ---", None)
+
     def status_history_snapshot(self, limit: int = 5000) -> list[dict[str, Any]]:
         with self._lock:
             items = list(self.status_history)

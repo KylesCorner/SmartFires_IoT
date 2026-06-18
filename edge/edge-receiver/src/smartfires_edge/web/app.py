@@ -1,6 +1,7 @@
 import asyncio
 import csv
 import json
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -88,6 +89,7 @@ def create_app(
     live_state: LiveState,
     data_dir: Path,
     base_station_store: Optional[BaseStationStore] = None,
+    reset_event: Optional[threading.Event] = None,
 ) -> FastAPI:
     app = FastAPI(title="SmartFires Dashboard")
     store = base_station_store or BaseStationStore()
@@ -143,6 +145,13 @@ def create_app(
     @app.post("/api/command")
     def post_command(payload: CommandPayload) -> dict:
         return {"status": "queued", "command": payload.command}
+
+    @app.post("/api/new_session")
+    def new_session() -> dict:
+        if reset_event is None:
+            raise HTTPException(status_code=501, detail="Session reset not available")
+        reset_event.set()
+        return {"status": "reset_requested"}
 
     @app.websocket("/ws/log")
     async def websocket_log(ws: WebSocket) -> None:
