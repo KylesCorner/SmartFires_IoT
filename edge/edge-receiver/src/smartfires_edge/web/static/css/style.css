@@ -63,11 +63,15 @@ h1, h2 {
   gap: 1rem;
 }
 
+.chart-container {
+  position: relative;
+  height: 300px;
+  width: 100%;
+}
+
 #sensor-chart {
   background: #15191e;
   border-radius: 6px;
-  height: 200px;
-  width: 100%;
 }
 
 .checkbox-row {
