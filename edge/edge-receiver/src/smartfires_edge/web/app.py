@@ -131,6 +131,16 @@ def create_app(
     # here. GET serves the cache; PUT stores what the browser fetched.
     # ------------------------------------------------------------------
 
+    @app.head("/tiles/{z}/{x}/{y}.png")
+    def head_tile(z: int, x: int, y: int) -> Response:
+        if tile_cache.has(z, x, y):
+            return Response(
+                status_code=200,
+                media_type="image/png",
+                headers={"Cache-Control": "public, max-age=86400"},
+            )
+        raise HTTPException(status_code=404, detail="Tile not cached")
+
     @app.get("/tiles/{z}/{x}/{y}.png")
     def get_tile(z: int, x: int, y: int) -> Response:
         data = tile_cache.get(z, x, y)
