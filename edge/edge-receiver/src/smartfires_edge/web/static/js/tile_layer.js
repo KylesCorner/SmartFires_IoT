@@ -34,7 +34,9 @@ const _TILE_ATTRIBUTION =
 // Tile coordinate math
 // ---------------------------------------------------------------------------
 
-const _PREFETCH_ZOOMS = [12, 13, 14, 15, 16, 17];
+// Proactive prefetch: z13-z15 only (~80 tiles per location, ~40 s at 2 req/s).
+// z16-z17 tiles are cached on-demand as the user browses at high zoom.
+const _PREFETCH_ZOOMS = [13, 14, 15];
 const _RADIUS_M = 3218.7; // 2 statute miles
 
 function _tileXY(lat, lon, zoom) {
@@ -201,8 +203,8 @@ async function _runPrefetchLoop() {
       }
     } catch (_) {}
 
-    // ~5 req/s.
-    await new Promise((r) => setTimeout(r, 200));
+    // ~2 req/s — conservative to avoid rate limiting.
+    await new Promise((r) => setTimeout(r, 500));
   }
 
   _prefetchRunning = false;
