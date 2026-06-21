@@ -130,36 +130,45 @@ ArduinoAnalogReader analog;
 constexpr uint8_t PIN_WIND_RV = A1;
 constexpr uint8_t PIN_WIND_TMP = A2;
 constexpr uint8_t PIN_WIND_ENABLE = A3;
-
 TPSDriver::Config windPowerCfg = TPSDriver::Config::make(PIN_WIND_ENABLE, true);
-
 TPSDriver windPower(windPowerCfg);
-
-// Pins are board wiring, passed explicitly; every other field now comes
-// from config/SensingConfig.h's Wind namespace via makeRevCCfg()'s own
-// defaults (verified identical to the values this call used to override by
-// hand: divider ratio 1.6818, zero-wind adjustment -1.0 V, 10 ms sample
-// floor, 10000 ms hot-wire/TPS settling wake delay).
 WindSensorRevC::Config windCfg =
-    WindSensorRevC::Config::makeRevCCfg(PIN_WIND_RV, PIN_WIND_TMP);
-
+    WindSensorRevC::Config::make(PIN_WIND_RV,
+                                PIN_WIND_TMP,
+                                SensingConfig::Wind::kMinSamplePeriodMs,
+                                SensingConfig::Wind::kWakeDelayMs,
+                                SensingConfig::Wind::kDutyClass);
 WindSensorRevC wind(windCfg, analog, windPower, clock);
 
 AdafruitSht31Driver sht31Driver;
-
-Sht31Sensor::Config sht31Cfg = Sht31Sensor::Config::makeSht31Cfg();
+Sht31Sensor::Config sht31Cfg = Sht31Sensor::Config::make(
+  SensingConfig::Sht31::kMinSamplePeriodMs,
+  SensingConfig::Sht31::kDutyClass);
 Sht31Sensor sht31(sht31Cfg, sht31Driver, clock);
 
 AdafruitGpsDriver gpsDriver;
-Pa1010dGpsSensor::Config gpsCfg =
-    Pa1010dGpsSensor::Config::makePeriodicBackupCfg();
+Pa1010dGpsSensor::Config gpsCfg = Pa1010dGpsSensor::Config::make(
+    SensingConfig::Gps::kPeriodicRunTimeMs,
+    SensingConfig::Gps::kPeriodicSleepTimeMs,
+    SensingConfig::Gps::kPeriodicSecondRunTimeMs,
+    SensingConfig::Gps::kPeriodicSecondSleepTimeMs,
+    SensingConfig::Gps::kPeriodicMinSamplePeriodMs,
+    GpsPowerMode::PeriodicBackup);
 Pa1010dGpsSensor gps(gpsCfg, gpsDriver, clock);
 
 SparkfunIcm20948Driver imuDriver;
-Icm20948Sensor::Config imuCfg = Icm20948Sensor::Config::makeImuCfg();
+Icm20948Sensor::Config imuCfg = Icm20948Sensor::Config::make(
+  SensingConfig::Imu::kMinSamplePeriodMs,
+  SensingConfig::Imu::kWakeDelayMs,
+  SensingConfig::Imu::kDutyClass
+);
 Icm20948Sensor imu(imuCfg, imuDriver, clock);
 
-Sps30Sensor::Config sps30Cfg = Sps30Sensor::Config::makeSps30Cfg();
+Sps30Sensor::Config sps30Cfg = Sps30Sensor::Config::make(
+    SensingConfig::Sps30::kMinSamplePeriodMs,
+    SensingConfig::Sps30::kWakeDelayMs,
+    SensingConfig::Sps30::kDutyClass);
+
 SensirionUartSps30Driver sps30Driver(Serial1);
 Sps30Sensor sps30(sps30Cfg, sps30Driver, clock);
 
@@ -167,9 +176,6 @@ ISensor *sensors[] = {
     &sht31, &gps, &imu, &sps30, &wind,
 };
 
-// ISensor *sensors[] = {
-//     &sht31, &imu,
-// };
 constexpr size_t sensorCount = sizeof(sensors) / sizeof(sensors[0]);
 
 // -----------------------------------------------------------------------------
@@ -183,7 +189,16 @@ BatteryMonitor battery(batteryCfg, analog, clock);
 // Duty Cycle
 // -----------------------------------------------------------------------------
 
-DutyCycleConfig dutyCfg = DutyCycleConfig::dutyCycleCfgContinuous();
+DutyCycleConfig dutyCfg = DutyCycleConfig::make(
+    SensingConfig::DutyCycle::kThresholdEnabled,
+    SensingConfig::DutyCycle::kThresholdMinSleepMs,
+    SensingConfig::DutyCycle::kThresholdMaxWakeMs,
+    SensingConfig::DutyCycle::kThresholdActiveSampleMs,
+    SensingConfig::DutyCycle::kThresholdSamplePeriodMs,
+    SensingConfig::DutyCycle::kThresholdWarmupMs,
+    SensingConfig::DutyCycle::kThresholdTempDeltaThresholdC,
+    SensingConfig::DutyCycle::kThresholdHumidityDeltaThresholdPct,
+    SensingConfig::DutyCycle::kThresholdFailOnSampleError);
 DutyCycleController duty(dutyCfg, sht31, sensors, sensorCount, clock, battery);
 
 // -----------------------------------------------------------------------------
@@ -316,6 +331,7 @@ void setup() {
   gps.reset();
 
   Wire.begin();
+  analog.begin();
   delay(100);
   scanI2C();
   // duty.resetSensors();

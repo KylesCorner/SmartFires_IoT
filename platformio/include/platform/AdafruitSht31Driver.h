@@ -7,6 +7,9 @@
 class AdafruitSht31Driver final : public ISht31Driver {
 public:
   bool begin(uint8_t address) override;
+
+  bool read(float &temperatureC, float &humidityPct) override;
+
   float readTemperatureC() override;
   float readHumidityPct() override;
 

@@ -1,6 +1,5 @@
 #pragma once
 
-#include "config/SensingConfig.h"
 #include "drivers/IGpsDriver.h"
 #include "interfaces/IClock.h"
 #include "interfaces/ISensor.h"
@@ -8,97 +7,32 @@
 class Pa1010dGpsSensor final : public ISensor {
 public:
   struct Config {
-    SensorDutyClass dutyClass;
+    SensorDutyClass dutyClass = SensorDutyClass::AlwaysOn;
     GpsPowerMode powerMode;
     GpsPeriodicConfig periodic;
     uint32_t minSamplePeriodMs;
-    uint32_t wakeDelayMs;
-    uint8_t address = SensingConfig::Gps::kAddress;
+    uint32_t wakeDelayMs = 0;
+    uint8_t address = 0x10;
 
-    // Thin wrapper: defaults come from config/SensingConfig.h's Gps
-    // namespace. Each factory below corresponds to a distinct, independently
-    // tuned power-mode family — see SensingConfig.h's comment on why a
-    // couple of the timing values are intentionally shared between two
-    // factories rather than collapsed into one.
-    static Pa1010dGpsSensor::Config makeGpsCfg(
-        uint32_t minSamplePeriodMs_ = SensingConfig::Gps::kContinuousMinSamplePeriodMs,
-        uint32_t wakeDelayMs_ = SensingConfig::Gps::kContinuousWakeDelayMs,
-        SensorDutyClass dutyClass_ = SensorDutyClass::AlwaysOn,
-        uint8_t address_ = SensingConfig::Gps::kAddress,
-        GpsPowerMode powerMode_ = GpsPowerMode::FullPowerContinuous) {
-      Pa1010dGpsSensor::Config cfg;
-      cfg.minSamplePeriodMs = minSamplePeriodMs_;
-      cfg.wakeDelayMs = wakeDelayMs_;
-      cfg.dutyClass = dutyClass_;
-      cfg.address = address_;
-      cfg.powerMode = powerMode_;
-      cfg.periodic = GpsPeriodicConfig{};
-      return cfg;
-    }
+    //The gps unit is on its own sub-duty cycle. This config says that the main
+    //duty cycle has no control over the gps and the gps will perodically cycle
+    //itself. The gps needs to have its wake pin (defined in the driver) to
+    //backup its routing info for faster fix when awakened
 
-    static Pa1010dGpsSensor::Config makePeriodicStandbyCfg(
-        uint32_t runTimeMs = SensingConfig::Gps::kPeriodicRunTimeMs,
-        uint32_t sleepTimeMs = SensingConfig::Gps::kPeriodicSleepTimeMs,
-        uint32_t secondRunTimeMs = SensingConfig::Gps::kPeriodicSecondRunTimeMs,
-        uint32_t secondSleepTimeMs = SensingConfig::Gps::kPeriodicSecondSleepTimeMs,
-        uint32_t minSamplePeriodMs = SensingConfig::Gps::kPeriodicMinSamplePeriodMs,
-        uint8_t address = SensingConfig::Gps::kAddress) {
+    static Pa1010dGpsSensor::Config make(
+        uint32_t runTimeMs = 4000,
+        uint32_t sleepTimeMs = 15000,
+        uint32_t secondRunTimeMs = 24000,
+        uint32_t secondSleepTimeMs = 90000,
+        uint32_t minSamplePeriodMs = 1000,
+        GpsPowerMode powermode = GpsPowerMode::PeriodicBackup) {
       Pa1010dGpsSensor::Config cfg;
       cfg.minSamplePeriodMs = minSamplePeriodMs;
-      cfg.wakeDelayMs = 0;
-      cfg.dutyClass = SensorDutyClass::AlwaysOn;
-      cfg.address = address;
-      cfg.powerMode = GpsPowerMode::PeriodicStandby;
+      cfg.powerMode = powermode;
       cfg.periodic.runTimeMs = runTimeMs;
       cfg.periodic.sleepTimeMs = sleepTimeMs;
       cfg.periodic.secondRunTimeMs = secondRunTimeMs;
       cfg.periodic.secondSleepTimeMs = secondSleepTimeMs;
-      return cfg;
-    }
-
-    static Pa1010dGpsSensor::Config makePeriodicBackupCfg(
-        uint32_t runTimeMs = SensingConfig::Gps::kPeriodicRunTimeMs,
-        uint32_t sleepTimeMs = SensingConfig::Gps::kPeriodicSleepTimeMs,
-        uint32_t secondRunTimeMs = SensingConfig::Gps::kPeriodicSecondRunTimeMs,
-        uint32_t secondSleepTimeMs = SensingConfig::Gps::kPeriodicSecondSleepTimeMs,
-        uint32_t minSamplePeriodMs = SensingConfig::Gps::kPeriodicMinSamplePeriodMs,
-        uint8_t address = SensingConfig::Gps::kAddress) {
-      Pa1010dGpsSensor::Config cfg;
-      cfg.minSamplePeriodMs = minSamplePeriodMs;
-      cfg.wakeDelayMs = 0;
-      cfg.dutyClass = SensorDutyClass::AlwaysOn;
-      cfg.address = address;
-      cfg.powerMode = GpsPowerMode::PeriodicBackup;
-      cfg.periodic.runTimeMs = runTimeMs;
-      cfg.periodic.sleepTimeMs = sleepTimeMs;
-      cfg.periodic.secondRunTimeMs = secondRunTimeMs;
-      cfg.periodic.secondSleepTimeMs = secondSleepTimeMs;
-      return cfg;
-    }
-
-    static Pa1010dGpsSensor::Config makeAlwaysLocateStandbyCfg(
-        uint32_t minSamplePeriodMs = SensingConfig::Gps::kAlwaysLocateMinSamplePeriodMs,
-        uint8_t address = SensingConfig::Gps::kAddress) {
-      Pa1010dGpsSensor::Config cfg;
-      cfg.minSamplePeriodMs = minSamplePeriodMs;
-      cfg.wakeDelayMs = 0;
-      cfg.dutyClass = SensorDutyClass::AlwaysOn;
-      cfg.address = address;
-      cfg.powerMode = GpsPowerMode::AlwaysLocateStandby;
-      cfg.periodic = GpsPeriodicConfig{};
-      return cfg;
-    }
-
-    static Pa1010dGpsSensor::Config makeAlwaysLocateBackupCfg(
-        uint32_t minSamplePeriodMs = SensingConfig::Gps::kAlwaysLocateMinSamplePeriodMs,
-        uint8_t address = SensingConfig::Gps::kAddress) {
-      Pa1010dGpsSensor::Config cfg;
-      cfg.minSamplePeriodMs = minSamplePeriodMs;
-      cfg.wakeDelayMs = 0;
-      cfg.dutyClass = SensorDutyClass::AlwaysOn;
-      cfg.address = address;
-      cfg.powerMode = GpsPowerMode::AlwaysLocateBackup;
-      cfg.periodic = GpsPeriodicConfig{};
       return cfg;
     }
   };

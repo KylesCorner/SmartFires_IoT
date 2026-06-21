@@ -16,7 +16,6 @@
 
 #pragma once
 
-#include "config/SensingConfig.h"
 #include "interfaces/IAnalogReader.h"
 #include "interfaces/IClock.h"
 #include "interfaces/ISensor.h"
@@ -29,8 +28,8 @@
 class WindSensorRevC final : public ISensor {
 public:
   struct Config {
-    uint8_t pinRv = 1;
-    uint8_t pinTmp = 2;
+    uint8_t pinRv;
+    uint8_t pinTmp;
 
     float adcRefVolts = 3.3f;
     uint16_t adcMax = 1023;
@@ -43,12 +42,12 @@ public:
     // Example:
     //   Sensor output -> 10k -> ADC pin -> 22k -> GND
     //   dividerRatio = (10 + 22) / 22 = 1.4545
-    float rvDividerRatio = 1.0f;
-    float tmpDividerRatio = 1.0f;
+    float rvDividerRatio = 1.6818f;
+    float tmpDividerRatio = 1.6818f;
 
     // Calibration offset used by the Modern Device Rev C algorithm.
     // Tune this with the wind sensor covered / no airflow until wind_mps ~= 0.
-    float zeroWindAdjustmentVolts = 0.20f;
+    float zeroWindAdjustmentVolts = 0.25f;
 
     // The published Rev C math is based on 5 V / 10-bit Arduino ADC units.
     // We measure voltage directly, then convert back into equivalent 5 V ADC
@@ -56,38 +55,19 @@ public:
     float formulaRefVolts = 5.0f;
     uint16_t formulaAdcMax = 1023;
 
-    uint32_t minSamplePeriodMs = SensingConfig::Wind::kMinSamplePeriodMs;
-    uint32_t wakeDelayMs = SensingConfig::Wind::kWakeDelayMs;
+    uint32_t minSamplePeriodMs;
+    uint32_t wakeDelayMs;
 
     SensorDutyClass dutyClass = SensorDutyClass::DutyCycled;
 
-    // Thin wrapper: defaults come from config/SensingConfig.h's Wind
-    // namespace, which holds this sensor's own independently-tuned values
-    // (these are the values that actually ship — main.cpp used to
-    // re-override several of them by hand at the call site instead of the
-    // factory's own bare defaults representing real flight values).
-    // pinRv_/pinTmp_ stay as explicit parameters since they're board wiring,
-    // not a tuning value.
-    static Config makeRevCCfg(uint8_t pinRv_ = 1,
-                              uint8_t pinTmp_ = 2,
-                              float adcRefVolts_ = SensingConfig::Wind::kAdcRefVolts,
-                              uint16_t adcMax_ = SensingConfig::Wind::kAdcMax,
-                              float rvDividerRatio_ = SensingConfig::Wind::kDividerRatio,
-                              float tmpDividerRatio_ = SensingConfig::Wind::kDividerRatio,
-                              float zeroWindAdjustmentVolts_ =
-                                  SensingConfig::Wind::kZeroWindAdjustmentVolts,
-                              uint32_t minSamplePeriodMs_ =
-                                  SensingConfig::Wind::kMinSamplePeriodMs,
-                              uint32_t wakeDelayMs_ = SensingConfig::Wind::kWakeDelayMs,
-                              SensorDutyClass dutyClass_ = SensingConfig::Wind::kDutyClass) {
+    static Config make(uint8_t pinRv_,
+                              uint8_t pinTmp_,
+                              uint32_t minSamplePeriodMs_ = 10,
+                              uint32_t wakeDelayMs_ = 10000,
+                              SensorDutyClass dutyClass_ = SensorDutyClass::WarmupHeavy) {
       Config cfg;
       cfg.pinRv = pinRv_;
       cfg.pinTmp = pinTmp_;
-      cfg.adcRefVolts = adcRefVolts_;
-      cfg.adcMax = adcMax_;
-      cfg.rvDividerRatio = rvDividerRatio_;
-      cfg.tmpDividerRatio = tmpDividerRatio_;
-      cfg.zeroWindAdjustmentVolts = zeroWindAdjustmentVolts_;
       cfg.minSamplePeriodMs = minSamplePeriodMs_;
       cfg.wakeDelayMs = wakeDelayMs_;
       cfg.dutyClass = dutyClass_;

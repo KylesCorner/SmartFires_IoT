@@ -139,7 +139,6 @@ bool Sht31Sensor::service() {
 
   return _state == SensorPowerState::Ready;
 }
-
 bool Sht31Sensor::sample() {
   if (!ready()) {
     LOG_TRACE("sht31",
@@ -152,33 +151,103 @@ bool Sht31Sensor::sample() {
     return false;
   }
 
-  const float tempC = _driver.readTemperatureC();
-  const float humidityPct = _driver.readHumidityPct();
+  float tempC = NAN;
+  float humidityPct = NAN;
+
+  const bool readOk = _driver.read(tempC, humidityPct);
+
+  const bool tempValid =
+      isfinite(tempC) && tempC >= -40.0f && tempC <= 125.0f;
+
+  const bool humidityValid =
+      isfinite(humidityPct) && humidityPct >= 0.0f && humidityPct <= 100.0f;
 
   _reading.tempC = tempC;
   _reading.humidityPct = humidityPct;
-  _reading.valid = !isnan(tempC) && !isnan(humidityPct);
+  _reading.valid = readOk && tempValid && humidityValid;
   _reading.timestampMs = _clock.millis();
 
-  _triggerReading.valid = _reading.valid;
-  _triggerReading.tempC = _reading.tempC;
-  _triggerReading.humidityPct = _reading.humidityPct;
-
-  _lastSampleMs = _clock.millis();
+  _lastSampleMs = _reading.timestampMs;
 
   if (!_reading.valid) {
     LOG_WARN("sht31",
-             "sample_invalid temp_nan=%u humidity_nan=%u state=%s healthy=%u",
-             isnan(tempC) ? 1 : 0,
-             isnan(humidityPct) ? 1 : 0,
+             "sample_invalid read_ok=%u temp_c=%.2f humidity_pct=%.2f "
+             "temp_finite=%u humidity_finite=%u "
+             "temp_in_range=%u humidity_in_range=%u state=%s healthy=%u",
+             readOk ? 1 : 0,
+             tempC,
+             humidityPct,
+             isfinite(tempC) ? 1 : 0,
+             isfinite(humidityPct) ? 1 : 0,
+             tempValid ? 1 : 0,
+             humidityValid ? 1 : 0,
              sensorPowerStateName(_state),
              _healthy ? 1 : 0);
 
+    _triggerReading.valid = false;
     return false;
   }
 
+  _triggerReading.valid = true;
+  _triggerReading.tempC = _reading.tempC;
+  _triggerReading.humidityPct = _reading.humidityPct;
+
   return true;
 }
+// bool Sht31Sensor::sample() {
+//   if (!ready()) {
+//     LOG_TRACE("sht31",
+//               "sample_skip reason=not_ready healthy=%u state=%s "
+//               "elapsed_since_last_ms=%lu min_sample_period_ms=%lu",
+//               _healthy ? 1 : 0,
+//               sensorPowerStateName(_state),
+//               static_cast<unsigned long>(_clock.millis() - _lastSampleMs),
+//               static_cast<unsigned long>(_cfg.minSamplePeriodMs));
+//     return false;
+//   }
+
+//   const float tempC = _driver.readTemperatureC();
+//   const float humidityPct = _driver.readHumidityPct();
+
+//   _reading.tempC = tempC;
+//   _reading.humidityPct = humidityPct;
+//   const bool tempValid =
+//     isfinite(tempC) && tempC >= -40.0f && tempC <= 125.0f;
+
+//   const bool humidityValid =
+//       isfinite(humidityPct) && humidityPct >= 0.0f && humidityPct <= 100.0f;
+
+//   _reading.valid = tempValid && humidityValid;
+//   _reading.timestampMs = _clock.millis();
+
+//   _triggerReading.valid = _reading.valid;
+
+//   if (_reading.valid) {
+//     _triggerReading.tempC = _reading.tempC;
+//     _triggerReading.humidityPct = _reading.humidityPct;
+//   }
+
+//   _lastSampleMs = _clock.millis();
+
+//   if (!_reading.valid) {
+//     LOG_WARN("sht31",
+//          "sample_invalid temp_c=%.2f humidity_pct=%.2f "
+//          "temp_finite=%u humidity_finite=%u "
+//          "temp_in_range=%u humidity_in_range=%u state=%s healthy=%u",
+//          tempC,
+//          humidityPct,
+//          isfinite(tempC) ? 1 : 0,
+//          isfinite(humidityPct) ? 1 : 0,
+//          tempValid ? 1 : 0,
+//          humidityValid ? 1 : 0,
+//          sensorPowerStateName(_state),
+//          _healthy ? 1 : 0);
+
+//     return false;
+//   }
+
+//   return true;
+// }
 
 const ITriggerSensor::Reading &Sht31Sensor::triggerReading() const {
   return _triggerReading;

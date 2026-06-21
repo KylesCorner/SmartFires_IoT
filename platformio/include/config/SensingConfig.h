@@ -69,7 +69,6 @@ constexpr bool kThresholdFailOnSampleError = false;
 // SHT31 (temperature/humidity)
 // ---------------------------------------------------------------------------
 namespace Sht31 {
-constexpr uint8_t kAddress = 0x45;
 constexpr uint32_t kMinSamplePeriodMs = 100;
 constexpr SensorDutyClass kDutyClass = SensorDutyClass::AlwaysOn;
 }  // namespace Sht31
@@ -78,18 +77,12 @@ constexpr SensorDutyClass kDutyClass = SensorDutyClass::AlwaysOn;
 // Wind (Modern Device Rev C hot-wire anemometer)
 // ---------------------------------------------------------------------------
 namespace Wind {
-constexpr float kAdcRefVolts = 3.3f;       // Feather ADC reference voltage
-constexpr uint16_t kAdcMax = 1023;         // 10-bit ADC
 // Both the RV and TMP divider channels on this board use the same divider
 // network, hence one shared constant here (not a cross-sensor
 // generalization — it is the same physical sensor's two channels).
-constexpr float kDividerRatio = 1.6818f;
-// Calibration offset for the Rev C zero-wind formula. Tune with the sensor
-// covered / no airflow until wind_mps ~= 0.
-constexpr float kZeroWindAdjustmentVolts = -1.0f;
 constexpr uint32_t kMinSamplePeriodMs = 10;
 constexpr uint32_t kWakeDelayMs = 10000;  // hot-wire/TPS settling
-constexpr SensorDutyClass kDutyClass = SensorDutyClass::DutyCycled;
+constexpr SensorDutyClass kDutyClass = SensorDutyClass::WarmupHeavy;
 }  // namespace Wind
 
 // ---------------------------------------------------------------------------
@@ -108,7 +101,6 @@ namespace Imu {
 constexpr uint32_t kMinSamplePeriodMs = 10;
 constexpr uint32_t kWakeDelayMs = 0;
 constexpr SensorDutyClass kDutyClass = SensorDutyClass::DutyCycled;
-constexpr uint8_t kAddress = 1;
 }  // namespace Imu
 
 // ---------------------------------------------------------------------------
@@ -119,7 +111,6 @@ constexpr uint8_t kAddress = 1;
 // today, but each is named separately so a future change to one family
 // doesn't silently affect another.
 namespace Gps {
-constexpr uint8_t kAddress = 0x10;
 
 // makeGpsCfg() — full-power continuous mode.
 constexpr uint32_t kContinuousMinSamplePeriodMs = 100;

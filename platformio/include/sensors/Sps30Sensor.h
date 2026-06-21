@@ -1,6 +1,5 @@
 #pragma once
 
-#include "config/SensingConfig.h"
 #include "drivers/ISps30Driver.h"
 #include "interfaces/IClock.h"
 #include "interfaces/ISensor.h"
@@ -19,10 +18,10 @@ public:
 
     // Thin wrapper: defaults come from config/SensingConfig.h's Sps30
     // namespace (this sensor's own independently-tuned values).
-    static Sps30Sensor::Config makeSps30Cfg(
-        uint32_t minSamplePeriodMs_ = SensingConfig::Sps30::kMinSamplePeriodMs,
-        uint32_t wakeDelayMs_ = SensingConfig::Sps30::kWakeDelayMs,
-        SensorDutyClass dutyClass_ = SensingConfig::Sps30::kDutyClass) {
+    static Sps30Sensor::Config make(
+        uint32_t minSamplePeriodMs_ = 1000,
+        uint32_t wakeDelayMs_ = 15000,
+        SensorDutyClass dutyClass_ = SensorDutyClass::WarmupHeavy) {
       Sps30Sensor::Config cfg;
       cfg.minSamplePeriodMs = minSamplePeriodMs_;
       cfg.wakeDelayMs = wakeDelayMs_;
