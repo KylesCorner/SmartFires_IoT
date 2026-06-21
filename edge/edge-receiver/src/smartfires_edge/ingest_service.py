@@ -215,6 +215,16 @@ def run_receive(
                 int(hdr_node) if hdr_node is not None else None,
             )
 
+            # Observe every packet (all types share the same rolling seq counter).
+            # Done once per LoRa packet here so that STATUS/AWAKEN seqs are counted
+            # and bundle samples don't inflate crc_valid_packets.
+            if hdr_node is not None and hdr_seq is not None and event.get("rssi") is not None:
+                tracker.observe_packet(
+                    node_id=int(hdr_node),
+                    seq=int(hdr_seq),
+                    rssi=int(event["rssi"]),
+                )
+
             if hdr_node is not None and hdr_seq is not None and pkt_type == PKT_AWAKEN:
                 awaken = event.get("awaken") or {}
                 uid_hash = awaken.get("uid_hash")
@@ -360,11 +370,6 @@ def run_receive(
                     pkt["jetson_wind_dir_deg"] = ""
 
                 logger.write_row(pkt)
-                tracker.observe_packet(
-                    node_id=int(pkt["node_id"]),
-                    seq=int(pkt["seq"]),
-                    rssi=int(pkt["rssi"]),
-                )
                 if live_state is not None:
                     live_state.record_telemetry(pkt)
 

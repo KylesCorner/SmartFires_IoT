@@ -1,31 +1,52 @@
 const METRICS = [
-  { key: "temp_c", label: "Temp (°C)" },
+  { key: "temp_c",       label: "Temp (°C)" },
   { key: "humidity_pct", label: "Humidity (%)" },
-  { key: "wind_mps", label: "Wind (m/s)" },
-  { key: "pm1_0_ug_m3", label: "PM1.0" },
-  { key: "pm2_5_ug_m3", label: "PM2.5" },
-  { key: "pm4_0_ug_m3", label: "PM4.0" },
-  { key: "pm10_ug_m3", label: "PM10" },
+  { key: "wind_mps",     label: "Wind (m/s)" },
+  { key: "pm1_0_ug_m3",  label: "PM1.0" },
+  { key: "pm2_5_ug_m3",  label: "PM2.5" },
+  { key: "pm4_0_ug_m3",  label: "PM4.0" },
+  { key: "pm10_ug_m3",   label: "PM10" },
+];
+
+const METRIC_COLORS = {
+  temp_c:       "#ff6384",
+  humidity_pct: "#36a2eb",
+  wind_mps:     "#ffce56",
+  pm1_0_ug_m3:  "#4bc0c0",
+  pm2_5_ug_m3:  "#9966ff",
+  pm4_0_ug_m3:  "#ff9f40",
+  pm10_ug_m3:   "#c9cbcf",
+};
+
+// Solid line for node 0, dashed for node 1, dotted for node 2, etc.
+const NODE_DASH_PATTERNS = [[], [5, 5], [2, 3], [8, 3, 2, 3]];
+
+const TIME_RANGES = [
+  { label: "All time",    ms: null,            fetchLimit: 2000 },
+  { label: "Last 5 min",  ms: 5 * 60 * 1000,  fetchLimit: 150  },
+  { label: "Last 15 min", ms: 15 * 60 * 1000, fetchLimit: 400  },
+  { label: "Last hour",   ms: 60 * 60 * 1000, fetchLimit: 2000 },
 ];
 
 const LOG_MAX_LINES = 2000;
 
 const state = {
-  selectedNodes: new Set(),
-  knownNodes: new Set(),
+  selectedNodes:   new Set(),
+  knownNodes:      new Set(),
   selectedMetrics: new Set(["temp_c"]),
-  chart: null,
-  map: null,
-  markers: {},
-  baseMarker: null,
-  mapFitted: false,
+  timeRangeMs:     null,   // null = all available data
+  chart:           null,
+  map:             null,
+  markers:         {},
+  baseMarker:      null,
+  mapFitted:       false,
 };
 
 const logState = {
-  entries: [],        // {t, msg, node_id} — ring of up to LOG_MAX_LINES
-  activeTab: null,    // null = "All", number = specific node_id
+  entries:      [],
+  activeTab:    null,
   knownNodeIds: new Set(),
-  ws: null,
+  ws:           null,
 };
 
 // ---------------------------------------------------------------------------
@@ -81,7 +102,23 @@ function buildNodeCheckboxes(nodeIds) {
   }
 }
 
-function buildChartScales() {
+function buildTimeRangeButtons() {
+  const container = document.getElementById("time-range-buttons");
+  for (const range of TIME_RANGES) {
+    const btn = document.createElement("button");
+    btn.className = "time-range-btn" + (state.timeRangeMs === range.ms ? " active" : "");
+    btn.textContent = range.label;
+    btn.addEventListener("click", () => {
+      state.timeRangeMs = range.ms;
+      container.querySelectorAll(".time-range-btn").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      refreshChart();
+    });
+    container.appendChild(btn);
+  }
+}
+
+function buildBaseScales() {
   return {
     x: {
       type: "linear",
@@ -90,14 +127,6 @@ function buildChartScales() {
         color: "#aab4c0",
         maxTicksLimit: 8,
       },
-      grid: { color: "#2a2f36" },
-    },
-    y: {
-      type: "linear",
-      display: false,
-      min: 0,
-      max: 1,
-      ticks: { color: "#aab4c0" },
       grid: { color: "#2a2f36" },
     },
   };
@@ -112,17 +141,12 @@ function initChart() {
       animation: false,
       parsing: false,
       maintainAspectRatio: false,
-      scales: buildChartScales(),
+      scales: buildBaseScales(),
       plugins: {
         legend: { labels: { color: "#e6e6e6" } },
         tooltip: {
           callbacks: {
-            label: (ctx) => {
-              const raw = ctx.raw?.raw;
-              return raw !== undefined
-                ? `${ctx.dataset.label}: ${raw}`
-                : ctx.dataset.label;
-            },
+            label: (ctx) => `${ctx.dataset.label}: ${_fmtVal(ctx.raw.y)}`,
           },
         },
       },
@@ -140,50 +164,89 @@ async function refreshChart() {
   const nodeIds = [...state.selectedNodes];
   if (nodeIds.length === 0 || state.selectedMetrics.size === 0) {
     state.chart.data.datasets = [];
+    state.chart.options.scales = buildBaseScales();
     state.chart.update();
     return;
   }
 
+  const currentRange = TIME_RANGES.find((r) => r.ms === state.timeRangeMs) ?? TIME_RANGES[0];
+  const cutoff = state.timeRangeMs ? Date.now() - state.timeRangeMs : 0;
+
   const perNodeSamples = await Promise.all(
-    nodeIds.map((nodeId) => Api.telemetryRecent(nodeId, 300))
+    nodeIds.map((nodeId) => Api.telemetryRecent(nodeId, currentRange.fetchLimit))
   );
 
-  // Per-metric min/max across all nodes — used for normalization and axis labels.
-  const metricStats = {};
+  // Per-metric maximum across all nodes within the time window (axis min is always 0).
+  const metricMax = {};
   for (const metric of state.selectedMetrics) {
-    let lo = Infinity, hi = -Infinity;
+    let hi = 0;
     for (const samples of perNodeSamples) {
       for (const s of samples) {
+        if (Date.parse(s.timestamp) < cutoff) continue;
         if (s[metric] !== "" && s[metric] !== undefined && s[metric] !== null) {
           const v = Number(s[metric]);
-          if (v < lo) lo = v;
           if (v > hi) hi = v;
         }
       }
     }
-    metricStats[metric] = {
-      min: isFinite(lo) ? lo : 0,
-      max: isFinite(hi) ? hi : 1,
-    };
+    metricMax[metric] = hi;
   }
 
-  // Normalize each metric to 0–1 so every variable fills the full chart height
-  // independently. Actual values are stored in `.raw` for tooltips and axis labels.
+  // Build one Y axis per selected metric on the right side.
+  // Only the first axis draws chart-area grid lines; the rest show labels only.
+  const scales = buildBaseScales();
+  let axisIdx = 0;
+  for (const metric of state.selectedMetrics) {
+    const axisMax = metricMax[metric] > 0 ? metricMax[metric] * 1.1 : 1;
+    const color = METRIC_COLORS[metric] ?? "#aab4c0";
+    const metaDef = METRICS.find((m) => m.key === metric);
+    scales[`y_${metric}`] = {
+      type: "linear",
+      position: "right",
+      min: 0,
+      max: axisMax,
+      grid: {
+        drawOnChartArea: axisIdx === 0,
+        color: "#2a2f36",
+      },
+      ticks: {
+        color,
+        callback: (v) => _fmtVal(v),
+        maxTicksLimit: 6,
+      },
+      title: {
+        display: true,
+        text: metaDef?.label ?? metric,
+        color,
+        font: { size: 10 },
+      },
+    };
+    axisIdx++;
+  }
+
+  // Build datasets with raw values. Nodes sharing the same metric share the same axis;
+  // different nodes are distinguished by line dash pattern.
   const datasets = [];
-  nodeIds.forEach((nodeId, idx) => {
-    const samples = perNodeSamples[idx];
+  nodeIds.forEach((nodeId, nodeIdx) => {
+    const samples = perNodeSamples[nodeIdx];
+    const dashPattern = NODE_DASH_PATTERNS[nodeIdx % NODE_DASH_PATTERNS.length];
     for (const metric of state.selectedMetrics) {
-      const { min, max } = metricStats[metric];
-      const range = max - min || 1;
+      const color = METRIC_COLORS[metric] ?? "#aab4c0";
+      const metaDef = METRICS.find((m) => m.key === metric);
       const points = samples
-        .filter((s) => s[metric] !== "" && s[metric] !== undefined && s[metric] !== null)
-        .map((s) => {
-          const raw = Number(s[metric]);
-          return { x: Date.parse(s.timestamp), y: (raw - min) / range, raw };
-        });
+        .filter((s) => {
+          if (Date.parse(s.timestamp) < cutoff) return false;
+          return s[metric] !== "" && s[metric] !== undefined && s[metric] !== null;
+        })
+        .map((s) => ({ x: Date.parse(s.timestamp), y: Number(s[metric]) }))
+        .sort((a, b) => a.x - b.x);
       datasets.push({
-        label: `node ${nodeId} – ${metric}`,
+        label: `Node ${nodeId} – ${metaDef?.label ?? metric}`,
         data: points,
+        yAxisID: `y_${metric}`,
+        borderColor: color,
+        backgroundColor: color + "33",
+        borderDash: dashPattern,
         borderWidth: 1.5,
         pointRadius: 0,
         tension: 0.15,
@@ -191,21 +254,7 @@ async function refreshChart() {
     }
   });
 
-  // Show actual Y-axis values only when a single metric is selected.
-  const yScale = state.chart.options.scales.y;
-  if (state.selectedMetrics.size === 1) {
-    const metric = [...state.selectedMetrics][0];
-    const { min, max } = metricStats[metric];
-    const range = max - min || 1;
-    yScale.display = true;
-    yScale.ticks = {
-      ...yScale.ticks,
-      callback: (v) => _fmtVal(min + v * range),
-    };
-  } else {
-    yScale.display = false;
-  }
-
+  state.chart.options.scales = scales;
   state.chart.data.datasets = datasets;
   state.chart.update();
 }
@@ -217,7 +266,7 @@ async function refreshChart() {
 function initMap() {
   L.Icon.Default.imagePath = "/static/vendor/leaflet/images/";
   state.map = L.map("node-map").setView([0, 0], 2);
-  L.tileLayer("/tiles/{z}/{x}/{y}.png", { maxZoom: 19 }).addTo(state.map);
+  createSmartFiresTileLayer().addTo(state.map);
 }
 
 function updateMap(nodes, baseStation) {
@@ -229,6 +278,7 @@ function updateMap(nodes, baseStation) {
     }
     const latlng = [info.lat, info.lon];
     bounds.push(latlng);
+    prefetchTilesForLocation(info.lat, info.lon);
 
     if (!state.markers[info.node_id]) {
       state.markers[info.node_id] = L.marker(latlng).addTo(state.map);
@@ -243,6 +293,7 @@ function updateMap(nodes, baseStation) {
   if (baseStation && baseStation.lat !== undefined) {
     const latlng = [baseStation.lat, baseStation.lon];
     bounds.push(latlng);
+    prefetchTilesForLocation(baseStation.lat, baseStation.lon);
     if (!state.baseMarker) {
       state.baseMarker = L.circleMarker(latlng, {
         radius: 9,
@@ -355,7 +406,6 @@ function onLogEntry(entry) {
     const atBottom = el.scrollHeight - el.scrollTop <= el.clientHeight + 4;
     el.textContent += `${entry.t.slice(11, 23)}  ${entry.msg}\n`;
     if (logState.entries.length > LOG_MAX_LINES) {
-      // Trim first line from the display too
       const firstNewline = el.textContent.indexOf("\n");
       if (firstNewline !== -1) {
         el.textContent = el.textContent.slice(firstNewline + 1);
@@ -395,16 +445,14 @@ function wireNewSessionButton() {
     try {
       await Api.newSession();
 
-      // Clear chart
       state.chart.data.datasets = [];
+      state.chart.options.scales = buildBaseScales();
       state.chart.update();
 
-      // Clear node checkboxes
       state.knownNodes.clear();
       state.selectedNodes.clear();
       document.getElementById("node-checkboxes").innerHTML = "";
 
-      // Clear map markers
       for (const marker of Object.values(state.markers)) {
         marker.remove();
       }
@@ -415,7 +463,6 @@ function wireNewSessionButton() {
         state.baseMarker = null;
       }
 
-      // Clear log
       logState.entries = [];
       logState.knownNodeIds.clear();
       logState.activeTab = null;
@@ -456,6 +503,7 @@ function wireCommandInput() {
 async function init() {
   renderNav(window.location.pathname);
   buildMetricCheckboxes();
+  buildTimeRangeButtons();
   initChart();
   initMap();
   wireBaseStationForm();

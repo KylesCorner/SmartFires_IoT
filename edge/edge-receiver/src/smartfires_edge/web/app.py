@@ -1,21 +1,25 @@
 import asyncio
 import csv
 import json
+import socket
 import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from smartfires_edge.base_station_store import BaseStationStore
 from smartfires_edge.live_state import LiveState
+from smartfires_edge.tile_cache import TileCache
 
 STATIC_DIR = Path(__file__).parent / "static"
-TILES_DIR = Path(__file__).parent / "tiles"
+# Legacy manual tile directory — used as the default cache when no tile_cache_dir
+# is supplied (preserves backward-compat with pre-loaded tile pyramids).
+_LEGACY_TILES_DIR = Path(__file__).parent / "tiles"
 
 TELEMETRY_METRICS = {
     "temp_c",
@@ -37,8 +41,18 @@ class CommandPayload(BaseModel):
     command: str
 
 
+def _check_online() -> bool:
+    """Return True if internet is reachable (TCP connect to Cloudflare DNS)."""
+    try:
+        s = socket.create_connection(("1.1.1.1", 443), timeout=3.0)
+        s.close()
+        return True
+    except OSError:
+        return False
+
+
 def _read_telemetry_history(
-    telemetry_dir: Path,
+    data_dir: Path,
     node_id: int,
     metric: str,
     start: Optional[str],
@@ -48,10 +62,10 @@ def _read_telemetry_history(
     end_dt = datetime.fromisoformat(end) if end else None
     results: list[dict] = []
 
-    if not telemetry_dir.exists():
+    if not data_dir.exists():
         return results
 
-    for path in sorted(telemetry_dir.glob("telemetry-*.csv")):
+    for path in sorted(data_dir.glob("*/telemetry.csv")):
         with open(path, newline="", encoding="utf-8") as f:
             for row in csv.DictReader(f):
                 if row.get("packet_type") != "telemetry":
@@ -90,14 +104,17 @@ def create_app(
     data_dir: Path,
     base_station_store: Optional[BaseStationStore] = None,
     reset_event: Optional[threading.Event] = None,
+    tile_cache_dir: Optional[Path] = None,
 ) -> FastAPI:
     app = FastAPI(title="SmartFires Dashboard")
     store = base_station_store or BaseStationStore()
-    telemetry_dir = data_dir / "telemetry"
+    tile_cache = TileCache(tile_cache_dir if tile_cache_dir is not None else _LEGACY_TILES_DIR)
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-    if TILES_DIR.exists() and any(TILES_DIR.iterdir()):
-        app.mount("/tiles", StaticFiles(directory=TILES_DIR), name="tiles")
+
+    # ------------------------------------------------------------------
+    # Pages
+    # ------------------------------------------------------------------
 
     @app.get("/")
     def index() -> FileResponse:
@@ -106,6 +123,55 @@ def create_app(
     @app.get("/map-history")
     def map_history() -> FileResponse:
         return FileResponse(STATIC_DIR / "map_history.html")
+
+    # ------------------------------------------------------------------
+    # Tile cache endpoints
+    #
+    # The browser (not the Jetson) fetches tiles from OSM and uploads them
+    # here. GET serves the cache; PUT stores what the browser fetched.
+    # ------------------------------------------------------------------
+
+    @app.head("/tiles/{z}/{x}/{y}.png")
+    def head_tile(z: int, x: int, y: int) -> Response:
+        if tile_cache.has(z, x, y):
+            return Response(
+                status_code=200,
+                media_type="image/png",
+                headers={"Cache-Control": "public, max-age=86400"},
+            )
+        raise HTTPException(status_code=404, detail="Tile not cached")
+
+    @app.get("/tiles/{z}/{x}/{y}.png")
+    def get_tile(z: int, x: int, y: int) -> Response:
+        data = tile_cache.get(z, x, y)
+        if data is None:
+            raise HTTPException(status_code=404, detail="Tile not cached")
+        return Response(
+            content=data,
+            media_type="image/png",
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+
+    @app.put("/tiles/{z}/{x}/{y}.png")
+    async def put_tile(z: int, x: int, y: int, request: Request) -> dict:
+        data = await request.body()
+        if data:
+            tile_cache.put(z, x, y, data)
+        return {"status": "ok"}
+
+    # ------------------------------------------------------------------
+    # Connectivity probe
+    # ------------------------------------------------------------------
+
+    @app.get("/api/connectivity")
+    async def connectivity() -> dict:
+        loop = asyncio.get_running_loop()
+        online = await loop.run_in_executor(None, _check_online)
+        return {"online": online}
+
+    # ------------------------------------------------------------------
+    # Data API
+    # ------------------------------------------------------------------
 
     @app.get("/api/nodes")
     def get_nodes() -> dict:
@@ -124,15 +190,15 @@ def create_app(
     ) -> list[dict]:
         if metric not in TELEMETRY_METRICS:
             raise HTTPException(status_code=400, detail=f"Unknown metric {metric!r}")
-        return _read_telemetry_history(telemetry_dir, node, metric, start, end)
+        return _read_telemetry_history(data_dir, node, metric, start, end)
 
     @app.get("/api/status_history")
     def status_history(limit: int = 5000) -> list[dict]:
         return live_state.status_history_snapshot(limit=limit)
 
     @app.get("/api/reception_timeline")
-    def reception_timeline(bins: int = 50, bin_width_s: float = 5.0) -> dict:
-        return live_state.reception_timeline(bins=bins, bin_width_s=bin_width_s)
+    def reception_timeline(bins: int = 50) -> dict:
+        return live_state.reception_timeline(bins=bins)
 
     @app.get("/api/base_station")
     def get_base_station() -> dict:
