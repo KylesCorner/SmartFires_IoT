@@ -415,10 +415,40 @@ table th {
   color: #fff;
 }
 
+.sniffer-timeline-row {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
 .sniffer-canvas-wrapper {
   position: relative;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   height: 420px;
+}
+
+.sniffer-legend {
+  flex-shrink: 0;
+  width: 140px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  padding-top: 0.25rem;
+}
+
+.sniffer-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sniffer-legend-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  flex-shrink: 0;
 }
 
 #sniffer-timeline {

@@ -10,6 +10,7 @@ const SLOT_WIDTH_MS = 900;
 const GUARD_MS = 20;
 const LANE_HEIGHT = 36;
 const HEADER_HEIGHT = 24;
+const SLOT_LABEL_HEIGHT = 20;
 const LOG_MAX_LINES = 1000;
 
 const PKT_COLORS = {
@@ -18,14 +19,20 @@ const PKT_COLORS = {
   AWAKEN: "#d4b340",
   FULL_STATE: "#3b82c4",
   TIME_SYNC: "#7a828c",
+  ACK_SUMMARY: "#9b59b6",
+  CMD_CALIBRATE: "#e8743a",
+  CMD_RESET: "#e8743a",
+  CMD_ACK: "#5dade2",
 };
 const UNKNOWN_COLOR = "#c0392b";
+const UNKNOWN_LABEL = "UNKNOWN / other";
 
 const sniffer = {
   events: [],            // recent events within WINDOW_MS (+ small buffer)
   laneOf: new Map(),     // node_id -> lane index
   laneOrder: [],         // node_ids in lane order
   lastAnchor: null,      // {wallMs, sessionMs}
+  numSlots: null,
   ws: null,
   notConfigured: false,
   logLines: 0,
@@ -42,7 +49,25 @@ function laneIndexFor(nodeId) {
 }
 
 function canvasHeight() {
-  return HEADER_HEIGHT + Math.max(1, sniffer.laneOrder.length) * LANE_HEIGHT;
+  return HEADER_HEIGHT + Math.max(1, sniffer.laneOrder.length) * LANE_HEIGHT + SLOT_LABEL_HEIGHT;
+}
+
+function renderLegend() {
+  const el = document.getElementById("sniffer-legend");
+  el.innerHTML = "";
+  const entries = [...Object.entries(PKT_COLORS), ["UNKNOWN", UNKNOWN_COLOR]];
+  for (const [pktType, color] of entries) {
+    const item = document.createElement("div");
+    item.className = "sniffer-legend-item";
+    const swatch = document.createElement("span");
+    swatch.className = "sniffer-legend-swatch";
+    swatch.style.background = color;
+    const label = document.createElement("span");
+    label.textContent = pktType === "UNKNOWN" ? UNKNOWN_LABEL : pktType;
+    item.appendChild(swatch);
+    item.appendChild(label);
+    el.appendChild(item);
+  }
 }
 
 function resizeCanvas() {
@@ -73,8 +98,12 @@ function draw() {
   const nowMs = Date.now();
 
   ctx.clearRect(0, 0, widthCss, heightCss);
+  const lanesBottom = heightCss - SLOT_LABEL_HEIGHT;
 
   // Slot boundary grid + guard bands, anchored to the last TIME_SYNC heard.
+  // Also collect each gridline's wall-ms so the label row below can derive
+  // which node is expected to transmit in that interval.
+  const gridlineWallMs = [];
   if (sniffer.lastAnchor) {
     const { wallMs, sessionMs } = sniffer.lastAnchor;
     const phaseAnchor = ((wallMs - sessionMs) % SLOT_WIDTH_MS + SLOT_WIDTH_MS) % SLOT_WIDTH_MS;
@@ -84,12 +113,13 @@ function draw() {
     ctx.strokeStyle = "#3a4049";
     ctx.setLineDash([4, 4]);
     for (; t <= nowMs + SLOT_WIDTH_MS; t += SLOT_WIDTH_MS) {
+      gridlineWallMs.push(t);
       const x = xForWallMs(widthCss, nowMs, t);
       ctx.fillStyle = "rgba(122,130,140,0.08)";
-      ctx.fillRect(x - guardWidthPx, HEADER_HEIGHT, 2 * guardWidthPx, heightCss - HEADER_HEIGHT);
+      ctx.fillRect(x - guardWidthPx, HEADER_HEIGHT, 2 * guardWidthPx, lanesBottom - HEADER_HEIGHT);
       ctx.beginPath();
       ctx.moveTo(x, HEADER_HEIGHT);
-      ctx.lineTo(x, heightCss);
+      ctx.lineTo(x, lanesBottom);
       ctx.stroke();
     }
     ctx.setLineDash([]);
@@ -120,7 +150,7 @@ function draw() {
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.moveTo(x, HEADER_HEIGHT);
-      ctx.lineTo(x, heightCss);
+      ctx.lineTo(x, lanesBottom);
       ctx.stroke();
       ctx.lineWidth = 1;
       continue;
@@ -135,6 +165,28 @@ function draw() {
       ctx.strokeRect(x - 3, y, 7, 16);
     }
     ctx.fillRect(x - 3, y, 7, 16);
+  }
+
+  // Expected-node label row: which node should be transmitting in each slot
+  // interval, per the firmware's compile-time slot=(node_id-1)%num_slots
+  // assignment (node IDs are handed out sequentially starting at 1, so the
+  // inverse is simply node = slot + 1).
+  ctx.fillStyle = "#15191e";
+  ctx.fillRect(0, lanesBottom, widthCss, SLOT_LABEL_HEIGHT);
+  if (sniffer.lastAnchor && sniffer.numSlots) {
+    const { wallMs, sessionMs } = sniffer.lastAnchor;
+    const pixelsPerSlot = (SLOT_WIDTH_MS / WINDOW_MS) * widthCss;
+    ctx.fillStyle = "#7a828c";
+    ctx.font = "11px sans-serif";
+    ctx.textAlign = "center";
+    for (const t of gridlineWallMs) {
+      const sessionMsAtT = sessionMs + (t - wallMs);
+      const slotIndex = Math.round(sessionMsAtT / SLOT_WIDTH_MS);
+      const expectedNode = (((slotIndex % sniffer.numSlots) + sniffer.numSlots) % sniffer.numSlots) + 1;
+      const x = xForWallMs(widthCss, nowMs, t) + pixelsPerSlot / 2;
+      ctx.fillText(`${expectedNode}`, x, lanesBottom + 14);
+    }
+    ctx.textAlign = "left";
   }
 }
 
@@ -157,6 +209,9 @@ function onSnifferEvent(ev) {
 
   if (ev.pkt_type === "TIME_SYNC" && ev.session_ms != null) {
     sniffer.lastAnchor = { wallMs: ev._wallMs, sessionMs: ev.session_ms };
+  }
+  if (ev.num_slots) {
+    sniffer.numSlots = ev.num_slots;
   }
 
   appendSnifferLog(ev);
@@ -237,6 +292,7 @@ async function pollStats() {
 
 function init() {
   renderNav(window.location.pathname);
+  renderLegend();
   resizeCanvas();
   window.addEventListener("resize", resizeCanvas);
   connectSnifferSocket();

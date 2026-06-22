@@ -314,6 +314,32 @@ def decode_time_sync(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Opt
     }
 
 
+def decode_ack_summary(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Optional[dict]:
+    """Decode a PKT_ACK_SUMMARY LoRa broadcast (base station -> target node).
+
+    The header's node_id is 0 (broadcast/command convention) — the actual
+    target node lives in the payload's own node_id field.
+    """
+    if len(raw_lora_payload) < ACK_SUMMARY_LORA_SIZE:
+        return None
+    if crc8(raw_lora_payload[:-1]) != raw_lora_payload[-1]:
+        return None
+
+    magic, pkt_type, hdr_node_id, seq = struct.unpack_from(HEADER_FMT, raw_lora_payload, 0)
+    if magic != PKT_MAGIC or pkt_type != PKT_ACK_SUMMARY:
+        return None
+
+    node_id, ack_base_seq, ack_mask = struct.unpack_from(ACK_SUMMARY_PAYLOAD_FMT, raw_lora_payload, HEADER_SIZE)
+    return {
+        "hdr_node_id": hdr_node_id,
+        "seq": seq,
+        "rssi": rssi,
+        "node_id": node_id,
+        "ack_base_seq": ack_base_seq,
+        "ack_mask": ack_mask,
+    }
+
+
 def decode_cmd_calibrate(raw_lora_payload: bytes) -> Optional[dict]:
     if len(raw_lora_payload) < CMD_CALIBRATE_LORA_SIZE:
         return None

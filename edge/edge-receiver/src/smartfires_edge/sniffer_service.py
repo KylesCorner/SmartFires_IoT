@@ -20,15 +20,23 @@ from smartfires_edge.config import SnifferConfig
 from smartfires_edge.live_state import LiveState
 from smartfires_edge.packet import (
     HEADER_FMT,
+    PKT_ACK_SUMMARY,
     PKT_AWAKEN,
     PKT_BUNDLE,
+    PKT_CMD_ACK,
+    PKT_CMD_CALIBRATE,
+    PKT_CMD_RESET,
     PKT_FULL_STATE,
     PKT_GPS,
     PKT_MAGIC,
     PKT_STATUS,
     PKT_TIME_SYNC,
+    decode_ack_summary,
     decode_awaken,
     decode_bundle,
+    decode_cmd_ack,
+    decode_cmd_calibrate,
+    decode_cmd_reset,
     decode_full_state,
     decode_status,
     decode_time_sync,
@@ -40,6 +48,11 @@ from smartfires_edge.packet import (
 SLOT_WIDTH_MS = 900
 GUARD_MS = 20
 
+# Base-station-originated broadcasts (TIME_SYNC, ACK_SUMMARY, CMD_*) are sent
+# opportunistically, not gated to a TDMA slot — slot/jitter math only applies
+# to actual node transmissions.
+_BASE_BROADCAST_TYPES = {PKT_TIME_SYNC, PKT_ACK_SUMMARY, PKT_CMD_CALIBRATE, PKT_CMD_RESET}
+
 
 def _pkt_type_name(pkt_type: int) -> str:
     return {
@@ -48,6 +61,10 @@ def _pkt_type_name(pkt_type: int) -> str:
         PKT_BUNDLE: "BUNDLE",
         PKT_STATUS: "STATUS",
         PKT_TIME_SYNC: "TIME_SYNC",
+        PKT_ACK_SUMMARY: "ACK_SUMMARY",
+        PKT_CMD_CALIBRATE: "CMD_CALIBRATE",
+        PKT_CMD_RESET: "CMD_RESET",
+        PKT_CMD_ACK: "CMD_ACK",
     }.get(pkt_type, f"0x{pkt_type:02x}")
 
 
@@ -145,11 +162,27 @@ def _decode_rx_event(
         decode_full_state(raw, rssi)
     elif pkt_type == PKT_BUNDLE:
         decode_bundle(raw, rssi)
+    elif pkt_type == PKT_ACK_SUMMARY:
+        # Header node_id is 0 (broadcast convention) — the real target node
+        # lives in the payload, so use that for the timeline lane.
+        dec = decode_ack_summary(raw, rssi)
+        if dec is not None:
+            node_id = dec["node_id"]
+    elif pkt_type == PKT_CMD_CALIBRATE:
+        dec = decode_cmd_calibrate(raw)
+        if dec is not None:
+            node_id = dec["node_id"]
+    elif pkt_type == PKT_CMD_RESET:
+        dec = decode_cmd_reset(raw)
+        if dec is not None:
+            node_id = dec["node_id"]
+    elif pkt_type == PKT_CMD_ACK:
+        decode_cmd_ack(raw, rssi)
 
     session_ms = anchor.session_ms_for(t_ms) if pkt_type != PKT_TIME_SYNC else anchor.session_time_ms
     jitter_ms = None
     guard_violation = None
-    if session_ms is not None and node_id is not None and pkt_type != PKT_TIME_SYNC:
+    if session_ms is not None and node_id is not None and pkt_type not in _BASE_BROADCAST_TYPES:
         jitter_ms, guard_violation = _slot_timing(node_id, session_ms, num_slots)
 
     event = {
@@ -164,6 +197,7 @@ def _decode_rx_event(
         "jitter_ms": round(jitter_ms, 1) if jitter_ms is not None else None,
         "guard_violation": guard_violation,
         "anchored": anchor.anchored,
+        "num_slots": num_slots,
         "payload_hex": payload_hex,
     }
     event.update(extra)
