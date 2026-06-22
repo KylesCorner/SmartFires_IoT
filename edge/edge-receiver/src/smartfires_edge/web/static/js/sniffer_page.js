@@ -177,9 +177,9 @@ function draw() {
   // Expected-transmitter label row: who should be transmitting in each slot
   // interval. Slot 0 is permanently reserved for the base station (node_id 1
   // is never assigned to a real node — see config/BaseConfig.h's
-  // kFirstNodeId=2), so it's labeled "Base"; slot s (s >= 1) maps to node
-  // (s + 1) via the firmware's compile-time slot=(node_id-1)%num_slots
-  // assignment.
+  // kFirstNodeId=2); labeled "0" to match the lane's node_id rather than a
+  // separate "Base" string. Slot s (s >= 1) maps to node (s + 1) via the
+  // firmware's compile-time slot=(node_id-1)%num_slots assignment.
   ctx.fillStyle = "#15191e";
   ctx.fillRect(0, lanesBottom, widthCss, SLOT_LABEL_HEIGHT);
   if (sniffer.lastAnchor && sniffer.numSlots) {
@@ -192,7 +192,7 @@ function draw() {
       const sessionMsAtT = sessionMs + (t - wallMs);
       const slotIndex = Math.round(sessionMsAtT / SLOT_WIDTH_MS);
       const slotNumber = ((slotIndex % sniffer.numSlots) + sniffer.numSlots) % sniffer.numSlots;
-      const expectedLabel = slotNumber === 0 ? "Base" : `${slotNumber + 1}`;
+      const expectedLabel = slotNumber === 0 ? "0" : `${slotNumber + 1}`;
       const x = xForWallMs(widthCss, nowMs, t) + pixelsPerSlot / 2;
       ctx.fillText(expectedLabel, x, lanesBottom + 14);
     }
