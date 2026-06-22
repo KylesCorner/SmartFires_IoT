@@ -166,12 +166,12 @@ bool Icm20948Sensor::sample() {
   _reading.timestampMs = _clock.millis();
   _lastSampleMs = _reading.timestampMs;
 
-  LOG_DEBUG(
-      "IMU",
-      "imu_dmp_heading heading_deg=%.1f accuracy_deg=%.2f t_ms=%lu",
-      _reading.headingDeg,
-      static_cast<float>(_reading.headingAccuracy) / 4096.0f,
-      static_cast<unsigned long>(_reading.timestampMs));
+  // LOG_DEBUG(
+  //     "IMU",
+  //     "imu_dmp_heading heading_deg=%.1f accuracy_deg=%.2f t_ms=%lu",
+  //     _reading.headingDeg,
+  //     static_cast<float>(_reading.headingAccuracy) / 4096.0f,
+  //     static_cast<unsigned long>(_reading.timestampMs));
 
   return true;
 }

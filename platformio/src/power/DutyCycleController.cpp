@@ -300,7 +300,7 @@ void DutyCycleController::updateSampling() {
           char buf[180];
           sensor->writeTelemetry(buf, sizeof(buf));
 
-          LOG_INFO(sensorName, "%s", buf);
+          LOG_DEBUG(sensorName, "%s", buf);
         } else {
           LOG_WARN(sensorName, "sample_failed");
         }

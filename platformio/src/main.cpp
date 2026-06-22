@@ -244,6 +244,10 @@ SmartFiresNodeApp app(appCfg, clock, duty, packetHandler, tdmaRadio, tdmaClock,
 
 DebugLogger gLog(Serial, initialRadioAddr);
 
+// -----------------------------------------------------------------------------
+// Methods
+// -----------------------------------------------------------------------------
+
 void scanI2C() {
   LOG_INFO("i2c", "scan_start");
 
@@ -260,60 +264,6 @@ void scanI2C() {
   }
 
   LOG_INFO("i2c", "scan_done found_count=%u", static_cast<unsigned int>(foundCount));
-}
-
-void testBeginSensors() {
-  battery.begin();
-  for (int i = 0; i < sensorCount; ++i) {
-    Serial.print(sensors[i]->name());
-    if (!sensors[i]->begin()) {
-      Serial.print(" begin FAILED.");
-    } else {
-
-      Serial.print(" begin OK.");
-    }
-    delay(1000);
-
-    if (!sensors[i]->wake()) {
-      Serial.println(" wake FAILED");
-    } else {
-
-      Serial.println(" wake OK");
-    }
-  }
-}
-
-void testSampleSensors() {
-  for (int i = 0; i < sensorCount; ++i) {
-    sensors[i]->service();
-    if (sensors[i]->ready()) {
-      if (sensors[i]->sample()) {
-        char buf[180];
-        sensors[i]->writeTelemetry(buf, sizeof(buf));
-        Serial.println(buf);
-      } else {
-        Serial.print(sensors[i]->name());
-        Serial.println(" sample failed");
-        scanI2C();
-      }
-    } else {
-      Serial.print(sensors[i]->name());
-      Serial.println(" not ready");
-      scanI2C();
-    }
-  }
-
-  battery.sample();
-  char buf[180];
-  battery.writeTelemetry(buf, sizeof(buf));
-  Serial.println(buf);
-  Serial.println("-------------------------");
-}
-
-void testServiceSensors() {
-  for (int i = 0; i < sensorCount; ++i) {
-    sensors[i]->service();
-  }
 }
 
 void setup() {
@@ -406,16 +356,231 @@ unsigned long previousMillis = 0; // Stores last time event triggered
 const long interval = 500;        // Interval (milliseconds)
 
 void loop() {
-  // unsigned long currentMillis = millis();
-  // testServiceSensors();
-  // if (currentMillis - previousMillis >= interval) {
-  //   previousMillis = currentMillis;
-  //   testSampleSensors();
-  // }
   app.update();
   delay(25);
 }
 
+#elif defined(SENSOR_PROBE)
+
+#include <Wire.h>
+
+#include "config/SensingConfig.h"
+#include "interfaces/ISensor.h"
+
+#include "platform/ArduinoAnalogReader.h"
+#include "platform/ArduinoClock.h"
+
+#include "power/BatteryMonitor.h"
+
+#include "platform/AdafruitGpsDriver.h"
+#include "platform/AdafruitSht31Driver.h"
+#include "platform/SensirionUartSps30Driver.h"
+#include "platform/SparkfunIcm20948Driver.h"
+#include "platform/TPSDriver.h"
+
+#include "sensors/Icm20948Sensor.h"
+#include "sensors/Pa1010dGpsSensor.h"
+#include "sensors/Sht31Sensor.h"
+#include "sensors/Sps30Sensor.h"
+#include "sensors/WindSensorRevC.h"
+
+ArduinoClock clock;
+ArduinoAnalogReader analog;
+
+DebugLogger gLog(Serial, 0xEE);
+
+// -----------------------------------------------------------------------------
+// Sensors
+// -----------------------------------------------------------------------------
+
+constexpr uint8_t PIN_WIND_RV = A1;
+constexpr uint8_t PIN_WIND_TMP = A2;
+constexpr uint8_t PIN_WIND_ENABLE = A3;
+
+TPSDriver::Config windPowerCfg =
+    TPSDriver::Config::make(PIN_WIND_ENABLE, true);
+
+TPSDriver windPower(windPowerCfg);
+
+WindSensorRevC::Config windCfg = WindSensorRevC::Config::make(
+    PIN_WIND_RV,
+    PIN_WIND_TMP,
+    SensingConfig::Wind::kMinSamplePeriodMs,
+    SensingConfig::Wind::kWakeDelayMs,
+    SensingConfig::Wind::kDutyClass);
+
+WindSensorRevC wind(windCfg, analog, windPower, clock);
+
+AdafruitSht31Driver sht31Driver;
+
+Sht31Sensor::Config sht31Cfg = Sht31Sensor::Config::make(
+    SensingConfig::Sht31::kMinSamplePeriodMs,
+    SensingConfig::Sht31::kDutyClass);
+
+Sht31Sensor sht31(sht31Cfg, sht31Driver, clock);
+
+AdafruitGpsDriver gpsDriver;
+
+Pa1010dGpsSensor::Config gpsCfg = Pa1010dGpsSensor::Config::make(
+    SensingConfig::Gps::kPeriodicRunTimeMs,
+    SensingConfig::Gps::kPeriodicSleepTimeMs,
+    SensingConfig::Gps::kPeriodicSecondRunTimeMs,
+    SensingConfig::Gps::kPeriodicSecondSleepTimeMs,
+    SensingConfig::Gps::kPeriodicMinSamplePeriodMs,
+    GpsPowerMode::PeriodicBackup);
+
+Pa1010dGpsSensor gps(gpsCfg, gpsDriver, clock);
+
+SparkfunIcm20948Driver imuDriver;
+
+Icm20948Sensor::Config imuCfg = Icm20948Sensor::Config::make(
+    SensingConfig::Imu::kMinSamplePeriodMs,
+    SensingConfig::Imu::kWakeDelayMs,
+    SensingConfig::Imu::kDutyClass);
+
+Icm20948Sensor imu(imuCfg, imuDriver, clock);
+
+Sps30Sensor::Config sps30Cfg = Sps30Sensor::Config::make(
+    SensingConfig::Sps30::kMinSamplePeriodMs,
+    SensingConfig::Sps30::kWakeDelayMs,
+    SensingConfig::Sps30::kDutyClass);
+
+SensirionUartSps30Driver sps30Driver(Serial1);
+Sps30Sensor sps30(sps30Cfg, sps30Driver, clock);
+
+ISensor *sensors[] = {
+    &sht31,
+    &gps,
+    &imu,
+    &sps30,
+    &wind,
+};
+
+constexpr size_t sensorCount = sizeof(sensors) / sizeof(sensors[0]);
+
+BatteryMonitor::Config batteryCfg = BatteryMonitor::Config::makeBatConfig();
+BatteryMonitor battery(batteryCfg, analog, clock);
+
+void scanI2C() {
+  LOG_INFO("i2c", "scan_start");
+
+  uint8_t foundCount = 0;
+
+  for (uint8_t addr = 1; addr < 127; ++addr) {
+    Wire.beginTransmission(addr);
+    const uint8_t err = Wire.endTransmission();
+
+    if (err == 0) {
+      ++foundCount;
+      LOG_INFO("i2c", "found addr=0x%02X", static_cast<unsigned int>(addr));
+    }
+  }
+
+  LOG_INFO("i2c", "scan_done found_count=%u",
+           static_cast<unsigned int>(foundCount));
+}
+
+void beginSensors() {
+  if (!battery.begin()) {
+    LOG_WARN("battery", "begin_failed");
+  } else {
+    LOG_INFO("battery", "begin_ok");
+  }
+
+  for (size_t i = 0; i < sensorCount; ++i) {
+    ISensor *sensor = sensors[i];
+
+    LOG_INFO(sensor->name(), "begin_start");
+
+    if (!sensor->begin()) {
+      LOG_ERROR(sensor->name(), "begin_failed");
+      continue;
+    }
+
+    LOG_INFO(sensor->name(), "begin_ok");
+
+    if (!sensor->wake()) {
+      LOG_WARN(sensor->name(), "wake_failed");
+    } else {
+      LOG_INFO(sensor->name(), "wake_ok");
+    }
+  }
+}
+
+void serviceSensors() {
+  for (size_t i = 0; i < sensorCount; ++i) {
+    sensors[i]->service();
+  }
+}
+
+void sampleSensors() {
+  for (size_t i = 0; i < sensorCount; ++i) {
+    ISensor *sensor = sensors[i];
+
+    sensor->service();
+
+    if (!sensor->ready()) {
+      LOG_DEBUG(sensor->name(), "sample_skip reason=not_ready");
+      continue;
+    }
+
+    if (!sensor->sample()) {
+      LOG_WARN(sensor->name(), "sample_failed");
+      continue;
+    }
+
+    char buf[180];
+    sensor->writeTelemetry(buf, sizeof(buf));
+    LOG_INFO(sensor->name(), "%s", buf);
+  }
+
+  if (battery.sample()) {
+    char buf[180];
+    battery.writeTelemetry(buf, sizeof(buf));
+    LOG_INFO("battery", "%s", buf);
+  }
+}
+
+void setup() {
+  delay(3000);
+
+  Serial.begin(115200);
+  Serial1.begin(115200);
+
+  while (!Serial && millis() < 3000) {
+  }
+
+  gLog.setMinLevel(LogLevel::Debug);
+
+  LOG_INFO("boot", "SmartFires sensor probe starting");
+  LOG_INFO("boot", "networking=disabled radio=disabled app=disabled");
+
+  Wire.begin();
+  analog.begin();
+
+  delay(100);
+  scanI2C();
+
+  beginSensors();
+
+  LOG_INFO("boot", "sensor probe ready");
+}
+
+void loop() {
+  static uint32_t lastSampleMs = 0;
+  const uint32_t now = millis();
+
+  serviceSensors();
+
+  if (now - lastSampleMs >= 1000) {
+    lastSampleMs = now;
+    sampleSensors();
+    LOG_INFO("probe", "======== tick_done ========");
+  }
+
+  delay(25);
+}
+
 #else
-#error "Define exactly one firmware role: LORA_BASE or LORA_NODE"
+#error "Define exactly one firmware role: LORA_BASE, LORA_NODE or SENSOR_PROBE"
 #endif
