@@ -229,7 +229,7 @@ void SmartFiresBaseApp::maybeSendPeriodicTimeSync() {
 void SmartFiresBaseApp::processIncomingLoRa() {
   while (_radio.available()) {
     ITdmaRadioDriver::ReceivedPacket pkt;
-    if (!_radio.receive(pkt)) {
+    if (!_radio.receive(pkt, /*autoAck=*/false)) {
       _radioReceiveFailCount++;
       LOG_WARN("base", "rx_fail count=%lu",
                static_cast<unsigned long>(_radioReceiveFailCount));
@@ -243,6 +243,16 @@ void SmartFiresBaseApp::processIncomingLoRa() {
     const bool validHeader = hasHeader &&
                              (memcpy(&hdr, pkt.data, sizeof(BinaryPacket::PktHeader)),
                               hdr.magic == BinaryPacket::PKT_MAGIC);
+
+    // AWAKEN is the only node->base packet type that's actually sent with
+    // sendToWait() (TdmaRadioService::sendAwakenHandshake) — the node blocks
+    // and retries on this link-layer ACK to know the base is alive. Every
+    // other node->base type (BUNDLE/STATUS/FULL_STATE) is sent fire-and-forget
+    // and relies on the app-layer ACK_SUMMARY instead, so acking them here
+    // would just be wasted airtime nobody waits for.
+    if (validHeader && hdr.pkt_type == BinaryPacket::PKT_AWAKEN) {
+      _radio.acknowledge(pkt.from, pkt.id);
+    }
 
     if (!validHeader) {
       _rawRxCount++;

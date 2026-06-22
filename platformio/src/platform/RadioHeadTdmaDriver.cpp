@@ -80,23 +80,47 @@ bool RadioHeadTdmaDriver::available() {
   return _healthy && _manager.available();
 }
 
-bool RadioHeadTdmaDriver::receive(ReceivedPacket &out) {
+bool RadioHeadTdmaDriver::receive(ReceivedPacket &out, bool autoAck) {
   if (!_healthy) {
     return false;
   }
 
   uint8_t len = sizeof(out.data);
   uint8_t from = 0;
+  uint8_t id = 0;
 
-  if (!_manager.recvfromAck(out.data, &len, &from)) {
+  // recvfromAck() unconditionally ACKs any accepted unicast datagram — it has
+  // no notion of "the sender didn't ask for one". recvfrom() (inherited from
+  // RHDatagram) skips that ACK entirely, at the cost of also skipping RH's
+  // duplicate-id rejection; callers that need an ACK call acknowledge() once
+  // they've decoded enough of the payload to know it's warranted.
+  const bool ok = autoAck ? _manager.recvfromAck(out.data, &len, &from, nullptr, &id)
+                          : _manager.recvfrom(out.data, &len, &from, nullptr, &id);
+  if (!ok) {
     return false;
   }
 
   out.from = from;
+  out.id = id;
   out.len = len;
   out.rssi = static_cast<int8_t>(_rf95.lastRssi());
 
   return true;
+}
+
+void RadioHeadTdmaDriver::acknowledge(uint8_t from, uint8_t id) {
+  if (!_healthy) {
+    return;
+  }
+
+  // RHReliableDatagram::acknowledge() does exactly this, but it's protected,
+  // so we can't call it directly through `_manager` — mirror it here. The
+  // 1-byte (not 0-byte) ack body matches RH's own workaround for radios that
+  // wedge on a zero-length CRC-error packet; see RHReliableDatagram.cpp.
+  _manager.setHeaderId(id);
+  _manager.setHeaderFlags(RH_FLAGS_ACK);
+  uint8_t ack = '!';
+  _manager.sendto(&ack, sizeof(ack), from);
 }
 
 bool RadioHeadTdmaDriver::healthy() const {

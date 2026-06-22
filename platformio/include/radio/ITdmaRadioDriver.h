@@ -7,6 +7,7 @@ class ITdmaRadioDriver {
 public:
   struct ReceivedPacket {
     uint8_t from = 0;
+    uint8_t id = 0;
     uint8_t data[255] = {};
     uint8_t len = 0;
     int8_t rssi = 0;
@@ -20,7 +21,21 @@ public:
   virtual bool setLocalAddress(uint8_t address) = 0;
 
   virtual bool available() = 0;
-  virtual bool receive(ReceivedPacket &out) = 0;
+
+  // autoAck=true (default) replies with a RadioHead link-layer ACK as soon as
+  // a unicast packet is accepted — this is what every node-side receive call
+  // wants, since every unicast packet the base sends to a node (TIME_SYNC,
+  // ACK_SUMMARY, CMD_CALIBRATE/RESET) is sent with sendToWait() and blocks on
+  // that ACK. Pass autoAck=false to receive without acking and decide later
+  // via acknowledge() — used by the base, since most node->base traffic
+  // (BUNDLE/STATUS) is sent fire-and-forget and never waits for one; ACKing
+  // it anyway is just wasted airtime.
+  virtual bool receive(ReceivedPacket &out, bool autoAck = true) = 0;
+
+  // Sends a zero-payload RadioHead link-layer ACK for a packet received via
+  // receive(out, /*autoAck=*/false). `from`/`id` must be the values that
+  // receive() populated on `out` for that packet.
+  virtual void acknowledge(uint8_t from, uint8_t id) = 0;
 
   virtual bool healthy() const = 0;
 };
