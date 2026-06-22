@@ -48,10 +48,14 @@ from smartfires_edge.packet import (
 SLOT_WIDTH_MS = 900
 GUARD_MS = 20
 
-# Base-station-originated broadcasts (TIME_SYNC, ACK_SUMMARY, CMD_*) are sent
-# opportunistically, not gated to a TDMA slot — slot/jitter math only applies
-# to actual node transmissions.
-_BASE_BROADCAST_TYPES = {PKT_TIME_SYNC, PKT_ACK_SUMMARY, PKT_CMD_CALIBRATE, PKT_CMD_RESET}
+# The base station firmware now gates ACK_SUMMARY/CMD_CALIBRATE/CMD_RESET to
+# its own reserved TDMA slot (slot 0, the identity that's never assigned to a
+# real node — see config/BaseConfig.h's kFirstNodeId=2), so their jitter is
+# computed against that virtual node_id=1 rather than skipped. TIME_SYNC
+# stays excluded: it's the anchor itself, so its own jitter relative to
+# itself is degenerate.
+_VIRTUAL_BASE_NODE_ID = 1
+_BASE_SLOTTED_TYPES = {PKT_ACK_SUMMARY, PKT_CMD_CALIBRATE, PKT_CMD_RESET}
 
 
 def _pkt_type_name(pkt_type: int) -> str:
@@ -184,8 +188,10 @@ def _decode_rx_event(
     session_ms = anchor.session_ms_for(t_ms) if pkt_type != PKT_TIME_SYNC else anchor.session_time_ms
     jitter_ms = None
     guard_violation = None
-    if session_ms is not None and node_id is not None and pkt_type not in _BASE_BROADCAST_TYPES:
-        jitter_ms, guard_violation = _slot_timing(node_id, session_ms, num_slots)
+    if session_ms is not None and pkt_type != PKT_TIME_SYNC:
+        slot_node_id = _VIRTUAL_BASE_NODE_ID if pkt_type in _BASE_SLOTTED_TYPES else node_id
+        if slot_node_id is not None:
+            jitter_ms, guard_violation = _slot_timing(slot_node_id, session_ms, num_slots)
 
     event = {
         "wall_t": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),

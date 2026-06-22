@@ -174,10 +174,12 @@ function draw() {
     ctx.fillRect(x - 3, y, 7, 16);
   }
 
-  // Expected-node label row: which node should be transmitting in each slot
-  // interval, per the firmware's compile-time slot=(node_id-1)%num_slots
-  // assignment (node IDs are handed out sequentially starting at 1, so the
-  // inverse is simply node = slot + 1).
+  // Expected-transmitter label row: who should be transmitting in each slot
+  // interval. Slot 0 is permanently reserved for the base station (node_id 1
+  // is never assigned to a real node — see config/BaseConfig.h's
+  // kFirstNodeId=2), so it's labeled "Base"; slot s (s >= 1) maps to node
+  // (s + 1) via the firmware's compile-time slot=(node_id-1)%num_slots
+  // assignment.
   ctx.fillStyle = "#15191e";
   ctx.fillRect(0, lanesBottom, widthCss, SLOT_LABEL_HEIGHT);
   if (sniffer.lastAnchor && sniffer.numSlots) {
@@ -189,9 +191,10 @@ function draw() {
     for (const t of gridlineWallMs) {
       const sessionMsAtT = sessionMs + (t - wallMs);
       const slotIndex = Math.round(sessionMsAtT / SLOT_WIDTH_MS);
-      const expectedNode = (((slotIndex % sniffer.numSlots) + sniffer.numSlots) % sniffer.numSlots) + 1;
+      const slotNumber = ((slotIndex % sniffer.numSlots) + sniffer.numSlots) % sniffer.numSlots;
+      const expectedLabel = slotNumber === 0 ? "Base" : `${slotNumber + 1}`;
       const x = xForWallMs(widthCss, nowMs, t) + pixelsPerSlot / 2;
-      ctx.fillText(`${expectedNode}`, x, lanesBottom + 14);
+      ctx.fillText(expectedLabel, x, lanesBottom + 14);
     }
     ctx.textAlign = "left";
   }

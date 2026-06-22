@@ -1,9 +1,14 @@
 # TDMA Protocol
 
-All sensor nodes share a single 915 MHz LoRa channel. TDMA divides time into
-repeating frames. Each frame contains `NUM_SLOTS` equal-width slots, one per
-node. A node transmits only during its assigned slot, eliminating collisions
-without any runtime negotiation.
+All sensor nodes and the base station share a single 915 MHz LoRa channel.
+TDMA divides time into repeating frames. Each frame contains `NUM_SLOTS`
+equal-width slots. **Slot 0 is permanently reserved for the base station** —
+real node IDs are assigned starting at `kFirstNodeId = 2`
+(`config/BaseConfig.h`), so node 1 (→ slot 0) is never given to a real node.
+Each real node transmits only during its own assigned slot; the base
+transmits only during slot 0. This eliminates collisions without any
+runtime negotiation, including between base-originated broadcasts and node
+telemetry.
 
 ## Slot Assignment
 
@@ -14,17 +19,24 @@ slot = (NODE_ID - 1) % NUM_SLOTS
 ```
 
 `NODE_ID` is derived from the SAMD21 128-bit serial number via FNV-1a hash
-at runtime (via `uid_hash` in the AWAKEN handshake). `NUM_SLOTS` is a build
-flag and must be identical across all deployed node Feathers.
+at runtime (via `uid_hash` in the AWAKEN handshake) for real nodes, starting
+at 2. The base station uses the reserved identity `NODE_ID = 1` (→ slot 0)
+internally via its own `TdmaClock` (`SmartFiresBaseApp::_baseTdmaClock`),
+self-clocked from its own session time rather than from a received
+`TIME_SYNC`. `NUM_SLOTS` is a build flag and must be identical across all
+deployed node Feathers — **with N real nodes, `NUM_SLOTS` must be `N + 1`**,
+not `N`. The base station's own `[env:feather_m0_lora_base]` build does not
+currently pass a `-DNUM_SLOTS` flag and falls back to `NetworkConfig.h`'s
+default (4); keep it in sync manually if a deployment changes node
+`NUM_SLOTS` away from the default.
 
-Mismatch in `NUM_SLOTS` causes slot collisions. The base station does not
-enforce TDMA — only nodes respect slot boundaries.
+Mismatch in `NUM_SLOTS` causes slot collisions.
 
 ## Frame and Slot Layout
 
 ```
-|<─────────────────── frame = NUM_SLOTS × slotWidthMs ───────────────────>|
-|  slot 0 (node 1)   |  slot 1 (node 2)   |  ...  |  slot N-1 (node N)   |
+|<─────────────────── frame = NUM_SLOTS × slotWidthMs ───────────────────────>|
+|  slot 0 (base)   |  slot 1 (node 2)   |  slot 2 (node 3)  |  ...  |  slot N-1 (node N+1)  |
 |──guard──|──TX win──|──guard──|──TX win──|
    20 ms     860 ms     20 ms     860 ms
 ```

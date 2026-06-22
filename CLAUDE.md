@@ -164,10 +164,11 @@ SmartFires_IoT/
 ### Adding a node
 
 1. Add a new `[env:feather_m0_lora_node_N]` section in `platformio.ini` based on `feather_m0_lora_node`.
-2. **Update `NUM_SLOTS` to the new total node count in ALL node environments (node and debug).**
+2. **Update `NUM_SLOTS` to (new total node count) + 1 in ALL node environments (node and debug).** Slot 0 is permanently reserved for the base station — `NUM_SLOTS` is never just the node count.
 3. Reflash every node Feather — they all need the same `NUM_SLOTS` for TDMA to work.
+4. **The base Feather also needs `NUM_SLOTS` to match, but its `[env:feather_m0_lora_base]` section currently doesn't set the flag at all** — it silently falls back to `NetworkConfig.h`'s `#define NUM_SLOTS 4` default via `BaseConfig.h`. This only matches today because node deployments also use 4. If you change node `NUM_SLOTS` away from 4, add `-DNUM_SLOTS=<value>` to the base env explicitly (or wire up a shared `platformio.ini` value so it can't drift) and reflash the base, or the base's slot-0 reservation will silently disagree with the nodes' slot math.
 
-`NUM_SLOTS` is the only flag that must match across all node Feathers.
+`NUM_SLOTS` is the only flag that must match across all node Feathers (and, per the caveat above, the base).
 
 ### Common build commands (run from `platformio/`)
 
@@ -363,16 +364,24 @@ CRC: CRC-8/MAXIM (polynomial 0x31), covers the `len` byte + all data bytes.
 ## TDMA — Time Division Multiple Access
 
 All nodes share the 915 MHz LoRa channel. TDMA divides time into repeating frames,
-each split into `NUM_SLOTS` equal slots. Each node transmits only in its assigned slot.
+each split into `NUM_SLOTS` equal slots. **Slot 0 is permanently reserved for the
+base station** — node IDs are assigned starting at `kFirstNodeId = 2`
+(`config/BaseConfig.h`), so node 1 (→ slot 0) is never given to a real node. Each
+real node transmits only in its assigned slot; the base transmits only in slot 0
+(`SmartFiresBaseApp::_baseTdmaClock`, constructed with `nodeId=1`) — every
+base-originated send (`TIME_SYNC`, `ACK_SUMMARY`, `CMD_CALIBRATE`/`CMD_RESET`) is
+deferred until that window is open, never sent immediately.
 
 ```
-|<-------------- NUM_SLOTS × slotWidthMs = frame period ─────────────>|
-|  slot 0 (node 1)  |  slot 1 (node 2)  |  ...
+|<-------------- NUM_SLOTS × slotWidthMs = frame period ─────────────────────>|
+|  slot 0 (base)  |  slot 1 (node 2)  |  slot 2 (node 3)  |  ...
 |--guard--|--TX win--|--guard--|--TX win--|
     20 ms     860 ms     20 ms     860 ms
 ```
 
 **Slot = `(NODE_ID - 1) % NUM_SLOTS`** — baked in at compile time via `TdmaConfig`.
+**With N real nodes, `NUM_SLOTS` must be `N + 1`** (one slot for the base + one per
+node) — not `N`.
 
 | Parameter | Value | Notes |
 |---|---|---|
@@ -381,7 +390,7 @@ each split into `NUM_SLOTS` equal slots. Each node transmits only in its assigne
 | `maxRetries` | 1 | One re-attempt; ACK typically arrives in ~35 ms |
 | `ackTimeoutMs` | 100 ms | Per-attempt timeout |
 | `syncStaleMs` | 1 320 000 ms | After 22 min without TIME_SYNC, fall back to immediate TX |
-| `NUM_SLOTS` (build flag) | 2 (default) | Must match across all node Feathers |
+| `NUM_SLOTS` (build flag) | 4 (default) | = (node count) + 1; must match across all node Feathers |
 
 TDMA state is managed by `TdmaClock`. The session clock is:
 
@@ -501,8 +510,9 @@ Jetson UART setup (one-time):
 - **SensorSnapshot as internal currency:** sensors write float readings into `SensorSnapshot` via `ISensor::fillSnapshot()`. Battery data is also written into the snapshot by `SmartFiresNodeApp`. `PacketHandler` owns all quantization and encoding — sensors never touch wire format.
 - **AWAKEN boot handshake:** node withholds sensing until it receives a TIME_SYNC from the base. This ensures `session_time` in every bundle is valid from the first sample. Node re-broadcasts AWAKEN every 5 s until synced.
 - **PKT_STATUS every 15 min:** replaces the old one-shot PKT_GPS. Carries GPS position + battery level with validity flags so the receiver always knows what's populated. First STATUS goes out on the first sensing cycle after sync.
-- **TDMA slot assignment is compile-time:** `slot = (NODE_ID - 1) % NUM_SLOTS`. No runtime negotiation. Adding a node = change `NUM_SLOTS` in platformio.ini, reflash all Feathers.
-- **`NUM_SLOTS` must match across all node Feathers.** Mismatch causes slot collisions. Only node Feathers enforce TDMA — base station is unaware.
+- **TDMA slot assignment is compile-time:** `slot = (NODE_ID - 1) % NUM_SLOTS`. No runtime negotiation. Adding a node = change `NUM_SLOTS` to `(node count) + 1` in platformio.ini, reflash all Feathers.
+- **Slot 0 is permanently reserved for the base station.** Node IDs are assigned starting at `kFirstNodeId = 2` (`config/BaseConfig.h`), so node 1/slot 0 is never given to a real node. The base enforces this with its own `TdmaClock` (`nodeId=1`, self-clocked from its own session time) and defers every outgoing transmission — `TIME_SYNC`, `ACK_SUMMARY`, `CMD_CALIBRATE`/`CMD_RESET` — until that window opens, instead of sending immediately at an arbitrary phase.
+- **`NUM_SLOTS` must match across all node Feathers, and the base.** Mismatch causes slot collisions.
 - **Drop-oldest queue:** `TdmaTxQueue` always holds the freshest data. No blocking between sensing and TX.
 - **Stale-sync fallback:** if no TIME_SYNC for 22 min (2× the 10-min broadcast interval), `TdmaClock::myTurn()` returns true unconditionally — node transmits immediately rather than going silent.
 - **TIME_SYNC driven by Jetson NTP, not GPS.** GPS PPS sync deferred; current crystal drift between synced nodes is within the 20 ms guard band.

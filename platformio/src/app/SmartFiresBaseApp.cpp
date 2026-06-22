@@ -118,6 +118,19 @@ uint8_t countBits32(uint32_t value) {
   return count;
 }
 
+// nodeId=1 is the permanently reserved base identity -> slot 0 via
+// TdmaClock's slot=(nodeId-1)%numSlots (see config/BaseConfig.h's
+// kFirstNodeId=2: real nodes start at 2, so node 1/slot 0 is never assigned
+// to one).
+TdmaConfig makeBaseTdmaConfig(const SmartFiresBaseApp::Config &cfg) {
+  TdmaConfig tdmaCfg;
+  tdmaCfg.nodeId = 1;
+  tdmaCfg.numSlots = cfg.tdmaNumSlots;
+  tdmaCfg.slotWidthMs = cfg.tdmaSlotWidthMs;
+  tdmaCfg.guardMs = cfg.tdmaGuardMs;
+  return tdmaCfg;
+}
+
 }
 
 SmartFiresBaseApp::SmartFiresBaseApp(const Config &cfg,
@@ -129,7 +142,8 @@ SmartFiresBaseApp::SmartFiresBaseApp(const Config &cfg,
       _clock(clock),
       _radio(radio),
       _jetsonUart(jetsonUart),
-      _debugUart(debugUart) {}
+      _debugUart(debugUart),
+      _baseTdmaClock(makeBaseTdmaConfig(cfg), clock) {}
 
 bool SmartFiresBaseApp::begin() {
   _jetsonUart.begin(_cfg.uartBaud);
@@ -160,10 +174,15 @@ void SmartFiresBaseApp::update() {
     return;
   }
 
+  // Self-clocking: the base always "syncs" to its own session time (Jetson
+  // UART-relative or local millis() fallback, via currentTimeSyncPayload()),
+  // so _baseTdmaClock.myTurn() is meaningful from the very first tick.
+  const BinaryPacket::TimeSyncPayload ts = currentTimeSyncPayload();
+  _baseTdmaClock.applySync(ts.session_id, ts.session_time_ms);
+
   processIncomingLoRa();
-  maybeSendPendingAckSummaries();
   processIncomingJetsonUart();
-  maybeSendPeriodicTimeSync();
+  maybeSendInBaseWindow();
   maybeLogHealth();
 }
 
@@ -268,12 +287,24 @@ void SmartFiresBaseApp::processIncomingLoRa() {
                               : 0xFFu),
                static_cast<unsigned int>(hdr.seq));
 
-      const bool syncOk = assignment &&
-                          sendDirectTimeSync(pkt.from, assignment->nodeId,
-                                             "awaken", hdr.seq);
-      LOG_INFO("base", "awaken_local_time_sync_result count=%lu result=%s",
+      // Deferred rather than sent immediately: AWAKEN comes from a node with
+      // no slot discipline yet (it broadcasts every 5 s independent of frame
+      // phase), so replying right away would fire at an essentially random
+      // phase relative to the frame — just as likely to land on top of
+      // whatever already-synced node currently owns that slot. Queuing it
+      // for the base's own reserved window (slot 0) makes it collision-safe;
+      // sendPendingDirectTimeSync() flushes it within at most one frame
+      // period, well inside the node's 5 s AWAKEN-retry budget.
+      bool syncQueued = false;
+      if (assignment) {
+        assignment->pendingDirectSync = true;
+        assignment->pendingRadioAddr = pkt.from;
+        assignment->pendingTriggerSeq = hdr.seq;
+        syncQueued = true;
+      }
+      LOG_INFO("base", "awaken_local_time_sync_queued count=%lu result=%s",
                static_cast<unsigned long>(_awakenRxCount),
-               syncOk ? "OK" : "FAIL");
+               syncQueued ? "QUEUED" : "NO_ASSIGNMENT");
 
       uint8_t patched[BinaryPacket::kAwakenLoRaSize];
       memcpy(patched, pkt.data, pkt.len);
@@ -551,16 +582,99 @@ void SmartFiresBaseApp::updateTelemetryReceiptWindow(AckTracker &tracker,
   tracker.receiptWindowMask |= (1UL << delta);
 }
 
-void SmartFiresBaseApp::maybeSendPendingAckSummaries() {
+void SmartFiresBaseApp::maybeSendInBaseWindow() {
   uint32_t slotIndex = 0;
-  if (!ackSummaryWindowOpen(slotIndex)) {
+  if (!baseTxWindowOpen(slotIndex)) {
     return;
   }
 
+  // Priority order: boot-critical AWAKEN replies first, then operator-
+  // triggered commands (rare, shouldn't starve behind routine acks), then
+  // routine ACK_SUMMARY, then the least-urgent periodic broadcast sync.
+  // One send attempted per update() call — all four payload types are tiny
+  // (7-13 bytes on the wire) and infrequent, so a multi-packet-per-window
+  // budget isn't needed; later calls within the same ~860 ms window pick up
+  // whatever's still pending.
+  if (sendPendingDirectTimeSync()) {
+    return;
+  }
+  if (sendPendingCommand()) {
+    return;
+  }
+  if (sendPendingAckSummary(slotIndex)) {
+    return;
+  }
+  maybeSendPeriodicTimeSync();
+}
+
+bool SmartFiresBaseApp::sendPendingDirectTimeSync() {
+  for (uint8_t i = 0; i < kMaxAssignedNodes; ++i) {
+    NodeAssignment &assignment = _nodeAssignments[i];
+    if (!assignment.inUse || !assignment.pendingDirectSync) {
+      continue;
+    }
+
+    const bool ok = sendDirectTimeSync(assignment.pendingRadioAddr, assignment.nodeId,
+                                       "awaken", assignment.pendingTriggerSeq);
+    if (!ok) {
+      continue;
+    }
+
+    assignment.pendingDirectSync = false;
+    return true;
+  }
+  return false;
+}
+
+bool SmartFiresBaseApp::sendPendingCommand() {
+  for (uint8_t i = 0; i < kMaxPendingCommands; ++i) {
+    PendingCommand &cmd = _pendingCommands[i];
+    if (!cmd.inUse) {
+      continue;
+    }
+
+    const bool ok = _radio.sendToWait(cmd.payload, cmd.len, cmd.targetNodeId);
+    LOG_INFO("base", "tx_pending_cmd_flush node=%u len=%u result=%s",
+             static_cast<unsigned int>(cmd.targetNodeId),
+             static_cast<unsigned int>(cmd.len), ok ? "OK" : "FAIL");
+    if (!ok) {
+      continue;
+    }
+
+    cmd.inUse = false;
+    return true;
+  }
+  return false;
+}
+
+bool SmartFiresBaseApp::enqueuePendingCommand(uint8_t targetNodeId,
+                                              const uint8_t *payload,
+                                              uint8_t len) {
+  if (!payload || len == 0 || len > kPendingCommandPayloadSize) {
+    return false;
+  }
+
+  for (uint8_t i = 0; i < kMaxPendingCommands; ++i) {
+    PendingCommand &cmd = _pendingCommands[i];
+    if (cmd.inUse) {
+      continue;
+    }
+
+    cmd.inUse = true;
+    cmd.targetNodeId = targetNodeId;
+    cmd.len = len;
+    memcpy(cmd.payload, payload, len);
+    return true;
+  }
+
+  return false;
+}
+
+bool SmartFiresBaseApp::sendPendingAckSummary(uint32_t slotIndex) {
   const uint32_t now = _clock.millis();
   if (_cfg.ackSummaryMinIntervalMs > 0 &&
       (now - _lastAckSummaryFlushMs) < _cfg.ackSummaryMinIntervalMs) {
-    return;
+    return false;
   }
 
   for (uint8_t offset = 0; offset < kMaxAckTrackedNodes; ++offset) {
@@ -601,36 +715,13 @@ void SmartFiresBaseApp::maybeSendPendingAckSummaries() {
     _lastAckSummaryFlushMs = now;
     _lastAckSummaryFlushSlotIndex = slotIndex;
     _nextAckTrackerFlushIndex = static_cast<uint8_t>((i + 1u) % kMaxAckTrackedNodes);
-    return;
-  }
-}
-
-bool SmartFiresBaseApp::ackSummaryWindowOpen(uint32_t &slotIndexOut) const {
-  if (_cfg.tdmaNumSlots == 0 || _cfg.tdmaSlotWidthMs == 0) {
-    slotIndexOut = 0;
     return true;
   }
+  return false;
+}
 
-  const BinaryPacket::TimeSyncPayload ts = currentTimeSyncPayload();
-  const uint32_t sessionMs = ts.session_time_ms;
-  const uint32_t slotIndex = sessionMs / _cfg.tdmaSlotWidthMs;
-  const uint32_t posInSlot = sessionMs % _cfg.tdmaSlotWidthMs;
-  slotIndexOut = slotIndex;
-
-  if (static_cast<uint8_t>(slotIndex % _cfg.tdmaNumSlots) != 0u) {
-    return false;
-  }
-
-  if (posInSlot < _cfg.tdmaGuardMs) {
-    return false;
-  }
-
-  if (_cfg.tdmaSlotWidthMs > _cfg.tdmaGuardMs &&
-      posInSlot >= (_cfg.tdmaSlotWidthMs - _cfg.tdmaGuardMs)) {
-    return false;
-  }
-
-  return true;
+bool SmartFiresBaseApp::baseTxWindowOpen(uint32_t &slotIndexOut) const {
+  return _baseTdmaClock.myTurn(slotIndexOut);
 }
 
 bool SmartFiresBaseApp::sendAckSummary(uint8_t nodeId, uint8_t ackBaseSeq,
@@ -798,14 +889,16 @@ bool SmartFiresBaseApp::handleJetsonCommandPayload(const uint8_t *payload, uint8
               legacyNoCrc ? "legacy_no_crc" : "lora_crc",
               static_cast<unsigned int>(loraLen));
 
-    const bool ok = _radio.sendToWait(loraPayload, loraLen, cmd.node_id);
-    LOG_INFO("base", "tx_cmd_calibrate seq=%u node=%u duration_s=%u uart_format=%s lora_len=%u result=%s",
+    // Deferred to the base's reserved TDMA window rather than sent
+    // immediately — see maybeSendInBaseWindow()/sendPendingCommand().
+    const bool queued = enqueuePendingCommand(cmd.node_id, loraPayload, loraLen);
+    LOG_INFO("base", "tx_cmd_calibrate_queue seq=%u node=%u duration_s=%u uart_format=%s lora_len=%u result=%s",
              static_cast<unsigned int>(cmdHdr.seq),
              static_cast<unsigned int>(cmd.node_id),
              static_cast<unsigned int>(cmd.duration_s),
              legacyNoCrc ? "legacy_no_crc" : "lora_crc",
-             static_cast<unsigned int>(loraLen), ok ? "OK" : "FAIL");
-    return ok;
+             static_cast<unsigned int>(loraLen), queued ? "QUEUED" : "QUEUE_FULL");
+    return queued;
   }
 
   if (hdr.pkt_type == BinaryPacket::PKT_CMD_RESET) {
@@ -829,14 +922,16 @@ bool SmartFiresBaseApp::handleJetsonCommandPayload(const uint8_t *payload, uint8
       return false;
     }
 
-    const bool ok = _radio.sendToWait(loraPayload, loraLen, cmd.node_id);
-    LOG_INFO("base", "tx_cmd_reset seq=%u node=%u reset_type=%u uart_format=%s lora_len=%u result=%s",
+    // Deferred to the base's reserved TDMA window rather than sent
+    // immediately — see maybeSendInBaseWindow()/sendPendingCommand().
+    const bool queued = enqueuePendingCommand(cmd.node_id, loraPayload, loraLen);
+    LOG_INFO("base", "tx_cmd_reset_queue seq=%u node=%u reset_type=%u uart_format=%s lora_len=%u result=%s",
              static_cast<unsigned int>(cmdHdr.seq),
              static_cast<unsigned int>(cmd.node_id),
              static_cast<unsigned int>(cmd.reset_type),
              legacyNoCrc ? "legacy_no_crc" : "lora_crc",
-             static_cast<unsigned int>(loraLen), ok ? "OK" : "FAIL");
-    return ok;
+             static_cast<unsigned int>(loraLen), queued ? "QUEUED" : "QUEUE_FULL");
+    return queued;
   }
 
   LOG_WARN("base", "uart_cmd_unsupported type=%s code=0x%02X",
@@ -945,12 +1040,12 @@ void SmartFiresBaseApp::maybeLogHealth() {
   }
 
   const BinaryPacket::TimeSyncPayload ts = currentTimeSyncPayload();
-  const uint32_t slotIndex =
-      (_cfg.tdmaSlotWidthMs == 0) ? 0u : (ts.session_time_ms / _cfg.tdmaSlotWidthMs);
-  const uint32_t slotPosMs =
-      (_cfg.tdmaSlotWidthMs == 0) ? 0u : (ts.session_time_ms % _cfg.tdmaSlotWidthMs);
-  const uint8_t slotRole =
-      (_cfg.tdmaNumSlots == 0) ? 0u : static_cast<uint8_t>(slotIndex % _cfg.tdmaNumSlots);
+  // _baseTdmaClock is kept in sync every update() tick (see update()), so
+  // these reuse the same source of truth as the actual TX-window gating
+  // instead of a second, hand-rolled slot computation.
+  const uint32_t slotIndex = _baseTdmaClock.currentSlotIndex();
+  const uint32_t slotPosMs = _baseTdmaClock.positionInSlotMs();
+  const uint8_t slotRole = _baseTdmaClock.currentSlotNumber();
 
     LOG_INFO(
       "base",

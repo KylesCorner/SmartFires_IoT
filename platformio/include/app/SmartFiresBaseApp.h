@@ -3,6 +3,8 @@
 #include "config/BaseConfig.h"
 #include "interfaces/IClock.h"
 #include "radio/ITdmaRadioDriver.h"
+#include "radio/TdmaClock.h"
+#include "radio/TdmaConfig.h"
 #include "telemetry/BinaryPacket.h"
 
 #include <stddef.h>
@@ -53,7 +55,33 @@ private:
     bool inUse = false;
     uint32_t uidHash = 0;
     uint8_t nodeId = 0;
+
+    // Set when an AWAKEN arrives outside the base's reserved TDMA window
+    // (slot 0) — the direct TIME_SYNC reply is deferred and flushed by
+    // sendPendingDirectTimeSync() the next time the window opens, instead of
+    // replying immediately at an arbitrary phase that could land inside a
+    // real node's TX slot.
+    bool pendingDirectSync = false;
+    uint8_t pendingRadioAddr = 0;
+    uint8_t pendingTriggerSeq = 0;
   };
+
+  // CMD_CALIBRATE/CMD_RESET forwards from the Jetson are deferred the same
+  // way — encoded immediately (so the original UART payload doesn't need to
+  // be retained) but only transmitted once the base's window opens.
+  static constexpr size_t kPendingCommandPayloadSize =
+      BinaryPacket::kCmdCalibrateLoRaSize > BinaryPacket::kCmdResetLoRaSize
+          ? BinaryPacket::kCmdCalibrateLoRaSize
+          : BinaryPacket::kCmdResetLoRaSize;
+
+  struct PendingCommand {
+    bool inUse = false;
+    uint8_t targetNodeId = 0;
+    uint8_t payload[kPendingCommandPayloadSize] = {};
+    uint8_t len = 0;
+  };
+
+  static constexpr uint8_t kMaxPendingCommands = 4;
 
   struct UartRxState {
     enum class Stage : uint8_t {
@@ -96,6 +124,15 @@ private:
   HardwareSerial &_jetsonUart;
   Print &_debugUart;
 
+  // The base's own reserved-slot timing. nodeId=1 is the permanently
+  // reserved identity that maps to slot 0 via TdmaClock's
+  // slot=(nodeId-1)%numSlots — see config/BaseConfig.h's kFirstNodeId=2
+  // (real nodes start at 2, so node 1/slot 0 is never assigned to one).
+  // Self-clocking: applySync() is called every update() tick from the
+  // base's own currentTimeSyncPayload(), so it never depends on receiving
+  // anything over the radio.
+  TdmaClock _baseTdmaClock;
+
   UartRxState _uartRx;
   bool _initialized = false;
 
@@ -127,6 +164,7 @@ private:
   uint32_t _lastAckSummaryFlushSlotIndex = 0xFFFFFFFFu;
   NodeAssignment _nodeAssignments[kMaxAssignedNodes] = {};
   AckTracker _ackTrackers[kMaxAckTrackedNodes] = {};
+  PendingCommand _pendingCommands[kMaxPendingCommands] = {};
 
   void processIncomingLoRa();
   void processIncomingJetsonUart();
@@ -138,14 +176,22 @@ private:
   AckTracker *findOrCreateAckTracker(uint8_t nodeId);
   void recordTelemetrySequence(AckTracker &tracker, uint8_t seq);
   void updateTelemetryReceiptWindow(AckTracker &tracker, uint8_t seq);
-  void maybeSendPendingAckSummaries();
-  bool ackSummaryWindowOpen(uint32_t &slotIndexOut) const;
   bool sendAckSummary(uint8_t nodeId, uint8_t ackBaseSeq, uint16_t ackMask,
                       const char *reason, uint8_t triggerSeq);
   void maybeSendPeriodicTimeSync();
   BinaryPacket::TimeSyncPayload baseLocalTimeSyncPayload() const;
   void updateJetsonTimeSource(const BinaryPacket::TimeSyncPayload &ts);
   BinaryPacket::TimeSyncPayload currentTimeSyncPayload() const;
+
+  // Reserved-slot (slot 0) TX gating — every base-originated LoRa send
+  // funnels through here instead of transmitting immediately, so base
+  // traffic can no longer land inside a real node's TX window.
+  bool baseTxWindowOpen(uint32_t &slotIndexOut) const;
+  void maybeSendInBaseWindow();
+  bool sendPendingDirectTimeSync();
+  bool sendPendingCommand();
+  bool sendPendingAckSummary(uint32_t slotIndex);
+  bool enqueuePendingCommand(uint8_t targetNodeId, const uint8_t *payload, uint8_t len);
 
   bool pushJetsonUartByte(uint8_t b, uint8_t *payloadOut, uint8_t &lenOut);
   void resetJetsonUartRx();
