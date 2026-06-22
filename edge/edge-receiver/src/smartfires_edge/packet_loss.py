@@ -17,6 +17,16 @@ class NodeStats:
     crc_valid_packets: int = 0
     last_rssi: Optional[int] = None
 
+    # Absolute (unwrapped) counterparts of first_seq/last_seq/seen_seqs, used
+    # only for received/missing/duplicate accounting. The wire seq is 8-bit
+    # and rolls over every 256 packets; without an unwrapped key, a seq reused
+    # after a rollover collides with its own first-lap entry in seen_seqs and
+    # gets miscounted as a duplicate forever after. first_seq/last_seq/seen_seqs
+    # stay mod-256 because reception_timeline() needs the raw wire value.
+    _first_abs_seq: Optional[int] = field(default=None, repr=False)
+    _last_abs_seq: Optional[int] = field(default=None, repr=False)
+    _seen_abs_seqs: set = field(default_factory=set, repr=False)
+
     def observe(self, seq: int, rssi: int) -> None:
         seq &= 0xFF
         self.last_rssi = rssi
@@ -26,6 +36,9 @@ class NodeStats:
             self.first_seq = seq
             self.last_seq = seq
             self.seen_seqs.add(seq)
+            self._first_abs_seq = seq
+            self._last_abs_seq = seq
+            self._seen_abs_seqs.add(seq)
             return
 
         self.seen_seqs.add(seq)
@@ -37,20 +50,28 @@ class NodeStats:
         if 1 <= forward_gap <= 127:
             self.last_seq = seq
 
+        # Resolve the wire seq onto an ever-increasing absolute sequence number
+        # anchored to the previous absolute high-water mark, so rollovers
+        # extend the count instead of wrapping back over earlier seqs.
+        abs_delta = (seq - (self._last_abs_seq & 0xFF)) & 0xFF
+        if abs_delta > 127:
+            abs_delta -= 256
+        abs_seq = self._last_abs_seq + abs_delta
+        self._seen_abs_seqs.add(abs_seq)
+        if abs_seq > self._last_abs_seq:
+            self._last_abs_seq = abs_seq
+
     @property
     def _span(self) -> int:
         """Number of sequence positions from first_seq to last_seq inclusive."""
-        if self.first_seq is None:
+        if self._first_abs_seq is None:
             return 0
-        return ((self.last_seq - self.first_seq) & 0xFF) + 1
+        return self._last_abs_seq - self._first_abs_seq + 1
 
     @property
     def received(self) -> int:
         """Unique sequence numbers received within the [first_seq, last_seq] window."""
-        if self.first_seq is None:
-            return 0
-        span = (self.last_seq - self.first_seq) & 0xFF
-        return sum(1 for s in self.seen_seqs if (s - self.first_seq) & 0xFF <= span)
+        return len(self._seen_abs_seqs)
 
     @property
     def missing(self) -> int:

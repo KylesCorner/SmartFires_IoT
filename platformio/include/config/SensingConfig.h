@@ -53,7 +53,7 @@ constexpr bool kContinuousFailOnSampleError = false;
 // available as a documented alternate operating mode. samplePeriodMs here
 // carries forward a pre-existing "//TEMP" marker from before this
 // consolidation; flagged as a real value, not silently dropped.
-constexpr bool kThresholdEnabled = true;
+constexpr bool kThresholdEnabled = false;
 constexpr uint32_t kThresholdMinSleepMs = 3000;
 constexpr uint32_t kThresholdMaxWakeMs = 1000;
 constexpr uint32_t kThresholdActiveSampleMs = 30000;
