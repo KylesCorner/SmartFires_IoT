@@ -38,6 +38,13 @@ const sniffer = {
   logLines: 0,
 };
 
+function laneLabel(nodeId) {
+  // node_id 0 is the broadcast/command convention (TIME_SYNC/ACK_SUMMARY/CMD_*
+  // are sent by the base station, never by a real TDMA node) — give it its
+  // own dedicated lane rather than mixing it into a numbered node lane.
+  return nodeId === 0 ? "Base Station" : `Node ${nodeId}`;
+}
+
 function laneIndexFor(nodeId) {
   if (sniffer.laneOf.has(nodeId)) return sniffer.laneOf.get(nodeId);
   sniffer.laneOrder.push(nodeId);
@@ -130,7 +137,7 @@ function draw() {
   ctx.font = "11px sans-serif";
   sniffer.laneOrder.forEach((nodeId, idx) => {
     const y = HEADER_HEIGHT + idx * LANE_HEIGHT;
-    ctx.fillText(`Node ${nodeId}`, 4, y + 14);
+    ctx.fillText(laneLabel(nodeId), 4, y + 14);
     ctx.strokeStyle = "#2a2f36";
     ctx.beginPath();
     ctx.moveTo(0, y);
@@ -221,7 +228,8 @@ function appendSnifferLog(ev) {
   const el = document.getElementById("sniffer-log-output");
   const time = new Date(ev._wallMs).toISOString().slice(11, 23);
   const jitter = ev.jitter_ms != null ? `${ev.jitter_ms > 0 ? "+" : ""}${ev.jitter_ms}ms` : "—";
-  const line = `${time}  ${ev.pkt_type.padEnd(10)} node=${ev.node_id ?? "—"} rssi=${ev.rssi ?? "—"} snr=${ev.snr ?? "—"} jitter=${jitter}${ev.guard_violation ? "  GUARD-VIOLATION" : ""}`;
+  const target = ev.target_node_id != null ? ` target=${ev.target_node_id}` : "";
+  const line = `${time}  ${ev.pkt_type.padEnd(10)} node=${ev.node_id ?? "—"}${target} rssi=${ev.rssi ?? "—"} snr=${ev.snr ?? "—"} jitter=${jitter}${ev.guard_violation ? "  GUARD-VIOLATION" : ""}`;
 
   sniffer.logLines += 1;
   const atBottom = el.scrollHeight - el.scrollTop <= el.clientHeight + 4;
@@ -278,7 +286,7 @@ async function pollStats() {
     for (const s of sorted) {
       const tr = document.createElement("tr");
       tr.innerHTML = `
-        <td>${s.node_id}</td>
+        <td>${s.node_id === 0 ? "Base" : s.node_id}</td>
         <td>${fmt(s.packets)}</td>
         <td>${fmt(s.avg_rssi)}</td>
         <td>${fmt(s.avg_snr)}</td>

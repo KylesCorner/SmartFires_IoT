@@ -163,19 +163,21 @@ def _decode_rx_event(
     elif pkt_type == PKT_BUNDLE:
         decode_bundle(raw, rssi)
     elif pkt_type == PKT_ACK_SUMMARY:
-        # Header node_id is 0 (broadcast convention) — the real target node
-        # lives in the payload, so use that for the timeline lane.
+        # Header node_id stays 0 (broadcast convention) — these are base
+        # station transmissions, so they land in the dedicated base lane.
+        # The payload's own node_id is the node being acked; keep it as
+        # metadata rather than reassigning the lane.
         dec = decode_ack_summary(raw, rssi)
         if dec is not None:
-            node_id = dec["node_id"]
+            extra["target_node_id"] = dec["node_id"]
     elif pkt_type == PKT_CMD_CALIBRATE:
         dec = decode_cmd_calibrate(raw)
         if dec is not None:
-            node_id = dec["node_id"]
+            extra["target_node_id"] = dec["node_id"]
     elif pkt_type == PKT_CMD_RESET:
         dec = decode_cmd_reset(raw)
         if dec is not None:
-            node_id = dec["node_id"]
+            extra["target_node_id"] = dec["node_id"]
     elif pkt_type == PKT_CMD_ACK:
         decode_cmd_ack(raw, rssi)
 
