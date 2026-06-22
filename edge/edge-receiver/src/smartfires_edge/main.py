@@ -3,7 +3,9 @@ from pathlib import Path
 
 from smartfires_edge.config import (
     DEFAULT_BAUD,
+    DEFAULT_NUM_SLOTS,
     DEFAULT_PORT,
+    DEFAULT_SNIFFER_BAUD,
     DEFAULT_SYNC_INTERVAL_S,
     DEFAULT_TELEMETRY_ROWS,
     DEFAULT_WEB_HOST,
@@ -57,6 +59,29 @@ def build_parser() -> argparse.ArgumentParser:
     add_anemometer_args(web)
     web.add_argument("--host", default=DEFAULT_WEB_HOST)
     web.add_argument("--http-port", type=int, default=DEFAULT_WEB_HTTP_PORT)
+    web.add_argument(
+        "--sniffer-port",
+        default=None,
+        metavar="PORT",
+        help="Serial port for the passive LoRa sniffer Feather; omit to disable the TDMA tab (default: disabled)",
+    )
+    web.add_argument(
+        "--sniffer-baud",
+        type=int,
+        default=None,
+        metavar="BAUD",
+        help=f"Sniffer baud rate (default: {DEFAULT_SNIFFER_BAUD})",
+    )
+    web.add_argument(
+        "--num-slots",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "TDMA slot count for sniffer alignment — must match the NUM_SLOTS "
+            f"build flag on the deployed node Feathers (default: {DEFAULT_NUM_SLOTS})"
+        ),
+    )
 
     return p
 

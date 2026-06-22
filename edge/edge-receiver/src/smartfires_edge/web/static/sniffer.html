@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>SmartFires — TDMA Sniffer</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <main>
+    <div class="layout">
+
+      <section class="panel left-panel">
+        <h1>TDMA Timeline</h1>
+        <p class="section-hint">
+          Each lane is one node's assigned TDMA slot, aligned to the live session clock
+          overheard from the base station's TIME_SYNC broadcasts. Dashed lines mark slot
+          boundaries; shaded bands are the guard window. Disconnected/unanchored packets
+          render at the left margin.
+        </p>
+        <div id="sniffer-disabled" class="sniffer-disabled" style="display:none;">
+          Sniffer not connected — start <code>smartfires-edge web</code> with
+          <code>--sniffer-port &lt;port&gt;</code>.
+        </div>
+        <div id="sniffer-canvas-wrapper" class="sniffer-canvas-wrapper">
+          <canvas id="sniffer-timeline"></canvas>
+        </div>
+      </section>
+
+      <section class="right-panel">
+        <div class="panel">
+          <h2>Per-Node Stats</h2>
+          <table id="sniffer-stats-table">
+            <thead>
+              <tr>
+                <th>Node</th>
+                <th>Packets</th>
+                <th>Avg RSSI</th>
+                <th>Avg SNR</th>
+                <th>Jitter σ (ms)</th>
+                <th>Guard Viol.</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+    </div>
+
+    <div class="panel log-panel">
+      <div class="log-header">
+        <h2>Sniffer Packet Log</h2>
+      </div>
+      <pre id="sniffer-log-output" class="log-output"></pre>
+    </div>
+  </main>
+
+  <script src="/static/js/nav.js"></script>
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/sniffer_page.js"></script>
+</body>
+</html>

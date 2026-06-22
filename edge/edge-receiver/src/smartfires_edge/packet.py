@@ -293,6 +293,27 @@ def decode_awaken(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Option
     }
 
 
+def decode_time_sync(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Optional[dict]:
+    """Decode a PKT_TIME_SYNC LoRa broadcast (base station -> nodes)."""
+    if len(raw_lora_payload) < TIME_SYNC_LORA_SIZE:
+        return None
+    if crc8(raw_lora_payload[:-1]) != raw_lora_payload[-1]:
+        return None
+
+    magic, pkt_type, node_id, seq = struct.unpack_from(HEADER_FMT, raw_lora_payload, 0)
+    if magic != PKT_MAGIC or pkt_type != PKT_TIME_SYNC:
+        return None
+
+    session_id, session_time_ms = struct.unpack_from(TIME_SYNC_PAYLOAD_FMT, raw_lora_payload, HEADER_SIZE)
+    return {
+        "node_id": node_id,
+        "seq": seq,
+        "rssi": rssi,
+        "session_id": session_id,
+        "session_time_ms": session_time_ms,
+    }
+
+
 def decode_cmd_calibrate(raw_lora_payload: bytes) -> Optional[dict]:
     if len(raw_lora_payload) < CMD_CALIBRATE_LORA_SIZE:
         return None

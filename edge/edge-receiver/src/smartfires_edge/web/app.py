@@ -105,6 +105,7 @@ def create_app(
     base_station_store: Optional[BaseStationStore] = None,
     reset_event: Optional[threading.Event] = None,
     tile_cache_dir: Optional[Path] = None,
+    sniffer_enabled: bool = False,
 ) -> FastAPI:
     app = FastAPI(title="SmartFires Dashboard")
     store = base_station_store or BaseStationStore()
@@ -123,6 +124,10 @@ def create_app(
     @app.get("/map-history")
     def map_history() -> FileResponse:
         return FileResponse(STATIC_DIR / "map_history.html")
+
+    @app.get("/sniffer")
+    def sniffer_page() -> FileResponse:
+        return FileResponse(STATIC_DIR / "sniffer.html")
 
     # ------------------------------------------------------------------
     # Tile cache endpoints
@@ -200,6 +205,10 @@ def create_app(
     def reception_timeline(bins: int = 50) -> dict:
         return live_state.reception_timeline(bins=bins)
 
+    @app.get("/api/sniffer/stats")
+    def sniffer_stats() -> dict:
+        return live_state.sniffer_stats_snapshot()
+
     @app.get("/api/base_station")
     def get_base_station() -> dict:
         return store.get() or {}
@@ -226,6 +235,23 @@ def create_app(
         try:
             while True:
                 entries, idx = live_state.drain_log(idx)
+                for entry in entries:
+                    await ws.send_text(json.dumps(entry))
+                await asyncio.sleep(0.05)
+        except (WebSocketDisconnect, Exception):
+            pass
+
+    @app.websocket("/ws/sniffer")
+    async def websocket_sniffer(ws: WebSocket) -> None:
+        await ws.accept()
+        if not sniffer_enabled:
+            await ws.send_text(json.dumps({"event": "not_configured"}))
+            await ws.close()
+            return
+        idx = 0
+        try:
+            while True:
+                entries, idx = live_state.drain_sniffer(idx)
                 for entry in entries:
                     await ws.send_text(json.dumps(entry))
                 await asyncio.sleep(0.05)

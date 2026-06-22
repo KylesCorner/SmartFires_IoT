@@ -1,6 +1,7 @@
 const NAV_LINKS = [
   { href: "/", label: "Main" },
   { href: "/map-history", label: "Map & History" },
+  { href: "/sniffer", label: "TDMA Sniffer" },
 ];
 
 let _connDot = null;

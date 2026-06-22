@@ -54,6 +54,13 @@ DEFAULT_ANEMOMETER_INTERVAL_S: float = 1.0  # Modbus poll interval
 DEFAULT_WEB_HOST: str = "0.0.0.0"
 DEFAULT_WEB_HTTP_PORT: int = 8080
 
+# Passive LoRa sniffer — second USB-serial Feather, TDMA visualization (web subcommand only)
+DEFAULT_SNIFFER_PORT: str | None = None  # None = sniffer disabled
+DEFAULT_SNIFFER_BAUD: int = 115200
+# Must match the NUM_SLOTS build flag baked into the deployed node Feathers
+# (see platformio/platformio.ini and the root CLAUDE.md "must match" note).
+DEFAULT_NUM_SLOTS: int = 4
+
 # Visualize (visualize subcommand only)
 DEFAULT_TELEMETRY_ROWS: int = 20
 
@@ -81,6 +88,19 @@ class AnemometerConfig:
 
 
 @dataclass
+class SnifferConfig:
+    """Optional passive LoRa sniffer settings (second USB-serial Feather)."""
+
+    port: str | None = DEFAULT_SNIFFER_PORT
+    baud: int = DEFAULT_SNIFFER_BAUD
+    num_slots: int = DEFAULT_NUM_SLOTS
+
+    @property
+    def enabled(self) -> bool:
+        return self.port is not None
+
+
+@dataclass
 class IngestConfig:
     """UART ingest loop settings — used by ``receive`` and ``web`` subcommands."""
 
@@ -93,6 +113,7 @@ class IngestConfig:
     fsync_every_row: bool = False
     raw_log: bool = False
     anemometer: AnemometerConfig = field(default_factory=AnemometerConfig)
+    sniffer: SnifferConfig = field(default_factory=SnifferConfig)
 
 
 @dataclass
@@ -160,6 +181,12 @@ class EdgeConfig:
             # defaults, so we apply them unconditionally.
             cfg.web_host = args.host
             cfg.web_http_port = args.http_port
+            if getattr(args, "sniffer_port", None) is not None:
+                cfg.ingest.sniffer.port = args.sniffer_port
+            if getattr(args, "sniffer_baud", None) is not None:
+                cfg.ingest.sniffer.baud = args.sniffer_baud
+            if getattr(args, "num_slots", None) is not None:
+                cfg.ingest.sniffer.num_slots = args.num_slots
 
         if subcommand == "visualize":
             # visualize defines its own args with real defaults (not None),
@@ -201,6 +228,11 @@ def _apply_json_config(cfg: EdgeConfig, path: Path) -> None:
           "web": {
             "host": "0.0.0.0",
             "http_port": 8080
+          },
+          "sniffer": {
+            "port": null,
+            "baud": 115200,
+            "num_slots": 4
           }
         }
 
@@ -242,6 +274,14 @@ def _apply_json_config(cfg: EdgeConfig, path: Path) -> None:
         cfg.web_host = str(web["host"])
     if "http_port" in web:
         cfg.web_http_port = int(web["http_port"])
+
+    sniffer = data.get("sniffer", {})
+    if "port" in sniffer:
+        cfg.ingest.sniffer.port = sniffer["port"] or None
+    if "baud" in sniffer:
+        cfg.ingest.sniffer.baud = int(sniffer["baud"])
+    if "num_slots" in sniffer:
+        cfg.ingest.sniffer.num_slots = int(sniffer["num_slots"])
 
 
 # ---------------------------------------------------------------------------

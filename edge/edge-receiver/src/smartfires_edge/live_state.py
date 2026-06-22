@@ -1,3 +1,4 @@
+import statistics
 import threading
 import time
 from collections import deque
@@ -37,6 +38,10 @@ class LiveState:
         self._log_ring: deque[dict] = deque(maxlen=2000)
         self._log_lock = threading.Lock()
         self._log_total = 0
+        self._sniffer_ring: deque[dict] = deque(maxlen=5000)
+        self._sniffer_lock = threading.Lock()
+        self._sniffer_total = 0
+        self._sniffer_stats: dict[int, dict[str, Any]] = {}
 
     def push_log(self, msg: str, node_id: int | None = None) -> None:
         with self._log_lock:
@@ -60,6 +65,68 @@ class LiveState:
         if since_idx <= oldest_idx:
             return items, total
         return items[since_idx - oldest_idx:], total
+
+    def push_sniffer_event(self, event: dict[str, Any]) -> None:
+        with self._sniffer_lock:
+            self._sniffer_ring.append(event)
+            self._sniffer_total += 1
+
+            node_id = event.get("node_id")
+            if node_id is None or event.get("pkt_type") == "TIME_SYNC":
+                return
+            stats = self._sniffer_stats.setdefault(
+                node_id,
+                {
+                    "packets": 0,
+                    "rssi_sum": 0.0,
+                    "rssi_count": 0,
+                    "snr_sum": 0.0,
+                    "snr_count": 0,
+                    "jitter_samples": deque(maxlen=200),
+                    "guard_violations": 0,
+                },
+            )
+            stats["packets"] += 1
+            if event.get("rssi") is not None:
+                stats["rssi_sum"] += event["rssi"]
+                stats["rssi_count"] += 1
+            if event.get("snr") is not None:
+                stats["snr_sum"] += event["snr"]
+                stats["snr_count"] += 1
+            if event.get("jitter_ms") is not None:
+                stats["jitter_samples"].append(event["jitter_ms"])
+            if event.get("guard_violation"):
+                stats["guard_violations"] += 1
+
+    def drain_sniffer(self, since_idx: int) -> tuple[list[dict], int]:
+        """Same monotonic-cursor pattern as drain_log."""
+        with self._sniffer_lock:
+            items = list(self._sniffer_ring)
+            total = self._sniffer_total
+        oldest_idx = total - len(items)
+        if since_idx <= oldest_idx:
+            return items, total
+        return items[since_idx - oldest_idx:], total
+
+    def sniffer_stats_snapshot(self) -> dict[int, dict[str, Any]]:
+        with self._sniffer_lock:
+            result: dict[int, dict[str, Any]] = {}
+            for node_id, s in self._sniffer_stats.items():
+                jitter = list(s["jitter_samples"])
+                result[node_id] = {
+                    "node_id": node_id,
+                    "packets": s["packets"],
+                    "avg_rssi": round(s["rssi_sum"] / s["rssi_count"], 1) if s["rssi_count"] else None,
+                    "avg_snr": round(s["snr_sum"] / s["snr_count"], 1) if s["snr_count"] else None,
+                    "jitter_std_ms": round(statistics.pstdev(jitter), 1) if len(jitter) >= 2 else None,
+                    "guard_violations": s["guard_violations"],
+                }
+            return result
+
+    def reset_sniffer_stats(self) -> None:
+        """Called by sniffer_service when a new base-station session is detected."""
+        with self._sniffer_lock:
+            self._sniffer_stats.clear()
 
     def _events_for(self, node_id: int) -> deque:
         return self.reception_events.setdefault(node_id, deque(maxlen=500))
@@ -144,6 +211,9 @@ class LiveState:
                 q.clear()
             self._session_start_retx.clear()
             self._session_start_fail.clear()
+        with self._sniffer_lock:
+            self._sniffer_ring.clear()
+            self._sniffer_stats.clear()
         self.push_log("--- NEW SESSION ---", None)
 
     def status_history_snapshot(self, limit: int = 5000) -> list[dict[str, Any]]:

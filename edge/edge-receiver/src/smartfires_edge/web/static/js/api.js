@@ -40,6 +40,9 @@ const Api = {
       })
     ).json();
   },
+  async snifferStats() {
+    return (await fetch("/api/sniffer/stats")).json();
+  },
 };
 
 function fmt(value) {
