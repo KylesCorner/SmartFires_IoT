@@ -118,8 +118,8 @@ constexpr uint32_t kContinuousWakeDelayMs = 0;
 
 // makePeriodicStandbyCfg() / makePeriodicBackupCfg() — periodic run/sleep
 // duty cycling (currently identical between the two power sub-modes).
-constexpr uint32_t kPeriodicRunTimeMs = 4000;
-constexpr uint32_t kPeriodicSleepTimeMs = 15000;
+constexpr uint32_t kPeriodicRunTimeMs = 24000;
+constexpr uint32_t kPeriodicSleepTimeMs = 90000;
 constexpr uint32_t kPeriodicSecondRunTimeMs = 24000;
 constexpr uint32_t kPeriodicSecondSleepTimeMs = 90000;
 constexpr uint32_t kPeriodicMinSamplePeriodMs = 1000;

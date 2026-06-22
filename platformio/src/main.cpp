@@ -153,7 +153,7 @@ Pa1010dGpsSensor::Config gpsCfg = Pa1010dGpsSensor::Config::make(
     SensingConfig::Gps::kPeriodicSecondRunTimeMs,
     SensingConfig::Gps::kPeriodicSecondSleepTimeMs,
     SensingConfig::Gps::kPeriodicMinSamplePeriodMs,
-    GpsPowerMode::PeriodicBackup);
+    GpsPowerMode::FullPowerContinuous);
 Pa1010dGpsSensor gps(gpsCfg, gpsDriver, clock);
 
 SparkfunIcm20948Driver imuDriver;

@@ -6,3 +6,20 @@ pip install -e edge/edge-receiver
 
 rsync -avz --progress smartfires@10.8.184.94:/mnt/nvme_drive/data/ ./data/
 sudo nmcli connection up wired-dhcp
+
+## Web dashboard
+
+`smartfires-edge web` runs UART ingest (CSV logging, packet-loss tracking) and
+the live web dashboard (Signal Map, Link Quality, Reception Timeline) in one
+process — no separate `receive` step needed.
+
+1. On the Jetson, find its LAN IP and start the dashboard:
+
+   ```bash
+   hostname -I && smartfires-edge web --port /dev/ttyTHS1
+   ```
+
+2. From any machine on the same network, open `http://<jetson-ip>:8080` in a browser.
+
+Defaults: host `0.0.0.0` (LAN-reachable), port `8080`. Override with `--host`/`--http-port`.
+CSV + metrics still land under the default data dir unless `--data-dir` is set.
