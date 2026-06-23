@@ -1,3 +1,7 @@
+// ---
+// description: Implements BatteryMonitor's ADC sampling, voltage-divider conversion, percent clamping, and telemetry string formatting.
+// role: implementation
+// ---
 #include "power/BatteryMonitor.h"
 
 #include <math.h>

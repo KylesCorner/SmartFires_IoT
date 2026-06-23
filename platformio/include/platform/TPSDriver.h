@@ -1,3 +1,7 @@
+// ---
+// description: GPIO enable-pin driver implementing Itps to power-gate the wind sensor's TPS regulator.
+// role: implementation
+// ---
 #pragma once
 
 #include "interfaces/Itps.h"

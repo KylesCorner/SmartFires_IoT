@@ -1,3 +1,7 @@
+// ---
+// description: Orchestrates TDMA-gated LoRa TX/RX, app-layer reliability retries, and command receipt.
+// role: implementation
+// ---
 #pragma once
 
 #include "config/NetworkConfig.h"

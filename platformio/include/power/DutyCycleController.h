@@ -1,3 +1,8 @@
+// ---
+// description: Sensor wake/sample/sleep duty-cycle state machine, gated by an ITriggerSensor threshold crossing and driving all ISensor instances plus the battery monitor.
+// role: implementation
+// docs: [duty-cycling]
+// ---
 #pragma once
 
 #include "interfaces/IClock.h"

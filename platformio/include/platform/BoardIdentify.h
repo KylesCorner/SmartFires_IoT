@@ -1,3 +1,7 @@
+// ---
+// description: Reads the SAMD21 128-bit hardware serial number and derives an FNV-1a uid_hash/small-id for board identity.
+// role: implementation
+// ---
 #pragma once
 
 #include <stdint.h>

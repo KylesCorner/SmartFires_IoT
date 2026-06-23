@@ -1,3 +1,8 @@
+// ---
+// description: Base-station bridge constants (UART-to-Jetson cadence, ACK-summary batching, periodic TIME_SYNC, node/ACK table sizes) — reuses NetworkConfig::kGeometry for TDMA slot geometry.
+// role: config
+// docs: [tunable-parameters]
+// ---
 #pragma once
 
 // Base-bridge domain — single source of truth for the base station's

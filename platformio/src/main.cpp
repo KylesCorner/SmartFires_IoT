@@ -1,3 +1,7 @@
+// ---
+// description: Firmware entrypoint — selects and wires up one of LORA_BASE/LORA_NODE/SENSOR_PROBE build roles, constructing all objects and running setup()/loop().
+// role: entrypoint
+// ---
 #include "logging/DebugLogger.h"
 #include <Arduino.h>
 

@@ -1,3 +1,7 @@
+// ---
+// description: Plain data struct holding one sensor reading cycle in natural float units, filled by ISensor::fillSnapshot() and quantized to wire format by PacketHandler.
+// role: implementation
+// ---
 #pragma once
 
 #include <math.h>

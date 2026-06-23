@@ -1,3 +1,7 @@
+// ---
+// description: Top-level node application class — drives the AWAKEN/TIME_SYNC handshake, duty cycle, snapshot building, telemetry enqueueing, and CMD_CALIBRATE/CMD_RESET handling.
+// role: implementation
+// ---
 #pragma once
 
 #include "config/NetworkConfig.h"

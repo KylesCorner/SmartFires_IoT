@@ -1,3 +1,7 @@
+// ---
+// description: ISensor implementation wrapping the ICM-20948 IMU driver, exposing DMP heading/accuracy readings and snapshot fill.
+// role: implementation
+// ---
 #pragma once
 
 #include "drivers/IIcm20948Driver.h"

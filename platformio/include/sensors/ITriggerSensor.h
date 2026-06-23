@@ -1,3 +1,7 @@
+// ---
+// description: Abstract interface for a sensor that can produce a threshold-trigger reading (temp/humidity) used to gate duty-cycle wakeups.
+// role: interface
+// ---
 // include/sensors/ITriggerSensor.h
 #pragma once
 

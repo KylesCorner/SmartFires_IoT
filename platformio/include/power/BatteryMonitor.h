@@ -1,3 +1,7 @@
+// ---
+// description: Battery voltage/percent monitor — reads the divider ADC pin, computes battery voltage/percent/low-flag from PowerConfig constants.
+// role: implementation
+// ---
 #pragma once
 
 #include "config/PowerConfig.h"

@@ -1,3 +1,8 @@
+// ---
+// description: Implements SmartFiresBaseApp's LoRa RX dispatch, node/ACK tracking, Jetson UART frame parsing, and reserved-slot-gated TX of TIME_SYNC/ACK_SUMMARY/commands.
+// role: implementation
+// docs: [packet-reliability, uart-jetson-bridge]
+// ---
 #include "app/SmartFiresBaseApp.h"
 
 #include "calibration/CalibrationDebug.h"

@@ -1,3 +1,7 @@
+// ---
+// description: Implements SmartFiresNodeApp's update loop — TIME_SYNC wait/AWAKEN retry, duty-cycle-driven snapshot building, telemetry enqueueing, and incoming CMD_CALIBRATE/CMD_RESET handling.
+// role: implementation
+// ---
 #include "app/SmartFiresNodeApp.h"
 
 #include "calibration/CalibrationDebug.h"

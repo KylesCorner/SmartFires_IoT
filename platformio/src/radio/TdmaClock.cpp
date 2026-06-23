@@ -1,3 +1,8 @@
+// ---
+// description: Implements TdmaClock's session clock, slot-index math, and myTurn() transmit gating.
+// role: implementation
+// docs: [tdma-protocol]
+// ---
 #include "radio/TdmaClock.h"
 
 TdmaClock::TdmaClock(const TdmaConfig &cfg, IClock &clock)

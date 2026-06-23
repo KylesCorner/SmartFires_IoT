@@ -1,3 +1,7 @@
+// ---
+// description: RHReliableDatagram/RH_RF95-based LoRa radio driver implementing ITdmaRadioDriver for the TDMA stack.
+// role: implementation
+// ---
 #pragma once
 
 #include "config/NetworkConfig.h"

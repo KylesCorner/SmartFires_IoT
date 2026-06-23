@@ -1,3 +1,8 @@
+// ---
+// description: Binary wire-format definitions for SmartFires telemetry — packet structs, CRC-8/MAXIM, and the encode/decode functions for every LoRa and UART frame type.
+// role: implementation
+// docs: [bandwidth-scaling, uart-jetson-bridge, software-design]
+// ---
 #pragma once
 
 // Binary wire format for SmartFires telemetry.

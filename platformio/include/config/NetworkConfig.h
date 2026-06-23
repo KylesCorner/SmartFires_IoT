@@ -1,3 +1,8 @@
+// ---
+// description: TDMA slot geometry, LoRa radio link, link-layer ACK, and app-layer reliability constants — the single source of truth for the network domain, including the node TdmaConfig profile builder.
+// role: config
+// docs: [bandwidth-scaling, packet-reliability, tdma-protocol, tunable-parameters]
+// ---
 #pragma once
 
 // Network domain — single source of truth for TDMA slot geometry, the LoRa

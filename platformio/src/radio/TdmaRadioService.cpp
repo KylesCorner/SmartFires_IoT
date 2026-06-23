@@ -1,3 +1,8 @@
+// ---
+// description: Implements TdmaRadioService's TDMA TX draining, retransmit/ACK-summary handling, and time-sync/command RX.
+// role: implementation
+// docs: [bandwidth-scaling, packet-reliability, tdma-protocol]
+// ---
 #include "radio/TdmaRadioService.h"
 
 #include "logging/DebugLogger.h"

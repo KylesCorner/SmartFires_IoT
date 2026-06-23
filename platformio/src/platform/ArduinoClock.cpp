@@ -1,3 +1,7 @@
+// ---
+// description: Arduino millis()-backed implementation of IClock.
+// role: implementation
+// ---
 #include "platform/ArduinoClock.h"
 
 #include <Arduino.h>

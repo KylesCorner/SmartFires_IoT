@@ -1,3 +1,7 @@
+// ---
+// description: Tracks the TDMA session clock and slot timing, deriving whose turn it is to transmit.
+// role: implementation
+// ---
 #pragma once
 
 #include "interfaces/IClock.h"

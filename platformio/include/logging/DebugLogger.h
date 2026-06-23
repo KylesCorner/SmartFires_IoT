@@ -1,3 +1,7 @@
+// ---
+// description: Structured @SFDBG line logger (level/seq/timestamp-tagged) with LOG_TRACE/DEBUG/INFO/WARN/ERROR macros, writing to any Print sink.
+// role: implementation
+// ---
 #pragma once
 
 #include <Arduino.h>

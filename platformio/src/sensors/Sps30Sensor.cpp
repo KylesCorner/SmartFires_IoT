@@ -1,3 +1,7 @@
+// ---
+// description: Implements Sps30Sensor's measurement start/stop lifecycle, PM reading sampling, and SensorSnapshot fill.
+// role: implementation
+// ---
 #include "sensors/Sps30Sensor.h"
 
 #include "logging/DebugLogger.h"

@@ -1,3 +1,7 @@
+// ---
+// description: Common lifecycle/power-state interface every sensor implements, including fillSnapshot() into SensorSnapshot.
+// role: interface
+// ---
 #pragma once
 
 #include "telemetry/SensorSnapshot.h"

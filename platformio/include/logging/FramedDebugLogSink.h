@@ -1,3 +1,8 @@
+// ---
+// description: Print sink that buffers DebugLogger output line-by-line and flushes each line as a PKT_DEBUG_LOG frame over the base-to-Jetson USB UART link.
+// role: implementation
+// docs: [uart-jetson-bridge]
+// ---
 #pragma once
 
 #include "telemetry/BinaryPacket.h"

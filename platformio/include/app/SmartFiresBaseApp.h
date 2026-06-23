@@ -1,3 +1,7 @@
+// ---
+// description: Top-level base-station application class — LoRa RX/TX, node assignment, ACK_SUMMARY tracking, and Jetson UART bridging, gated by the base's own reserved TDMA slot.
+// role: implementation
+// ---
 #pragma once
 
 #include "config/BaseConfig.h"

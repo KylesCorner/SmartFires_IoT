@@ -1,3 +1,7 @@
+// ---
+// description: SparkFun ICM_20948 I2C IMU driver implementing IIcm20948Driver, using the on-chip DMP 9DOF rotation-vector fusion for heading.
+// role: implementation
+// ---
 #pragma once
 
 #include "drivers/IIcm20948Driver.h"
