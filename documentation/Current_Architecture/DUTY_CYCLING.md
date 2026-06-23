@@ -25,46 +25,79 @@ CooldownSleeping ─────────────────────
 Error (fatal sensor failure, if failOnSampleError = true)
 ```
 
+This is the full state machine as implemented, but **it is not what runs
+today** — every current build has `cfg.enabled = false`
+(`SensingConfig::DutyCycle::kThresholdEnabled`), and `DutyCycleController::update()`
+short-circuits to a reduced path while disabled:
+
+- `begin()` always transitions `NotStarted → WarmingUp` unconditionally.
+- While disabled, `IdleSleeping`'s threshold-trigger logic (`updateSleeping()`)
+  is never invoked — the controller instead treats `IdleSleeping`/`NotStarted`
+  the same as `WarmingUp`, running `updateWakingSensors()` and waiting out the
+  real `warmupMs`.
+- Once `ActiveSampling` is reached, the controller **stays there permanently**,
+  sampling every `samplePeriodMs` — `activeSampleMs` is never checked, so it
+  never transitions to `CooldownSleeping` on its own.
+- If `CooldownSleeping` is ever entered (not reachable in practice while
+  disabled), it jumps straight back to `ActiveSampling`, skipping the real
+  `minSleepMs` wait.
+
+Net effect while disabled: one `WarmingUp` delay at boot, then indefinite
+`ActiveSampling` at `samplePeriodMs` — `IdleSleeping` and `CooldownSleeping`
+are never functionally exercised.
+
 ## Configuration
 
-Two preset configurations are defined in `DutyCycleConfig`:
-
-### Duty-cycle mode (production)
-
-Used when `enabled = true`. Sensors are powered down between active windows to
-reduce current draw.
+`DutyCycleConfig` is built by the single factory `DutyCycleConfig::make(...)`
+(`include/power/DutyCycleController.h`) — there is no separate
+`dutyCycleCfgContinuous()` / `dutyCycleCfg()` pair of factories. Two named
+constant sets exist in `SensingConfig::DutyCycle` (`kThreshold*` and
+`kContinuous*`); `main.cpp` currently wires up the **`kThreshold*`** set.
 
 > **Authoritative values:** `platformio/include/config/SensingConfig.h` — `SensingConfig::DutyCycle` namespace.
 > For the full parameter table see [TUNABLE_PARAMETERS.md](TUNABLE_PARAMETERS.md#sensing--duty-cycle).
 
-| Parameter | Default value | Meaning |
+### Current shipped behavior
+
+`kThresholdEnabled` is `false`, so every current build runs with the duty-cycle
+gate **disabled** regardless of which named constant set is wired in — the
+controller never cycles through `IdleSleeping` → `WarmingUp` →
+`ActiveSampling` → `CooldownSleeping`. Sensors are instead serviced
+back-to-back at `samplePeriodMs = 750 ms` (`kThresholdSamplePeriodMs`).
+
+| Parameter | Value (as wired by `main.cpp`) | Meaning |
 |---|---|---|
-| `minSleepMs` | 3 000 ms | Minimum time in `IdleSleeping` before waking |
-| `maxWakeMs` | 1 000 ms | Max additional wake delay (unused in current impl) |
+| `minSleepMs` | 3 000 ms | Minimum time in `IdleSleeping` before waking (unused while disabled) |
+| `maxWakeMs` | 1 000 ms | Max additional wake delay (unused while disabled) |
 | `warmupMs` | 10 000 ms | Time in `WarmingUp` — sensor stabilization delay |
-| `activeSampleMs` | 30 000 ms | Duration of the `ActiveSampling` window |
-| `samplePeriodMs` | 50 000 ms | Target cycle period (wake-to-wake) |
-| `tempDeltaThresholdC` | 1.0 °C | Threshold to trigger early wake from idle |
-| `humidityDeltaThresholdPct` | 5.0 %RH | Threshold to trigger early wake from idle |
+| `activeSampleMs` | 30 000 ms | Duration of the `ActiveSampling` window (unused while disabled) |
+| `samplePeriodMs` | 750 ms | Master loop cadence while disabled — how often sensors are serviced |
+| `tempDeltaThresholdC` | 1.0 °C | Threshold to trigger early wake from idle (unused while disabled) |
+| `humidityDeltaThresholdPct` | 5.0 %RH | Threshold to trigger early wake from idle (unused while disabled) |
 | `failOnSampleError` | false | Whether sensor errors are fatal |
 
-### Continuous mode
+### Continuous constant set (defined, not currently wired up)
 
-Used when `enabled = false`. Sensors run continuously at the fastest practical
-rate. `samplePeriodMs = 2 000 ms` gives approximately 0.5 Hz ground truth, but
-the bundle system accumulates 15 samples before emitting a packet, so the
-effective bundle rate depends on the sample rate fed into `PacketHandler`.
+`SensingConfig::DutyCycle::kContinuous*` is a second named constant set with
+the same `enabled = false` behavior as Threshold, differing in its temp/humidity
+delta thresholds (both `0.0`, vs. Threshold's `1.0`/`5.0`) and `samplePeriodMs`
+(`750 ms`, same value as Threshold today). No current build references it —
+`main.cpp` only constructs `DutyCycleConfig::make(...)` from the `kThreshold*`
+constants.
 
 ## Trigger Sensor
 
-`DutyCycleController` takes an `ITriggerSensor` reference (typically the SHT31
-temperature/humidity sensor). When in `IdleSleeping`, the trigger sensor is
-polled each update tick. If the reading crosses `tempDeltaThresholdC` or
-`humidityDeltaThresholdPct` relative to the baseline established at the end of
-the last `ActiveSampling` window, the controller wakes early.
+`DutyCycleController` takes an `ITriggerSensor` reference (the SHT31
+temperature/humidity sensor, per `main.cpp`). When in `IdleSleeping`, the
+trigger sensor is polled each update tick. If the reading crosses
+`tempDeltaThresholdC` or `humidityDeltaThresholdPct` relative to the baseline
+established at the end of the last `ActiveSampling` window, the controller
+wakes early.
 
 This allows the node to respond to rapid environmental change without burning
-power during quiet conditions.
+power during quiet conditions — **when duty cycling is enabled**. With
+`cfg.enabled = false` (current shipped behavior), `IdleSleeping`'s trigger
+logic is never invoked, so this mechanism is currently dormant.
 
 ## Sample Dispatch
 

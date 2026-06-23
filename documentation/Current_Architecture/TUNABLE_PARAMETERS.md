@@ -15,7 +15,7 @@ automatically.
 | Constant | Value | Meaning |
 |---|---|---|
 | `kNumSlots` | 4 (from `NUM_SLOTS` build flag) | TDMA slots per frame; must match across all node Feathers |
-| `kSlotWidthMs` | 900 ms | Slot duration; fits worst-case 2× TX + ACK round trip + 2× guard |
+| `kSlotWidthMs` | 900 ms | Slot duration; fits worst-case one bundle TX (340 ms) + one link-ACK timeout (250 ms) + 2× guard |
 | `kGuardMs` | 20 ms | Guard time at slot edges; covers ≤50 ppm crystal drift at 22 min max sync interval |
 | `kSyncStaleMs` | 1 320 000 ms (22 min) | Node transmits unconditionally after this long without a TIME_SYNC |
 | `kBaseAddr` | 0x01 | RadioHead address of the base station |
@@ -68,35 +68,42 @@ automatically.
 
 **Source (firmware):** `platformio/include/config/SensingConfig.h` — `SensingConfig::DutyCycle` namespace
 
-Two presets, selectable via `DutyCycleConfig::dutyCycleCfgContinuous()` or `dutyCycleCfg()`.
+Two named constant sets exist in `SensingConfig::DutyCycle`. There are no
+`dutyCycleCfgContinuous()` / `dutyCycleCfg()` factory functions — the only
+runtime factory is `DutyCycleConfig::make(...)` (`include/power/DutyCycleController.h`),
+and `main.cpp` currently wires it up using the **`kThreshold*`** constant set,
+not `kContinuous*`. Since `kThresholdEnabled` is `false`, `DutyCycleController`
+runs with duty cycling disabled regardless — sensors are serviced back-to-back
+every `samplePeriodMs` rather than cycling through `IdleSleeping` /
+`WarmingUp` / `ActiveSampling` / `CooldownSleeping`.
 
-### Continuous (currently shipped)
+### Threshold constant set (what `main.cpp` actually wires up)
 
 | Constant | Value | Meaning |
 |---|---|---|
-| `kContinuousEnabled` | false | `enabled=false` → always-on; duty cycle gate is skipped |
+| `kThresholdEnabled` | false | Duty-cycle gate is disabled — sensors run back-to-back at `samplePeriodMs` |
+| `kThresholdMinSleepMs` | 3 000 ms | Minimum idle sleep before wake (unused while disabled) |
+| `kThresholdMaxWakeMs` | 1 000 ms | Max additional wake delay (unused while disabled) |
+| `kThresholdActiveSampleMs` | 30 000 ms | Duration of the `ActiveSampling` window (unused while disabled) |
+| `kThresholdSamplePeriodMs` | 750 ms | Master loop cadence — how often the sensor-service tick fires (carries a `//TEMP` marker in source, not yet retuned) |
+| `kThresholdWarmupMs` | 10 000 ms | Sensor stabilization delay after wake |
+| `kThresholdTempDeltaThresholdC` | 1.0 °C | Temperature delta to trigger early wake (unused while disabled) |
+| `kThresholdHumidityDeltaThresholdPct` | 5.0 %RH | Humidity delta to trigger early wake (unused while disabled) |
+| `kThresholdFailOnSampleError` | false | Sensor errors do not halt the node |
+
+### Continuous constant set (defined, but not wired up by any current build)
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `kContinuousEnabled` | false | Same effective behavior as Threshold — duty cycle gate skipped |
 | `kContinuousMinSleepMs` | 0 ms | Not used in continuous mode |
 | `kContinuousMaxWakeMs` | 0 ms | Not used in continuous mode |
 | `kContinuousActiveSampleMs` | 0 ms | Not used in continuous mode |
-| `kContinuousSamplePeriodMs` | 2 000 ms | Master loop cadence — how often the sensor-service tick fires |
+| `kContinuousSamplePeriodMs` | 750 ms | Master loop cadence — how often the sensor-service tick fires |
 | `kContinuousWarmupMs` | 10 000 ms | One-time warmup delay at boot before first sample |
 | `kContinuousTempDeltaThresholdC` | 0.0 °C | Not used in continuous mode |
 | `kContinuousHumidityDeltaThresholdPct` | 0.0 %RH | Not used in continuous mode |
 | `kContinuousFailOnSampleError` | false | Sensor errors do not halt the node |
-
-### ThresholdTriggered (alternate preset, not currently deployed)
-
-| Constant | Value | Meaning |
-|---|---|---|
-| `kThresholdEnabled` | true | Trigger-based duty cycle on |
-| `kThresholdMinSleepMs` | 3 000 ms | Minimum idle sleep before wake |
-| `kThresholdMaxWakeMs` | 1 000 ms | Max additional wake delay |
-| `kThresholdActiveSampleMs` | 30 000 ms | Duration of the `ActiveSampling` window |
-| `kThresholdSamplePeriodMs` | 50 000 ms | Target wake-to-wake cycle period |
-| `kThresholdWarmupMs` | 10 000 ms | Sensor stabilization delay after wake |
-| `kThresholdTempDeltaThresholdC` | 1.0 °C | Temperature delta to trigger early wake |
-| `kThresholdHumidityDeltaThresholdPct` | 5.0 %RH | Humidity delta to trigger early wake |
-| `kThresholdFailOnSampleError` | false | Sensor errors do not halt the node |
 
 ---
 
@@ -115,9 +122,12 @@ Namespace `SensingConfig::Sht31`
 
 | Constant | Value | Meaning |
 |---|---|---|
-| `kAddress` | 0x45 | I²C address |
 | `kMinSamplePeriodMs` | 100 ms | Minimum interval between samples |
 | `kDutyClass` | `AlwaysOn` | Always powered — used as the trigger sensor for ThresholdTriggered duty cycle |
+
+I²C address (0x45) is not a `SensingConfig.h` constant — it is a default
+constructor parameter on `Sht31Sensor` (`include/sensors/Sht31Sensor.h`),
+forwarded to `AdafruitSht31Driver::begin()`.
 
 ### Wind — RevC Hot-Wire Anemometer
 
@@ -147,26 +157,33 @@ Namespace `SensingConfig::Imu`
 
 | Constant | Value | Meaning |
 |---|---|---|
-| `kAddress` | 1 | `ad0Val` passed to `IIcm20948Driver::begin()` — value 1 means AD0 pin high, giving I²C address 0x69 |
 | `kMinSamplePeriodMs` | 10 ms | DMP output rate |
 | `kWakeDelayMs` | 0 ms | No additional settling beyond driver init |
 | `kDutyClass` | `DutyCycled` | Follows duty-cycle controller |
 
+`ad0Val` (AD0 pin state passed to `IIcm20948Driver::begin()`, selecting the
+0x69 I²C address) is not a `SensingConfig.h` constant — it is supplied at the
+`begin()` call site, not centralized here.
+
 ### PA1010D GPS
 
-Namespace `SensingConfig::Gps` — five factory variants, each with its own constants.
+Namespace `SensingConfig::Gps` — three independently-tuned timing groups (Continuous,
+Periodic Standby/Backup, AlwaysLocate Standby/Backup).
 
 | Constant | Value | Mode(s) | Meaning |
 |---|---|---|---|
-| `kAddress` | 0x10 | all | I²C address |
 | `kContinuousMinSamplePeriodMs` | 100 ms | Continuous | Sample floor for full-power continuous mode |
 | `kContinuousWakeDelayMs` | 0 ms | Continuous | No delay |
-| `kPeriodicRunTimeMs` | 4 000 ms | Periodic Standby/Backup | Active GPS window per cycle |
-| `kPeriodicSleepTimeMs` | 15 000 ms | Periodic Standby/Backup | First sleep window |
+| `kPeriodicRunTimeMs` | 24 000 ms | Periodic Standby/Backup | Active GPS window per cycle |
+| `kPeriodicSleepTimeMs` | 90 000 ms | Periodic Standby/Backup | First sleep window |
 | `kPeriodicSecondRunTimeMs` | 24 000 ms | Periodic Standby/Backup | Second active window per cycle |
 | `kPeriodicSecondSleepTimeMs` | 90 000 ms | Periodic Standby/Backup | Second sleep window |
 | `kPeriodicMinSamplePeriodMs` | 1 000 ms | Periodic Standby/Backup | Sample floor while active |
 | `kAlwaysLocateMinSamplePeriodMs` | 1 000 ms | AlwaysLocate Standby/Backup | Sample floor |
+
+I²C address (0x10) is not a `SensingConfig.h` constant — it is a default
+constructor parameter on `Pa1010dGpsSensor` (`include/sensors/Pa1010dGpsSensor.h`),
+forwarded to `AdafruitGpsDriver::begin()`.
 
 ---
 

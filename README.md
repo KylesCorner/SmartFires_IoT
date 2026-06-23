@@ -2,7 +2,7 @@
 
 SmartFires IoT is a wildfire telemetry system built around Feather M0 LoRa sensor nodes, a Feather M0 base station, and a Jetson Orin Nano edge receiver.
 
-The embedded firmware is structured around a finalized class-based architecture. Sensor wiring is still being completed for a few devices, but the major application, telemetry, radio, and ingest boundaries are in place.
+The embedded firmware is structured around a finalized class-based architecture. All node sensors (SHT31, wind, GPS, SPS30, ICM-20948 IMU) are wired end-to-end via `fillSnapshot()`, and the application, telemetry, radio, and ingest boundaries are in place.
 
 ## Architecture Summary
 
@@ -23,11 +23,12 @@ CLAUDE.md        Maintained project context and architecture summary
 
 ## Core Docs
 
+- `documentation/README.md` is the full documentation index — start here
 - `documentation/SOFTWARE_DESIGN.md` describes the current software architecture
 - `documentation/SOFTWARE_DESIGN_DIAGRAM.md` provides Mermaid diagrams for topology and control flow
-- `documentation/BINARY_PACKET_PIPELINE.md` describes the wire protocol and packet pipeline
-- `documentation/BANDWIDTH_SCALING.md` contains sizing and scaling notes
-- `documentation/FLASHING.md` contains device flashing instructions
+- `documentation/Completed_Plans/BINARY_PACKET_PIPELINE.md` describes the wire protocol and packet pipeline
+- `documentation/Current_Architecture/BANDWIDTH_SCALING.md` contains sizing and scaling notes
+- `documentation/User_Reference/FLASHING.md` contains device flashing instructions
 
 ## Build and Test
 
@@ -35,7 +36,7 @@ Run embedded commands from `platformio/`.
 
 ```bash
 pio run -e feather_m0_lora_node --target upload
-pio run -e feather_m0_lora --target upload
+pio run -e feather_m0_lora_base --target upload
 pio device monitor -e feather_m0_lora_node
 pio test -e native
 ```
@@ -47,13 +48,17 @@ What is in place:
 - class-based node and base station application structure
 - binary packet definitions and bundle encoding
 - TDMA timing, queueing, and radio driver abstraction
+- all node sensors (SHT31, wind, GPS, SPS30, ICM-20948 IMU) wired via `fillSnapshot()`
+- CMD_CALIBRATE / CMD_RESET / CMD_ACK protocol round-trip (node ↔ base ↔ Jetson)
 - Jetson-side UART ingest and packet decode
 - native unit-test layout for firmware logic
 
 What is still being finished:
 
-- wiring additional sensors into the finalized node composition in `platformio/src/main.cpp`
-- validating end-to-end hardware behavior as more sensors are enabled
+- node-side handling of CMD_RESET currently logs + ACKs but does not yet trigger an
+  actual board reset (`reset_type` is decoded but unused) — see
+  `documentation/Pending_Plans/RESET_SYSTEM.md`
+- validating end-to-end hardware behavior under continued field deployment
 
 ## Development Notes
 

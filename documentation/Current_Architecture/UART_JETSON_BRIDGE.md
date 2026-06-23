@@ -17,9 +17,14 @@ format below is unchanged by that migration — it's transport-agnostic.
 | Feather M0 base | `Serial` (native USB) | 115 200 | Same USB cable used to flash the board |
 | Jetson Orin Nano | udev symlink, e.g. `/dev/smartfires-base` | 115 200 | See "Disambiguating base vs. sniffer" below |
 
-The Feather's old `Serial1` UART pins are no longer wired to the Jetson. They
-currently carry a stopgap debug-log tap (see DEBUG_FILTER.md) until that's
-multiplexed onto this same USB link as `PKT_DEBUG_LOG` frames.
+The Feather's old `Serial1` UART pins are no longer wired to the Jetson and
+carry no debug traffic on the base build — `Serial1` is unused there (it's
+only used on the node build, for the SPS30 driver). Debug logs are already
+multiplexed onto the same USB link as `PKT_DEBUG_LOG` frames: `main.cpp`
+constructs a `FramedDebugLogSink` wrapping `Serial`, and all `LOG_INFO` /
+`LOG_WARN` / etc. calls route through it, so debug text and the binary
+Jetson protocol share one USB stream, distinguished by `PKT_DEBUG_LOG`
+framing.
 
 ### Disambiguating base vs. sniffer
 
@@ -83,11 +88,14 @@ This frame format is kept here for protocol reference only. Standard-packet
 app reliability is now base-managed, so `SmartFiresBaseApp` rejects Jetson
 `ACK_SUMMARY` frames during normal operation.
 
-### Jetson → Feather: command frames (CMD_CALIBRATE / CMD_RESET)
+### Jetson → Feather: command frames (CMD_CALIBRATE / CMD_RESET, 11 bytes total)
 
 ```
-[0xAA][0x55][len=11][command payload: 11 bytes][crc8]
+[0xAA][0x55][len=7][command payload: 7 bytes][crc8]
 ```
+
+The 7-byte payload is `PktHeader (4 bytes) + CmdCalibratePayload/CmdResetPayload (2 bytes)
++ crc8 (1 byte)`. Total frame size (2 magic + 1 len + 7 data + 1 crc8) is 11 bytes.
 
 ## Jetson-side Frame Parser (uart_receiver.py)
 
@@ -150,9 +158,22 @@ decode telemetry beyond what is needed for routing:
 
 1. Receives LoRa packets from nodes via `recvfromAck()` (auto-ACKs at the link layer).
 2. Assigns `node_id` from `uid_hash` on the first `AWAKEN` (`findOrCreateNodeAssignment`).
-3. Wraps the LoRa payload with RSSI into a base UART frame and writes it to `Serial1`.
-4. Reads incoming Jetson UART frames and routes `TIME_SYNC` to LoRa broadcast and `CMD_CALIBRATE` / `CMD_RESET` to targeted LoRa sends.
-5. Logs periodic health counters (received count, UART TX count) to the debug UART.
+3. Wraps the LoRa payload with RSSI into a base UART frame and writes it over USB (`Serial`).
+4. Reads incoming Jetson UART frames. A `TIME_SYNC` frame from the Jetson is **not**
+   directly forwarded to LoRa — it's cached (`updateJetsonTimeSource()`), and the base's
+   own `maybeSendPeriodicTimeSync()` later broadcasts a LoRa `TIME_SYNC` derived from that
+   cached value, on its own cadence (`BaseConfig::kPeriodicTimeSyncMs`, separately from
+   whenever the Jetson frame arrived). `CMD_CALIBRATE` / `CMD_RESET` frames are queued
+   (`enqueuePendingCommand()`) and later flushed via a targeted, blocking
+   `_radio.sendToWait(..., targetNodeId)` to the specific node — not a broadcast.
+5. Rejects `ACK_SUMMARY` frames received from the Jetson (`uart_cmd_reject` /
+   `uart_cmd_dropped` warnings logged, frame discarded, no LoRa action taken) — see
+   "ACK Ownership" below.
+6. Logs periodic health counters every `kHealthLogPeriodMs` (5 000 ms) — three
+   `LOG_INFO` lines (link/TX counters, RX-by-type counters, ACK-tracking state) —
+   to the same USB stream used for the Jetson binary protocol, framed separately
+   via `PKT_DEBUG_LOG`/`@SFDBG` (`FramedDebugLogSink`) so the two don't collide
+   on the wire.
 
 The base station has no knowledge of bundle contents or sensor fields, but it
 does own app-layer reliability tracking and `ACK_SUMMARY` emission for

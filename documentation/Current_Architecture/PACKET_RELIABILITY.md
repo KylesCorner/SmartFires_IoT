@@ -67,6 +67,34 @@ re-sends the oldest unacknowledged entry from this window.
 Fresh queue entries always take priority over retransmits. Retransmits only
 fill slots when the TX queue is empty.
 
+#### ACK-Paced Retry Gate
+
+Before a pending entry becomes eligible for retransmission, `TdmaRadioService`
+computes a retry-wait duration and requires that much time to have elapsed
+since the entry was last sent:
+
+```
+retryWaitMs = clamp(expectedAckIntervalMs * retryWaitMultiplierPermille / 1000,
+                     retryWaitMinMs, retryWaitMaxMs)
+```
+
+| Parameter | Value | Notes |
+|---|---|---|
+| `expectedAckIntervalMs` | 4 000 ms | Expected cadence of base-side `ACK_SUMMARY` packets |
+| `retryWaitMultiplierPermille` | 2000 (2.0×) | Back-off multiplier applied to the expected interval |
+| `retryWaitMinMs` | 4 500 ms | Floor: one interval + 500 ms jitter margin |
+| `retryWaitMaxMs` | 10 000 ms | Ceiling: 2.5 intervals |
+
+At current values, `retryWaitMs` evaluates to `4000 × 2.0 = 8000`, clamped into
+`[4500, 10000]` → **8 000 ms**. An entry younger than this is skipped by
+`pickRetransmitCandidate()` regardless of queue idleness.
+
+`requireAckSummaryBeforeFirstRetry` (currently `false`) optionally gates a
+pending entry's *first* retransmit attempt on having observed at least one
+`ACK_SUMMARY` since the entry was sent, with a fallback: once the entry's age
+reaches `retryWaitMaxMs`, the gate is bypassed so the entry is not stuck
+forever if no `ACK_SUMMARY` ever arrives.
+
 The pending window uses **sequence-number matching** to avoid keeping duplicate
 entries. If the same seq arrives again (e.g., re-enqueued after a slot defer),
 the entry is refreshed in place.

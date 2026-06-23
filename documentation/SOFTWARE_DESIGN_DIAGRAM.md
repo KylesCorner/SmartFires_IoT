@@ -50,11 +50,15 @@ flowchart LR
         Csv[CSV logging]
         Sync[TIME_SYNC generation]
         Anemometer[Optional anemometer polling]
+        Web[web/app.py FastAPI dashboard\nmap, telemetry charts, command POST]
+        Sniffer[sniffer_service.py\noptional passive sniffer Feather]
 
         Ingest --> Decode
         Decode --> Csv
         Sync --> Ingest
         Anemometer --> Csv
+        Ingest --> Web
+        Sniffer --> Web
     end
 
     DriverNode --> LoRa
@@ -101,9 +105,13 @@ flowchart TD
     Parse --> Route{packet type}
     Route -- TIME_SYNC --> Broadcast[broadcast TIME_SYNC over LoRa]
     Route -- ACK_SUMMARY --> Targeted[target send to node]
+    Route -- CMD_CALIBRATE / CMD_RESET --> Cmd[target send command to node]
+    Route -- CMD_ACK from node --> RelayAck[relay ACK to Jetson over UART]
     Route -- other --> Ignore[ignore]
     Broadcast --> Health[maybeLogHealth]
     Targeted --> Health
+    Cmd --> Health
+    RelayAck --> Health
     Ignore --> Health
 ```
 

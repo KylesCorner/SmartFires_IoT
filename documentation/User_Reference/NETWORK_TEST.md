@@ -3,11 +3,21 @@
 End-to-end pipeline verification using synthetic sensor data. Tests the full
 LoRa → base → Jetson path without any real sensors wired to the node Feather.
 
+> **Status note:** The `feather_m0_lora_node_dummy` environment referenced below
+> is no longer present in `platformio/platformio.ini` (current environments are
+> `native`, `feather_m0_lora_base`, `feather_m0_lora_node`,
+> `feather_m0_lora_node_debug`, `feather_m0_sensor_probe`, and
+> `feather_m0_lora_sniffer`). Until a synthetic-data env is reintroduced, use
+> `feather_m0_lora_node_debug` with real sensors attached for this procedure —
+> the AWAKEN/TIME_SYNC/BUNDLE behavior described below still applies, but the
+> sensor values will be real readings rather than the dummy triangle-wave /
+> fixed values.
+
 ---
 
 ## Overview
 
-The `feather_m0_lora_node_dummy` firmware environment substitutes two stub
+The (currently removed) `feather_m0_lora_node_dummy` firmware environment substituted two stub
 sensor objects for all real hardware:
 
 | Stub | Replaces | What it provides |
@@ -25,7 +35,7 @@ binary packet encoding, same AWAKEN handshake, same STATUS + BUNDLE sequence.
 | Component | Quantity | Notes |
 |---|---|---|
 | Adafruit Feather M0 RFM95 | 1 | Node — runs `feather_m0_lora_node_dummy` |
-| Adafruit Feather M0 RFM95 | 1 | Base station — runs `feather_m0_lora` |
+| Adafruit Feather M0 RFM95 | 1 | Base station — runs `feather_m0_lora_base` |
 | Jetson Orin Nano | 1 | Runs `smartfires-edge receive`; sends TIME_SYNC to base |
 | USB cable (data-capable) | 2 | One per Feather — the base's cable also carries the Jetson link |
 
@@ -45,7 +55,7 @@ All `pio` commands run from `platformio/`. Use `~/.platformio/penv/bin/pio` if
 ### 1 — Flash the base station
 
 ```bash
-pio run -e feather_m0_lora --target upload
+pio run -e feather_m0_lora_base --target upload
 ```
 
 ### 2 — Flash the dummy node
@@ -73,7 +83,7 @@ Open two terminals (one per Feather):
 
 ```bash
 # Base station
-pio device monitor -e feather_m0_lora
+pio device monitor -e feather_m0_lora_base
 
 # Dummy node (separate terminal)
 pio device monitor -e feather_m0_lora_node_dummy

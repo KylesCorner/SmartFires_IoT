@@ -6,20 +6,31 @@ This document summarizes sensing, bundle production, TDMA service capacity, and 
 
 - Sample rate: `4 Hz`
 - Bundle composition: `1 reference + 14 deltas = 15 samples`
-- Bundle payload (`PKT_BUNDLE`): `193 bytes` max
+- Bundle payload (`PKT_BUNDLE`): `194 bytes` max (`BinaryPacket::kMaxBundleLoRaSize` — `PktHeader(4) + FullStatePayload(20) + n_deltas(1) + 14×DeltaPayload(12) + crc8(1)`)
 - TDMA slot width: `900 ms`
 - TDMA guard: `20 ms` on each edge
 - Usable slot window: `860 ms`
-- Multi-send budget in node radio service: up to `2 bundle-class sends/slot` (conservative `340 ms` budget each)
+- Multi-send budget in node radio service: up to `3 sends/slot` (`kMaxSendsPerUpdate` in `TdmaRadioService::drainTxQueue()` — a hard iteration cap applied uniformly to fresh queue items and retransmits, not specific to `PKT_BUNDLE`; layered on top of, not a substitute for, the per-send time-budget check, conservative `340 ms` budget each for bundle-class payloads)
 - ACK summary payload (`PKT_ACK_SUMMARY`): `9 bytes` on LoRa (`PktHeader + AckSummaryPayload + crc8`)
-- ACK summary cadence (edge default): `1 summary per node every 4 seconds` (`0.25 Hz`)
+- ACK summary cadence (modeling assumption, not a configured base-side rate):
+  `1 summary per node every 4 seconds` (`0.25 Hz`). The base does **not** emit
+  `ACK_SUMMARY` on a fixed timer — actual emission is dirty-flag-driven (a
+  summary becomes eligible whenever a node's tracker changes), gated only by
+  a 25 ms anti-flood floor (`BaseConfig::kAckSummaryMinIntervalMs`) and the
+  base's own TDMA slot-window availability, so real cadence can be faster or
+  slower than 4 s depending on traffic. The 4 s figure used in this model is
+  borrowed from `NetworkConfig::kExpectedAckIntervalMs` — the **node-side**
+  assumed cadence used in its own retry-wait-gate formula (see
+  PACKET_RELIABILITY.md), not an edge/Jetson setting (the Jetson never
+  generates `ACK_SUMMARY` at all) and not a literal base emission interval.
 
 ## Airtime Model
 
-Using SF7/BW125/CR 4/5 with RadioHead 4-byte over-the-air header:
+Using SF7/BW125/CR 4/5 with RadioHead's 4-byte over-the-air header added on top
+of each LoRa payload:
 
-- Bundle airtime (193-byte payload): `312.576 ms`
-- ACK summary airtime (9-byte payload): `41.216 ms` (approximate; 1-byte delta from previous estimate)
+- Bundle airtime (194-byte LoRa payload + 4-byte RadioHead header = 198 bytes on air): `317.696 ms`
+- ACK summary airtime (9-byte LoRa payload + 4-byte RadioHead header = 13 bytes on air): `46.336 ms`
 
 ## Core Formulas
 
@@ -29,7 +40,7 @@ Let:
 - $S_b$ = samples per bundle
 - $N$ = number of nodes
 - $W$ = slot width (s)
-- $k$ = sends per slot (old: $k=1$, new multi-send: $k=2$)
+- $k$ = sends per slot (old: $k=1$, current multi-send cap: $k=3$, i.e. `kMaxSendsPerUpdate`)
 
 Bundle production per node:
 
@@ -52,7 +63,7 @@ $$
 For $W=0.9$ s:
 
 $$
-r_{svc,old} = \frac{1}{0.9N},\quad r_{svc,new} = \frac{2}{0.9N}
+r_{svc,old} = \frac{1}{0.9N},\quad r_{svc,new} = \frac{3}{0.9N}
 $$
 
 Utilization ratio (stable if $\eta \le 1$):
@@ -81,28 +92,28 @@ $$
 \text{total\_occ} = \text{uplink\_occ} + \text{ack\_occ}
 $$
 
-with $f_{ack}=0.25$ Hz/node, $T_{bundle}=312.576$ ms, $T_{ack}=41.216$ ms.
+with $f_{ack}=0.25$ Hz/node (modeling assumption — see note above), $T_{bundle}=317.696$ ms, $T_{ack}=46.336$ ms.
 
 ## Node Scaling Table (2–10 nodes)
 
-| Nodes | Frame (s) | Service old (1/slot) bundles/s | Service new (2/slot) bundles/s | Util old $\eta$ | Util new $\eta$ | Loss old | Loss new | Uplink occ @ offered load | ACK occ @0.25Hz | Total occ @0.25Hz |
+| Nodes | Frame (s) | Service old (1/slot) bundles/s | Service new (3/slot) bundles/s | Util old $\eta$ | Util new $\eta$ | Loss old | Loss new | Uplink occ @ offered load | ACK occ @0.25Hz | Total occ @0.25Hz |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 2 | 1.8 | 0.5556 | 1.1111 | 0.48 | 0.24 | 0.0% | 0.0% | 16.7% | 2.1% | 18.8% |
-| 3 | 2.7 | 0.3704 | 0.7407 | 0.72 | 0.36 | 0.0% | 0.0% | 25.0% | 3.1% | 28.1% |
-| 4 | 3.6 | 0.2778 | 0.5556 | 0.96 | 0.48 | 0.0% | 0.0% | 33.3% | 4.1% | 37.4% |
-| 5 | 4.5 | 0.2222 | 0.4444 | 1.20 | 0.60 | 16.7% | 0.0% | 41.7% | 5.2% | 46.9% |
-| 6 | 5.4 | 0.1852 | 0.3704 | 1.44 | 0.72 | 30.6% | 0.0% | 50.0% | 6.2% | 56.2% |
-| 7 | 6.3 | 0.1587 | 0.3175 | 1.68 | 0.84 | 40.5% | 0.0% | 58.3% | 7.2% | 65.5% |
-| 8 | 7.2 | 0.1389 | 0.2778 | 1.92 | 0.96 | 47.9% | 0.0% | 66.7% | 8.2% | 74.9% |
-| 9 | 8.1 | 0.1235 | 0.2469 | 2.16 | 1.08 | 53.7% | 7.4% | 75.0% | 9.3% | 84.3% |
-| 10 | 9.0 | 0.1111 | 0.2222 | 2.40 | 1.20 | 58.3% | 16.7% | 83.4% | 10.3% | 93.7% |
+| 2 | 1.8 | 0.5556 | 1.6667 | 0.48 | 0.16 | 0.0% | 0.0% | 16.9% | 2.3% | 19.3% |
+| 3 | 2.7 | 0.3704 | 1.1111 | 0.72 | 0.24 | 0.0% | 0.0% | 25.4% | 3.5% | 28.9% |
+| 4 | 3.6 | 0.2778 | 0.8333 | 0.96 | 0.32 | 0.0% | 0.0% | 33.9% | 4.6% | 38.5% |
+| 5 | 4.5 | 0.2222 | 0.6667 | 1.20 | 0.40 | 16.7% | 0.0% | 42.4% | 5.8% | 48.2% |
+| 6 | 5.4 | 0.1852 | 0.5556 | 1.44 | 0.48 | 30.6% | 0.0% | 50.8% | 7.0% | 57.8% |
+| 7 | 6.3 | 0.1587 | 0.4762 | 1.68 | 0.56 | 40.5% | 0.0% | 59.3% | 8.1% | 67.4% |
+| 8 | 7.2 | 0.1389 | 0.4167 | 1.92 | 0.64 | 47.9% | 0.0% | 67.8% | 9.3% | 77.0% |
+| 9 | 8.1 | 0.1235 | 0.3704 | 2.16 | 0.72 | 53.7% | 0.0% | 76.2% | 10.4% | 86.7% |
+| 10 | 9.0 | 0.1111 | 0.3333 | 2.40 | 0.80 | 58.3% | 0.0% | 84.7% | 11.6% | 96.3% |
 
 ## Interpretation
 
-- The multi-send TDMA change ($k=2$) roughly doubles per-node service capacity.
-- At current settings, 4 nodes at 4 Hz are comfortably stable.
-- With $k=2$, 8 nodes are still mathematically stable in queue terms ($\eta=0.96$), but channel occupancy is near saturation once ACK summaries are included.
-- At 9–10 nodes, both occupancy and queue stability become problematic even with multi-send.
+- The multi-send TDMA change ($k=3$, `kMaxSendsPerUpdate`) roughly triples per-node service capacity over the old $k=1$ baseline.
+- At current settings, 4 nodes at 4 Hz are comfortably stable ($\eta=0.32$).
+- With $k=3$, queue utilization $\eta$ stays well under 1 (≤0.80) all the way to 10 nodes — queue overflow is not the binding constraint in this range.
+- Channel occupancy, not queue stability, becomes the binding constraint at higher node counts: total offered occupancy crosses ~77% at 8 nodes and approaches ~96% at 10 nodes, leaving little margin for retransmits, AWAKEN/TIME_SYNC traffic, or clock drift before real-world loss appears.
 
 ## Practical Notes
 

@@ -26,7 +26,8 @@ Practical how-to guides for day-to-day development and deployment.
 |---|---|
 | [FLASHING.md](User_Reference/FLASHING.md) | PlatformIO CLI commands to flash node and base firmware |
 | [DEBUG_FILTER.md](User_Reference/DEBUG_FILTER.md) | Debug build structured logging and PlatformIO monitor filter |
-| [JETSON_CHEATSHEET.md](User_Reference/JETSON_CHEATSHEET.md) | Jetson one-time setup, UART enable, edge-receiver install and run |
+| [JETSON_CHEATSHEET.md](User_Reference/JETSON_CHEATSHEET.md) | Jetson one-time setup, udev rules, edge-receiver install and run |
+| [NETWORK_TEST.md](User_Reference/NETWORK_TEST.md) | End-to-end LoRa → base → Jetson integration test procedure |
 
 ## Pending Plans
 

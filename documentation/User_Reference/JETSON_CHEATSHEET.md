@@ -1,11 +1,36 @@
-install tool
+# SmartFires — Jetson Cheatsheet
 
+## Install the edge-receiver package
+
+From the repo root on the Jetson:
+
+```bash
 python3 -m pip install --use-pep517 -e .
+```
 
+or equivalently, from anywhere:
+
+```bash
 pip install -e edge/edge-receiver
+```
 
+This installs the `smartfires-edge` console script (defined in
+`edge/edge-receiver/pyproject.toml`'s `[project.scripts]`), exposing the
+`receive`, `summary`, `visualize`, and `web` subcommands used below.
+
+## Pull data off the Jetson
+
+```bash
 rsync -avz --progress smartfires@10.8.184.94:/mnt/nvme_drive/data/ ./data/
+```
+
+(See also `util/rsync_from_jetson.sh` for a saved variant of this command.)
+
+## Bring up wired Ethernet (if DHCP didn't apply automatically)
+
+```bash
 sudo nmcli connection up wired-dhcp
+```
 
 ## Web dashboard
 
