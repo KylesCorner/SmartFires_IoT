@@ -1,9 +1,13 @@
-// TDMA sniffer timeline: swim-lane canvas + stats table + packet log.
+// TDMA sniffer timeline: swim-lane canvas + stats table + packet detail.
 //
 // Slot boundaries are derived purely from the most recently anchored event's
 // (wall-clock-ms, session_ms) pair plus the fixed 900ms slot width — see
 // sniffer_service.py for why that's sufficient (every slot boundary repeats
 // every slot_width_ms, so num_slots isn't needed client-side for the grid).
+//
+// The full packet log (including sniffer activity) lives on the main
+// dashboard's Live Log panel now, filterable via the "Sniffer" tab — see
+// main_page.js. This page only keeps the canvas-click detail panel.
 
 const WINDOW_MS = 60_000;
 const SLOT_WIDTH_MS = 900;
@@ -11,7 +15,11 @@ const GUARD_MS = 20;
 const LANE_HEIGHT = 36;
 const HEADER_HEIGHT = 24;
 const SLOT_LABEL_HEIGHT = 20;
-const LOG_MAX_LINES = 1000;
+// Dedicated row, always shown directly above the Base Station lane, for
+// bare RadioHead frames (RH_ACK/RH_RAW) that have no SmartFires node_id —
+// keeps them from overlapping or interleaving with real per-node traffic.
+const RH_LANE_HEIGHT = LANE_HEIGHT;
+const RH_LANE_LABEL = "RadioHead / Unknown";
 
 const PKT_COLORS = {
   BUNDLE: "#3b82c4",
@@ -41,8 +49,6 @@ const sniffer = {
   numSlots: null,
   ws: null,
   notConfigured: false,
-  logLines: 0,
-  logElems: [],          // log line elements, parallel to ring-buffer eviction
   idCounter: 0,
   selectedId: null,
   hitRects: [],          // canvas marker bounding boxes for click hit-testing
@@ -66,7 +72,9 @@ function laneIndexFor(nodeId) {
 }
 
 function canvasHeight() {
-  return HEADER_HEIGHT + Math.max(1, sniffer.laneOrder.length) * LANE_HEIGHT + SLOT_LABEL_HEIGHT;
+  return (
+    HEADER_HEIGHT + RH_LANE_HEIGHT + Math.max(1, sniffer.laneOrder.length) * LANE_HEIGHT + SLOT_LABEL_HEIGHT
+  );
 }
 
 function renderLegend() {
@@ -142,11 +150,17 @@ function draw() {
     ctx.setLineDash([]);
   }
 
-  // Lane labels + separators.
+  // RH/Unknown dedicated lane — always shown, directly under the header and
+  // above every node lane, so radio-level noise never overlaps real traffic.
+  const lanesTop = HEADER_HEIGHT + RH_LANE_HEIGHT;
   ctx.fillStyle = "#aab4c0";
   ctx.font = "11px sans-serif";
+  ctx.fillText(RH_LANE_LABEL, 4, HEADER_HEIGHT + 14);
+
+  // Lane labels + separators (including the line separating the RH lane
+  // from the first real lane, drawn at idx=0's top edge == lanesTop).
   sniffer.laneOrder.forEach((nodeId, idx) => {
-    const y = HEADER_HEIGHT + idx * LANE_HEIGHT;
+    const y = lanesTop + idx * LANE_HEIGHT;
     ctx.fillText(laneLabel(nodeId), 4, y + 14);
     ctx.strokeStyle = "#2a2f36";
     ctx.beginPath();
@@ -176,8 +190,13 @@ function draw() {
       continue;
     }
 
-    const laneIdx = ev.node_id != null ? laneIndexFor(ev.node_id) : null;
-    const y = laneIdx != null ? HEADER_HEIGHT + laneIdx * LANE_HEIGHT + LANE_HEIGHT / 2 - 8 : HEADER_HEIGHT;
+    let y;
+    if (ev.pkt_type === "RH_ACK" || ev.pkt_type === "RH_RAW") {
+      y = HEADER_HEIGHT + RH_LANE_HEIGHT / 2 - 8;
+    } else {
+      const laneIdx = ev.node_id != null ? laneIndexFor(ev.node_id) : null;
+      y = laneIdx != null ? lanesTop + laneIdx * LANE_HEIGHT + LANE_HEIGHT / 2 - 8 : HEADER_HEIGHT;
+    }
     ctx.fillStyle = color;
     if (ev.guard_violation) {
       ctx.strokeStyle = "#ffffff";
@@ -244,36 +263,6 @@ function onSnifferEvent(ev) {
   if (ev.num_slots) {
     sniffer.numSlots = ev.num_slots;
   }
-
-  appendSnifferLog(ev);
-}
-
-function appendSnifferLog(ev) {
-  const el = document.getElementById("sniffer-log-output");
-  const time = new Date(ev._wallMs).toISOString().slice(11, 23);
-  const jitter = ev.jitter_ms != null ? `${ev.jitter_ms > 0 ? "+" : ""}${ev.jitter_ms}ms` : "—";
-  const target = ev.target_node_id != null ? ` target=${ev.target_node_id}` : "";
-  const rhFlag = ev.rh_is_ack ? " RH-ACK" : ev.rh_is_retry ? " RH-RETRY" : "";
-  const line = `${time}  ${ev.pkt_type.padEnd(10)} node=${ev.node_id ?? "—"}${target} rssi=${ev.rssi ?? "—"} snr=${ev.snr ?? "—"} jitter=${jitter}${rhFlag}${ev.guard_violation ? "  GUARD-VIOLATION" : ""}`;
-
-  const lineEl = document.createElement("div");
-  lineEl.className = "sniffer-log-line";
-  lineEl.textContent = line;
-  lineEl.dataset.id = String(ev._id);
-  lineEl.addEventListener("click", () => selectEvent(ev));
-
-  sniffer.logLines += 1;
-  sniffer.logElems.push(lineEl);
-  const atBottom = el.scrollHeight - el.scrollTop <= el.clientHeight + 4;
-  el.appendChild(lineEl);
-  if (sniffer.logLines > LOG_MAX_LINES) {
-    const oldest = sniffer.logElems.shift();
-    oldest.remove();
-    sniffer.logLines -= 1;
-  }
-  if (atBottom) {
-    el.scrollTop = el.scrollHeight;
-  }
 }
 
 // --- Packet detail panel -------------------------------------------------
@@ -314,6 +303,11 @@ const DETAIL_FIELDS = [
   ["RadioHead from", (ev) => ev.rh_from, false],
   ["RadioHead msg id", (ev) => ev.rh_id, false],
   ["RadioHead flags", (ev) => fmtRhFlags(ev.rh_flags), (ev) => ev.rh_is_ack || ev.rh_is_retry],
+  [
+    "Attributed to (slot owner)",
+    (ev) => (ev.rh_owner_node_id != null ? (ev.rh_owner_node_id === 0 ? "Base Station" : `Node ${ev.rh_owner_node_id}`) : undefined),
+    false,
+  ],
   ["Wall time", (ev) => ev.wall_t, false],
   ["Sniffer t (ms)", (ev) => ev.sniffer_t_ms, false],
   ["Payload length", (ev) => (ev.payload_hex ? ev.payload_hex.length / 2 : 0), false],
@@ -341,16 +335,9 @@ function renderDetail(ev) {
   document.getElementById("sniffer-detail-table").style.display = "";
 }
 
-function highlightLogSelection() {
-  for (const el of sniffer.logElems) {
-    el.classList.toggle("selected", Number(el.dataset.id) === sniffer.selectedId);
-  }
-}
-
 function selectEvent(ev) {
   sniffer.selectedId = ev._id;
   renderDetail(ev);
-  highlightLogSelection();
 }
 
 function onCanvasClick(e) {

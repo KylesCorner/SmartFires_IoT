@@ -352,15 +352,32 @@ function wireBaseStationForm() {
 // Log panel
 // ---------------------------------------------------------------------------
 
+// "sniffer" is a fixed pseudo-tab (always shown, like "All") that filters by
+// log source instead of node_id — the passive sniffer reports on the same
+// nodes the normal ingest path does, so a node-id tab alone can't isolate it.
+const FIXED_LOG_TABS = [null, "sniffer"];
+
+function logTabLabel(tabId) {
+  if (tabId === null) return "All";
+  if (tabId === "sniffer") return "Sniffer";
+  return `Node ${tabId}`;
+}
+
+function logEntryMatchesTab(entry, tabId) {
+  if (tabId === null) return true;
+  if (tabId === "sniffer") return entry.source === "sniffer";
+  return entry.node_id === tabId || entry.node_id === null;
+}
+
 function renderLogTabs() {
   const container = document.getElementById("log-tabs");
   container.innerHTML = "";
 
-  const tabs = [null, ...Array.from(logState.knownNodeIds).sort((a, b) => a - b)];
+  const tabs = [...FIXED_LOG_TABS, ...Array.from(logState.knownNodeIds).sort((a, b) => a - b)];
   for (const tabId of tabs) {
     const btn = document.createElement("button");
     btn.className = "log-tab" + (logState.activeTab === tabId ? " active" : "");
-    btn.textContent = tabId === null ? "All" : `Node ${tabId}`;
+    btn.textContent = logTabLabel(tabId);
     btn.addEventListener("click", () => {
       logState.activeTab = tabId;
       renderLogTabs();
@@ -373,9 +390,7 @@ function renderLogTabs() {
 function renderLogOutput() {
   const el = document.getElementById("log-output");
   const active = logState.activeTab;
-  const visible = active === null
-    ? logState.entries
-    : logState.entries.filter((e) => e.node_id === active || e.node_id === null);
+  const visible = logState.entries.filter((e) => logEntryMatchesTab(e, active));
 
   const atBottom = el.scrollHeight - el.scrollTop <= el.clientHeight + 4;
   el.textContent = visible.map((e) => `${e.t.slice(11, 23)}  ${e.msg}`).join("\n");
@@ -401,7 +416,7 @@ function onLogEntry(entry) {
   }
 
   const active = logState.activeTab;
-  if (active === null || entry.node_id === active || entry.node_id === null) {
+  if (logEntryMatchesTab(entry, active)) {
     const el = document.getElementById("log-output");
     const atBottom = el.scrollHeight - el.scrollTop <= el.clientHeight + 4;
     el.textContent += `${entry.t.slice(11, 23)}  ${entry.msg}\n`;

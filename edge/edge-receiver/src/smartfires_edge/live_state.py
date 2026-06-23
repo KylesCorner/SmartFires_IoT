@@ -43,12 +43,13 @@ class LiveState:
         self._sniffer_total = 0
         self._sniffer_stats: dict[int, dict[str, Any]] = {}
 
-    def push_log(self, msg: str, node_id: int | None = None) -> None:
+    def push_log(self, msg: str, node_id: int | None = None, source: str = "ingest") -> None:
         with self._log_lock:
             self._log_ring.append({
                 "t": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
                 "msg": msg,
                 "node_id": node_id,
+                "source": source,
             })
             self._log_total += 1
 

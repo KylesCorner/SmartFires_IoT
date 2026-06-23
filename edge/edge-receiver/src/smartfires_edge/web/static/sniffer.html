@@ -7,65 +7,53 @@
 </head>
 <body>
   <main>
-    <div class="layout">
-
-      <section class="panel left-panel">
-        <h1>TDMA Timeline</h1>
-        <p class="section-hint">
-          Each lane is one node's assigned TDMA slot, aligned to the live session clock
-          overheard from the base station's TIME_SYNC broadcasts. Dashed lines mark slot
-          boundaries; shaded bands are the guard window. Disconnected/unanchored packets
-          render at the left margin.
-        </p>
-        <div id="sniffer-disabled" class="sniffer-disabled" style="display:none;">
-          Sniffer not connected — start <code>smartfires-edge web</code> with
-          <code>--sniffer-port &lt;port&gt;</code>.
-        </div>
-        <div class="sniffer-timeline-row">
-          <div id="sniffer-canvas-wrapper" class="sniffer-canvas-wrapper">
-            <canvas id="sniffer-timeline"></canvas>
-          </div>
-          <div id="sniffer-legend" class="sniffer-legend"></div>
-        </div>
-      </section>
-
-      <section class="right-panel">
-        <div class="panel">
-          <h2>Per-Node Stats</h2>
-          <table id="sniffer-stats-table">
-            <thead>
-              <tr>
-                <th>Node</th>
-                <th>Packets</th>
-                <th>Avg RSSI</th>
-                <th>Avg SNR</th>
-                <th>Jitter σ (ms)</th>
-                <th>Guard Viol.</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
-
-        <div class="panel">
-          <h2>Packet Detail</h2>
-          <p class="section-hint">
-            Click a marker on the timeline or a line in the packet log to inspect it.
-          </p>
-          <div id="sniffer-detail-empty" class="sniffer-detail-empty">No packet selected.</div>
-          <table id="sniffer-detail-table" class="sniffer-detail-table" style="display:none;">
-            <tbody></tbody>
-          </table>
-        </div>
-      </section>
-
-    </div>
-
-    <div class="panel log-panel">
-      <div class="log-header">
-        <h2>Sniffer Packet Log</h2>
+    <section class="panel sniffer-top-panel">
+      <h1>TDMA Timeline</h1>
+      <p class="section-hint">
+        Each lane is one node's assigned TDMA slot, aligned to the live session clock
+        overheard from the base station's TIME_SYNC broadcasts. Dashed lines mark slot
+        boundaries; shaded bands are the guard window. The dedicated "RadioHead / Unknown"
+        row holds bare RadioHead frames (e.g. RHReliableDatagram ACKs) that carry no
+        SmartFires node_id of their own. Click any marker to inspect it below.
+      </p>
+      <div id="sniffer-disabled" class="sniffer-disabled" style="display:none;">
+        Sniffer not connected — start <code>smartfires-edge web</code> with
+        <code>--sniffer-port &lt;port&gt;</code>.
       </div>
-      <div id="sniffer-log-output" class="log-output sniffer-log-list"></div>
+      <div class="sniffer-timeline-row">
+        <div id="sniffer-canvas-wrapper" class="sniffer-canvas-wrapper">
+          <canvas id="sniffer-timeline"></canvas>
+        </div>
+        <div id="sniffer-legend" class="sniffer-legend"></div>
+      </div>
+    </section>
+
+    <div class="sniffer-bottom-row">
+      <section class="panel">
+        <h2>Per-Node Stats</h2>
+        <table id="sniffer-stats-table">
+          <thead>
+            <tr>
+              <th>Node</th>
+              <th>Packets</th>
+              <th>Avg RSSI</th>
+              <th>Avg SNR</th>
+              <th>Jitter σ (ms)</th>
+              <th>Guard Viol.</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </section>
+
+      <section class="panel">
+        <h2>Packet Detail</h2>
+        <p class="section-hint">Click a marker on the timeline above to inspect it.</p>
+        <div id="sniffer-detail-empty" class="sniffer-detail-empty">No packet selected.</div>
+        <table id="sniffer-detail-table" class="sniffer-detail-table" style="display:none;">
+          <tbody></tbody>
+        </table>
+      </section>
     </div>
   </main>
 

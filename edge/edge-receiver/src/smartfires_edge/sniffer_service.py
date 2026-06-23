@@ -64,9 +64,10 @@ RH_FLAGS_ACK = 0x80
 RH_FLAGS_RETRY = 0x40
 
 # RadioHead address of the base station (RadioHeadTdmaDriver::Config::radioHeadCfg(0x01)
-# in main.cpp). Used to fold bare RadioHead frames (no SmartFires magic byte,
-# e.g. RHReliableDatagram ACKs) into the existing node_id=0 "Base Station"
-# lane convention already used for SmartFires-decoded base packets.
+# in main.cpp). Used to translate a bare RadioHead frame's attributed address
+# (rh_owner_node_id) into the same node_id=0 convention used for
+# SmartFires-decoded base packets, for slot-jitter math and detail display —
+# it does not affect lane placement (see rh_owner_node_id docstring above).
 _RH_BASE_ADDRESS = 1
 
 
@@ -204,13 +205,15 @@ def _decode_rx_event(
     rh_is_ack = bool(rh_flags is not None and rh_flags & RH_FLAGS_ACK)
     rh_is_retry = bool(rh_flags is not None and rh_flags & RH_FLAGS_RETRY)
 
+    # rh_owner_node_id: best-effort attribution of which node's TDMA slot a
+    # bare RadioHead frame (no SmartFires magic byte) belongs to. Kept
+    # separate from `node_id` — these frames carry no SmartFires PktHeader,
+    # so `node_id` stays None and the UI renders them on a dedicated
+    # RadioHead/Unknown lane rather than mixing them into a node's lane.
+    rh_owner_node_id = None
     if pkt_type is not None:
         pkt_type_name = _pkt_type_name(pkt_type)
     else:
-        # No SmartFires magic byte — most commonly a bare RadioHead
-        # RHReliableDatagram ACK (zero-length payload, link-layer only).
-        # Attribute it to a lane so it lines up against the TDMA grid
-        # instead of piling up under one ambiguous "UNKNOWN" bucket.
         pkt_type_name = "RH_ACK" if rh_is_ack else "RH_RAW"
         if rh_is_ack:
             # An ACK is transmitted BY the receiver of the original message,
@@ -224,16 +227,18 @@ def _decode_rx_event(
             # whichever radio actually sent it.
             attributed_addr = rh_from
         if attributed_addr is not None:
-            node_id = 0 if attributed_addr == _RH_BASE_ADDRESS else attributed_addr
+            rh_owner_node_id = 0 if attributed_addr == _RH_BASE_ADDRESS else attributed_addr
 
     session_ms = anchor.session_ms_for(t_ms) if pkt_type != PKT_TIME_SYNC else anchor.session_time_ms
     jitter_ms = None
     guard_violation = None
     if session_ms is not None and pkt_type != PKT_TIME_SYNC:
-        is_base_rh_frame = pkt_type is None and node_id == 0
-        slot_node_id = (
-            _VIRTUAL_BASE_NODE_ID if (pkt_type in _BASE_SLOTTED_TYPES or is_base_rh_frame) else node_id
-        )
+        if pkt_type is None:
+            slot_node_id = _VIRTUAL_BASE_NODE_ID if rh_owner_node_id == 0 else rh_owner_node_id
+        elif pkt_type in _BASE_SLOTTED_TYPES:
+            slot_node_id = _VIRTUAL_BASE_NODE_ID
+        else:
+            slot_node_id = node_id
         if slot_node_id is not None:
             jitter_ms, guard_violation = _slot_timing(slot_node_id, session_ms, num_slots)
 
@@ -257,6 +262,7 @@ def _decode_rx_event(
         "rh_flags": rh_flags,
         "rh_is_ack": rh_is_ack,
         "rh_is_retry": rh_is_retry,
+        "rh_owner_node_id": rh_owner_node_id,
     }
     event.update(extra)
     event["_session_changed"] = session_changed
@@ -266,15 +272,21 @@ def _decode_rx_event(
 def run_sniffer(
     cfg: SnifferConfig,
     live_state: LiveState,
-    log_fn: Callable[[str, Optional[int]], None] | None = None,
+    log_fn: Callable[..., None] | None = None,
 ) -> int:
     """Run the sniffer ingest loop. Intended to be run in a daemon thread
     alongside the base-station ingest loop (see web_service.run_web)."""
     if log_fn is None:
-        log_fn = lambda msg, node_id=None: print(msg)  # noqa: E731
+        log_fn = lambda msg, node_id=None, source="sniffer": print(msg)  # noqa: E731
+
+    # Every log line from this loop is tagged source="sniffer" so the main
+    # dashboard's log panel can filter to just sniffer activity, the same
+    # way it filters by node — see LiveState.push_log / main_page.js.
+    def slog(msg: str, node_id: Optional[int] = None) -> None:
+        log_fn(msg, node_id, source="sniffer")
 
     anchor = _SyncAnchor()
-    log_fn(f"[SNIFFER] Listening on {cfg.port} @ {cfg.baud}, num_slots={cfg.num_slots}", None)
+    slog(f"[SNIFFER] Listening on {cfg.port} @ {cfg.baud}, num_slots={cfg.num_slots}")
 
     try:
         with serial.Serial(cfg.port, cfg.baud, timeout=1.0) as ser:
@@ -289,7 +301,7 @@ def run_sniffer(
 
                 if msg.get("event") != "rx":
                     if msg.get("event") in ("status", "error", "config"):
-                        log_fn(f"[SNIFFER] {msg.get('message') or msg}", None)
+                        slog(f"[SNIFFER] {msg.get('message') or msg}")
                     continue
 
                 event = _decode_rx_event(msg, anchor, cfg.num_slots)
@@ -298,18 +310,18 @@ def run_sniffer(
 
                 if event.pop("_session_changed", False):
                     live_state.reset_sniffer_stats()
-                    log_fn("[SNIFFER] New base station session detected — sniffer stats reset", None)
+                    slog("[SNIFFER] New base station session detected — sniffer stats reset")
 
                 live_state.push_sniffer_event(event)
-                log_fn(
+                slog(
                     f"[SNIFFER-RX] type={event['pkt_type']} node={event['node_id']} "
                     f"rssi={event['rssi']} snr={event['snr']} jitter={event['jitter_ms']}",
                     event["node_id"],
                 )
     except serial.SerialException as exc:
         print(f"[SNIFFER][FATAL] {exc}", file=sys.stderr)
-        log_fn(f"[SNIFFER] serial error: {exc}", None)
+        slog(f"[SNIFFER] serial error: {exc}")
         return 1
     except KeyboardInterrupt:
-        log_fn("[SNIFFER] Stopped by user.", None)
+        slog("[SNIFFER] Stopped by user.")
     return 0

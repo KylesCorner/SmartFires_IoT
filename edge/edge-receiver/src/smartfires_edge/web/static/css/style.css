@@ -415,6 +415,21 @@ table th {
   color: #fff;
 }
 
+.sniffer-top-panel {
+  margin-bottom: 1rem;
+}
+
+.sniffer-bottom-row {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.sniffer-bottom-row > section {
+  flex: 1;
+  min-width: 0;
+}
+
 .sniffer-timeline-row {
   display: flex;
   gap: 1rem;
@@ -425,7 +440,7 @@ table th {
   position: relative;
   flex: 1;
   min-width: 0;
-  height: 420px;
+  height: 520px;
 }
 
 .sniffer-legend {
@@ -488,25 +503,6 @@ table th {
 .new-session-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.sniffer-log-list {
-  cursor: default;
-}
-
-.sniffer-log-line {
-  cursor: pointer;
-  padding: 1px 2px;
-  border-radius: 3px;
-}
-
-.sniffer-log-line:hover {
-  background: #20262d;
-}
-
-.sniffer-log-line.selected {
-  background: #2a3a4a;
-  color: #fff;
 }
 
 .sniffer-detail-empty {
