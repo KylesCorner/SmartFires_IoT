@@ -27,14 +27,13 @@ binary packet encoding, same AWAKEN handshake, same STATUS + BUNDLE sequence.
 | Adafruit Feather M0 RFM95 | 1 | Node — runs `feather_m0_lora_node_dummy` |
 | Adafruit Feather M0 RFM95 | 1 | Base station — runs `feather_m0_lora` |
 | Jetson Orin Nano | 1 | Runs `smartfires-edge receive`; sends TIME_SYNC to base |
-| USB cable (data-capable) | 2 | One per Feather |
-| UART cable | 1 | Feather base → Jetson (Serial1 / `/dev/ttyTHS1`) |
+| USB cable (data-capable) | 2 | One per Feather — the base's cable also carries the Jetson link |
 
 > **TIME_SYNC dependency:** The node withholds all sensing until it receives a
 > TIME_SYNC packet from the base station. The base station originates LoRa
 > TIME_SYNC transmissions (AWAKEN reply + periodic broadcast). If Jetson sync
-> is available over UART, the base uses Jetson-derived time; otherwise it falls
-> back to base-local session time.
+> is available over the USB link, the base uses Jetson-derived time; otherwise
+> it falls back to base-local session time.
 
 ---
 
@@ -57,10 +56,11 @@ pio run -e feather_m0_lora_node_dummy --target upload
 
 ### 3 — Start the Jetson edge receiver
 
-Connect the base station Feather to the Jetson via Serial1 (`/dev/ttyTHS1`).
+Connect the base station Feather to the Jetson via USB
+(`/dev/smartfires-base`, see UART_JETSON_BRIDGE.md for the udev symlink setup).
 
 ```bash
-smartfires-edge receive --port /dev/ttyTHS1 --data-dir /mnt/nvme_drive/data
+smartfires-edge receive --port /dev/smartfires-base --data-dir /mnt/nvme_drive/data
 ```
 
 This starts the session clock and sends periodic TIME_SYNC updates to the base

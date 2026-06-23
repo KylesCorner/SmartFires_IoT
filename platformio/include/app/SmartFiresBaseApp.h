@@ -10,7 +10,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-class HardwareSerial;
+class Stream;
 class Print;
 
 class SmartFiresBaseApp {
@@ -39,7 +39,7 @@ public:
   SmartFiresBaseApp(const Config &cfg,
                     IClock &clock,
                     ITdmaRadioDriver &radio,
-                    HardwareSerial &jetsonUart,
+                    Stream &jetsonUart,
                     Print &debugUart);
 
   bool begin();
@@ -121,7 +121,7 @@ private:
   Config _cfg;
   IClock &_clock;
   ITdmaRadioDriver &_radio;
-  HardwareSerial &_jetsonUart;
+  Stream &_jetsonUart;
   Print &_debugUart;
 
   // The base's own reserved-slot timing. nodeId=1 is the permanently

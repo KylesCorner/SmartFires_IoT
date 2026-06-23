@@ -23,6 +23,8 @@ PKT_CMD_CALIBRATE = 0x10
 PKT_CMD_RESET = 0x11
 PKT_CALIBRATION_DATA = 0x12
 PKT_CMD_ACK = 0x13
+# Base -> Jetson only, never sent over LoRa — see BinaryPacket.h's PKT_DEBUG_LOG.
+PKT_DEBUG_LOG = 0x14
 
 # ---------- struct formats (little-endian, packed) ----------
 
@@ -397,6 +399,21 @@ def decode_cmd_ack(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Optio
         "uid_hash": uid_hash,
         "status": status,
     }
+
+def decode_debug_log(raw_lora_payload: bytes) -> Optional[str]:
+    """Decode a PKT_DEBUG_LOG frame: PktHeader followed by a raw @SFDBG text
+    line, no fixed struct and no embedded crc8 (the outer UART/USB frame's
+    crc8 already covers this single Jetson hop end-to-end — see
+    FramedDebugLogSink.h)."""
+    if len(raw_lora_payload) < HEADER_SIZE:
+        return None
+
+    magic, pkt_type, _node_id, _seq = struct.unpack_from(HEADER_FMT, raw_lora_payload, 0)
+    if magic != PKT_MAGIC or pkt_type != PKT_DEBUG_LOG:
+        return None
+
+    return raw_lora_payload[HEADER_SIZE:].decode("utf-8", errors="replace")
+
 
 def decode_full_state(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Optional[dict]:
     """

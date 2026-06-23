@@ -13,11 +13,13 @@ import serial
 from smartfires_edge.anemometer import AnemometerPoller
 from smartfires_edge.config import IngestConfig
 from smartfires_edge.csv_logger import DurableCsvLogger
+from smartfires_edge.debug_log import parse_sfdbg_line
 from smartfires_edge.live_state import LiveState
 from smartfires_edge.packet import (
     PKT_AWAKEN,
     PKT_BUNDLE,
     PKT_CMD_ACK,
+    PKT_DEBUG_LOG,
     PKT_FULL_STATE,
     PKT_STATUS,
     encode_time_sync_frame,
@@ -208,6 +210,26 @@ def run_receive(
             hdr_node = event.get("node_id")
             hdr_seq = event.get("seq")
             pkt_type = event.get("pkt_type")
+
+            # Base-originated debug log line (FramedDebugLogSink), never a
+            # LoRa packet from a real node — handled entirely separately from
+            # telemetry/loss-tracking below, then skip the rest of the loop
+            # body for this iteration.
+            if pkt_type == PKT_DEBUG_LOG:
+                debug_text = event.get("debug_log")
+                if live_state is not None and debug_text is not None:
+                    record = parse_sfdbg_line(debug_text) or {
+                        "v": "?",
+                        "node": "?",
+                        "src": "?",
+                        "lvl": "?",
+                        "seq": "-",
+                        "t": "-",
+                        "msg": debug_text,
+                        "raw": debug_text,
+                    }
+                    live_state.push_base_debug(record)
+                continue
 
             log_fn(
                 f"[EDGE][LORA-RX] type={_pkt_type_name(pkt_type)} node={hdr_node} "

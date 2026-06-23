@@ -42,6 +42,11 @@ enum PktType : uint8_t {
     PKT_CMD_RESET        = 0x11,
     PKT_CALIBRATION_DATA = 0x12,
     PKT_CMD_ACK          = 0x13,
+    // Base -> Jetson only, never sent over LoRa. Payload is PktHeader followed
+    // by a raw @SFDBG text line (see logging/DebugLogger.h) — no fixed struct,
+    // no embedded crc8, since the outer UART/USB frame's crc8 already covers
+    // it end-to-end on this single hop.
+    PKT_DEBUG_LOG        = 0x14,
 };
 
 struct __attribute__((packed)) PktHeader {

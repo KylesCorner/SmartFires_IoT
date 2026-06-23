@@ -1,22 +1,41 @@
-# UART Jetson Bridge
+# Jetson Bridge
 
 The Feather M0 base station and the Jetson Orin Nano communicate over a
-bidirectional UART link at 115 200 baud (`Serial1` on the Feather,
-`/dev/ttyTHS1` on the Jetson). A lightweight framing protocol wraps LoRa
+bidirectional link carried on native USB CDC (`Serial` on the Feather — the
+same port used for flashing). A lightweight framing protocol wraps LoRa
 payloads for reliable transport over the serial link.
+
+This link was originally a hardware UART (`Serial1` ↔ `/dev/ttyTHS1`); it was
+migrated to USB so the base station matches the sniffer Feather's transport
+(`main_lora_sniffer.cpp`) and to free up `Serial1`'s pins. The on-wire frame
+format below is unchanged by that migration — it's transport-agnostic.
 
 ## Physical Setup
 
 | Side | Port | Baud | Notes |
 |---|---|---|---|
-| Feather M0 base | `Serial1` | 115 200 | TX pin → Jetson RX; RX pin → Jetson TX |
-| Jetson Orin Nano | `/dev/ttyTHS1` | 115 200 | Enable via `jetson-io.py`; disable `nvgetty` |
+| Feather M0 base | `Serial` (native USB) | 115 200 | Same USB cable used to flash the board |
+| Jetson Orin Nano | udev symlink, e.g. `/dev/smartfires-base` | 115 200 | See "Disambiguating base vs. sniffer" below |
 
-One-time Jetson UART setup:
+The Feather's old `Serial1` UART pins are no longer wired to the Jetson. They
+currently carry a stopgap debug-log tap (see DEBUG_FILTER.md) until that's
+multiplexed onto this same USB link as `PKT_DEBUG_LOG` frames.
+
+### Disambiguating base vs. sniffer
+
+Both the base and the sniffer Feathers enumerate as generic USB CDC-ACM
+devices with identical VID/PID, so `/dev/ttyACM0`/`ttyACM1` can swap on
+reboot or reconnect. Add a udev rule keyed on each board's USB serial number
+to get stable symlinks:
+
 ```bash
-sudo /opt/nvidia/jetson-io/jetson-io.py   # enable UART pin group
-sudo systemctl disable nvgetty && sudo udevadm trigger
+udevadm info -a -n /dev/ttyACM0 | grep '{serial}'   # run once per board, alone
 ```
+
+then create `/etc/udev/rules.d/99-smartfires.rules` with one `SYMLINK+=`
+rule per board (matching on `ATTRS{serial}`), producing
+`/dev/smartfires-base` and `/dev/smartfires-sniffer`. See
+`JETSON_CHEATSHEET.md` for the exact invocation using these symlinks.
 
 ## Frame Format
 

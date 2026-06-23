@@ -30,11 +30,11 @@ Wildfire IoT sensor network. Remote drone nodes collect environmental data (temp
     |                CMD_RESET (7 bytes, forwarded from Jetson)
     v
 [Adafruit Feather M0 RFM95 — base station]  ← SmartFiresBaseApp, fully ported
-    Receives telemetry, auto-ACKs, relays to Jetson over UART.
+    Receives telemetry, auto-ACKs, relays to Jetson over USB.
     Assigns node_id from uid_hash on first AWAKEN (findOrCreateNodeAssignment).
-    Reads TIME_SYNC + command frames from Jetson UART, routes/broadcasts over LoRa.
+    Reads TIME_SYNC + command frames from the Jetson USB link, routes/broadcasts over LoRa.
     |
-    | UART 115200 baud (Serial1, binary frames — bidirectional)
+    | USB CDC, 115200 baud (Serial — native USB, binary frames — bidirectional)
     |   Feather → Jetson: base UART frames with RSSI (variable length, ≤198 bytes)
     |   Jetson → Feather: TIME_SYNC (16 bytes), CMD_CALIBRATE/RESET (11 bytes), ACK_SUMMARY
     v
@@ -416,9 +416,9 @@ Node Feather — SmartFiresNodeApp::begin()
   │  Sensors and duty cycle are HELD OFF until sync is received
   ▼
 Base Feather  ← SmartFiresBaseApp (fully ported)
-  │  Relays all node packets to Jetson over UART (encodeBaseFrame)
+  │  Relays all node packets to Jetson over USB (encodeBaseFrame)
   │  Assigns node_id from uid_hash on first AWAKEN (findOrCreateNodeAssignment)
-  │  Receives TIME_SYNC + command frames from Jetson UART, routes/broadcasts over LoRa
+  │  Receives TIME_SYNC + command frames from the Jetson USB link, routes/broadcasts over LoRa
   │  Broadcasts 12-byte LoRa TIME_SYNC to RH_BROADCAST_ADDRESS (every 10 min)
   ▼
 Node Feather — TdmaRadioService::checkIncomingTimeSync()
@@ -487,7 +487,7 @@ stub in session.py) is not yet implemented — readings are magnetic bearing, no
 
 ```bash
 pip install -e edge/edge-receiver
-smartfires-edge receive --port /dev/ttyTHS1 --data-dir /mnt/nvme_drive/data
+smartfires-edge receive --port /dev/smartfires-base --data-dir /mnt/nvme_drive/data
 smartfires-edge receive --sync-interval 600      # 10-min sync interval
 smartfires-edge receive --anemometer-port /dev/ttyUSB0 --anemometer-baud 9600 --anemometer-address 1
 ```
@@ -495,10 +495,13 @@ smartfires-edge receive --anemometer-port /dev/ttyUSB0 --anemometer-baud 9600 --
 `edge/edge-receiver/src/smartfires_edge/packet.py` mirrors `BinaryPacket.h` for STATUS/FULL_STATE/BUNDLE parsing and
 bundle delta expansion.
 
-Jetson UART setup (one-time):
-1. `sudo /opt/nvidia/jetson-io/jetson-io.py` — enable the UART pin group
-2. `sudo systemctl disable nvgetty && sudo udevadm trigger` — free the port
-3. Typical device path: `/dev/ttyTHS1`
+Base station link (USB, not UART — see `UART_JETSON_BRIDGE.md`):
+1. Plug the base station Feather's USB cable into the Jetson.
+2. One-time udev setup so the base and sniffer (both generic USB-CDC, same
+   VID/PID) get stable, non-swapping device paths — see
+   `JETSON_CHEATSHEET.md`'s "One-time udev setup".
+3. Resulting device path: `/dev/smartfires-base` (symlink, not a raw
+   `/dev/ttyACM*` path).
 
 ---
 

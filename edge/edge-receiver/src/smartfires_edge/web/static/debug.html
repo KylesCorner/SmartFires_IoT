@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>SmartFires — Base Debug Log</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <main>
+    <div class="panel log-panel">
+      <div class="log-header">
+        <h2>Base Station Debug Log</h2>
+        <button id="debug-clear-btn" class="new-session-btn">Clear</button>
+      </div>
+      <p class="section-hint">
+        Live <code>@SFDBG</code> lines from the base station Feather, multiplexed onto
+        the same USB link as telemetry (<code>PKT_DEBUG_LOG</code> frames) — see
+        documentation/User_Reference/DEBUG_FILTER.md for the source/level conventions
+        this mirrors from <code>pio device monitor</code>.
+      </p>
+      <div class="log-header">
+        <span class="sniffer-toolbar-label">Min level:</span>
+        <div id="debug-level-tabs" class="log-tabs"></div>
+      </div>
+      <div class="log-header">
+        <span class="sniffer-toolbar-label">Source:</span>
+        <div id="debug-src-tabs" class="log-tabs"></div>
+      </div>
+      <pre id="debug-output" class="log-output"></pre>
+    </div>
+  </main>
+
+  <script src="/static/js/nav.js"></script>
+  <script src="/static/js/debug_page.js"></script>
+</body>
+</html>

@@ -129,6 +129,10 @@ def create_app(
     def sniffer_page() -> FileResponse:
         return FileResponse(STATIC_DIR / "sniffer.html")
 
+    @app.get("/debug")
+    def debug_page() -> FileResponse:
+        return FileResponse(STATIC_DIR / "debug.html")
+
     # ------------------------------------------------------------------
     # Tile cache endpoints
     #
@@ -235,6 +239,19 @@ def create_app(
         try:
             while True:
                 entries, idx = live_state.drain_log(idx)
+                for entry in entries:
+                    await ws.send_text(json.dumps(entry))
+                await asyncio.sleep(0.05)
+        except (WebSocketDisconnect, Exception):
+            pass
+
+    @app.websocket("/ws/base-debug")
+    async def websocket_base_debug(ws: WebSocket) -> None:
+        await ws.accept()
+        idx = 0
+        try:
+            while True:
+                entries, idx = live_state.drain_base_debug(idx)
                 for entry in entries:
                     await ws.send_text(json.dumps(entry))
                 await asyncio.sleep(0.05)

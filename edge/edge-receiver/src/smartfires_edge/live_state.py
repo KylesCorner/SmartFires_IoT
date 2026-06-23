@@ -42,6 +42,9 @@ class LiveState:
         self._sniffer_lock = threading.Lock()
         self._sniffer_total = 0
         self._sniffer_stats: dict[int, dict[str, Any]] = {}
+        self._base_debug_ring: deque[dict] = deque(maxlen=5000)
+        self._base_debug_lock = threading.Lock()
+        self._base_debug_total = 0
 
     def push_log(self, msg: str, node_id: int | None = None, source: str = "ingest") -> None:
         with self._log_lock:
@@ -62,6 +65,21 @@ class LiveState:
         with self._log_lock:
             items = list(self._log_ring)
             total = self._log_total
+        oldest_idx = total - len(items)
+        if since_idx <= oldest_idx:
+            return items, total
+        return items[since_idx - oldest_idx:], total
+
+    def push_base_debug(self, record: dict[str, Any]) -> None:
+        with self._base_debug_lock:
+            self._base_debug_ring.append(record)
+            self._base_debug_total += 1
+
+    def drain_base_debug(self, since_idx: int) -> tuple[list[dict], int]:
+        """Same monotonic-cursor pattern as drain_log."""
+        with self._base_debug_lock:
+            items = list(self._base_debug_ring)
+            total = self._base_debug_total
         oldest_idx = total - len(items)
         if since_idx <= oldest_idx:
             return items, total

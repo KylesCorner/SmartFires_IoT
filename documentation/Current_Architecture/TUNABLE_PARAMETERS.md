@@ -190,12 +190,12 @@ Namespace `SensingConfig::Gps` — five factory variants, each with its own cons
 
 **Source (Python):** `edge/edge-receiver/src/smartfires_edge/config.py`
 
-### Ingest / UART
+### Ingest / base-station link
 
 | Constant | Default | CLI flag | Meaning |
 |---|---|---|---|
-| `DEFAULT_PORT` | `/dev/ttyTHS1` | `--port` | Serial port for base-station UART |
-| `DEFAULT_BAUD` | 115200 | `--baud` | UART baud rate |
+| `DEFAULT_PORT` | `/dev/smartfires-base` | `--port` | Serial port for the base-station USB link (udev symlink — see UART_JETSON_BRIDGE.md) |
+| `DEFAULT_BAUD` | 115200 | `--baud` | Baud rate passed to pyserial |
 | `DEFAULT_DATA_DIR` | `/mnt/nvme_drive/data` | `--data-dir` | Root output directory |
 | `DEFAULT_NODES` | `[1, 2]` | `--nodes` | Node IDs tracked for packet-loss metrics |
 | `DEFAULT_METRICS_INTERVAL_S` | 10 s | `--metrics-interval` | Packet-loss state flush interval |

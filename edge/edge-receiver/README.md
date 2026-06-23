@@ -12,7 +12,7 @@ pip install -e .
 
 ```bash
 smartfires-edge receive \
-  --port /dev/ttyTHS1 \
+  --port /dev/smartfires-base \
   --baud 115200 \
   --data-dir /mnt/nvme_drive/data \
   --sync-interval 600
@@ -22,7 +22,7 @@ smartfires-edge receive \
 
 ```bash
 smartfires-edge receive \
-  --port /dev/ttyTHS1 \
+  --port /dev/smartfires-base \
   --anemometer-port /dev/ttyUSB0 \
   --anemometer-baud 9600 \
   --anemometer-address 1 \
@@ -55,7 +55,7 @@ smartfires-edge summary --data-dir /mnt/nvme_drive/data
 
 ```bash
 smartfires-edge visualize \
-  --port /dev/ttyTHS1 \
+  --port /dev/smartfires-base \
   --baud 115200 \
   --sync-interval 600 \
   --telemetry-rows 20
@@ -73,7 +73,7 @@ session calibration data.
 
 ```bash
 smartfires-edge cli \
-  --port /dev/ttyTHS1 \
+  --port /dev/smartfires-base \
   --baud 115200
 ```
 
@@ -81,7 +81,7 @@ Optional session file override:
 
 ```bash
 smartfires-edge cli \
-  --port /dev/ttyTHS1 \
+  --port /dev/smartfires-base \
   --baud 115200 \
   --session-file ~/.smartfires/session.json
 ```
@@ -122,7 +122,7 @@ Use this checklist to execute integration testing in a repeatable order.
 
 - base station firmware running with Phase 0-5 changes
 - node firmware running with Phase 0-5 changes
-- receiver host has serial access to base station (`/dev/ttyTHS1` or equivalent)
+- receiver host has serial access to base station (`/dev/smartfires-base` or equivalent)
 - clear terminal for node serial monitor and base serial monitor
 - known test location and reference compass available for heading spot-check
 
@@ -131,7 +131,7 @@ Use this checklist to execute integration testing in a repeatable order.
 Run:
 
 ```bash
-smartfires-edge cli --port /dev/ttyTHS1 --baud 115200
+smartfires-edge cli --port /dev/smartfires-base --baud 115200
 ```
 
 In a second shell, capture CLI output to a timestamped file:
