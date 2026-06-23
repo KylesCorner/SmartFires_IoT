@@ -23,3 +23,7 @@ process — no separate `receive` step needed.
 
 Defaults: host `0.0.0.0` (LAN-reachable), port `8080`. Override with `--host`/`--http-port`.
 CSV + metrics still land under the default data dir unless `--data-dir` is set.
+
+
+Current working web command: (Do not delete)
+smartfires-edge web --port /dev/ttyTHS1 --sniffer-port /dev/ttyACM0 --num-slots 4
