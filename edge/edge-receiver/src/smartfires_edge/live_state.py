@@ -46,13 +46,20 @@ class LiveState:
         self._base_debug_lock = threading.Lock()
         self._base_debug_total = 0
 
-    def push_log(self, msg: str, node_id: int | None = None, source: str = "ingest") -> None:
+    def push_log(
+        self,
+        msg: str,
+        node_id: int | None = None,
+        source: str = "ingest",
+        kind: str = "other",
+    ) -> None:
         with self._log_lock:
             self._log_ring.append({
                 "t": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
                 "msg": msg,
                 "node_id": node_id,
                 "source": source,
+                "kind": kind,
             })
             self._log_total += 1
 
@@ -233,7 +240,7 @@ class LiveState:
         with self._sniffer_lock:
             self._sniffer_ring.clear()
             self._sniffer_stats.clear()
-        self.push_log("--- NEW SESSION ---", None)
+        self.push_log("--- NEW SESSION ---", None, kind="session")
 
     def status_history_snapshot(self, limit: int = 5000) -> list[dict[str, Any]]:
         with self._lock:

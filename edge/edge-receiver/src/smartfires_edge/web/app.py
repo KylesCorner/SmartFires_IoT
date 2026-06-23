@@ -133,6 +133,10 @@ def create_app(
     def debug_page() -> FileResponse:
         return FileResponse(STATIC_DIR / "debug.html")
 
+    @app.get("/live-log")
+    def live_log_page() -> FileResponse:
+        return FileResponse(STATIC_DIR / "live_log.html")
+
     # ------------------------------------------------------------------
     # Tile cache endpoints
     #

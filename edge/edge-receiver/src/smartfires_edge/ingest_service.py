@@ -129,7 +129,7 @@ def run_receive(
         reset_event: Optional threading.Event set by the web API to trigger a new session.
     """
     if log_fn is None:
-        log_fn = lambda msg, node_id=None: print(msg)  # noqa: E731
+        log_fn = lambda msg, node_id=None, source="ingest", kind="other": print(msg)  # noqa: E731
 
     tracker = PacketLossTracker(cfg.nodes)
     if live_state is not None:
@@ -344,12 +344,15 @@ def run_receive(
                     live_state.record_status(status)
                 log_fn(
                     f"[STATUS] node={status_row['node_id']} seq={status_row['seq']} "
+                    f"lat={status_row['lat']} lon={status_row['lon']} "
                     f"gps_valid={status_row['gps_valid']} batt_valid={status_row['battery_valid']} "
-                    f"batt_mv={status_row['battery_mv']} rssi={status_row['rssi']} "
+                    f"batt_mv={status_row['battery_mv']} batt_pct={status_row['battery_pct']} "
+                    f"rssi={status_row['rssi']} "
                     f"heading={status_row['heading_true_deg']} "
                     f"location_corrected_heading={status_row['location_corrected_heading']} "
                     f"retx_total={status_row['retx_total']} fail_total={status_row['fail_total']}",
                     int(status_row["node_id"]) if status_row["node_id"] is not None else None,
+                    kind="status",
                 )
 
             cmd_ack = event.get("cmd_ack")
@@ -409,9 +412,13 @@ def run_receive(
                     f"[RX] node={pkt['node_id']} seq={pkt['seq']:3d} "
                     f"t={pkt['timestamp'][11:]} "
                     f"T={pkt['temp_c']:5.1f}C H={pkt['humidity_pct']:4.1f}% "
-                    f"wind={pkt['wind_mps']:.2f} PM2.5={pkt['pm2_5_ug_m3']:.1f} "
+                    f"wind={pkt['wind_mps']:.2f} "
+                    f"PM1.0={pkt['pm1_0_ug_m3']:.1f} PM2.5={pkt['pm2_5_ug_m3']:.1f} "
+                    f"PM4.0={pkt['pm4_0_ug_m3']:.1f} PM10={pkt['pm10_ug_m3']:.1f} "
+                    f"lat={pkt['lat']} lon={pkt['lon']} "
                     f"rssi={pkt['rssi']:4d}",
                     int(pkt["node_id"]),
+                    kind="bundle",
                 )
 
             now = time.monotonic()
@@ -460,6 +467,7 @@ def run_receive(
                 log_fn(
                     f"[SESSION] New session started: 0x{session_id:08x}  stamp={session_stamp}",
                     None,
+                    kind="session",
                 )
 
     except KeyboardInterrupt:

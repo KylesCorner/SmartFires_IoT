@@ -3,6 +3,7 @@ const NAV_LINKS = [
   { href: "/map-history", label: "Map & History" },
   { href: "/sniffer", label: "TDMA Sniffer" },
   { href: "/debug", label: "Debug Log" },
+  { href: "/live-log", label: "Live Log" },
 ];
 
 let _connDot = null;
