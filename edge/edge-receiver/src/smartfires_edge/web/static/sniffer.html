@@ -20,6 +20,18 @@
         Sniffer not connected — start <code>smartfires-edge web</code> with
         <code>--sniffer-port &lt;port&gt;</code>.
       </div>
+      <div class="sniffer-toolbar">
+        <div class="sniffer-toolbar-group">
+          <span class="sniffer-toolbar-label">Window:</span>
+          <div id="sniffer-zoom-buttons" class="time-range-row"></div>
+        </div>
+        <div class="sniffer-toolbar-group sniffer-playback">
+          <button id="sniffer-step-back" class="sniffer-step-btn" title="Step back">◀</button>
+          <button id="sniffer-play-toggle" class="sniffer-play-btn">⏸ Pause</button>
+          <button id="sniffer-step-forward" class="sniffer-step-btn" title="Step forward">▶</button>
+          <span id="sniffer-live-indicator" class="sniffer-live-indicator"></span>
+        </div>
+      </div>
       <div class="sniffer-timeline-row">
         <div id="sniffer-canvas-wrapper" class="sniffer-canvas-wrapper">
           <canvas id="sniffer-timeline"></canvas>

@@ -8,8 +8,23 @@
 // The full packet log (including sniffer activity) lives on the main
 // dashboard's Live Log panel now, filterable via the "Sniffer" tab — see
 // main_page.js. This page only keeps the canvas-click detail panel.
+//
+// Playback model: `sniffer.live` controls whether the right edge of the
+// canvas tracks Date.now() every frame (live tail) or is frozen at
+// `sniffer.pausedViewEndMs` (paused/scrubbed). Zooming changes the visible
+// window (`sniffer.windowMs`) without touching live/paused state; stepping
+// back/forward always implies pausing first — there's no sensible "step"
+// while the view is still chasing "now" every frame.
 
-const WINDOW_MS = 60_000;
+const ZOOM_PRESETS_MS = [15_000, 30_000, 60_000, 5 * 60_000, 15 * 60_000];
+const DEFAULT_WINDOW_MS = 60_000;
+// How far back the client keeps buffered events for scrubbing — independent
+// of the visible window. Packet rate here is low (well under 1/s typical),
+// so 30 min of buffered history costs nothing.
+const MAX_RETAIN_MS = 30 * 60_000;
+// Each step button press moves the view by half the current window.
+const STEP_FRACTION = 0.5;
+
 const SLOT_WIDTH_MS = 900;
 const GUARD_MS = 20;
 const LANE_HEIGHT = 36;
@@ -42,7 +57,7 @@ const UNKNOWN_COLOR = "#c0392b";
 const UNKNOWN_LABEL = "UNKNOWN / other";
 
 const sniffer = {
-  events: [],            // recent events within WINDOW_MS (+ small buffer)
+  events: [],            // buffered events within MAX_RETAIN_MS
   laneOf: new Map(),     // node_id -> lane index
   laneOrder: [],         // node_ids in lane order
   lastAnchor: null,      // {wallMs, sessionMs}
@@ -52,7 +67,21 @@ const sniffer = {
   idCounter: 0,
   selectedId: null,
   hitRects: [],          // canvas marker bounding boxes for click hit-testing
+  windowMs: DEFAULT_WINDOW_MS,
+  live: true,
+  pausedViewEndMs: null, // set when paused; the timestamp at the canvas's right edge
 };
+
+// The timestamp at the canvas's right edge for this frame/action.
+function currentViewEndMs() {
+  return sniffer.live ? Date.now() : sniffer.pausedViewEndMs;
+}
+
+function clampViewEnd(ms, windowMs) {
+  const maxEnd = Date.now();
+  const minEnd = maxEnd - MAX_RETAIN_MS + windowMs;
+  return Math.min(maxEnd, Math.max(minEnd, ms));
+}
 
 function laneLabel(nodeId) {
   // node_id 0 is the broadcast/command convention (TIME_SYNC/ACK_SUMMARY/CMD_*
@@ -110,8 +139,8 @@ function resizeCanvas() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
-function xForWallMs(canvasWidthCss, nowMs, wallMs) {
-  return canvasWidthCss - ((nowMs - wallMs) / WINDOW_MS) * canvasWidthCss;
+function xForWallMs(canvasWidthCss, viewEndMs, windowMs, wallMs) {
+  return canvasWidthCss - ((viewEndMs - wallMs) / windowMs) * canvasWidthCss;
 }
 
 function draw() {
@@ -120,7 +149,8 @@ function draw() {
   const dpr = window.devicePixelRatio || 1;
   const widthCss = canvas.width / dpr;
   const heightCss = canvas.height / dpr;
-  const nowMs = Date.now();
+  const viewEndMs = currentViewEndMs();
+  const windowMs = sniffer.windowMs;
 
   ctx.clearRect(0, 0, widthCss, heightCss);
   const lanesBottom = heightCss - SLOT_LABEL_HEIGHT;
@@ -132,14 +162,14 @@ function draw() {
   if (sniffer.lastAnchor) {
     const { wallMs, sessionMs } = sniffer.lastAnchor;
     const phaseAnchor = ((wallMs - sessionMs) % SLOT_WIDTH_MS + SLOT_WIDTH_MS) % SLOT_WIDTH_MS;
-    const earliest = nowMs - WINDOW_MS;
+    const earliest = viewEndMs - windowMs;
     let t = phaseAnchor + Math.ceil((earliest - phaseAnchor) / SLOT_WIDTH_MS) * SLOT_WIDTH_MS;
-    const guardWidthPx = (GUARD_MS / WINDOW_MS) * widthCss;
+    const guardWidthPx = (GUARD_MS / windowMs) * widthCss;
     ctx.strokeStyle = "#3a4049";
     ctx.setLineDash([4, 4]);
-    for (; t <= nowMs + SLOT_WIDTH_MS; t += SLOT_WIDTH_MS) {
+    for (; t <= viewEndMs + SLOT_WIDTH_MS; t += SLOT_WIDTH_MS) {
       gridlineWallMs.push(t);
-      const x = xForWallMs(widthCss, nowMs, t);
+      const x = xForWallMs(widthCss, viewEndMs, windowMs, t);
       ctx.fillStyle = "rgba(122,130,140,0.08)";
       ctx.fillRect(x - guardWidthPx, HEADER_HEIGHT, 2 * guardWidthPx, lanesBottom - HEADER_HEIGHT);
       ctx.beginPath();
@@ -173,8 +203,8 @@ function draw() {
   sniffer.hitRects = [];
   for (const ev of sniffer.events) {
     const wallMs = ev._wallMs;
-    if (wallMs < nowMs - WINDOW_MS) continue;
-    const x = xForWallMs(widthCss, nowMs, wallMs);
+    if (wallMs < viewEndMs - windowMs || wallMs > viewEndMs) continue;
+    const x = xForWallMs(widthCss, viewEndMs, windowMs, wallMs);
     const color = PKT_COLORS[ev.pkt_type] ?? UNKNOWN_COLOR;
     const isSelected = ev._id === sniffer.selectedId;
 
@@ -223,7 +253,7 @@ function draw() {
   ctx.fillRect(0, lanesBottom, widthCss, SLOT_LABEL_HEIGHT);
   if (sniffer.lastAnchor && sniffer.numSlots) {
     const { wallMs, sessionMs } = sniffer.lastAnchor;
-    const pixelsPerSlot = (SLOT_WIDTH_MS / WINDOW_MS) * widthCss;
+    const pixelsPerSlot = (SLOT_WIDTH_MS / windowMs) * widthCss;
     ctx.fillStyle = "#7a828c";
     ctx.font = "11px sans-serif";
     ctx.textAlign = "center";
@@ -232,7 +262,7 @@ function draw() {
       const slotIndex = Math.round(sessionMsAtT / SLOT_WIDTH_MS);
       const slotNumber = ((slotIndex % sniffer.numSlots) + sniffer.numSlots) % sniffer.numSlots;
       const expectedLabel = slotNumber === 0 ? "0" : `${slotNumber + 1}`;
-      const x = xForWallMs(widthCss, nowMs, t) + pixelsPerSlot / 2;
+      const x = xForWallMs(widthCss, viewEndMs, windowMs, t) + pixelsPerSlot / 2;
       ctx.fillText(expectedLabel, x, lanesBottom + 14);
     }
     ctx.textAlign = "left";
@@ -245,7 +275,10 @@ function tick() {
 }
 
 function pruneEvents() {
-  const cutoff = Date.now() - WINDOW_MS - 5000;
+  // Retention is independent of the visible window — it bounds how far back
+  // scrubbing can go, not what's currently drawn. Always measured from real
+  // time so the buffer keeps growing even while paused.
+  const cutoff = Date.now() - MAX_RETAIN_MS;
   while (sniffer.events.length && sniffer.events[0]._wallMs < cutoff) {
     sniffer.events.shift();
   }
@@ -263,6 +296,72 @@ function onSnifferEvent(ev) {
   if (ev.num_slots) {
     sniffer.numSlots = ev.num_slots;
   }
+}
+
+// --- Zoom + playback controls ---------------------------------------------
+
+function fmtWindowLabel(ms) {
+  return ms < 60_000 ? `${ms / 1000}s` : `${ms / 60_000}m`;
+}
+
+function renderZoomButtons() {
+  const container = document.getElementById("sniffer-zoom-buttons");
+  container.innerHTML = "";
+  for (const ms of ZOOM_PRESETS_MS) {
+    const btn = document.createElement("button");
+    btn.className = "time-range-btn" + (sniffer.windowMs === ms ? " active" : "");
+    btn.textContent = fmtWindowLabel(ms);
+    btn.addEventListener("click", () => setWindowMs(ms));
+    container.appendChild(btn);
+  }
+}
+
+function setWindowMs(ms) {
+  if (!sniffer.live) {
+    // Zooming while paused keeps the center of the current view stable,
+    // rather than anchoring to either edge.
+    const center = sniffer.pausedViewEndMs - sniffer.windowMs / 2;
+    sniffer.pausedViewEndMs = clampViewEnd(center + ms / 2, ms);
+  }
+  sniffer.windowMs = ms;
+  renderZoomButtons();
+}
+
+function renderPlaybackUI() {
+  const toggleBtn = document.getElementById("sniffer-play-toggle");
+  const indicator = document.getElementById("sniffer-live-indicator");
+  if (sniffer.live) {
+    toggleBtn.textContent = "⏸ Pause";
+    indicator.innerHTML = `<span class="conn-dot online"></span> LIVE`;
+  } else {
+    toggleBtn.textContent = "▶ Go Live";
+    const start = new Date(sniffer.pausedViewEndMs - sniffer.windowMs);
+    const end = new Date(sniffer.pausedViewEndMs);
+    indicator.innerHTML =
+      `<span class="conn-dot offline"></span> Viewing ${start.toLocaleTimeString()} – ${end.toLocaleTimeString()}`;
+  }
+}
+
+function setLive(isLive) {
+  if (isLive) {
+    sniffer.live = true;
+    sniffer.pausedViewEndMs = null;
+  } else if (sniffer.live) {
+    sniffer.pausedViewEndMs = Date.now();
+    sniffer.live = false;
+  }
+  renderPlaybackUI();
+}
+
+function togglePlay() {
+  setLive(!sniffer.live);
+}
+
+function stepView(direction) {
+  setLive(false); // stepping always means "look away from now"
+  const delta = direction * sniffer.windowMs * STEP_FRACTION;
+  sniffer.pausedViewEndMs = clampViewEnd(sniffer.pausedViewEndMs + delta, sniffer.windowMs);
+  renderPlaybackUI();
 }
 
 // --- Packet detail panel -------------------------------------------------
@@ -467,6 +566,11 @@ function init() {
   resizeCanvas();
   window.addEventListener("resize", resizeCanvas);
   document.getElementById("sniffer-timeline").addEventListener("click", onCanvasClick);
+  renderZoomButtons();
+  renderPlaybackUI();
+  document.getElementById("sniffer-play-toggle").addEventListener("click", togglePlay);
+  document.getElementById("sniffer-step-back").addEventListener("click", () => stepView(-1));
+  document.getElementById("sniffer-step-forward").addEventListener("click", () => stepView(1));
   connectSnifferSocket();
   requestAnimationFrame(tick);
   pollStats();
