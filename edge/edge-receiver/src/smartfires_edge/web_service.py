@@ -53,7 +53,11 @@ def run_web(cfg: EdgeConfig) -> int:
         data_dir=cfg.ingest.data_dir,
         base_station_store=BaseStationStore(),
         reset_event=reset_event,
-        tile_cache_dir=cfg.ingest.data_dir / "tiles",
+        # Namespaced by tile source: switching providers (as happened when we
+        # moved off raw OSM tiles to CARTO Voyager) must not silently mix old
+        # and new tiles under the same path — bump this name on any future
+        # source change instead of relying on a manual cache purge.
+        tile_cache_dir=cfg.ingest.data_dir / "tiles" / "carto-voyager",
         sniffer_enabled=cfg.ingest.sniffer.enabled,
     )
     uvicorn.run(app, host=cfg.web_host, port=cfg.web_http_port, log_level="info")
