@@ -1,3 +1,19 @@
+---
+name: packet-reliability
+description: StrictLinkAck vs AppLayerAckSummary reliability modes, retry gating, and ACK_SUMMARY.
+category: architecture
+status: current
+last_verified: 2026-06-23
+source_refs:
+  - platformio/include/config/NetworkConfig.h
+  - platformio/include/radio/TdmaConfig.h
+  - platformio/src/radio/TdmaRadioService.cpp
+  - platformio/src/app/SmartFiresBaseApp.cpp
+related_docs:
+  - tdma-protocol
+  - tunable-parameters
+---
+
 # Packet Reliability
 
 SmartFires uses a two-layer reliability architecture that keeps radio-link

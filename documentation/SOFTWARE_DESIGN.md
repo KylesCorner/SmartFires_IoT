@@ -1,3 +1,19 @@
+---
+name: software-design
+description: Master system architecture — hardware topology, firmware/edge module layout, wire protocol.
+category: architecture
+status: current
+last_verified: 2026-06-23
+source_refs:
+  - platformio/platformio.ini
+  - platformio/include/telemetry/BinaryPacket.h
+  - edge/edge-receiver/src/smartfires_edge/main.py
+related_docs:
+  - software-design-diagram
+  - tdma-protocol
+  - uart-jetson-bridge
+---
+
 # SmartFires IoT Software Design
 
 ## Overview

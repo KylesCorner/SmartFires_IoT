@@ -1,3 +1,17 @@
+---
+name: network-test
+description: End-to-end LoRa-to-base-to-Jetson integration test procedure using synthetic sensor data (currently blocked on a removed dummy-node build env).
+category: reference
+status: current
+last_verified: 2026-06-23
+source_refs:
+  - platformio/platformio.ini
+related_docs:
+  - flashing
+  - tdma-protocol
+  - uart-jetson-bridge
+---
+
 # SmartFires — Network Integration Test Guide
 
 End-to-end pipeline verification using synthetic sensor data. Tests the full

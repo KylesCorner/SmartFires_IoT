@@ -1,3 +1,20 @@
+---
+name: tunable-parameters
+description: Every tunable constant in the system — TDMA, sensing/duty-cycle, power, Jetson.
+category: architecture
+status: current
+last_verified: 2026-06-23
+source_refs:
+  - platformio/include/config/NetworkConfig.h
+  - platformio/include/config/SensingConfig.h
+  - platformio/include/config/PowerConfig.h
+  - platformio/include/config/BaseConfig.h
+related_docs:
+  - tdma-protocol
+  - packet-reliability
+  - duty-cycling
+---
+
 # SmartFires — Tunable Parameters
 
 Single reference for every configurable value in the system.  After the

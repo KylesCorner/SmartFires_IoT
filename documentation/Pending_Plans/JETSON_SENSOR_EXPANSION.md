@@ -1,3 +1,12 @@
+---
+name: jetson-sensor-expansion
+description: Plan to add temp/humidity, BMV080, GPS, and ICM-20948 IMU sensors directly to the Jetson via I2C, with per-sensor risk assessment.
+category: plan-pending
+status: draft
+related_docs:
+  - uart-jetson-bridge
+---
+
 # Jetson Sensor Expansion
 
 ## Background

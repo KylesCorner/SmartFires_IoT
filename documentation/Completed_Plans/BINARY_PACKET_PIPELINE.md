@@ -1,3 +1,13 @@
+---
+name: binary-packet-pipeline
+description: Plan for converting node telemetry from text-based full-state stream to the binary bundle-with-delta-frames protocol, integrated into the refactored class structure.
+category: plan-completed
+status: historical
+superseded_by: software-design
+related_docs:
+  - telemetry-rework-plan
+---
+
 # Binary Packet Pipeline
 
 ## Purpose

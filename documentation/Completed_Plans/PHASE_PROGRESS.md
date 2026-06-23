@@ -1,3 +1,11 @@
+---
+name: phase-progress
+description: Tracking doc for the staged rollout of TDMA telemetry reliability changes, from StrictLinkAck mode introduction through fire-and-forget app-layer ACK_SUMMARY.
+category: plan-completed
+status: historical
+superseded_by: packet-reliability
+---
+
 # SmartFires Reliability Phase Progress
 
 This file tracks the staged rollout of TDMA telemetry reliability changes.

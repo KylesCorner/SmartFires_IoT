@@ -1,3 +1,11 @@
+---
+name: tdma-bundle-sizing
+description: Reference deriving the relationships between sensing rate, bundle delta count, LoRa packet size/airtime, TDMA slot width, and node count, for choosing tuning parameters.
+category: plan-completed
+status: historical
+superseded_by: bandwidth-scaling
+---
+
 # TDMA & Bundle Packet Sizing Reference
 
 This document derives the relationships between sensing rate, bundle delta count, LoRa

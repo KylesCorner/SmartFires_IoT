@@ -1,3 +1,13 @@
+---
+name: documentation-index
+description: Table of contents for documentation/ — start here.
+category: index
+status: current
+last_verified: 2026-06-23
+related_docs:
+  - software-design
+---
+
 # SmartFires IoT Documentation
 
 ## Top-level docs

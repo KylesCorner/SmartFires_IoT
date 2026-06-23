@@ -1,3 +1,15 @@
+---
+name: software-design-diagram
+description: Diagram-form companion to SOFTWARE_DESIGN.md — system, control-flow, and packet diagrams.
+category: architecture
+status: current
+last_verified: 2026-06-23
+source_refs:
+  - platformio/platformio.ini
+related_docs:
+  - software-design
+---
+
 # SmartFires IoT Software Design Diagram
 
 ## System Diagram

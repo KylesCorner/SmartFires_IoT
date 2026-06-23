@@ -1,3 +1,20 @@
+---
+name: tdma-protocol
+description: Slot geometry, session clock, boot handshake, and TX budget for the TDMA radio layer.
+category: architecture
+status: current
+last_verified: 2026-06-23
+source_refs:
+  - platformio/include/radio/TdmaConfig.h
+  - platformio/include/config/NetworkConfig.h
+  - platformio/src/radio/TdmaClock.cpp
+  - platformio/src/radio/TdmaRadioService.cpp
+related_docs:
+  - packet-reliability
+  - bandwidth-scaling
+  - tunable-parameters
+---
+
 # TDMA Protocol
 
 All sensor nodes and the base station share a single 915 MHz LoRa channel.

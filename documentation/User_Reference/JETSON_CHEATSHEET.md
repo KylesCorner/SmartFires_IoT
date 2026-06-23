@@ -1,3 +1,16 @@
+---
+name: jetson-cheatsheet
+description: Common Jetson-side commands — installing edge-receiver, pulling data, the web dashboard, and one-time udev setup for stable base/sniffer device paths.
+category: reference
+status: current
+last_verified: 2026-06-23
+source_refs:
+  - util/udev/99-smartfires.rules
+  - edge/edge-receiver/src/smartfires_edge/main.py
+related_docs:
+  - uart-jetson-bridge
+---
+
 # SmartFires — Jetson Cheatsheet
 
 ## Install the edge-receiver package

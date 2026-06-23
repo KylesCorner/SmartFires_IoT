@@ -1,3 +1,17 @@
+---
+name: flashing
+description: PlatformIO flash, monitor, and build commands for every Feather M0 environment, plus upload troubleshooting.
+category: reference
+status: current
+last_verified: 2026-06-23
+source_refs:
+  - platformio/platformio.ini
+related_docs:
+  - debug-filter
+  - network-test
+  - tdma-protocol
+---
+
 # SmartFires — Flashing Guide
 
 All commands are run from the `platformio/` directory. The PlatformIO CLI is at

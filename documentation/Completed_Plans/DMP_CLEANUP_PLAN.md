@@ -1,3 +1,13 @@
+---
+name: dmp-cleanup-plan
+description: Plan to remove the Jetson-side IMU calibration pipeline and raw mag/accel transport now that the ICM-20948 DMP computes heading on-chip, replacing it with a compact heading field in STATUS.
+category: plan-completed
+status: historical
+superseded_by: software-design
+related_docs:
+  - orientation-calibration-plan
+---
+
 # DMP Cleanup Plan
 
 ## Background

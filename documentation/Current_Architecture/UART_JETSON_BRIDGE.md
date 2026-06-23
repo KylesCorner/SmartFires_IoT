@@ -1,3 +1,20 @@
+---
+name: uart-jetson-bridge
+description: Frame format and routing between the base station Feather and the Jetson over USB CDC.
+category: architecture
+status: current
+last_verified: 2026-06-23
+source_refs:
+  - platformio/include/telemetry/BinaryPacket.h
+  - platformio/src/app/SmartFiresBaseApp.cpp
+  - platformio/include/logging/FramedDebugLogSink.h
+  - edge/edge-receiver/src/smartfires_edge/uart_receiver.py
+  - edge/edge-receiver/src/smartfires_edge/ingest_service.py
+related_docs:
+  - packet-reliability
+  - tdma-protocol
+---
+
 # Jetson Bridge
 
 The Feather M0 base station and the Jetson Orin Nano communicate over a

@@ -1,3 +1,17 @@
+---
+name: duty-cycling
+description: DutyCycleController's wake/sample/sleep state machine and its config/trigger sensor.
+category: architecture
+status: current
+last_verified: 2026-06-23
+source_refs:
+  - platformio/include/power/DutyCycleController.h
+  - platformio/src/power/DutyCycleController.cpp
+  - platformio/include/config/SensingConfig.h
+related_docs:
+  - tunable-parameters
+---
+
 # Duty Cycling
 
 `DutyCycleController` owns the sensor wake/sample/sleep state machine for every

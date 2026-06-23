@@ -1,3 +1,14 @@
+---
+name: orientation-calibration-plan
+description: Plan for Jetson-side IMU calibration (ellipsoid fitting, soft/hard iron correction, declination) computing absolute heading from raw mag/accel data sent by the node.
+category: plan-completed
+status: historical
+superseded_by: dmp-cleanup-plan
+related_docs:
+  - jetson-cli-and-command-system
+  - deployment-schedule
+---
+
 # Node Orientation Calibration and Absolute Heading Plan
 
 ## Overview

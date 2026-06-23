@@ -1,3 +1,11 @@
+---
+name: persistent-node-registry
+description: Fix plan for two bugs in uid_hash-to-node_id correlation — a radio-address collision in the AWAKEN handshake and missing Jetson-side mapping persistence.
+category: plan-completed
+status: historical
+superseded_by: tdma-protocol
+---
+
 # Node ID Correlation Forwarding
 
 ## Goal

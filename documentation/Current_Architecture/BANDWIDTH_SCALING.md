@@ -1,3 +1,18 @@
+---
+name: bandwidth-scaling
+description: Airtime math and node-count scaling table for the current TDMA/bundle scheme.
+category: architecture
+status: current
+last_verified: 2026-06-23
+source_refs:
+  - platformio/include/telemetry/BinaryPacket.h
+  - platformio/include/config/NetworkConfig.h
+  - platformio/src/radio/TdmaRadioService.cpp
+related_docs:
+  - tdma-protocol
+  - packet-reliability
+---
+
 # Bandwidth and Scaling Math (Current Scheme)
 
 This document summarizes sensing, bundle production, TDMA service capacity, and channel occupancy for the current SmartFires node scheme.

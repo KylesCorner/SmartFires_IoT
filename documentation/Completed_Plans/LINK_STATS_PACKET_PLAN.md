@@ -1,3 +1,11 @@
+---
+name: link-stats-packet-plan
+description: Plan to extend PKT_STATUS with lifetime retransmit/send-failure counters so post-survey analysis can correlate LoRa link quality with GPS location, with no new packet type.
+category: plan-completed
+status: historical
+superseded_by: packet-reliability
+---
+
 # Link Stats in STATUS Packet Plan
 
 ## Purpose

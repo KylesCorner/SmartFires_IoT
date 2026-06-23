@@ -1,3 +1,14 @@
+---
+name: deployment-schedule
+description: Phased rollout schedule for the Jetson-side IMU calibration and absolute heading system, from wire protocol through interactive CLI and hardware validation.
+category: plan-completed
+status: historical
+related_docs:
+  - orientation-calibration-plan
+  - jetson-cli-and-command-system
+  - dmp-cleanup-plan
+---
+
 # Phased Deployment Schedule: Jetson CLI, Calibration, and Heading System
 
 ## Overview
