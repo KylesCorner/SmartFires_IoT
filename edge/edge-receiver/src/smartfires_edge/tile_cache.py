@@ -8,7 +8,19 @@ Pre-fetching is also driven from the browser (see static/js/tile_layer.js).
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
+
+# MD5 of known tile-provider error/placeholder images. A browser fetch() can
+# still come back with resp.ok=True for these (provider returns 200 with a
+# warning graphic), so a hash check is the last line of defense against
+# caching them permanently — once stored, they're served forever since
+# get() never re-validates.
+_REJECTED_TILE_HASHES = frozenset(
+    {
+        "c069a15b2cc2d6b6f527ad09eb93c61a",  # OSM "Access blocked" placeholder
+    }
+)
 
 
 class TileCache:
@@ -29,6 +41,8 @@ class TileCache:
         return p.read_bytes() if p.exists() else None
 
     def put(self, z: int, x: int, y: int, data: bytes) -> None:
+        if hashlib.md5(data).hexdigest() in _REJECTED_TILE_HASHES:
+            return
         p = self._path(z, x, y)
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(data)
