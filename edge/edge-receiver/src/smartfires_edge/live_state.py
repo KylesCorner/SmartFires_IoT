@@ -205,6 +205,12 @@ class LiveState:
                 tstats = tracker_nodes.get(str(node_id), {})
                 expected = tstats.get("received", 0) + tstats.get("missing", 0)
                 loss_percent = 100.0 * tstats.get("missing", 0) / expected if expected else 0.0
+                heading_accuracy_raw = status.get("heading_accuracy")
+                heading_accuracy_deg = (
+                    round(heading_accuracy_raw / 4096.0, 1)
+                    if isinstance(heading_accuracy_raw, (int, float))
+                    else None
+                )
                 result[node_id] = {
                     "node_id": node_id,
                     "lat": status.get("lat"),
@@ -213,6 +219,7 @@ class LiveState:
                     "battery_pct": status.get("battery_pct"),
                     "rssi": status.get("rssi"),
                     "heading_deg": status.get("heading_deg"),
+                    "heading_accuracy_deg": heading_accuracy_deg,
                     "retx_total": status.get("retx_total"),
                     "fail_total": status.get("fail_total"),
                     "retx_session": status.get("retx_session"),

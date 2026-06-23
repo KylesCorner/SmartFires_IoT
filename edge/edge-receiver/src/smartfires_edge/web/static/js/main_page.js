@@ -312,10 +312,16 @@ function updateNodeTable(nodes) {
     const lastSeen = info.last_seen
       ? new Date(info.last_seen * 1000).toLocaleTimeString()
       : "—";
+    const heading = info.heading_deg !== null && info.heading_deg !== undefined && info.heading_deg !== ""
+      ? `${info.heading_deg}°`
+      : "—";
+    const headingAcc = info.heading_accuracy_deg !== null && info.heading_accuracy_deg !== undefined && info.heading_accuracy_deg !== ""
+      ? `±${info.heading_accuracy_deg}°`
+      : "—";
     const tr = document.createElement("tr");
     tr.innerHTML = `<td>${info.node_id}</td><td>${fmt(info.lat)}</td><td>${fmt(
       info.lon
-    )}</td><td>${fmt(info.battery_pct)}</td><td>${lastSeen}</td>`;
+    )}</td><td>${fmt(info.battery_pct)}</td><td>${heading}</td><td>${headingAcc}</td><td>${lastSeen}</td>`;
     tbody.appendChild(tr);
   }
 }

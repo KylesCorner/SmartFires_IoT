@@ -415,7 +415,6 @@ def run_receive(
                     f"wind={pkt['wind_mps']:.2f} "
                     f"PM1.0={pkt['pm1_0_ug_m3']:.1f} PM2.5={pkt['pm2_5_ug_m3']:.1f} "
                     f"PM4.0={pkt['pm4_0_ug_m3']:.1f} PM10={pkt['pm10_ug_m3']:.1f} "
-                    f"lat={pkt['lat']} lon={pkt['lon']} "
                     f"rssi={pkt['rssi']:4d}",
                     int(pkt["node_id"]),
                     kind="bundle",
