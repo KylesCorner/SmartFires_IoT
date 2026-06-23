@@ -187,6 +187,8 @@ def _decode_rx_event(
         dec = decode_ack_summary(raw, rssi)
         if dec is not None:
             extra["target_node_id"] = dec["node_id"]
+            extra["ack_base_seq"] = dec["ack_base_seq"]
+            extra["ack_mask"] = dec["ack_mask"]
     elif pkt_type == PKT_CMD_CALIBRATE:
         dec = decode_cmd_calibrate(raw)
         if dec is not None:

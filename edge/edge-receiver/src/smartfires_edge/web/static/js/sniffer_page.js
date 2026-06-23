@@ -283,6 +283,40 @@ function fmtPayloadHex(hex) {
   return hex.match(/.{1,2}/g).join(" ");
 }
 
+// RadioHead addresses use 1 for the base station (RadioHeadTdmaDriver::Config::
+// radioHeadCfg(0x01) in main.cpp); display it as "0" to match the node_id=0
+// "Base Station" convention used everywhere else in this UI.
+function rhAddrLabel(addr) {
+  if (addr == null) return "—";
+  return addr === 1 ? "0" : String(addr);
+}
+
+function rhAddrName(addr) {
+  if (addr == null) return "—";
+  return addr === 1 ? "Base Station" : `Node ${addr}`;
+}
+
+// PKT_ACK_SUMMARY's payload is a 16-bit bitmap over a window of sequence
+// numbers starting at ack_base_seq — see PACKET_RELIABILITY.md. Decode it
+// into the actual (wrapping mod 256) seq numbers being acknowledged.
+function ackedSeqs(baseSeq, mask) {
+  if (baseSeq == null || mask == null) return undefined;
+  const seqs = [];
+  for (let bit = 0; bit < 16; bit++) {
+    if (mask & (1 << bit)) seqs.push((baseSeq + bit) & 0xff);
+  }
+  return seqs;
+}
+
+function fmtAckedSeqs(baseSeq, mask) {
+  const seqs = ackedSeqs(baseSeq, mask);
+  if (seqs === undefined) return undefined;
+  const maskHex = `0x${mask.toString(16).padStart(4, "0")}`;
+  return seqs.length
+    ? `${seqs.join(", ")}  (base=${baseSeq}, mask=${maskHex})`
+    : `none  (base=${baseSeq}, mask=${maskHex})`;
+}
+
 // [label, getter, isFlagRow] — getter returning undefined hides the row.
 const DETAIL_FIELDS = [
   ["Type", (ev) => ev.pkt_type, false],
@@ -303,6 +337,31 @@ const DETAIL_FIELDS = [
   ["RadioHead from", (ev) => ev.rh_from, false],
   ["RadioHead msg id", (ev) => ev.rh_id, false],
   ["RadioHead flags", (ev) => fmtRhFlags(ev.rh_flags), (ev) => ev.rh_is_ack || ev.rh_is_retry],
+  [
+    "Acker → Acked",
+    (ev) => {
+      if (ev.rh_is_ack) {
+        // A RadioHead ACK's rh_from is whoever is transmitting THIS ack
+        // frame (the receiver of the original message); rh_to is the
+        // original sender being acknowledged. "0 → 2" reads as "node 0 is
+        // acking node 2".
+        return `${rhAddrLabel(ev.rh_from)} → ${rhAddrLabel(ev.rh_to)}  (${rhAddrName(ev.rh_from)} acks ${rhAddrName(ev.rh_to)})`;
+      }
+      if (ev.pkt_type === "ACK_SUMMARY" && ev.target_node_id != null) {
+        // App-layer ACK_SUMMARY is always sent by the base (node_id 0 in
+        // the SmartFires header); the node being acked is its own payload
+        // field, decoded separately as target_node_id.
+        return `0 → ${ev.target_node_id}  (Base Station acks Node ${ev.target_node_id})`;
+      }
+      return undefined;
+    },
+    true,
+  ],
+  [
+    "Acked sequence numbers",
+    (ev) => (ev.pkt_type === "ACK_SUMMARY" ? fmtAckedSeqs(ev.ack_base_seq, ev.ack_mask) : undefined),
+    false,
+  ],
   [
     "Attributed to (slot owner)",
     (ev) => (ev.rh_owner_node_id != null ? (ev.rh_owner_node_id === 0 ? "Base Station" : `Node ${ev.rh_owner_node_id}`) : undefined),
