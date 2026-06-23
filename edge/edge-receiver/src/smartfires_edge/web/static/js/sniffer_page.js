@@ -23,6 +23,12 @@ const PKT_COLORS = {
   CMD_CALIBRATE: "#e8743a",
   CMD_RESET: "#e8743a",
   CMD_ACK: "#5dade2",
+  // Bare RadioHead link-layer frames with no SmartFires magic byte — most
+  // commonly RHReliableDatagram ACKs (zero-length payload). Given their own
+  // colors/labels so they're distinguishable from genuinely-unrecognized
+  // SmartFires packet types (which still fall through to UNKNOWN_COLOR).
+  RH_ACK: "#6b7280",
+  RH_RAW: "#a35400",
 };
 const UNKNOWN_COLOR = "#c0392b";
 const UNKNOWN_LABEL = "UNKNOWN / other";
@@ -36,6 +42,10 @@ const sniffer = {
   ws: null,
   notConfigured: false,
   logLines: 0,
+  logElems: [],          // log line elements, parallel to ring-buffer eviction
+  idCounter: 0,
+  selectedId: null,
+  hitRects: [],          // canvas marker bounding boxes for click hit-testing
 };
 
 function laneLabel(nodeId) {
@@ -146,20 +156,23 @@ function draw() {
   });
 
   // Events.
+  sniffer.hitRects = [];
   for (const ev of sniffer.events) {
     const wallMs = ev._wallMs;
     if (wallMs < nowMs - WINDOW_MS) continue;
     const x = xForWallMs(widthCss, nowMs, wallMs);
     const color = PKT_COLORS[ev.pkt_type] ?? UNKNOWN_COLOR;
+    const isSelected = ev._id === sniffer.selectedId;
 
     if (ev.pkt_type === "TIME_SYNC") {
       ctx.strokeStyle = color;
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = isSelected ? 3 : 1.5;
       ctx.beginPath();
       ctx.moveTo(x, HEADER_HEIGHT);
       ctx.lineTo(x, lanesBottom);
       ctx.stroke();
       ctx.lineWidth = 1;
+      sniffer.hitRects.push({ x0: x - 4, y0: HEADER_HEIGHT, x1: x + 4, y1: lanesBottom, ev });
       continue;
     }
 
@@ -172,6 +185,13 @@ function draw() {
       ctx.strokeRect(x - 3, y, 7, 16);
     }
     ctx.fillRect(x - 3, y, 7, 16);
+    if (isSelected) {
+      ctx.strokeStyle = "#ffd166";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x - 4, y - 1, 9, 18);
+      ctx.lineWidth = 1;
+    }
+    sniffer.hitRects.push({ x0: x - 3, y0: y, x1: x + 4, y1: y + 16, ev });
   }
 
   // Expected-transmitter label row: who should be transmitting in each slot
@@ -214,6 +234,7 @@ function pruneEvents() {
 
 function onSnifferEvent(ev) {
   ev._wallMs = Date.parse(ev.wall_t);
+  ev._id = ++sniffer.idCounter;
   sniffer.events.push(ev);
   pruneEvents();
 
@@ -232,20 +253,113 @@ function appendSnifferLog(ev) {
   const time = new Date(ev._wallMs).toISOString().slice(11, 23);
   const jitter = ev.jitter_ms != null ? `${ev.jitter_ms > 0 ? "+" : ""}${ev.jitter_ms}ms` : "—";
   const target = ev.target_node_id != null ? ` target=${ev.target_node_id}` : "";
-  const line = `${time}  ${ev.pkt_type.padEnd(10)} node=${ev.node_id ?? "—"}${target} rssi=${ev.rssi ?? "—"} snr=${ev.snr ?? "—"} jitter=${jitter}${ev.guard_violation ? "  GUARD-VIOLATION" : ""}`;
+  const rhFlag = ev.rh_is_ack ? " RH-ACK" : ev.rh_is_retry ? " RH-RETRY" : "";
+  const line = `${time}  ${ev.pkt_type.padEnd(10)} node=${ev.node_id ?? "—"}${target} rssi=${ev.rssi ?? "—"} snr=${ev.snr ?? "—"} jitter=${jitter}${rhFlag}${ev.guard_violation ? "  GUARD-VIOLATION" : ""}`;
+
+  const lineEl = document.createElement("div");
+  lineEl.className = "sniffer-log-line";
+  lineEl.textContent = line;
+  lineEl.dataset.id = String(ev._id);
+  lineEl.addEventListener("click", () => selectEvent(ev));
 
   sniffer.logLines += 1;
+  sniffer.logElems.push(lineEl);
   const atBottom = el.scrollHeight - el.scrollTop <= el.clientHeight + 4;
-  el.textContent += line + "\n";
+  el.appendChild(lineEl);
   if (sniffer.logLines > LOG_MAX_LINES) {
-    const firstNewline = el.textContent.indexOf("\n");
-    if (firstNewline !== -1) {
-      el.textContent = el.textContent.slice(firstNewline + 1);
-    }
+    const oldest = sniffer.logElems.shift();
+    oldest.remove();
     sniffer.logLines -= 1;
   }
   if (atBottom) {
     el.scrollTop = el.scrollHeight;
+  }
+}
+
+// --- Packet detail panel -------------------------------------------------
+
+function fmtRhFlags(flags) {
+  if (flags == null) return "—";
+  const bits = [];
+  if (flags & 0x80) bits.push("ACK");
+  if (flags & 0x40) bits.push("RETRY");
+  const appBits = flags & 0x0f;
+  if (appBits) bits.push(`app=0x${appBits.toString(16)}`);
+  const hex = `0x${flags.toString(16).padStart(2, "0")}`;
+  return bits.length ? `${hex} (${bits.join(", ")})` : hex;
+}
+
+function fmtPayloadHex(hex) {
+  if (!hex) return "(empty)";
+  return hex.match(/.{1,2}/g).join(" ");
+}
+
+// [label, getter, isFlagRow] — getter returning undefined hides the row.
+const DETAIL_FIELDS = [
+  ["Type", (ev) => ev.pkt_type, false],
+  ["Node", (ev) => ev.node_id ?? "—", false],
+  ["Seq", (ev) => ev.seq ?? "—", false],
+  ["Target node", (ev) => ev.target_node_id, false],
+  ["RSSI", (ev) => (ev.rssi != null ? `${ev.rssi} dBm` : "—"), false],
+  ["SNR", (ev) => (ev.snr != null ? `${ev.snr} dB` : "—"), false],
+  ["Jitter", (ev) => (ev.jitter_ms != null ? `${ev.jitter_ms} ms` : "—"), false],
+  ["Guard violation", (ev) => (ev.guard_violation ? "YES" : "no"), (ev) => ev.guard_violation],
+  ["Session ms", (ev) => ev.session_ms, false],
+  ["Session id", (ev) => ev.session_id, false],
+  ["Anchored to TIME_SYNC", (ev) => (ev.anchored ? "yes" : "no"), false],
+  ["Num slots", (ev) => ev.num_slots, false],
+  ["Battery %", (ev) => ev.battery_pct, false],
+  ["UID hash", (ev) => (ev.uid_hash != null ? `0x${ev.uid_hash.toString(16)}` : undefined), false],
+  ["RadioHead to", (ev) => ev.rh_to, false],
+  ["RadioHead from", (ev) => ev.rh_from, false],
+  ["RadioHead msg id", (ev) => ev.rh_id, false],
+  ["RadioHead flags", (ev) => fmtRhFlags(ev.rh_flags), (ev) => ev.rh_is_ack || ev.rh_is_retry],
+  ["Wall time", (ev) => ev.wall_t, false],
+  ["Sniffer t (ms)", (ev) => ev.sniffer_t_ms, false],
+  ["Payload length", (ev) => (ev.payload_hex ? ev.payload_hex.length / 2 : 0), false],
+  ["Payload (hex)", (ev) => fmtPayloadHex(ev.payload_hex), false],
+];
+
+function renderDetail(ev) {
+  const tbody = document.querySelector("#sniffer-detail-table tbody");
+  tbody.innerHTML = "";
+  for (const [label, getter, isFlag] of DETAIL_FIELDS) {
+    const value = getter(ev);
+    if (value === undefined) continue;
+    const tr = document.createElement("tr");
+    if (typeof isFlag === "function" ? isFlag(ev) : isFlag) {
+      tr.classList.add("sniffer-detail-flag");
+    }
+    const tdLabel = document.createElement("td");
+    tdLabel.textContent = label;
+    const tdValue = document.createElement("td");
+    tdValue.textContent = String(value);
+    tr.append(tdLabel, tdValue);
+    tbody.appendChild(tr);
+  }
+  document.getElementById("sniffer-detail-empty").style.display = "none";
+  document.getElementById("sniffer-detail-table").style.display = "";
+}
+
+function highlightLogSelection() {
+  for (const el of sniffer.logElems) {
+    el.classList.toggle("selected", Number(el.dataset.id) === sniffer.selectedId);
+  }
+}
+
+function selectEvent(ev) {
+  sniffer.selectedId = ev._id;
+  renderDetail(ev);
+  highlightLogSelection();
+}
+
+function onCanvasClick(e) {
+  for (let i = sniffer.hitRects.length - 1; i >= 0; i--) {
+    const r = sniffer.hitRects[i];
+    if (e.offsetX >= r.x0 && e.offsetX <= r.x1 && e.offsetY >= r.y0 && e.offsetY <= r.y1) {
+      selectEvent(r.ev);
+      return;
+    }
   }
 }
 
@@ -306,6 +420,7 @@ function init() {
   renderLegend();
   resizeCanvas();
   window.addEventListener("resize", resizeCanvas);
+  document.getElementById("sniffer-timeline").addEventListener("click", onCanvasClick);
   connectSnifferSocket();
   requestAnimationFrame(tick);
   pollStats();

@@ -46,6 +46,17 @@
             <tbody></tbody>
           </table>
         </div>
+
+        <div class="panel">
+          <h2>Packet Detail</h2>
+          <p class="section-hint">
+            Click a marker on the timeline or a line in the packet log to inspect it.
+          </p>
+          <div id="sniffer-detail-empty" class="sniffer-detail-empty">No packet selected.</div>
+          <table id="sniffer-detail-table" class="sniffer-detail-table" style="display:none;">
+            <tbody></tbody>
+          </table>
+        </div>
       </section>
 
     </div>
@@ -54,7 +65,7 @@
       <div class="log-header">
         <h2>Sniffer Packet Log</h2>
       </div>
-      <pre id="sniffer-log-output" class="log-output"></pre>
+      <div id="sniffer-log-output" class="log-output sniffer-log-list"></div>
     </div>
   </main>
 

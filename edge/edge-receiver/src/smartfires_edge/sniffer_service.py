@@ -57,6 +57,18 @@ GUARD_MS = 20
 _VIRTUAL_BASE_NODE_ID = 1
 _BASE_SLOTTED_TYPES = {PKT_ACK_SUMMARY, PKT_CMD_CALIBRATE, PKT_CMD_RESET}
 
+# RadioHead link-layer header flags (RHReliableDatagram) — not part of the
+# SmartFires wire protocol. See RadioHeadTdmaDriver.cpp's setHeaderFlags()
+# calls for the firmware's matching usage.
+RH_FLAGS_ACK = 0x80
+RH_FLAGS_RETRY = 0x40
+
+# RadioHead address of the base station (RadioHeadTdmaDriver::Config::radioHeadCfg(0x01)
+# in main.cpp). Used to fold bare RadioHead frames (no SmartFires magic byte,
+# e.g. RHReliableDatagram ACKs) into the existing node_id=0 "Base Station"
+# lane convention already used for SmartFires-decoded base packets.
+_RH_BASE_ADDRESS = 1
+
 
 def _pkt_type_name(pkt_type: int) -> str:
     return {
@@ -185,11 +197,43 @@ def _decode_rx_event(
     elif pkt_type == PKT_CMD_ACK:
         decode_cmd_ack(raw, rssi)
 
+    rh_to = rx.get("rh_to")
+    rh_from = rx.get("rh_from")
+    rh_id = rx.get("rh_id")
+    rh_flags = rx.get("rh_flags")
+    rh_is_ack = bool(rh_flags is not None and rh_flags & RH_FLAGS_ACK)
+    rh_is_retry = bool(rh_flags is not None and rh_flags & RH_FLAGS_RETRY)
+
+    if pkt_type is not None:
+        pkt_type_name = _pkt_type_name(pkt_type)
+    else:
+        # No SmartFires magic byte — most commonly a bare RadioHead
+        # RHReliableDatagram ACK (zero-length payload, link-layer only).
+        # Attribute it to a lane so it lines up against the TDMA grid
+        # instead of piling up under one ambiguous "UNKNOWN" bucket.
+        pkt_type_name = "RH_ACK" if rh_is_ack else "RH_RAW"
+        if rh_is_ack:
+            # An ACK is transmitted BY the receiver of the original message,
+            # addressed back TO the original sender — so the TDMA slot this
+            # exchange belongs to is owned by the ACK's *destination*
+            # (rh_to), not the radio that's actually sending this ACK frame.
+            attributed_addr = rh_to
+        else:
+            # Not a reliable-datagram ACK (e.g. a corrupted/foreign frame) —
+            # no "who's being acknowledged" semantics, so attribute it to
+            # whichever radio actually sent it.
+            attributed_addr = rh_from
+        if attributed_addr is not None:
+            node_id = 0 if attributed_addr == _RH_BASE_ADDRESS else attributed_addr
+
     session_ms = anchor.session_ms_for(t_ms) if pkt_type != PKT_TIME_SYNC else anchor.session_time_ms
     jitter_ms = None
     guard_violation = None
     if session_ms is not None and pkt_type != PKT_TIME_SYNC:
-        slot_node_id = _VIRTUAL_BASE_NODE_ID if pkt_type in _BASE_SLOTTED_TYPES else node_id
+        is_base_rh_frame = pkt_type is None and node_id == 0
+        slot_node_id = (
+            _VIRTUAL_BASE_NODE_ID if (pkt_type in _BASE_SLOTTED_TYPES or is_base_rh_frame) else node_id
+        )
         if slot_node_id is not None:
             jitter_ms, guard_violation = _slot_timing(slot_node_id, session_ms, num_slots)
 
@@ -197,7 +241,7 @@ def _decode_rx_event(
         "wall_t": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
         "sniffer_t_ms": t_ms,
         "session_ms": session_ms,
-        "pkt_type": _pkt_type_name(pkt_type) if pkt_type is not None else "UNKNOWN",
+        "pkt_type": pkt_type_name,
         "node_id": node_id,
         "seq": seq,
         "rssi": rssi,
@@ -207,6 +251,12 @@ def _decode_rx_event(
         "anchored": anchor.anchored,
         "num_slots": num_slots,
         "payload_hex": payload_hex,
+        "rh_to": rh_to,
+        "rh_from": rh_from,
+        "rh_id": rh_id,
+        "rh_flags": rh_flags,
+        "rh_is_ack": rh_is_ack,
+        "rh_is_retry": rh_is_retry,
     }
     event.update(extra)
     event["_session_changed"] = session_changed

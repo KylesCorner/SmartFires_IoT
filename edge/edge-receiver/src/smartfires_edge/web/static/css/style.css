@@ -489,3 +489,57 @@ table th {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+.sniffer-log-list {
+  cursor: default;
+}
+
+.sniffer-log-line {
+  cursor: pointer;
+  padding: 1px 2px;
+  border-radius: 3px;
+}
+
+.sniffer-log-line:hover {
+  background: #20262d;
+}
+
+.sniffer-log-line.selected {
+  background: #2a3a4a;
+  color: #fff;
+}
+
+.sniffer-detail-empty {
+  color: #6b7280;
+  font-size: 0.85rem;
+  padding: 0.5rem 0;
+}
+
+.sniffer-detail-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.sniffer-detail-table td {
+  padding: 0.25rem 0.4rem;
+  border-bottom: 1px solid #2a2f36;
+  vertical-align: top;
+}
+
+.sniffer-detail-table td:first-child {
+  color: #aab4c0;
+  white-space: nowrap;
+  width: 40%;
+}
+
+.sniffer-detail-table td:last-child {
+  color: #e6e6e6;
+  word-break: break-all;
+  font-family: monospace;
+}
+
+.sniffer-detail-table tr.sniffer-detail-flag td:last-child {
+  color: #e8743a;
+  font-weight: 600;
+}
