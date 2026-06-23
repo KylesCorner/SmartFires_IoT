@@ -311,6 +311,7 @@ void SmartFiresBaseApp::processIncomingLoRa() {
         assignment->pendingRadioAddr = pkt.from;
         assignment->pendingTriggerSeq = hdr.seq;
         syncQueued = true;
+        resetAckTracker(assignment->nodeId);
       }
       LOG_INFO("base", "awaken_local_time_sync_queued count=%lu result=%s",
                static_cast<unsigned long>(_awakenRxCount),
@@ -526,6 +527,38 @@ SmartFiresBaseApp::AckTracker *SmartFiresBaseApp::findOrCreateAckTracker(
   freeTracker->lastSentAckBaseSeq = 0;
   freeTracker->lastSentAckMask = 0;
   return freeTracker;
+}
+
+void SmartFiresBaseApp::resetAckTracker(uint8_t nodeId) {
+  for (uint8_t i = 0; i < kMaxAckTrackedNodes; ++i) {
+    AckTracker &tracker = _ackTrackers[i];
+    if (!tracker.inUse || tracker.nodeId != nodeId) {
+      continue;
+    }
+
+    // AWAKEN means the node lost its session (reboot/brownout) and its own
+    // telemetry seq counter restarted near 0. Without this reset,
+    // recordTelemetrySequence()'s modulo-256 "old duplicate" branch
+    // (deltaFromBase >= 128) swallows every post-reboot packet forever,
+    // since the new low seq numbers all look "behind" the stale
+    // ackBaseSeq — freezing ackBaseSeq/ackMask and permanently suppressing
+    // ACK_SUMMARY sends as "unchanged".
+    tracker.initialized = false;
+    tracker.ackBaseSeq = 0;
+    tracker.ackMask = 0;
+    tracker.dirty = false;
+    tracker.dirtyTriggerSeq = 0;
+    tracker.lastSentInitialized = false;
+    tracker.lastSentAckBaseSeq = 0;
+    tracker.lastSentAckMask = 0;
+    tracker.receiptWindowInitialized = false;
+    tracker.receiptWindowStartSeq = 0;
+    tracker.receiptWindowMask = 0;
+
+    LOG_INFO("base", "ack_tracker_reset node=%u reason=awaken",
+             static_cast<unsigned int>(nodeId));
+    return;
+  }
 }
 
 void SmartFiresBaseApp::recordTelemetrySequence(AckTracker &tracker, uint8_t seq) {

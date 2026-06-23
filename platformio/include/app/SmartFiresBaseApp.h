@@ -174,6 +174,7 @@ private:
   NodeAssignment *findOrCreateNodeAssignment(uint32_t uidHash);
   bool handleTelemetryAckSummary(uint8_t nodeId, uint8_t seq);
   AckTracker *findOrCreateAckTracker(uint8_t nodeId);
+  void resetAckTracker(uint8_t nodeId);
   void recordTelemetrySequence(AckTracker &tracker, uint8_t seq);
   void updateTelemetryReceiptWindow(AckTracker &tracker, uint8_t seq);
   bool sendAckSummary(uint8_t nodeId, uint8_t ackBaseSeq, uint16_t ackMask,
