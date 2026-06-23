@@ -215,6 +215,13 @@ def run_receive(
                 int(hdr_node) if hdr_node is not None else None,
             )
 
+            if hdr_node is not None and pkt_type == PKT_AWAKEN:
+                # Node rebooted, so its wire seq counter restarted from 0 —
+                # reset the loss-tracking baseline before observing this
+                # packet, or the gap since the old session's last seq gets
+                # miscounted as missing.
+                tracker.reset_node(int(hdr_node))
+
             # Observe every packet (all types share the same rolling seq counter).
             # Done once per LoRa packet here so that STATUS/AWAKEN seqs are counted
             # and bundle samples don't inflate crc_valid_packets.
