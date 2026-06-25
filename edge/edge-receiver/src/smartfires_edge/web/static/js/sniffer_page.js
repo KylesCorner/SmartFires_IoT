@@ -395,14 +395,15 @@ function rhAddrName(addr) {
   return addr === 1 ? "Base Station" : `Node ${addr}`;
 }
 
-// PKT_ACK_SUMMARY's payload is a 16-bit bitmap over a window of sequence
-// numbers starting at ack_base_seq — see PACKET_RELIABILITY.md. Decode it
-// into the actual (wrapping mod 256) seq numbers being acknowledged.
+// PKT_ACK_SUMMARY's payload is ack_base_seq (highest contiguous seq acked)
+// plus a 16-bit bitmap where bit N set means (ack_base_seq + N + 1) is also
+// acked — see PACKET_RELIABILITY.md. ack_base_seq itself is always acked
+// (it's the cumulative high-water mark), even when the mask is all zero.
 function ackedSeqs(baseSeq, mask) {
   if (baseSeq == null || mask == null) return undefined;
-  const seqs = [];
+  const seqs = [baseSeq & 0xff];
   for (let bit = 0; bit < 16; bit++) {
-    if (mask & (1 << bit)) seqs.push((baseSeq + bit) & 0xff);
+    if (mask & (1 << bit)) seqs.push((baseSeq + bit + 1) & 0xff);
   }
   return seqs;
 }
