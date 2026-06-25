@@ -482,6 +482,24 @@ def run_receive(
             # Check for new-session request from the web API
             if reset_event is not None and reset_event.is_set():
                 reset_event.clear()
+
+                # Reset every configured node first, before the base. Node
+                # firmware needs ~35ms (LoRa ACK) + 200ms (delay before
+                # NVIC_SystemReset) + however long sensor/DMP init takes on
+                # reboot (the ICM-20948 DMP image load alone is ~1-3s) before
+                # its next AWAKEN — comfortably longer than the base's own
+                # reset below, so no node can re-AWAKEN to a base that's
+                # still mid-reset.
+                # Note: the base only holds kMaxPendingCommands=4 queued
+                # commands at once (SmartFiresBaseApp.h) — with more than 4
+                # configured nodes, the extras risk QUEUE_FULL and getting
+                # silently dropped (visible only in the base debug log).
+                for target_node_id in cfg.nodes:
+                    _send_cmd_reset(
+                        ser, write_lock, cmd_seq_state,
+                        node_id=target_node_id, reset_type=0x01, log_fn=log_fn,
+                    )
+
                 tracker.save(state_path)
                 logger.close()
 
@@ -508,6 +526,15 @@ def run_receive(
                 if live_state is not None:
                     live_state.tracker = tracker
                     live_state.reset()
+
+                # Give the base's TDMA-deferred command queue a full slot-0
+                # window (and then some) to actually transmit the node
+                # resets over LoRa before we reset the base's own radio link.
+                # Default TDMA geometry (NUM_SLOTS=4, slotWidthMs=900ms) gives
+                # a ~3.6s frame period; 2s covers the common case where slot 0
+                # opens partway through this wait without stalling the new
+                # session for a full frame every time.
+                time.sleep(2.0)
 
                 _send_cmd_reset(ser, write_lock, cmd_seq_state, node_id=0, reset_type=0, log_fn=log_fn)
                 time.sleep(0.5)  # let the base's RH_RF95.begin() reinit complete
