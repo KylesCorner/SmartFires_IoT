@@ -109,8 +109,10 @@ private:
   bool _hasFreshTelemetrySent = false;
   bool _hasPendingCommand = false;
   ReceivedCommand _pendingCommand = {};
+  bool _radioAsleep = false;
 
   void drainTxQueue();
+  void updateRxPower();
   void checkIncomingTimeSync();
   void rememberPendingCommand(const ITdmaRadioDriver::ReceivedPacket &packet);
   uint32_t computeRetryWaitMs() const;

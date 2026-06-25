@@ -48,11 +48,17 @@ build_flags =
 build_src_filter =
   +<power/>
   +<sensors/>
+  +<radio/TdmaClock.cpp>
   -<main.cpp>
   -<main_base.cpp>
   -<main_node.cpp>
   -<main_node_dummy.cpp>
 ```
+
+`radio/TdmaClock.cpp` is the one `radio/`/`app/` file currently pulled into the native build — it has
+no Arduino/RadioHead dependency (pure session-clock math over `IClock`), unlike
+`TdmaRadioService.cpp` or `SmartFiresBaseApp.cpp`, which depend on `ITdmaRadioDriver` and would need
+a `FakeRadio` (not yet written) plus a wider filter change to test natively.
 
 Run individual test suites like:
 
@@ -62,6 +68,7 @@ pio test -e native -f test_sht31_sensor
 pio test -e native -f test_imu_sensor
 pio test -e native -f test_gps_sensor
 pio test -e native -f test_sps30_sensor
+pio test -e native -f test_tdma_clock
 ```
 
 ---

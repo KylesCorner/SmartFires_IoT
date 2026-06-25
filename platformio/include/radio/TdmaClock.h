@@ -28,6 +28,14 @@ public:
 
   bool myTurn(uint32_t &slotIndexOut) const;
 
+  // True while it's safe to listen for base-originated traffic (TIME_SYNC,
+  // ACK_SUMMARY, CMD_CALIBRATE/RESET) — i.e. slot 0, the base's permanently
+  // reserved slot, the only slot the base ever transmits in. Also true
+  // unconditionally before first sync or once sync goes stale, since slot
+  // timing can't be trusted yet/anymore: callers should fall back to
+  // continuous receive in both cases, mirroring myTurn()'s own fallback.
+  bool baseRxWindowOpen() const;
+
 private:
   TdmaConfig _cfg;
   IClock &_clock;

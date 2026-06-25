@@ -48,6 +48,7 @@ these — check status tables within each doc for what's done vs. open.
 |---|---|
 | [RESET_SYSTEM.md](Pending_Plans/RESET_SYSTEM.md) | Jetson/base/node reset coordination and time-sync recovery |
 | [JETSON_SENSOR_EXPANSION.md](Pending_Plans/JETSON_SENSOR_EXPANSION.md) | Adding temp/humidity, BMV080, GPS, and ICM-20948 IMU sensors directly to the Jetson via I2C |
+| [RADIO_RX_GATING.md](Pending_Plans/RADIO_RX_GATING.md) | Sleeping the node's SX1276 outside the base's TDMA window to cut radio power draw |
 
 ## Completed Plans
 

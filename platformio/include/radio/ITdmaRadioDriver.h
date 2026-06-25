@@ -26,6 +26,12 @@ public:
 
   virtual bool available() = 0;
 
+  // Puts the radio into low-power sleep. Purely an idle-time optimization —
+  // every other call on this interface (available(), send(), sendToWait())
+  // re-arms whatever mode it needs on its own before acting, so callers never
+  // need to "wake" the radio explicitly before using it again.
+  virtual bool sleep() = 0;
+
   // autoAck=true (default) replies with a RadioHead link-layer ACK as soon as
   // a unicast packet is accepted — this is what every node-side receive call
   // wants, since every unicast packet the base sends to a node (TIME_SYNC,

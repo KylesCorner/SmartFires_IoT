@@ -1,5 +1,5 @@
 // ---
-// description: Implements TdmaRadioService's TDMA TX draining, retransmit/ACK-summary handling, and time-sync/command RX.
+// description: Implements TdmaRadioService's TDMA TX draining, retransmit/ACK-summary handling, time-sync/command RX, and RX power gating.
 // role: implementation
 // docs: [bandwidth-scaling, packet-reliability, tdma-protocol]
 // ---
@@ -156,7 +156,7 @@ void TdmaRadioService::update() {
     return;
   }
 
-  checkIncomingTimeSync();
+  updateRxPower();
   drainTxQueue();
   maybeLogRetransmitHealth();
 }
@@ -696,6 +696,34 @@ void TdmaRadioService::drainTxQueue() {
     if (_queue.empty() && !useAppReliability) {
       return;
     }
+  }
+}
+
+void TdmaRadioService::updateRxPower() {
+  // StrictLinkAck mode needs the radio listening right after its own TX slot
+  // for the link-layer ACK (sendToWait(), used by drainTxQueue() in that
+  // mode) — gating Rx there would break that wait. It's diagnostics-only and
+  // not power-sensitive, so it simply keeps today's always-on Rx behavior.
+  const bool wantRx = _cfg.reliabilityMode != TdmaReliabilityMode::AppLayerAckSummary ||
+                      _tdmaClock.baseRxWindowOpen();
+
+  if (wantRx) {
+    if (_radioAsleep) {
+      LOG_DEBUG("radio", "rx_wake slot=%u",
+                static_cast<unsigned int>(_tdmaClock.currentSlotNumber()));
+      _radioAsleep = false;
+    }
+
+    checkIncomingTimeSync();
+    return;
+  }
+
+  if (!_radioAsleep) {
+    _driver.sleep();
+    _radioAsleep = true;
+
+    LOG_DEBUG("radio", "rx_sleep slot=%u",
+              static_cast<unsigned int>(_tdmaClock.currentSlotNumber()));
   }
 }
 

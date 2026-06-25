@@ -51,6 +51,7 @@ public:
   bool sendToWait(const uint8_t *data, uint8_t len, uint8_t to) override;
   bool setLocalAddress(uint8_t address) override;
   bool available() override;
+  bool sleep() override;
   bool receive(ReceivedPacket &out, bool autoAck = true) override;
   void acknowledge(uint8_t from, uint8_t id) override;
   bool healthy() const override;

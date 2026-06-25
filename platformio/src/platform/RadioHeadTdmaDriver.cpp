@@ -84,6 +84,17 @@ bool RadioHeadTdmaDriver::available() {
   return _healthy && _manager.available();
 }
 
+bool RadioHeadTdmaDriver::sleep() {
+  if (!_healthy) {
+    return false;
+  }
+
+  // RH_RF95::sleep() just writes the SLEEP opmode register; the next
+  // available()/send()/sendToWait() call re-arms whatever mode it needs
+  // regardless of current state, so there is no separate "wake" call to make.
+  return _rf95.sleep();
+}
+
 bool RadioHeadTdmaDriver::receive(ReceivedPacket &out, bool autoAck) {
   if (!_healthy) {
     return false;

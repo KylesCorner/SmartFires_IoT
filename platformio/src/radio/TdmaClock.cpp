@@ -1,5 +1,5 @@
 // ---
-// description: Implements TdmaClock's session clock, slot-index math, and myTurn() transmit gating.
+// description: Implements TdmaClock's session clock, slot-index math, myTurn() transmit gating, and baseRxWindowOpen() receive gating.
 // role: implementation
 // docs: [tdma-protocol]
 // ---
@@ -98,4 +98,15 @@ bool TdmaClock::myTurn(uint32_t &slotIndexOut) const {
   }
 
   return true;
+}
+
+bool TdmaClock::baseRxWindowOpen() const {
+  if (!_hasSync || syncStale()) {
+    return true;
+  }
+
+  // Unlike myTurn(), no guard-band exclusion here: a receiver listening a
+  // little longer than strictly necessary is harmless, whereas a transmitter
+  // running past its guard band risks colliding with the next slot's owner.
+  return currentSlotNumber() == 0;
 }
