@@ -85,6 +85,14 @@ private:
     uint8_t len = 0;
   };
 
+  // KNOWN LIMITATION: the Jetson's "New Session" flow (ingest_service.py's
+  // reset_event handler) enqueues one CMD_RESET per configured node in a
+  // tight loop. With more than kMaxPendingCommands nodes configured, the
+  // extras silently fail to enqueue (QUEUE_FULL, visible only in the base
+  // debug log) and never get reset. Revisit this constant (and/or add
+  // Jetson-side batching that waits for a slot-0 window between batches)
+  // before deploying more than 4 nodes. See
+  // documentation/Pending_Plans/RESET_SYSTEM.md.
   static constexpr uint8_t kMaxPendingCommands = 4;
 
   struct UartRxState {

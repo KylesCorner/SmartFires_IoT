@@ -269,3 +269,30 @@ Phase 1 can be deployed and tested independently (base just ignores the CMD_RESE
 - **Base self-reset has no CMD_ACK** — the base cannot ACK itself; the Jetson infers success if the subsequent TIME_SYNC is forwarded correctly.
 - **Hard reset timing** — `delay(200)` before `NVIC_SystemReset()` on a node is enough for the base to relay the CMD_ACK over UART (~35 ms LoRa round-trip + ~1 ms UART write). No further delay is needed.
 - **`_ackTrackers` vs `_nodeAssignments` on base soft reset** — trackers are cleared because they contain stale per-node sequence state that becomes invalid after radio reinit. Node assignments are preserved so existing nodes don't need to re-AWAKEN with new IDs.
+
+## Known Limitation — `kMaxPendingCommands` vs. node count
+
+**Status: open, must fix before deploying more than 4 nodes.**
+
+The Jetson's "New Session" web flow (`/api/new_session` → `reset_event` handler in
+`ingest_service.py`) hard-resets every node in `cfg.nodes` before resetting the base,
+by enqueueing one `CMD_RESET` per node in a tight loop (see "Full Flows" — this is an
+extension beyond the original per-node-reset design above). Each enqueue lands in the
+base's `_pendingCommands` ring (`SmartFiresBaseApp.h`), sized by
+`kMaxPendingCommands = 4`. That queue is shared with `CMD_CALIBRATE` and only drains
+during the base's own reserved TDMA slot 0 (once per ~3.6s frame at default
+`NUM_SLOTS=4`/`slotWidthMs=900`), so it can't be assumed to drain between enqueue calls.
+
+With more than 4 configured nodes, the 5th+ `enqueuePendingCommand()` calls return
+`false` (`QUEUE_FULL`) and those nodes silently never get reset — visible only as a
+`tx_cmd_reset_queue ... result=QUEUE_FULL` line in the base's debug log
+(`/debug` page), not surfaced anywhere in the Jetson UI.
+
+**Fix before scaling past 4 nodes** — either:
+
+- Bump `kMaxPendingCommands` on the base (cheap, bounded by `kPendingCommandPayloadSize`
+  per slot; reflash the base), or
+- Batch the Jetson-side reset loop: send ≤4 at a time, then wait roughly one TDMA frame
+  period before sending the next batch, so the queue has actually drained.
+
+Tracked in code at `SmartFiresBaseApp.h`'s `kMaxPendingCommands` declaration.

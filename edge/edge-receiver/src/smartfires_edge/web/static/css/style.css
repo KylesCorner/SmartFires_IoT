@@ -44,6 +44,22 @@ nav.topnav a.active {
 .conn-dot.online  { background: #28a055; }
 .conn-dot.offline { background: #4a5058; }
 
+.base-link-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3a4048;
+  margin-left: 0.5rem;
+  align-self: center;
+  flex-shrink: 0;
+  transition: background 0.4s;
+  cursor: default;
+}
+
+.base-link-dot.online  { background: #28a055; }
+.base-link-dot.offline { background: #d9534f; }
+
 main {
   padding: 1rem 1.5rem;
 }

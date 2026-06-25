@@ -123,9 +123,12 @@ def _time_sync_sender(
     session_ctx: dict,
     interval_s: int,
     log_fn: Callable[[str, int | None], None],
+    stop_event: threading.Event,
 ) -> None:
-    while True:
-        time.sleep(interval_s)
+    # stop_event is per-connection: when the serial link drops and the ingest
+    # loop reconnects, it gets a fresh `ser` and must stop this thread rather
+    # than let it keep writing to the now-dead handle forever in the background.
+    while not stop_event.wait(interval_s):
         _send_time_sync(
             ser=ser,
             write_lock=write_lock,
@@ -213,355 +216,383 @@ def run_receive(
         )
     log_fn("", None)
 
+    write_lock = threading.Lock()
+    reconnect_delay_s = 1.0
+    max_reconnect_delay_s = 10.0
+
     try:
-        sync_thread_started = False
-        write_lock = threading.Lock()
+        while True:
+            sync_thread_started = False
+            sync_stop_event = threading.Event()
 
-        for event, receiver, ser in iter_packets(cfg.port, cfg.baud, session_start):
-            if not sync_thread_started:
-                _send_cmd_reset(ser, write_lock, cmd_seq_state, node_id=0, reset_type=0, log_fn=log_fn)
-                time.sleep(0.5)  # let the base's RH_RF95.begin() reinit complete
-                _send_time_sync(
-                    ser=ser,
-                    write_lock=write_lock,
-                    sync_state=sync_state,
-                    session_ctx=session_ctx,
-                    reason="session_start",
-                    log_fn=log_fn,
-                )
+            try:
+                if live_state is not None:
+                    live_state.set_link_connected(True)
 
-                sync_thread = threading.Thread(
-                    target=_time_sync_sender,
-                    args=(
-                        ser,
-                        write_lock,
-                        sync_state,
-                        session_ctx,
-                        cfg.sync_interval_s,
-                        log_fn,
-                    ),
-                    daemon=True,
-                )
-                sync_thread.start()
-                sync_thread_started = True
+                for event, receiver, ser in iter_packets(cfg.port, cfg.baud, session_start):
+                    if not sync_thread_started:
+                        _send_cmd_reset(ser, write_lock, cmd_seq_state, node_id=0, reset_type=0, log_fn=log_fn)
+                        time.sleep(0.5)  # let the base's RH_RF95.begin() reinit complete
+                        _send_time_sync(
+                            ser=ser,
+                            write_lock=write_lock,
+                            sync_state=sync_state,
+                            session_ctx=session_ctx,
+                            reason="session_start",
+                            log_fn=log_fn,
+                        )
 
-            tracker.crc_failures = receiver.crc_failures
-            tracker.length_failures = receiver.length_failures
+                        sync_thread = threading.Thread(
+                            target=_time_sync_sender,
+                            args=(
+                                ser,
+                                write_lock,
+                                sync_state,
+                                session_ctx,
+                                cfg.sync_interval_s,
+                                log_fn,
+                                sync_stop_event,
+                            ),
+                            daemon=True,
+                        )
+                        sync_thread.start()
+                        sync_thread_started = True
+                        reconnect_delay_s = 1.0
 
-            hdr_node = event.get("node_id")
-            hdr_seq = event.get("seq")
-            pkt_type = event.get("pkt_type")
+                    tracker.crc_failures = receiver.crc_failures
+                    tracker.length_failures = receiver.length_failures
 
-            # Base-originated debug log line (FramedDebugLogSink), never a
-            # LoRa packet from a real node — handled entirely separately from
-            # telemetry/loss-tracking below, then skip the rest of the loop
-            # body for this iteration.
-            if pkt_type == PKT_DEBUG_LOG:
-                debug_text = event.get("debug_log")
-                if live_state is not None and debug_text is not None:
-                    record = parse_sfdbg_line(debug_text) or {
-                        "v": "?",
-                        "node": "?",
-                        "src": "?",
-                        "lvl": "?",
-                        "seq": "-",
-                        "t": "-",
-                        "msg": debug_text,
-                        "raw": debug_text,
-                    }
-                    live_state.push_base_debug(record)
-                continue
+                    hdr_node = event.get("node_id")
+                    hdr_seq = event.get("seq")
+                    pkt_type = event.get("pkt_type")
 
-            log_fn(
-                f"[EDGE][LORA-RX] type={_pkt_type_name(pkt_type)} node={hdr_node} "
-                f"seq={hdr_seq} rssi={event.get('rssi')}",
-                int(hdr_node) if hdr_node is not None else None,
-            )
+                    # Base-originated debug log line (FramedDebugLogSink), never a
+                    # LoRa packet from a real node — handled entirely separately from
+                    # telemetry/loss-tracking below, then skip the rest of the loop
+                    # body for this iteration.
+                    if pkt_type == PKT_DEBUG_LOG:
+                        debug_text = event.get("debug_log")
+                        if live_state is not None and debug_text is not None:
+                            record = parse_sfdbg_line(debug_text) or {
+                                "v": "?",
+                                "node": "?",
+                                "src": "?",
+                                "lvl": "?",
+                                "seq": "-",
+                                "t": "-",
+                                "msg": debug_text,
+                                "raw": debug_text,
+                            }
+                            live_state.push_base_debug(record)
+                        continue
 
-            if hdr_node is not None and pkt_type == PKT_AWAKEN:
-                # Node rebooted, so its wire seq counter restarted from 0 —
-                # reset the loss-tracking baseline before observing this
-                # packet, or the gap since the old session's last seq gets
-                # miscounted as missing.
-                tracker.reset_node(int(hdr_node))
-
-            # Observe every packet (all types share the same rolling seq counter).
-            # Done once per LoRa packet here so that STATUS/AWAKEN seqs are counted
-            # and bundle samples don't inflate crc_valid_packets.
-            if hdr_node is not None and hdr_seq is not None and event.get("rssi") is not None:
-                tracker.observe_packet(
-                    node_id=int(hdr_node),
-                    seq=int(hdr_seq),
-                    rssi=int(event["rssi"]),
-                )
-
-            if hdr_node is not None and hdr_seq is not None and pkt_type == PKT_AWAKEN:
-                awaken = event.get("awaken") or {}
-                uid_hash = awaken.get("uid_hash")
-                if uid_hash is not None:
-                    aw = session_manager.on_awaken(int(hdr_node), int(uid_hash))
-                    session_meta.on_awaken(int(hdr_node), int(uid_hash))
                     log_fn(
-                        f"[EDGE][AWAKEN] node={aw['node_id']} uid=0x{aw['uid_hash']:08x}",
-                        int(hdr_node),
-                    )
-                log_fn(
-                    f"[EDGE][AWAKEN] node={hdr_node} seq={hdr_seq} "
-                    f"action=send_time_sync",
-                    int(hdr_node),
-                )
-                _send_time_sync(
-                    ser=ser,
-                    write_lock=write_lock,
-                    sync_state=sync_state,
-                    session_ctx=session_ctx,
-                    reason="awaken",
-                    log_fn=log_fn,
-                    trigger_node=int(hdr_node),
-                    trigger_seq=int(hdr_seq),
-                )
-            elif hdr_node is not None and hdr_seq is not None and pkt_type is not None:
-                _send_time_sync(
-                    ser=ser,
-                    write_lock=write_lock,
-                    sync_state=sync_state,
-                    session_ctx=session_ctx,
-                    reason="receiver_start",
-                    log_fn=log_fn,
-                    trigger_node=int(hdr_node),
-                    trigger_seq=int(hdr_seq),
-                ) if sync_state["next_seq"] == 0 else None
-
-            gps = event.get("gps")
-            if gps:
-                node_gps[int(gps["node_id"])] = (float(gps["lat"]), float(gps["lon"]))
-
-            status = event.get("status")
-            if status:
-                uid_hash = session_manager.get_uid_hash_for_node(int(status.get("node_id")))
-                heading = session_manager.on_status(
-                    node_id=int(status.get("node_id")),
-                    uid_hash=uid_hash,
-                    status=status,
-                )
-                status_row = {
-                    "timestamp": datetime.utcnow().isoformat(timespec="milliseconds"),
-                    "packet_type": "status",
-                    "node_id": status.get("node_id"),
-                    "seq": status.get("seq"),
-                    "session_time_ms": "",
-                    "uptime_ms": "",
-                    "sensor_flags": "",
-                    "wind_mps": "",
-                    "temp_c": "",
-                    "humidity_pct": "",
-                    "pm1_0_ug_m3": "",
-                    "pm2_5_ug_m3": "",
-                    "pm4_0_ug_m3": "",
-                    "pm10_ug_m3": "",
-                    "lat": status.get("lat"),
-                    "lon": status.get("lon"),
-                    "gps_valid": status.get("gps_valid"),
-                    "battery_valid": status.get("battery_valid"),
-                    "rssi": status.get("rssi"),
-                    "flags": status.get("flags"),
-                    "battery_mv": status.get("battery_mv"),
-                    "battery_pct": status.get("battery_pct"),
-                    "uid_hash": f"0x{uid_hash:08x}" if isinstance(uid_hash, int) else "",
-                    "heading_true_deg": heading.get("heading_true_deg") if heading.get("computed") else "",
-                    "location_corrected_heading": (
-                        heading.get("location_corrected_heading")
-                        if heading.get("computed") and heading.get("location_corrected_heading") is not None
-                        else ""
-                    ),
-                    "jetson_wind_mps": "",
-                    "jetson_wind_dir_deg": "",
-                    "retx_total": status.get("retx_total") if status.get("retx_total") is not None else "",
-                    "fail_total": status.get("fail_total") if status.get("fail_total") is not None else "",
-                }
-                _append_jsonl(status_path, status_row)
-                logger.write_row(status_row)
-                if live_state is not None:
-                    live_state.record_status(status)
-                log_fn(
-                    f"[STATUS] node={status_row['node_id']} seq={status_row['seq']} "
-                    f"lat={status_row['lat']} lon={status_row['lon']} "
-                    f"gps_valid={status_row['gps_valid']} batt_valid={status_row['battery_valid']} "
-                    f"batt_mv={status_row['battery_mv']} batt_pct={status_row['battery_pct']} "
-                    f"rssi={status_row['rssi']} "
-                    f"heading={status_row['heading_true_deg']} "
-                    f"location_corrected_heading={status_row['location_corrected_heading']} "
-                    f"retx_total={status_row['retx_total']} fail_total={status_row['fail_total']}",
-                    int(status_row["node_id"]) if status_row["node_id"] is not None else None,
-                    kind="status",
-                )
-
-            cmd_ack = event.get("cmd_ack")
-            if cmd_ack:
-                session_manager.on_cmd_ack(
-                    node_id=int(cmd_ack.get("node_id")),
-                    uid_hash=int(cmd_ack.get("uid_hash")),
-                    cmd_type=int(cmd_ack.get("cmd_type")),
-                    status=int(cmd_ack.get("status")),
-                )
-                cmd_ack_row = {
-                    "timestamp": datetime.utcnow().isoformat(timespec="milliseconds"),
-                    "packet_type": "cmd_ack",
-                    "node_id": cmd_ack.get("node_id"),
-                    "seq": cmd_ack.get("seq"),
-                    "cmd_type": cmd_ack.get("cmd_type"),
-                    "uid_hash": cmd_ack.get("uid_hash"),
-                    "status": cmd_ack.get("status"),
-                    "rssi": cmd_ack.get("rssi"),
-                }
-                _append_jsonl(status_path, cmd_ack_row)
-                log_fn(
-                    "[CMD_ACK] "
-                    f"node={cmd_ack_row['node_id']} seq={cmd_ack_row['seq']} "
-                    f"cmd=0x{int(cmd_ack_row['cmd_type']):02x} "
-                    f"uid=0x{int(cmd_ack_row['uid_hash']):08x} "
-                    f"status={cmd_ack_row['status']} rssi={cmd_ack_row['rssi']}",
-                    int(cmd_ack_row["node_id"]) if cmd_ack_row["node_id"] is not None else None,
-                )
-
-            for pkt in event.get("packets", []):
-                pkt["packet_type"] = "telemetry"
-                pkt["gps_valid"] = ""
-                pkt["battery_valid"] = ""
-                pkt["battery_mv"] = ""
-                pkt["battery_pct"] = ""
-                gps_fix = node_gps.get(int(pkt["node_id"]))
-                pkt["lat"] = gps_fix[0] if gps_fix else ""
-                pkt["lon"] = gps_fix[1] if gps_fix else ""
-
-                if anemometer is not None:
-                    jetson_speed, jetson_dir = anemometer.latest()
-                    pkt["jetson_wind_mps"] = jetson_speed if jetson_speed is not None else ""
-                    pkt["jetson_wind_dir_deg"] = jetson_dir if jetson_dir is not None else ""
-                else:
-                    pkt["jetson_wind_mps"] = ""
-                    pkt["jetson_wind_dir_deg"] = ""
-
-                logger.write_row(pkt)
-                if live_state is not None:
-                    live_state.record_telemetry(pkt)
-
-                if cfg.raw_log:
-                    _append_jsonl(session_dir / "frames.jsonl", pkt)
-
-                log_fn(
-                    f"[RX] node={pkt['node_id']} seq={pkt['seq']:3d} "
-                    f"t={pkt['timestamp'][11:]} "
-                    f"T={pkt['temp_c']:5.1f}C H={pkt['humidity_pct']:4.1f}% "
-                    f"wind={pkt['wind_mps']:.2f} "
-                    f"PM1.0={pkt['pm1_0_ug_m3']:.1f} PM2.5={pkt['pm2_5_ug_m3']:.1f} "
-                    f"PM4.0={pkt['pm4_0_ug_m3']:.1f} PM10={pkt['pm10_ug_m3']:.1f} "
-                    f"rssi={pkt['rssi']:4d}",
-                    int(pkt["node_id"]),
-                    kind="bundle",
-                )
-
-            now = time.monotonic()
-            if now - last_metrics_write >= cfg.metrics_interval_s:
-                tracker.save(state_path)
-                last_metrics_write = now
-
-            # Drain any per-node hard-reset requests queued by the web API's
-            # "Reset" button (one request per click; non-blocking).
-            if node_reset_queue is not None:
-                while True:
-                    try:
-                        target_node_id = node_reset_queue.get_nowait()
-                    except queue.Empty:
-                        break
-                    _send_cmd_reset(
-                        ser, write_lock, cmd_seq_state,
-                        node_id=target_node_id, reset_type=0x01, log_fn=log_fn,
+                        f"[EDGE][LORA-RX] type={_pkt_type_name(pkt_type)} node={hdr_node} "
+                        f"seq={hdr_seq} rssi={event.get('rssi')}",
+                        int(hdr_node) if hdr_node is not None else None,
                     )
 
-            # Check for new-session request from the web API
-            if reset_event is not None and reset_event.is_set():
-                reset_event.clear()
+                    if hdr_node is not None and pkt_type == PKT_AWAKEN:
+                        # Node rebooted, so its wire seq counter restarted from 0 —
+                        # reset the loss-tracking baseline before observing this
+                        # packet, or the gap since the old session's last seq gets
+                        # miscounted as missing.
+                        tracker.reset_node(int(hdr_node))
 
-                # Reset every configured node first, before the base. Node
-                # firmware needs ~35ms (LoRa ACK) + 200ms (delay before
-                # NVIC_SystemReset) + however long sensor/DMP init takes on
-                # reboot (the ICM-20948 DMP image load alone is ~1-3s) before
-                # its next AWAKEN — comfortably longer than the base's own
-                # reset below, so no node can re-AWAKEN to a base that's
-                # still mid-reset.
-                # Note: the base only holds kMaxPendingCommands=4 queued
-                # commands at once (SmartFiresBaseApp.h) — with more than 4
-                # configured nodes, the extras risk QUEUE_FULL and getting
-                # silently dropped (visible only in the base debug log).
-                for target_node_id in cfg.nodes:
-                    _send_cmd_reset(
-                        ser, write_lock, cmd_seq_state,
-                        node_id=target_node_id, reset_type=0x01, log_fn=log_fn,
-                    )
+                    # Observe every packet (all types share the same rolling seq counter).
+                    # Done once per LoRa packet here so that STATUS/AWAKEN seqs are counted
+                    # and bundle samples don't inflate crc_valid_packets.
+                    if hdr_node is not None and hdr_seq is not None and event.get("rssi") is not None:
+                        tracker.observe_packet(
+                            node_id=int(hdr_node),
+                            seq=int(hdr_seq),
+                            rssi=int(event["rssi"]),
+                        )
 
-                tracker.save(state_path)
-                logger.close()
+                    if hdr_node is not None and hdr_seq is not None and pkt_type == PKT_AWAKEN:
+                        awaken = event.get("awaken") or {}
+                        uid_hash = awaken.get("uid_hash")
+                        if uid_hash is not None:
+                            aw = session_manager.on_awaken(int(hdr_node), int(uid_hash))
+                            session_meta.on_awaken(int(hdr_node), int(uid_hash))
+                            log_fn(
+                                f"[EDGE][AWAKEN] node={aw['node_id']} uid=0x{aw['uid_hash']:08x}",
+                                int(hdr_node),
+                            )
+                        log_fn(
+                            f"[EDGE][AWAKEN] node={hdr_node} seq={hdr_seq} "
+                            f"action=send_time_sync",
+                            int(hdr_node),
+                        )
+                        _send_time_sync(
+                            ser=ser,
+                            write_lock=write_lock,
+                            sync_state=sync_state,
+                            session_ctx=session_ctx,
+                            reason="awaken",
+                            log_fn=log_fn,
+                            trigger_node=int(hdr_node),
+                            trigger_seq=int(hdr_seq),
+                        )
+                    elif hdr_node is not None and hdr_seq is not None and pkt_type is not None:
+                        _send_time_sync(
+                            ser=ser,
+                            write_lock=write_lock,
+                            sync_state=sync_state,
+                            session_ctx=session_ctx,
+                            reason="receiver_start",
+                            log_fn=log_fn,
+                            trigger_node=int(hdr_node),
+                            trigger_seq=int(hdr_seq),
+                        ) if sync_state["next_seq"] == 0 else None
 
-                session_id = random.randint(1, 0xFFFFFFFF)
-                session_start = time.time()
-                session_stamp = _make_session_stamp(session_start)
-                session_ctx["session_id"] = session_id
-                session_ctx["session_start"] = session_start
+                    gps = event.get("gps")
+                    if gps:
+                        node_gps[int(gps["node_id"])] = (float(gps["lat"]), float(gps["lon"]))
 
-                session_dir = cfg.data_dir / session_stamp
-                state_path = session_dir / "packet_loss_state.json"
-                status_path = session_dir / "status.jsonl"
+                    status = event.get("status")
+                    if status:
+                        uid_hash = session_manager.get_uid_hash_for_node(int(status.get("node_id")))
+                        heading = session_manager.on_status(
+                            node_id=int(status.get("node_id")),
+                            uid_hash=uid_hash,
+                            status=status,
+                        )
+                        status_row = {
+                            "timestamp": datetime.utcnow().isoformat(timespec="milliseconds"),
+                            "packet_type": "status",
+                            "node_id": status.get("node_id"),
+                            "seq": status.get("seq"),
+                            "session_time_ms": "",
+                            "uptime_ms": "",
+                            "sensor_flags": "",
+                            "wind_mps": "",
+                            "temp_c": "",
+                            "humidity_pct": "",
+                            "pm1_0_ug_m3": "",
+                            "pm2_5_ug_m3": "",
+                            "pm4_0_ug_m3": "",
+                            "pm10_ug_m3": "",
+                            "lat": status.get("lat"),
+                            "lon": status.get("lon"),
+                            "gps_valid": status.get("gps_valid"),
+                            "battery_valid": status.get("battery_valid"),
+                            "rssi": status.get("rssi"),
+                            "flags": status.get("flags"),
+                            "battery_mv": status.get("battery_mv"),
+                            "battery_pct": status.get("battery_pct"),
+                            "uid_hash": f"0x{uid_hash:08x}" if isinstance(uid_hash, int) else "",
+                            "heading_true_deg": heading.get("heading_true_deg") if heading.get("computed") else "",
+                            "location_corrected_heading": (
+                                heading.get("location_corrected_heading")
+                                if heading.get("computed") and heading.get("location_corrected_heading") is not None
+                                else ""
+                            ),
+                            "jetson_wind_mps": "",
+                            "jetson_wind_dir_deg": "",
+                            "retx_total": status.get("retx_total") if status.get("retx_total") is not None else "",
+                            "fail_total": status.get("fail_total") if status.get("fail_total") is not None else "",
+                        }
+                        _append_jsonl(status_path, status_row)
+                        logger.write_row(status_row)
+                        if live_state is not None:
+                            live_state.record_status(status)
+                        log_fn(
+                            f"[STATUS] node={status_row['node_id']} seq={status_row['seq']} "
+                            f"lat={status_row['lat']} lon={status_row['lon']} "
+                            f"gps_valid={status_row['gps_valid']} batt_valid={status_row['battery_valid']} "
+                            f"batt_mv={status_row['battery_mv']} batt_pct={status_row['battery_pct']} "
+                            f"rssi={status_row['rssi']} "
+                            f"heading={status_row['heading_true_deg']} "
+                            f"location_corrected_heading={status_row['location_corrected_heading']} "
+                            f"retx_total={status_row['retx_total']} fail_total={status_row['fail_total']}",
+                            int(status_row["node_id"]) if status_row["node_id"] is not None else None,
+                            kind="status",
+                        )
 
-                logger = DurableCsvLogger(session_dir, fsync_every_row=cfg.fsync_every_row)
-                session_meta = SessionMetaLogger(
-                    session_id=session_id,
-                    session_start=session_start,
-                    port=cfg.port,
-                    baud=cfg.baud,
-                    data_dir=session_dir,
-                )
+                    cmd_ack = event.get("cmd_ack")
+                    if cmd_ack:
+                        session_manager.on_cmd_ack(
+                            node_id=int(cmd_ack.get("node_id")),
+                            uid_hash=int(cmd_ack.get("uid_hash")),
+                            cmd_type=int(cmd_ack.get("cmd_type")),
+                            status=int(cmd_ack.get("status")),
+                        )
+                        cmd_ack_row = {
+                            "timestamp": datetime.utcnow().isoformat(timespec="milliseconds"),
+                            "packet_type": "cmd_ack",
+                            "node_id": cmd_ack.get("node_id"),
+                            "seq": cmd_ack.get("seq"),
+                            "cmd_type": cmd_ack.get("cmd_type"),
+                            "uid_hash": cmd_ack.get("uid_hash"),
+                            "status": cmd_ack.get("status"),
+                            "rssi": cmd_ack.get("rssi"),
+                        }
+                        _append_jsonl(status_path, cmd_ack_row)
+                        log_fn(
+                            "[CMD_ACK] "
+                            f"node={cmd_ack_row['node_id']} seq={cmd_ack_row['seq']} "
+                            f"cmd=0x{int(cmd_ack_row['cmd_type']):02x} "
+                            f"uid=0x{int(cmd_ack_row['uid_hash']):08x} "
+                            f"status={cmd_ack_row['status']} rssi={cmd_ack_row['rssi']}",
+                            int(cmd_ack_row["node_id"]) if cmd_ack_row["node_id"] is not None else None,
+                        )
 
-                tracker = PacketLossTracker(cfg.nodes)
+                    for pkt in event.get("packets", []):
+                        pkt["packet_type"] = "telemetry"
+                        pkt["gps_valid"] = ""
+                        pkt["battery_valid"] = ""
+                        pkt["battery_mv"] = ""
+                        pkt["battery_pct"] = ""
+                        gps_fix = node_gps.get(int(pkt["node_id"]))
+                        pkt["lat"] = gps_fix[0] if gps_fix else ""
+                        pkt["lon"] = gps_fix[1] if gps_fix else ""
+
+                        if anemometer is not None:
+                            jetson_speed, jetson_dir = anemometer.latest()
+                            pkt["jetson_wind_mps"] = jetson_speed if jetson_speed is not None else ""
+                            pkt["jetson_wind_dir_deg"] = jetson_dir if jetson_dir is not None else ""
+                        else:
+                            pkt["jetson_wind_mps"] = ""
+                            pkt["jetson_wind_dir_deg"] = ""
+
+                        logger.write_row(pkt)
+                        if live_state is not None:
+                            live_state.record_telemetry(pkt)
+
+                        if cfg.raw_log:
+                            _append_jsonl(session_dir / "frames.jsonl", pkt)
+
+                        log_fn(
+                            f"[RX] node={pkt['node_id']} seq={pkt['seq']:3d} "
+                            f"t={pkt['timestamp'][11:]} "
+                            f"T={pkt['temp_c']:5.1f}C H={pkt['humidity_pct']:4.1f}% "
+                            f"wind={pkt['wind_mps']:.2f} "
+                            f"PM1.0={pkt['pm1_0_ug_m3']:.1f} PM2.5={pkt['pm2_5_ug_m3']:.1f} "
+                            f"PM4.0={pkt['pm4_0_ug_m3']:.1f} PM10={pkt['pm10_ug_m3']:.1f} "
+                            f"rssi={pkt['rssi']:4d}",
+                            int(pkt["node_id"]),
+                            kind="bundle",
+                        )
+
+                    now = time.monotonic()
+                    if now - last_metrics_write >= cfg.metrics_interval_s:
+                        tracker.save(state_path)
+                        last_metrics_write = now
+
+                    # Drain any per-node hard-reset requests queued by the web API's
+                    # "Reset" button (one request per click; non-blocking).
+                    if node_reset_queue is not None:
+                        while True:
+                            try:
+                                target_node_id = node_reset_queue.get_nowait()
+                            except queue.Empty:
+                                break
+                            _send_cmd_reset(
+                                ser, write_lock, cmd_seq_state,
+                                node_id=target_node_id, reset_type=0x01, log_fn=log_fn,
+                            )
+
+                    # Check for new-session request from the web API
+                    if reset_event is not None and reset_event.is_set():
+                        reset_event.clear()
+
+                        # Reset every configured node first, before the base. Node
+                        # firmware needs ~35ms (LoRa ACK) + 200ms (delay before
+                        # NVIC_SystemReset) + however long sensor/DMP init takes on
+                        # reboot (the ICM-20948 DMP image load alone is ~1-3s) before
+                        # its next AWAKEN — comfortably longer than the base's own
+                        # reset below, so no node can re-AWAKEN to a base that's
+                        # still mid-reset.
+                        # Note: the base only holds kMaxPendingCommands=4 queued
+                        # commands at once (SmartFiresBaseApp.h) — with more than 4
+                        # configured nodes, the extras risk QUEUE_FULL and getting
+                        # silently dropped (visible only in the base debug log).
+                        for target_node_id in cfg.nodes:
+                            _send_cmd_reset(
+                                ser, write_lock, cmd_seq_state,
+                                node_id=target_node_id, reset_type=0x01, log_fn=log_fn,
+                            )
+
+                        tracker.save(state_path)
+                        logger.close()
+
+                        session_id = random.randint(1, 0xFFFFFFFF)
+                        session_start = time.time()
+                        session_stamp = _make_session_stamp(session_start)
+                        session_ctx["session_id"] = session_id
+                        session_ctx["session_start"] = session_start
+
+                        session_dir = cfg.data_dir / session_stamp
+                        state_path = session_dir / "packet_loss_state.json"
+                        status_path = session_dir / "status.jsonl"
+
+                        logger = DurableCsvLogger(session_dir, fsync_every_row=cfg.fsync_every_row)
+                        session_meta = SessionMetaLogger(
+                            session_id=session_id,
+                            session_start=session_start,
+                            port=cfg.port,
+                            baud=cfg.baud,
+                            data_dir=session_dir,
+                        )
+
+                        tracker = PacketLossTracker(cfg.nodes)
+                        if live_state is not None:
+                            live_state.tracker = tracker
+                            live_state.reset()
+
+                        # Give the base's TDMA-deferred command queue a full slot-0
+                        # window (and then some) to actually transmit the node
+                        # resets over LoRa before we reset the base's own radio link.
+                        # Default TDMA geometry (NUM_SLOTS=4, slotWidthMs=900ms) gives
+                        # a ~3.6s frame period; 2s covers the common case where slot 0
+                        # opens partway through this wait without stalling the new
+                        # session for a full frame every time.
+                        time.sleep(2.0)
+
+                        _send_cmd_reset(ser, write_lock, cmd_seq_state, node_id=0, reset_type=0, log_fn=log_fn)
+                        time.sleep(0.5)  # let the base's RH_RF95.begin() reinit complete
+                        _send_time_sync(
+                            ser=ser,
+                            write_lock=write_lock,
+                            sync_state=sync_state,
+                            session_ctx=session_ctx,
+                            reason="new_session",
+                            log_fn=log_fn,
+                        )
+                        log_fn(
+                            f"[SESSION] New session started: 0x{session_id:08x}  stamp={session_stamp}",
+                            None,
+                            kind="session",
+                        )
+
+            except (serial.SerialException, OSError) as exc:
+                sync_stop_event.set()
                 if live_state is not None:
-                    live_state.tracker = tracker
-                    live_state.reset()
-
-                # Give the base's TDMA-deferred command queue a full slot-0
-                # window (and then some) to actually transmit the node
-                # resets over LoRa before we reset the base's own radio link.
-                # Default TDMA geometry (NUM_SLOTS=4, slotWidthMs=900ms) gives
-                # a ~3.6s frame period; 2s covers the common case where slot 0
-                # opens partway through this wait without stalling the new
-                # session for a full frame every time.
-                time.sleep(2.0)
-
-                _send_cmd_reset(ser, write_lock, cmd_seq_state, node_id=0, reset_type=0, log_fn=log_fn)
-                time.sleep(0.5)  # let the base's RH_RF95.begin() reinit complete
-                _send_time_sync(
-                    ser=ser,
-                    write_lock=write_lock,
-                    sync_state=sync_state,
-                    session_ctx=session_ctx,
-                    reason="new_session",
-                    log_fn=log_fn,
-                )
+                    live_state.set_link_connected(False, error=str(exc))
                 log_fn(
-                    f"[SESSION] New session started: 0x{session_id:08x}  stamp={session_stamp}",
+                    f"[EDGE][LINK] base station serial link lost ({exc}) — "
+                    f"retrying in {reconnect_delay_s:.0f}s",
                     None,
-                    kind="session",
+                    kind="error",
                 )
+                time.sleep(reconnect_delay_s)
+                reconnect_delay_s = min(reconnect_delay_s * 2, max_reconnect_delay_s)
 
     except KeyboardInterrupt:
         log_fn("\nStopped by user.", None)
     except Exception as exc:
         print(f"\n[FATAL] {exc}", file=sys.stderr)
+        if live_state is not None:
+            live_state.set_link_connected(False, error=str(exc))
         tracker.save(state_path)
         logger.close()
         if anemometer is not None:
             anemometer.stop()
         return 1
 
+    if live_state is not None:
+        live_state.set_link_connected(False)
     tracker.save(state_path)
     logger.close()
     if anemometer is not None:

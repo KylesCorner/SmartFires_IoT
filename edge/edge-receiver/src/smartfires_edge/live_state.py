@@ -45,6 +45,26 @@ class LiveState:
         self._base_debug_ring: deque[dict] = deque(maxlen=5000)
         self._base_debug_lock = threading.Lock()
         self._base_debug_total = 0
+        self._link_lock = threading.Lock()
+        self._link_connected = False
+        self._link_error: str | None = None
+        self._link_changed_at = time.time()
+
+    def set_link_connected(self, connected: bool, error: str | None = None) -> None:
+        """Called by the ingest thread when the base station serial link opens/drops."""
+        with self._link_lock:
+            if connected != self._link_connected:
+                self._link_changed_at = time.time()
+            self._link_connected = connected
+            self._link_error = None if connected else error
+
+    def link_status(self) -> dict[str, Any]:
+        with self._link_lock:
+            return {
+                "connected": self._link_connected,
+                "error": self._link_error,
+                "changed_at": self._link_changed_at,
+            }
 
     def push_log(
         self,

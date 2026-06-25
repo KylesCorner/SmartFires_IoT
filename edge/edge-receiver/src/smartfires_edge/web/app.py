@@ -223,6 +223,10 @@ def create_app(
     def sniffer_stats() -> dict:
         return live_state.sniffer_stats_snapshot()
 
+    @app.get("/api/base_link")
+    def get_base_link() -> dict:
+        return live_state.link_status()
+
     @app.get("/api/base_station")
     def get_base_station() -> dict:
         return store.get() or {}

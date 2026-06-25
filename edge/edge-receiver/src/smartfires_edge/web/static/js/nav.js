@@ -7,6 +7,7 @@ const NAV_LINKS = [
 ];
 
 let _connDot = null;
+let _baseLinkDot = null;
 
 function renderNav(activePath) {
   const nav = document.createElement("nav");
@@ -26,10 +27,17 @@ function renderNav(activePath) {
   _connDot.title = "Checking map tile connectivity…";
   nav.appendChild(_connDot);
 
+  _baseLinkDot = document.createElement("span");
+  _baseLinkDot.className = "base-link-dot";
+  _baseLinkDot.title = "Checking base station link…";
+  nav.appendChild(_baseLinkDot);
+
   document.body.prepend(nav);
 
   _pollConnectivity();
   setInterval(_pollConnectivity, 30_000);
+  _pollBaseLink();
+  setInterval(_pollBaseLink, 3_000);
 }
 
 async function _pollConnectivity() {
@@ -41,6 +49,19 @@ async function _pollConnectivity() {
       _connDot.title = online
         ? "Map tiles: online — new areas will be cached automatically"
         : "Map tiles: offline — using cached tiles";
+    }
+  } catch (_) {}
+}
+
+async function _pollBaseLink() {
+  try {
+    const resp = await fetch("/api/base_link");
+    const { connected, error } = await resp.json();
+    if (_baseLinkDot) {
+      _baseLinkDot.className = "base-link-dot " + (connected ? "online" : "offline");
+      _baseLinkDot.title = connected
+        ? "Base station: connected"
+        : "Base station: disconnected" + (error ? ` — ${error}` : "");
     }
   } catch (_) {}
 }
