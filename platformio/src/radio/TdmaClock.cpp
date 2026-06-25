@@ -29,6 +29,13 @@ bool TdmaClock::consumeSessionChanged() {
   return true;
 }
 
+void TdmaClock::reset() {
+  _hasSync        = false;
+  _sessionChanged = false;
+  _syncSessionMs  = 0;
+  _syncLocalMs    = 0;
+}
+
 bool TdmaClock::hasSync() const {
   return _hasSync;
 }

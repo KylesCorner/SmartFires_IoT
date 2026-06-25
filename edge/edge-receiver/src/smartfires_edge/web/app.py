@@ -1,6 +1,7 @@
 import asyncio
 import csv
 import json
+import queue
 import socket
 import threading
 from datetime import datetime
@@ -39,6 +40,10 @@ class BaseStationPayload(BaseModel):
 
 class CommandPayload(BaseModel):
     command: str
+
+
+class NodeResetPayload(BaseModel):
+    node_id: int
 
 
 def _check_online() -> bool:
@@ -104,6 +109,7 @@ def create_app(
     data_dir: Path,
     base_station_store: Optional[BaseStationStore] = None,
     reset_event: Optional[threading.Event] = None,
+    node_reset_queue: "Optional[queue.Queue[int]]" = None,
     tile_cache_dir: Optional[Path] = None,
     sniffer_enabled: bool = False,
 ) -> FastAPI:
@@ -235,6 +241,13 @@ def create_app(
             raise HTTPException(status_code=501, detail="Session reset not available")
         reset_event.set()
         return {"status": "reset_requested"}
+
+    @app.post("/api/node_reset")
+    def node_reset(payload: NodeResetPayload) -> dict:
+        if node_reset_queue is None:
+            raise HTTPException(status_code=501, detail="Node reset not available")
+        node_reset_queue.put(payload.node_id)
+        return {"status": "reset_requested", "node_id": payload.node_id}
 
     @app.websocket("/ws/log")
     async def websocket_log(ws: WebSocket) -> None:

@@ -420,6 +420,27 @@ table th {
   color: #fff;
 }
 
+.reset-node-btn {
+  background: #5a1f1f;
+  color: #e8b8b8;
+  border: 1px solid #8b3a3a;
+  border-radius: 4px;
+  padding: 0.15rem 0.5rem;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.75rem;
+}
+
+.reset-node-btn:hover {
+  background: #8b3a3a;
+  color: #fff;
+}
+
+.reset-node-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .sniffer-top-panel {
   margin-bottom: 1rem;
 }

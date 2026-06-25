@@ -18,6 +18,7 @@ public:
   bool hasSync() const;
   bool syncStale() const;
   bool consumeSessionChanged();
+  void reset();
 
   uint32_t sessionNowMs() const;
   uint32_t currentSlotIndex() const;

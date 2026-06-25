@@ -202,7 +202,7 @@ function updateLossTable(nodes) {
   const sorted = Object.values(nodes || {}).sort((a, b) => a.node_id - b.node_id);
   if (sorted.length === 0) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td colspan="8" style="color:#6a7480;font-style:italic">No nodes connected this session yet.</td>`;
+    tr.innerHTML = `<td colspan="9" style="color:#6a7480;font-style:italic">No nodes connected this session yet.</td>`;
     tbody.appendChild(tr);
     return;
   }
@@ -222,9 +222,34 @@ function updateLossTable(nodes) {
       <td>${fmt(info.last_rssi)}</td>
       <td>${fmt(info.retx_session)}</td>
       <td>${fmt(info.fail_session)}</td>
+      <td><button class="reset-node-btn" data-node-id="${info.node_id}">Reset</button></td>
     `;
     tbody.appendChild(tr);
   }
+}
+
+// ── Per-node hard reset ──────────────────────────────────────────────────────
+function wireResetButtons() {
+  const tbody = document.querySelector("#loss-table tbody");
+  tbody.addEventListener("click", async (ev) => {
+    const btn = ev.target.closest(".reset-node-btn");
+    if (!btn) return;
+
+    const nodeId = Number(btn.dataset.nodeId);
+    if (!confirm(`Hard-reset node ${nodeId}?\nThis reboots its MCU — it will go offline and resync via AWAKEN.`)) {
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = "Resetting…";
+    try {
+      await Api.resetNode(nodeId);
+    } catch (err) {
+      console.error("SmartFires reset request failed:", err);
+      alert(`Failed to send reset for node ${nodeId}.`);
+    }
+    // Table rebuilds on the next poll tick (2s), restoring the button.
+  });
 }
 
 // ── Poll loop ───────────────────────────────────────────────────────────────
@@ -250,6 +275,7 @@ async function pollAll() {
 async function init() {
   renderNav(window.location.pathname);
   initMap();
+  wireResetButtons();
   await pollAll();
   setInterval(pollAll, 2000);
 }

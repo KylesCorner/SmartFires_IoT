@@ -999,6 +999,26 @@ bool SmartFiresBaseApp::handleJetsonCommandPayload(const uint8_t *payload, uint8
       return false;
     }
 
+    if (cmd.node_id == 0) {
+      LOG_INFO("base", "uart_cmd_reset_self reset_type=%u seq=%u",
+               static_cast<unsigned int>(cmd.reset_type),
+               static_cast<unsigned int>(cmdHdr.seq));
+      if (cmd.reset_type == 0x01) {
+        NVIC_SystemReset();  // hard: full MCU reboot, never returns
+      }
+      // Soft: reinit radio, drop stale Jetson time/ACK state, force a
+      // TIME_SYNC broadcast on the next update() tick. Node assignments
+      // are preserved — a radio reinit doesn't invalidate existing IDs.
+      _hasJetsonTime = false;
+      for (auto &tracker : _ackTrackers) {
+        tracker = AckTracker{};
+      }
+      _lastPeriodicTimeSyncMs = 0;
+      const bool ok = _radio.begin();
+      LOG_INFO("base", "uart_cmd_reset_self_done radio_reinit=%s", ok ? "OK" : "FAIL");
+      return true;
+    }
+
     uint8_t loraPayload[BinaryPacket::kCmdResetLoRaSize] = {};
     const uint8_t loraLen = BinaryPacket::encodeCmdResetPayload(
         cmdHdr.seq, cmd, loraPayload, sizeof(loraPayload));

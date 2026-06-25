@@ -43,6 +43,15 @@ const Api = {
   async snifferStats() {
     return (await fetch("/api/sniffer/stats")).json();
   },
+  async resetNode(nodeId) {
+    return (
+      await fetch("/api/node_reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ node_id: nodeId }),
+      })
+    ).json();
+  },
 };
 
 function fmt(value) {

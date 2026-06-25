@@ -432,6 +432,19 @@ void SmartFiresNodeApp::handleIncomingCommands() {
                static_cast<unsigned int>(reset.reset_type));
 
       sendCmdAck(BinaryPacket::PKT_CMD_RESET, kCalStatusSuccess);
+
+      if (reset.reset_type == 0x01) {
+        delay(200);           // let the ACK reach the base over LoRa before the radio drops
+        NVIC_SystemReset();   // hard reset — full MCU reboot, never returns
+      }
+
+      // Soft reset: drop sync state, flush pending TX, re-enter AWAKEN loop.
+      _tdmaClock.reset();
+      _radio.flushTelemetryBuffers("cmd_reset_soft");
+      _packetHandler.reset();
+      _syncActive = false;
+      sendAwakenHandshake();
+      _awakenLastSentMs = _clock.millis();
       continue;
     }
 

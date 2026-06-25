@@ -1,3 +1,4 @@
+import queue
 import threading
 
 import uvicorn
@@ -23,6 +24,7 @@ def run_web(cfg: EdgeConfig) -> int:
     """
     live_state = LiveState(cfg.ingest.nodes)
     reset_event = threading.Event()
+    node_reset_queue: queue.Queue[int] = queue.Queue()
 
     ingest_thread = threading.Thread(
         target=run_receive,
@@ -31,6 +33,7 @@ def run_web(cfg: EdgeConfig) -> int:
             live_state=live_state,
             log_fn=live_state.push_log,
             reset_event=reset_event,
+            node_reset_queue=node_reset_queue,
         ),
         daemon=True,
     )
@@ -53,6 +56,7 @@ def run_web(cfg: EdgeConfig) -> int:
         data_dir=cfg.ingest.data_dir,
         base_station_store=BaseStationStore(),
         reset_event=reset_event,
+        node_reset_queue=node_reset_queue,
         # Namespaced by tile source: switching providers (as happened when we
         # moved off raw OSM tiles to CARTO Voyager) must not silently mix old
         # and new tiles under the same path — bump this name on any future

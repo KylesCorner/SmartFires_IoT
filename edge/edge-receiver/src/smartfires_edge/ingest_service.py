@@ -1,5 +1,6 @@
 import json
 import os
+import queue
 import random
 import sys
 import threading
@@ -22,6 +23,7 @@ from smartfires_edge.packet import (
     PKT_DEBUG_LOG,
     PKT_FULL_STATE,
     PKT_STATUS,
+    encode_cmd_reset_frame,
     encode_time_sync_frame,
 )
 from smartfires_edge.packet_loss import PacketLossTracker
@@ -91,6 +93,29 @@ def _send_time_sync(
     return True
 
 
+def _send_cmd_reset(
+    ser: serial.Serial,
+    write_lock: threading.Lock,
+    cmd_seq_state: dict,
+    node_id: int,
+    reset_type: int,
+    log_fn: Callable[[str, int | None], None],
+) -> bool:
+    """Send a CMD_RESET frame. node_id=0 means "reset the base station itself"."""
+    with write_lock:
+        seq = int(cmd_seq_state.setdefault("next_seq", 0)) & 0xFF
+        frame = encode_cmd_reset_frame(node_id=node_id, reset_type=reset_type, seq=seq)
+        try:
+            ser.write(frame)
+        except serial.SerialException as exc:
+            print(f"[EDGE][CMD-RESET] write error: {exc}", file=sys.stderr)
+            return False
+        cmd_seq_state["next_seq"] = (seq + 1) & 0xFF
+    kind = "hard" if reset_type == 0x01 else "soft"
+    log_fn(f"[EDGE][CMD-RESET] node={node_id} seq={seq:03d} reset_type={kind} bytes={len(frame)}", node_id or None)
+    return True
+
+
 def _time_sync_sender(
     ser: serial.Serial,
     write_lock: threading.Lock,
@@ -116,6 +141,7 @@ def run_receive(
     live_state: LiveState | None = None,
     log_fn: Callable[[str, int | None], None] | None = None,
     reset_event: threading.Event | None = None,
+    node_reset_queue: "queue.Queue[int] | None" = None,
 ) -> int:
     """Run the UART ingest loop.
 
@@ -127,6 +153,9 @@ def run_receive(
         log_fn: Optional log callback ``(msg, node_id)`` injected by ``web`` subcommand
                 to stream log lines to the browser. Defaults to plain ``print``.
         reset_event: Optional threading.Event set by the web API to trigger a new session.
+        node_reset_queue: Optional queue of node_ids, populated by the web API's
+                           per-node "Reset" button. Drained once per loop tick —
+                           each entry triggers a hard CMD_RESET to that node.
     """
     if log_fn is None:
         log_fn = lambda msg, node_id=None, source="ingest", kind="other": print(msg)  # noqa: E731
@@ -136,6 +165,7 @@ def run_receive(
         live_state.tracker = tracker
     node_gps: dict[int, tuple[float, float]] = {}
     sync_state = {"next_seq": 0}
+    cmd_seq_state = {"next_seq": 0}
     session_manager = SessionManager()
 
     session_id = random.randint(1, 0xFFFFFFFF)
@@ -189,6 +219,17 @@ def run_receive(
 
         for event, receiver, ser in iter_packets(cfg.port, cfg.baud, session_start):
             if not sync_thread_started:
+                _send_cmd_reset(ser, write_lock, cmd_seq_state, node_id=0, reset_type=0, log_fn=log_fn)
+                time.sleep(0.5)  # let the base's RH_RF95.begin() reinit complete
+                _send_time_sync(
+                    ser=ser,
+                    write_lock=write_lock,
+                    sync_state=sync_state,
+                    session_ctx=session_ctx,
+                    reason="session_start",
+                    log_fn=log_fn,
+                )
+
                 sync_thread = threading.Thread(
                     target=_time_sync_sender,
                     args=(
@@ -425,6 +466,19 @@ def run_receive(
                 tracker.save(state_path)
                 last_metrics_write = now
 
+            # Drain any per-node hard-reset requests queued by the web API's
+            # "Reset" button (one request per click; non-blocking).
+            if node_reset_queue is not None:
+                while True:
+                    try:
+                        target_node_id = node_reset_queue.get_nowait()
+                    except queue.Empty:
+                        break
+                    _send_cmd_reset(
+                        ser, write_lock, cmd_seq_state,
+                        node_id=target_node_id, reset_type=0x01, log_fn=log_fn,
+                    )
+
             # Check for new-session request from the web API
             if reset_event is not None and reset_event.is_set():
                 reset_event.clear()
@@ -455,6 +509,8 @@ def run_receive(
                     live_state.tracker = tracker
                     live_state.reset()
 
+                _send_cmd_reset(ser, write_lock, cmd_seq_state, node_id=0, reset_type=0, log_fn=log_fn)
+                time.sleep(0.5)  # let the base's RH_RF95.begin() reinit complete
                 _send_time_sync(
                     ser=ser,
                     write_lock=write_lock,
