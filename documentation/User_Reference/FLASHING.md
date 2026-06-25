@@ -1,3 +1,17 @@
+---
+name: flashing
+description: PlatformIO flash, monitor, and build commands for every Feather M0 environment, plus upload troubleshooting.
+category: reference
+status: current
+last_verified: 2026-06-23
+source_refs:
+  - platformio/platformio.ini
+related_docs:
+  - debug-filter
+  - network-test
+  - tdma-protocol
+---
+
 # SmartFires — Flashing Guide
 
 All commands are run from the `platformio/` directory. The PlatformIO CLI is at
@@ -13,39 +27,40 @@ cd ~/Documents/Smart_Fires/SmartFires_IoT/platformio
 
 | Device | Board | Environment | Notes |
 |---|---|---|---|
-| ESP32 sensor node 1 | Arduino Nano ESP32 | `drone` | NODE_ID=1 |
-| ESP32 sensor node 2 | Arduino Nano ESP32 | `drone_node2` | NODE_ID=2 |
-| Feather M0 — LoRa node 1 | Adafruit Feather M0 RFM95 | `lora_feather` | Paired with ESP32 node 1 |
-| Feather M0 — LoRa node 2 | Adafruit Feather M0 RFM95 | `lora_feather_node2` | Paired with ESP32 node 2 |
-| Feather M0 — Base station | Adafruit Feather M0 RFM95 | `lora_feather_base` | Connects to Jetson via UART |
+| Feather M0 — LoRa node | Adafruit Feather M0 RFM95 | `feather_m0_lora_node` | Production sensor node firmware |
+| Feather M0 — LoRa node (debug) | Adafruit Feather M0 RFM95 | `feather_m0_lora_node_debug` | Same as above, lower sample rate, structured debug logging (see DEBUG_FILTER.md) |
+| Feather M0 — Base station | Adafruit Feather M0 RFM95 | `feather_m0_lora_base` | Connects to Jetson via UART |
+| Feather M0 — Sensor probe | Adafruit Feather M0 RFM95 | `feather_m0_sensor_probe` | No LoRa/TDMA/app layer; for sensor bring-up and power measurement |
+| Feather M0 — LoRa sniffer | Adafruit Feather M0 RFM95 | `feather_m0_lora_sniffer` | Passive listener, prints packet metadata, does not participate in TDMA |
+| Native unit tests | n/a (runs on dev machine) | `native` | `pio test -e native` |
 
 ---
 
 ## Flash commands
 
-### ESP32 — sensor node 1
+### Feather M0 — LoRa node
 ```bash
-~/.platformio/penv/bin/pio run -e drone --target upload
+~/.platformio/penv/bin/pio run -e feather_m0_lora_node --target upload
 ```
 
-### ESP32 — sensor node 2
+### Feather M0 — LoRa node (debug build)
 ```bash
-~/.platformio/penv/bin/pio run -e drone_node2 --target upload
-```
-
-### Feather M0 — LoRa node 1
-```bash
-~/.platformio/penv/bin/pio run -e lora_feather --target upload
-```
-
-### Feather M0 — LoRa node 2
-```bash
-~/.platformio/penv/bin/pio run -e lora_feather_node2 --target upload
+~/.platformio/penv/bin/pio run -e feather_m0_lora_node_debug --target upload
 ```
 
 ### Feather M0 — Base station
 ```bash
-~/.platformio/penv/bin/pio run -e lora_feather_base --target upload
+~/.platformio/penv/bin/pio run -e feather_m0_lora_base --target upload
+```
+
+### Feather M0 — Sensor probe
+```bash
+~/.platformio/penv/bin/pio run -e feather_m0_sensor_probe --target upload
+```
+
+### Feather M0 — LoRa sniffer
+```bash
+~/.platformio/penv/bin/pio run -e feather_m0_lora_sniffer --target upload
 ```
 
 ---
@@ -54,20 +69,18 @@ cd ~/Documents/Smart_Fires/SmartFires_IoT/platformio
 
 Useful for watching debug output after flashing.
 
-### ESP32 node 1
+### Feather M0 node (debug build)
 ```bash
-~/.platformio/penv/bin/pio device monitor -e drone
-```
-
-### Feather M0 node 1
-```bash
-~/.platformio/penv/bin/pio device monitor -e lora_feather
+~/.platformio/penv/bin/pio device monitor -e feather_m0_lora_node_debug
 ```
 
 ### Feather M0 base station
 ```bash
-~/.platformio/penv/bin/pio device monitor -e lora_feather_base
+~/.platformio/penv/bin/pio device monitor -e feather_m0_lora_base
 ```
+
+See DEBUG_FILTER.md for `SFDBG_*` environment variables that filter the
+structured debug log stream.
 
 ---
 
@@ -76,9 +89,11 @@ Useful for watching debug output after flashing.
 To compile without flashing — useful for catching errors:
 
 ```bash
-~/.platformio/penv/bin/pio run -e drone
-~/.platformio/penv/bin/pio run -e lora_feather
-~/.platformio/penv/bin/pio run -e lora_feather_base
+~/.platformio/penv/bin/pio run -e feather_m0_lora_node
+~/.platformio/penv/bin/pio run -e feather_m0_lora_base
+~/.platformio/penv/bin/pio run -e feather_m0_sensor_probe
+~/.platformio/penv/bin/pio run -e feather_m0_lora_sniffer
+~/.platformio/penv/bin/pio test -e native
 ```
 
 ---
@@ -101,14 +116,6 @@ If nothing appears, the cable may be charge-only. Swap to a data-capable USB cab
 
 If the port is detected but upload still fails, specify it explicitly:
 ```bash
-~/.platformio/penv/bin/pio run -e lora_feather_base --target upload --upload-port /dev/cu.usbmodem1101
+~/.platformio/penv/bin/pio run -e feather_m0_lora_base --target upload --upload-port /dev/cu.usbmodem1101
 ```
 (Replace `/dev/cu.usbmodem1101` with whatever `ls /dev/cu.usbmodem*` shows.)
-
----
-
-## ESP32 upload troubleshooting
-
-If the ESP32 upload fails, hold the **BOOT button** on the board while the upload
-starts, then release it once the progress bar begins. Some boards require this to
-enter download mode manually.

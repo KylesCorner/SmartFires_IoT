@@ -1,3 +1,7 @@
+// ---
+// description: Accumulates SensorSnapshot readings into PKT_BUNDLE and PKT_STATUS LoRa payloads.
+// role: implementation
+// ---
 #pragma once
 
 #include "telemetry/BinaryPacket.h"

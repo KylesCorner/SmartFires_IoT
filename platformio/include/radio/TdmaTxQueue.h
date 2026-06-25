@@ -1,3 +1,7 @@
+// ---
+// description: Fixed-depth drop-oldest ring buffer queuing outgoing LoRa payloads for TDMA transmission.
+// role: implementation
+// ---
 #pragma once
 
 #include "config/NetworkConfig.h"

@@ -42,14 +42,24 @@ class LiveState:
         self._sniffer_lock = threading.Lock()
         self._sniffer_total = 0
         self._sniffer_stats: dict[int, dict[str, Any]] = {}
+        self._base_debug_ring: deque[dict] = deque(maxlen=5000)
+        self._base_debug_lock = threading.Lock()
+        self._base_debug_total = 0
 
-    def push_log(self, msg: str, node_id: int | None = None, source: str = "ingest") -> None:
+    def push_log(
+        self,
+        msg: str,
+        node_id: int | None = None,
+        source: str = "ingest",
+        kind: str = "other",
+    ) -> None:
         with self._log_lock:
             self._log_ring.append({
                 "t": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
                 "msg": msg,
                 "node_id": node_id,
                 "source": source,
+                "kind": kind,
             })
             self._log_total += 1
 
@@ -62,6 +72,21 @@ class LiveState:
         with self._log_lock:
             items = list(self._log_ring)
             total = self._log_total
+        oldest_idx = total - len(items)
+        if since_idx <= oldest_idx:
+            return items, total
+        return items[since_idx - oldest_idx:], total
+
+    def push_base_debug(self, record: dict[str, Any]) -> None:
+        with self._base_debug_lock:
+            self._base_debug_ring.append(record)
+            self._base_debug_total += 1
+
+    def drain_base_debug(self, since_idx: int) -> tuple[list[dict], int]:
+        """Same monotonic-cursor pattern as drain_log."""
+        with self._base_debug_lock:
+            items = list(self._base_debug_ring)
+            total = self._base_debug_total
         oldest_idx = total - len(items)
         if since_idx <= oldest_idx:
             return items, total
@@ -180,6 +205,12 @@ class LiveState:
                 tstats = tracker_nodes.get(str(node_id), {})
                 expected = tstats.get("received", 0) + tstats.get("missing", 0)
                 loss_percent = 100.0 * tstats.get("missing", 0) / expected if expected else 0.0
+                heading_accuracy_raw = status.get("heading_accuracy")
+                heading_accuracy_deg = (
+                    round(heading_accuracy_raw / 4096.0, 1)
+                    if isinstance(heading_accuracy_raw, (int, float))
+                    else None
+                )
                 result[node_id] = {
                     "node_id": node_id,
                     "lat": status.get("lat"),
@@ -188,6 +219,7 @@ class LiveState:
                     "battery_pct": status.get("battery_pct"),
                     "rssi": status.get("rssi"),
                     "heading_deg": status.get("heading_deg"),
+                    "heading_accuracy_deg": heading_accuracy_deg,
                     "retx_total": status.get("retx_total"),
                     "fail_total": status.get("fail_total"),
                     "retx_session": status.get("retx_session"),
@@ -215,7 +247,7 @@ class LiveState:
         with self._sniffer_lock:
             self._sniffer_ring.clear()
             self._sniffer_stats.clear()
-        self.push_log("--- NEW SESSION ---", None)
+        self.push_log("--- NEW SESSION ---", None, kind="session")
 
     def status_history_snapshot(self, limit: int = 5000) -> list[dict[str, Any]]:
         with self._lock:

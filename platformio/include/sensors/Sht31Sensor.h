@@ -1,3 +1,7 @@
+// ---
+// description: ISensor and ITriggerSensor implementation wrapping the SHT31 temperature/humidity driver.
+// role: implementation
+// ---
 #pragma once
 
 #include "drivers/ISht31Driver.h"

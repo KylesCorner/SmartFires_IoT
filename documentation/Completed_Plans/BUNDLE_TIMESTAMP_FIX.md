@@ -1,3 +1,10 @@
+---
+name: bundle-timestamp-fix
+description: Root-cause analysis and fix plan for two bugs causing every row decoded from the same PKT_BUNDLE to carry an identical timestamp in the telemetry CSV.
+category: plan-completed
+status: historical
+---
+
 # Bundle Timestamp Fix
 
 ## Background

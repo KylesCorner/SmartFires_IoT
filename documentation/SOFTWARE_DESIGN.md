@@ -1,3 +1,19 @@
+---
+name: software-design
+description: Master system architecture — hardware topology, firmware/edge module layout, wire protocol.
+category: architecture
+status: current
+last_verified: 2026-06-23
+source_refs:
+  - platformio/platformio.ini
+  - platformio/include/telemetry/BinaryPacket.h
+  - edge/edge-receiver/src/smartfires_edge/main.py
+related_docs:
+  - software-design-diagram
+  - tdma-protocol
+  - uart-jetson-bridge
+---
+
 # SmartFires IoT Software Design
 
 ## Overview
@@ -22,6 +38,7 @@ The current firmware architecture is class-based and centered on narrow responsi
   SmartFiresNodeApp
     -> DutyCycleController
     -> PacketHandler
+    -> CalibrationDebug (logging helpers for CMD_CALIBRATE/CMD_RESET/CMD_ACK; log-only, no real action)
     -> TdmaRadioService
     -> RadioHeadTdmaDriver
         |
@@ -30,15 +47,19 @@ The current firmware architecture is class-based and centered on narrow responsi
 [Feather M0 LoRa base station]
   SmartFiresBaseApp
     -> RadioHeadTdmaDriver
-    -> UART bridge
+    -> UART/USB bridge (binary frames + multiplexed PKT_DEBUG_LOG)
         |
-        | UART 115200
+        | USB CDC 115200
         v
 [Jetson Orin Nano]
   smartfires_edge.ingest_service
-    -> packet decode
+    -> packet decode (packet.py)
     -> CSV logging
     -> TIME_SYNC generation
+    -> optional anemometer merge
+  smartfires_edge.web (FastAPI/uvicorn dashboard, `smartfires-edge web`)
+    -> live map, telemetry charts, sniffer tab, debug log tab
+  smartfires_edge.sniffer_service (optional, passive LoRa sniffer Feather over a second port)
 ```
 
 ## Design Goals
@@ -58,8 +79,11 @@ SmartFires_IoT/
 │   ├── platformio.ini
 │   ├── include/
 │   │   ├── app/
+│   │   ├── calibration/
+│   │   ├── config/
 │   │   ├── drivers/
 │   │   ├── interfaces/
+│   │   ├── logging/
 │   │   ├── platform/
 │   │   ├── power/
 │   │   ├── radio/
@@ -67,15 +91,16 @@ SmartFires_IoT/
 │   │   └── telemetry/
 │   ├── src/
 │   │   ├── app/
+│   │   ├── calibration/
 │   │   ├── platform/
 │   │   ├── power/
 │   │   ├── radio/
-│   │   ├── sensors/
-│   │   └── telemetry/
+│   │   └── sensors/
 │   └── test/
 ├── edge/
 │   ├── anemometer_read.py
 │   └── edge-receiver/
+│       └── src/smartfires_edge/       — ingest, sniffer, and web dashboard (see below)
 ├── documentation/
 │   ├── README.md                      — doc index
 │   ├── SOFTWARE_DESIGN.md             — this file
@@ -85,13 +110,17 @@ SmartFires_IoT/
 │   │   ├── PACKET_RELIABILITY.md
 │   │   ├── DUTY_CYCLING.md
 │   │   ├── UART_JETSON_BRIDGE.md
-│   │   └── BANDWIDTH_SCALING.md
+│   │   ├── BANDWIDTH_SCALING.md
+│   │   └── TUNABLE_PARAMETERS.md
 │   ├── User_Reference/                — how-to guides
 │   │   ├── FLASHING.md
 │   │   ├── DEBUG_FILTER.md
 │   │   ├── JETSON_CHEATSHEET.md
 │   │   └── NETWORK_TEST.md
-│   └── Completed_Plans/               — historical design docs
+│   ├── Completed_Plans/               — historical design docs
+│   └── Pending_Plans/                 — not-yet-implemented proposals
+├── util/                              — host-side tooling (sniffer dashboard, drone-data
+│                                         plotting, Jetson rsync, udev rules)
 ├── CLAUDE.md
 └── README.md
 ```
@@ -136,6 +165,7 @@ loop()
 - builds a `SensorSnapshot` when telemetry is ready
 - forwards snapshots to `PacketHandler`
 - enqueues generated `STATUS` and `BUNDLE` packets to the radio service
+- handles incoming `CMD_CALIBRATE`/`CMD_RESET` packets directly, using `CalibrationDebug`'s logging helpers, and enqueues a `CMD_ACK` (no real calibration trigger or board reset is performed yet)
 
 `SmartFiresNodeApp` does not know binary field layouts beyond asking `PacketHandler` for encoded payloads.
 
@@ -194,8 +224,8 @@ Its runtime loop is simple by design:
 - wrap them into UART frames with RSSI metadata
 - forward them to the Jetson
 - parse incoming Jetson UART commands
-- forward `TIME_SYNC` broadcasts or targeted ACK-summary messages over LoRa
-- log periodic health counters to the debug UART
+- forward `TIME_SYNC` broadcasts, targeted ACK-summary messages, and `CMD_CALIBRATE`/`CMD_RESET` commands over LoRa; relay node `CMD_ACK` replies back to the Jetson
+- log periodic health counters and structured debug-log lines (`PKT_DEBUG_LOG`) to the Jetson over the same USB link
 
 The base station deliberately does not decode the full telemetry payload beyond the minimum needed to route commands. It behaves as a protocol bridge.
 
@@ -203,12 +233,23 @@ The base station deliberately does not decode the full telemetry payload beyond 
 
 The Jetson-side Python package in `edge/edge-receiver/src/smartfires_edge/` is responsible for:
 
-- reading UART frames from the base station
-- decoding binary payloads mirrored from `BinaryPacket.h`
+- reading UART/USB frames from the base station (`uart_receiver.py`)
+- decoding binary payloads mirrored from `BinaryPacket.h` (`packet.py`)
 - expanding bundle payloads into per-sample rows
-- writing rotated CSV telemetry logs
-- generating periodic `TIME_SYNC` command frames
-- optionally merging local anemometer readings into output rows
+- writing rotated CSV telemetry logs (`csv_logger.py`)
+- generating periodic `TIME_SYNC` command frames and forwarding CALIBRATE/RESET commands (`ingest_service.py`, `config.py`)
+- tracking per-node packet-loss/sequence stats (`packet_loss.py`)
+- optionally merging local anemometer readings into output rows (`anemometer.py`)
+- maintaining session metadata, live in-memory node state, and a small key-value state store (`session.py`, `session_meta.py`, `live_state.py`, `state_store.py`, `models.py`)
+- persisting/looking up base-station identity (`base_station_store.py`)
+- caching map tiles for offline use (`tile_cache.py`)
+- buffering structured debug-log lines received via `PKT_DEBUG_LOG` (`debug_log.py`)
+- decoding passive-sniffer LoRa captures from a second Feather (`sniffer_service.py`)
+- serving a live web dashboard (`web_service.py`, `web/app.py`) — a FastAPI/uvicorn app exposing a map view, telemetry/status history, sniffer stats, base-station config, and a command endpoint, plus WebSocket log/sniffer/base-debug streams; static assets (HTML/CSS/JS, Leaflet) live under `web/static/`
+
+The CLI (`main.py`) exposes four subcommands: `receive` (UART ingest + CSV only),
+`web` (ingest + dashboard), `visualize` (live terminal tables), and `summary`
+(print saved packet-loss stats).
 
 The Python side mirrors the binary protocol rather than redefining it.
 
@@ -249,11 +290,21 @@ Node to base packets:
 - `AWAKEN`: boot signal before the session is synchronized
 - `STATUS`: GPS and battery summary
 - `BUNDLE`: one full reference sample and multiple compact deltas
+- `CMD_ACK`: acknowledges a CALIBRATE or RESET command, relayed through the base back to the Jetson
 
 Base to node packets:
 
 - `TIME_SYNC`: session ID and session time broadcast
 - `ACK_SUMMARY`: targeted app-layer reliability summary generated by the base
+- `CMD_CALIBRATE` / `CMD_RESET`: forwarded from the Jetson via the base; node currently only logs and ACKs these (DMP self-calibrates continuously regardless; reset is not yet wired to a real board reset)
+
+Base to Jetson only (never sent over LoRa):
+
+- `PKT_DEBUG_LOG` (`0x14`): raw `@SFDBG` text log lines multiplexed onto the same USB link as telemetry
+
+Reserved/unused types still present in the decode dispatch but not produced by current
+firmware: `PKT_FULL_STATE` (`0x01`, dead TX path) and `PKT_CALIBRATION_DATA` (`0x12`,
+no encode/decode functions exist at all).
 
 Base to Jetson UART frames wrap received LoRa payloads with:
 
@@ -272,9 +323,10 @@ The current PlatformIO environments are:
 | Environment | Purpose | Key flags |
 | --- | --- | --- |
 | `native` | host-based unit tests | `UNIT_TEST` |
-| `feather_m0_lora_node` | real sensor node firmware | `LORA_NODE=2` `NUM_SLOTS=4` `SMARTFIRES_TDMA_RELIABILITY_MODE=1` `SMARTFIRES_STATUS_INTERVAL_MS=5000` `ICM_20948_USE_DMP` |
+| `feather_m0_lora_node` | real sensor node firmware | `LORA_NODE=2` `NUM_SLOTS=4` `SMARTFIRES_TDMA_RELIABILITY_MODE=1` `SMARTFIRES_STATUS_INTERVAL_MS=15000` `ICM_20948_USE_DMP` |
 | `feather_m0_lora_node_debug` | debug node (default env, debug filter) | `LORA_NODE=1` `NUM_SLOTS=4` `SMARTFIRES_TDMA_RELIABILITY_MODE=1` `SMARTFIRES_STATUS_INTERVAL_MS=1000` `ICM_20948_USE_DMP` |
 | `feather_m0_lora_base` | base station firmware | `LORA_BASE=1` |
+| `feather_m0_sensor_probe` | sensor bring-up / power-draw measurement, no LoRa/TDMA/app layer | `SENSOR_PROBE=1` `ICM_20948_USE_DMP` |
 | `feather_m0_lora_sniffer` | passive LoRa packet monitor | `SMARTFIRES_LORA_SNIFFER=1` |
 
 Key compile-time flags:
@@ -300,13 +352,15 @@ Stable architectural pieces:
 - class-based base station application skeleton
 - binary packet definitions and bundle encoding path
 - TDMA timing and queue abstractions
-- Jetson ingest and decode path
+- Jetson ingest and decode path, plus the FastAPI web dashboard
 - native test structure
+- all five sensor `fillSnapshot()` implementations (SHT31, Wind, GPS, SPS30, IMU) wired end-to-end in `main.cpp`
+- CMD_CALIBRATE/CMD_RESET/CMD_ACK round-trip (node logs and ACKs; no real calibration trigger or board reset yet)
 
 Still being wired into the finalized structure:
 
-- several sensor implementations beyond the currently active SHT31 and GPS path in `main.cpp`
-- full deployment-time hardware bring-up for all expected node sensors
+- real calibration-trigger and board-reset behavior for CMD_CALIBRATE/CMD_RESET (currently log-only on the node)
+- PKT_CALIBRATION_DATA (no encode/decode exists yet)
 - continued refinement of base station behavior as the bridge interface matures
 
 ## Extension Guidance

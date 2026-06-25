@@ -82,6 +82,46 @@ async function _fetchBlob(url) {
   return resp.blob();
 }
 
+// Leaflet calls createTile() once per visible tile with no coordination —
+// zooming in can ask for 30+ tiles at once. Firing them all at CARTO
+// simultaneously (across 4 subdomains, bypassing the browser's per-host
+// connection cap) looks like scraping and gets soft-blocked: CARTO returns
+// 200 OK with OSM's "Access blocked" placeholder as the body, so resp.ok
+// is true and the warning image renders as if it were the real tile. Cap
+// concurrent CARTO fetches so on-demand (high-zoom) loads stay polite too.
+const _MAX_CONCURRENT_CARTO_FETCHES = 4;
+let _activeCartoFetches = 0;
+const _cartoFetchQueue = [];
+
+function _acquireCartoSlot() {
+  return new Promise((resolve) => {
+    if (_activeCartoFetches < _MAX_CONCURRENT_CARTO_FETCHES) {
+      _activeCartoFetches++;
+      resolve();
+    } else {
+      _cartoFetchQueue.push(resolve);
+    }
+  });
+}
+
+function _releaseCartoSlot() {
+  const next = _cartoFetchQueue.shift();
+  if (next) {
+    next();
+  } else {
+    _activeCartoFetches--;
+  }
+}
+
+async function _fetchCartoBlob(z, x, y) {
+  await _acquireCartoSlot();
+  try {
+    return await _fetchBlob(_tileUrl(z, x, y));
+  } finally {
+    _releaseCartoSlot();
+  }
+}
+
 async function _uploadTile(z, x, y, blob) {
   try {
     await fetch(`/tiles/${z}/${x}/${y}.png`, {
@@ -120,7 +160,7 @@ const SmartFiresTileLayer = L.TileLayer.extend({
       // 2. Cache miss → fetch from CARTO (browser UA, different CDN from OSM).
       if (!blob) {
         try {
-          blob = await _fetchBlob(_tileUrl(z, x, y));
+          blob = await _fetchCartoBlob(z, x, y);
           if (blob) {
             // Store on Jetson for offline use (fire-and-forget).
             _uploadTile(z, x, y, blob.slice(0));

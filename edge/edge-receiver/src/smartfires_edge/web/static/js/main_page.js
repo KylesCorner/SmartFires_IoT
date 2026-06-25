@@ -28,8 +28,6 @@ const TIME_RANGES = [
   { label: "Last hour",   ms: 60 * 60 * 1000, fetchLimit: 2000 },
 ];
 
-const LOG_MAX_LINES = 2000;
-
 const state = {
   selectedNodes:   new Set(),
   knownNodes:      new Set(),
@@ -40,13 +38,6 @@ const state = {
   markers:         {},
   baseMarker:      null,
   mapFitted:       false,
-};
-
-const logState = {
-  entries:      [],
-  activeTab:    null,
-  knownNodeIds: new Set(),
-  ws:           null,
 };
 
 // ---------------------------------------------------------------------------
@@ -321,10 +312,16 @@ function updateNodeTable(nodes) {
     const lastSeen = info.last_seen
       ? new Date(info.last_seen * 1000).toLocaleTimeString()
       : "—";
+    const heading = info.heading_deg !== null && info.heading_deg !== undefined && info.heading_deg !== ""
+      ? `${info.heading_deg}°`
+      : "—";
+    const headingAcc = info.heading_accuracy_deg !== null && info.heading_accuracy_deg !== undefined && info.heading_accuracy_deg !== ""
+      ? `±${info.heading_accuracy_deg}°`
+      : "—";
     const tr = document.createElement("tr");
     tr.innerHTML = `<td>${info.node_id}</td><td>${fmt(info.lat)}</td><td>${fmt(
       info.lon
-    )}</td><td>${fmt(info.battery_pct)}</td><td>${lastSeen}</td>`;
+    )}</td><td>${fmt(info.battery_pct)}</td><td>${heading}</td><td>${headingAcc}</td><td>${lastSeen}</td>`;
     tbody.appendChild(tr);
   }
 }
@@ -349,105 +346,8 @@ function wireBaseStationForm() {
 }
 
 // ---------------------------------------------------------------------------
-// Log panel
+// New session
 // ---------------------------------------------------------------------------
-
-// "sniffer" is a fixed pseudo-tab (always shown, like "All") that filters by
-// log source instead of node_id — the passive sniffer reports on the same
-// nodes the normal ingest path does, so a node-id tab alone can't isolate it.
-const FIXED_LOG_TABS = [null, "sniffer"];
-
-function logTabLabel(tabId) {
-  if (tabId === null) return "All";
-  if (tabId === "sniffer") return "Sniffer";
-  return `Node ${tabId}`;
-}
-
-function logEntryMatchesTab(entry, tabId) {
-  if (tabId === null) return true;
-  if (tabId === "sniffer") return entry.source === "sniffer";
-  return entry.node_id === tabId || entry.node_id === null;
-}
-
-function renderLogTabs() {
-  const container = document.getElementById("log-tabs");
-  container.innerHTML = "";
-
-  const tabs = [...FIXED_LOG_TABS, ...Array.from(logState.knownNodeIds).sort((a, b) => a - b)];
-  for (const tabId of tabs) {
-    const btn = document.createElement("button");
-    btn.className = "log-tab" + (logState.activeTab === tabId ? " active" : "");
-    btn.textContent = logTabLabel(tabId);
-    btn.addEventListener("click", () => {
-      logState.activeTab = tabId;
-      renderLogTabs();
-      renderLogOutput();
-    });
-    container.appendChild(btn);
-  }
-}
-
-function renderLogOutput() {
-  const el = document.getElementById("log-output");
-  const active = logState.activeTab;
-  const visible = logState.entries.filter((e) => logEntryMatchesTab(e, active));
-
-  const atBottom = el.scrollHeight - el.scrollTop <= el.clientHeight + 4;
-  el.textContent = visible.map((e) => `${e.t.slice(11, 23)}  ${e.msg}`).join("\n");
-  if (atBottom) {
-    el.scrollTop = el.scrollHeight;
-  }
-}
-
-function onLogEntry(entry) {
-  logState.entries.push(entry);
-  if (logState.entries.length > LOG_MAX_LINES) {
-    logState.entries.splice(0, logState.entries.length - LOG_MAX_LINES);
-  }
-
-  let tabsChanged = false;
-  if (entry.node_id !== null && entry.node_id !== undefined && !logState.knownNodeIds.has(entry.node_id)) {
-    logState.knownNodeIds.add(entry.node_id);
-    tabsChanged = true;
-  }
-
-  if (tabsChanged) {
-    renderLogTabs();
-  }
-
-  const active = logState.activeTab;
-  if (logEntryMatchesTab(entry, active)) {
-    const el = document.getElementById("log-output");
-    const atBottom = el.scrollHeight - el.scrollTop <= el.clientHeight + 4;
-    el.textContent += `${entry.t.slice(11, 23)}  ${entry.msg}\n`;
-    if (logState.entries.length > LOG_MAX_LINES) {
-      const firstNewline = el.textContent.indexOf("\n");
-      if (firstNewline !== -1) {
-        el.textContent = el.textContent.slice(firstNewline + 1);
-      }
-    }
-    if (atBottom) {
-      el.scrollTop = el.scrollHeight;
-    }
-  }
-}
-
-function connectLogSocket() {
-  const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  const ws = new WebSocket(`${proto}//${location.host}/ws/log`);
-  logState.ws = ws;
-
-  ws.onmessage = (ev) => {
-    try {
-      onLogEntry(JSON.parse(ev.data));
-    } catch (_) {}
-  };
-
-  ws.onclose = () => {
-    logState.ws = null;
-    setTimeout(connectLogSocket, 2000);
-  };
-}
 
 function wireNewSessionButton() {
   const btn = document.getElementById("new-session-btn");
@@ -477,37 +377,12 @@ function wireNewSessionButton() {
         state.baseMarker.remove();
         state.baseMarker = null;
       }
-
-      logState.entries = [];
-      logState.knownNodeIds.clear();
-      logState.activeTab = null;
-      renderLogTabs();
-      renderLogOutput();
     } catch (e) {
       alert("Failed to start new session: " + (e.message || e));
     } finally {
       btn.disabled = false;
       btn.textContent = "New Session";
     }
-  });
-}
-
-function wireCommandInput() {
-  const input = document.getElementById("cmd-input");
-  const btn = document.getElementById("cmd-send");
-
-  async function sendCommand() {
-    const cmd = input.value.trim();
-    if (!cmd) return;
-    input.value = "";
-    try {
-      await Api.postCommand(cmd);
-    } catch (_) {}
-  }
-
-  btn.addEventListener("click", sendCommand);
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") sendCommand();
   });
 }
 
@@ -522,9 +397,6 @@ async function init() {
   initChart();
   initMap();
   wireBaseStationForm();
-  renderLogTabs();
-  connectLogSocket();
-  wireCommandInput();
   wireNewSessionButton();
   await pollNodes();
   await refreshChart();

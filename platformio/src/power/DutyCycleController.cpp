@@ -1,3 +1,8 @@
+// ---
+// description: Implements DutyCycleController's phase transitions (idle/warmup/active/cooldown), trigger-threshold detection, and per-sensor wake/sleep/sample orchestration.
+// role: implementation
+// docs: [duty-cycling]
+// ---
 #include "power/DutyCycleController.h"
 
 #include "logging/DebugLogger.h"

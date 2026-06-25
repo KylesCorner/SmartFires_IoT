@@ -1,3 +1,7 @@
+// ---
+// description: Implements Icm20948Sensor's power-state machine, DMP sampling, and SensorSnapshot fill for heading/accuracy.
+// role: implementation
+// ---
 #include "sensors/Icm20948Sensor.h"
 
 #include "logging/DebugLogger.h"

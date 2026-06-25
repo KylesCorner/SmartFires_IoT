@@ -1,3 +1,7 @@
+// ---
+// description: Implements PacketHandler bundle/STATUS accumulation, quantization, and encoding.
+// role: implementation
+// ---
 #include "radio/PacketHandler.h"
 
 #include "logging/DebugLogger.h"

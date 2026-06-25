@@ -1,3 +1,7 @@
+// ---
+// description: ISensor implementation for the Modern Device Wind Sensor Rev C, converting analog RV/TMP voltages into wind speed and temperature.
+// role: implementation
+// ---
 // -----------------------------------------------------------------------------
 // Wind Sensor Rev C
 // -----------------------------------------------------------------------------

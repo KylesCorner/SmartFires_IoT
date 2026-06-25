@@ -1,3 +1,8 @@
+// ---
+// description: Implements SmartFiresBaseApp's LoRa RX dispatch, node/ACK tracking, Jetson UART frame parsing, and reserved-slot-gated TX of TIME_SYNC/ACK_SUMMARY/commands.
+// role: implementation
+// docs: [packet-reliability, uart-jetson-bridge]
+// ---
 #include "app/SmartFiresBaseApp.h"
 
 #include "calibration/CalibrationDebug.h"
@@ -136,7 +141,7 @@ TdmaConfig makeBaseTdmaConfig(const SmartFiresBaseApp::Config &cfg) {
 SmartFiresBaseApp::SmartFiresBaseApp(const Config &cfg,
                                      IClock &clock,
                                      ITdmaRadioDriver &radio,
-                                     HardwareSerial &jetsonUart,
+                                     Stream &jetsonUart,
                                      Print &debugUart)
     : _cfg(cfg),
       _clock(clock),
@@ -146,7 +151,10 @@ SmartFiresBaseApp::SmartFiresBaseApp(const Config &cfg,
       _baseTdmaClock(makeBaseTdmaConfig(cfg), clock) {}
 
 bool SmartFiresBaseApp::begin() {
-  _jetsonUart.begin(_cfg.uartBaud);
+  // jetsonUart.begin() is no longer called here: Stream has no begin(), and
+  // the concrete type (HardwareSerial vs native-USB Serial_) is only known
+  // in main.cpp, which is responsible for calling begin() before
+  // SmartFiresBaseApp::begin() runs.
 
   if (!_radio.begin()) {
     LOG_ERROR("base", "radio_begin_failed");

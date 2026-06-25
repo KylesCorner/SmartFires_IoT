@@ -1,3 +1,7 @@
+// ---
+// description: SensirionUartSps30 UART driver implementing ISps30Driver for the SPS30 particulate matter sensor.
+// role: implementation
+// ---
 #pragma once
 
 #include "drivers/ISps30Driver.h"

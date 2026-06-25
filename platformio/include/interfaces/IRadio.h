@@ -1,3 +1,7 @@
+// ---
+// description: Generic send/receive radio abstraction that hardware-specific LoRa drivers implement.
+// role: interface
+// ---
 #pragma once
 
 #include <stddef.h>

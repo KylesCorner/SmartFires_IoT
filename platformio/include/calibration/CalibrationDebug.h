@@ -1,3 +1,7 @@
+// ---
+// description: Helper functions for naming CMD_CALIBRATE/CMD_RESET types and statuses, and for logging CmdAckPayload summaries.
+// role: implementation
+// ---
 #pragma once
 
 #include "telemetry/BinaryPacket.h"

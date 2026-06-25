@@ -1,3 +1,7 @@
+// ---
+// description: Adafruit_GPS (PA1010D, I2C) driver implementing IGpsDriver, including PMTK standby/backup/periodic power-mode commands.
+// role: implementation
+// ---
 #include "platform/AdafruitGpsDriver.h"
 
 #include <Adafruit_PMTK.h>

@@ -1,3 +1,7 @@
+// ---
+// description: Implements Pa1010dGpsSensor's power-mode handling, fix sampling, reset, and SensorSnapshot fill for lat/lon.
+// role: implementation
+// ---
 #include "sensors/Pa1010dGpsSensor.h"
 
 #include "logging/DebugLogger.h"

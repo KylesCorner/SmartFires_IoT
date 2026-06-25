@@ -30,8 +30,12 @@ from typing import Any
 # Default values — change here, takes effect everywhere
 # ---------------------------------------------------------------------------
 
-# Serial / UART (shared by receive, web, visualize, cli)
-DEFAULT_PORT: str = "/dev/ttyTHS1"
+# Serial link to the base station — native USB CDC, not the Jetson's hardware
+# UART (see documentation/Current_Architecture/UART_JETSON_BRIDGE.md). Use the
+# udev-assigned stable symlink, not a raw /dev/ttyACM* path, since the base
+# and sniffer Feathers enumerate identically and their ttyACM index can swap
+# on reconnect/reboot.
+DEFAULT_PORT: str = "/dev/smartfires-base"
 DEFAULT_BAUD: int = 115200
 
 # Data persistence (receive, web)
@@ -210,7 +214,7 @@ def _apply_json_config(cfg: EdgeConfig, path: Path) -> None:
 
         {
           "ingest": {
-            "port": "/dev/ttyTHS1",
+            "port": "/dev/smartfires-base",
             "baud": 115200,
             "data_dir": "/mnt/nvme_drive/data",
             "nodes": [1, 2],
@@ -300,7 +304,7 @@ def add_common_ingest_args(parser: Any) -> None:
     parser.add_argument(
         "--port",
         default=None,
-        help=f"Serial port for base-station UART (default: {DEFAULT_PORT})",
+        help=f"Serial port for the base-station USB link (default: {DEFAULT_PORT})",
     )
     parser.add_argument(
         "--baud",

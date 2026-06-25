@@ -1,9 +1,14 @@
+// ---
+// description: Firmware entrypoint — selects and wires up one of LORA_BASE/LORA_NODE/SENSOR_PROBE build roles, constructing all objects and running setup()/loop().
+// role: entrypoint
+// ---
 #include "logging/DebugLogger.h"
 #include <Arduino.h>
 
 #if defined(LORA_BASE)
 
 #include "app/SmartFiresBaseApp.h"
+#include "logging/FramedDebugLogSink.h"
 #include "platform/ArduinoClock.h"
 #include "platform/RadioHeadTdmaDriver.h"
 
@@ -14,11 +19,16 @@ RadioHeadTdmaDriver::Config baseRadioCfg =
 RadioHeadTdmaDriver baseRadio(baseRadioCfg);
 
 SmartFiresBaseApp::Config baseAppCfg = SmartFiresBaseApp::Config::baseCfg();
-SmartFiresBaseApp baseApp(baseAppCfg, baseClock, baseRadio, Serial1, Serial);
-DebugLogger gLog(Serial, baseAppCfg.baseAddr);
+// Jetson link is native USB CDC (Serial), matching the sniffer firmware — see
+// documentation/Current_Architecture/UART_JETSON_BRIDGE.md. Debug logs are
+// multiplexed onto that same link as PKT_DEBUG_LOG frames (FramedDebugLogSink)
+// instead of a separate physical UART — Serial1 is unused on this build.
+FramedDebugLogSink baseDebugSink(Serial, baseAppCfg.baseAddr);
+SmartFiresBaseApp baseApp(baseAppCfg, baseClock, baseRadio, Serial, baseDebugSink);
+DebugLogger gLog(baseDebugSink, baseAppCfg.baseAddr);
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(baseAppCfg.uartBaud);
   while (!Serial && millis() < 3000) {
   }
 

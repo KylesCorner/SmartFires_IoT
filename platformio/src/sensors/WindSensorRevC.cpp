@@ -1,3 +1,7 @@
+// ---
+// description: Implements WindSensorRevC's ADC sampling, Rev C wind-speed/temperature regression math, and SensorSnapshot fill.
+// role: implementation
+// ---
 #include "sensors/WindSensorRevC.h"
 
 #include "logging/DebugLogger.h"

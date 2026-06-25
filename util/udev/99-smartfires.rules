@@ -1,0 +1,15 @@
+# Stable device names for the base station and sniffer Feather M0 boards on
+# the Jetson. Both enumerate as generic USB CDC-ACM devices with identical
+# VID/PID, so raw /dev/ttyACM* paths can swap on reboot/reconnect — these
+# rules pin each board to a fixed symlink keyed on its USB serial number.
+#
+# Setup (see documentation/User_Reference/JETSON_CHEATSHEET.md):
+#   1. Plug in ONE board at a time, run:
+#        udevadm info -a -n /dev/ttyACM0 | grep '{serial}'
+#   2. Fill in the two serials below, then:
+#        sudo cp util/udev/99-smartfires.rules /etc/udev/rules.d/
+#        sudo udevadm control --reload-rules && sudo udevadm trigger
+#   3. Verify: ls -l /dev/smartfires-base /dev/smartfires-sniffer
+
+SUBSYSTEM=="tty", ATTRS{serial}=="4B1C501150314C57552E3120FF0E2730", SYMLINK+="smartfires-base"
+SUBSYSTEM=="tty", ATTRS{serial}=="08D8C68E50315943532E3120FF040F0D", SYMLINK+="smartfires-sniffer"

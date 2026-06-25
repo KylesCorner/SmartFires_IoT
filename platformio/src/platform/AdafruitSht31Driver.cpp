@@ -1,3 +1,7 @@
+// ---
+// description: Adafruit_SHT31 I2C temperature/humidity driver implementing ISht31Driver, with range-validated retrying reads.
+// role: implementation
+// ---
 #include "platform/AdafruitSht31Driver.h"
 
 #include <Arduino.h>

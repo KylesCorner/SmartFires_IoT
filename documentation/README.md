@@ -1,3 +1,13 @@
+---
+name: documentation-index
+description: Table of contents for documentation/ — start here.
+category: index
+status: current
+last_verified: 2026-06-23
+related_docs:
+  - software-design
+---
+
 # SmartFires IoT Documentation
 
 ## Top-level docs
@@ -26,7 +36,18 @@ Practical how-to guides for day-to-day development and deployment.
 |---|---|
 | [FLASHING.md](User_Reference/FLASHING.md) | PlatformIO CLI commands to flash node and base firmware |
 | [DEBUG_FILTER.md](User_Reference/DEBUG_FILTER.md) | Debug build structured logging and PlatformIO monitor filter |
-| [JETSON_CHEATSHEET.md](User_Reference/JETSON_CHEATSHEET.md) | Jetson one-time setup, UART enable, edge-receiver install and run |
+| [JETSON_CHEATSHEET.md](User_Reference/JETSON_CHEATSHEET.md) | Jetson one-time setup, udev rules, edge-receiver install and run |
+| [NETWORK_TEST.md](User_Reference/NETWORK_TEST.md) | End-to-end LoRa → base → Jetson integration test procedure |
+
+## Pending Plans
+
+Active design documents for work not yet implemented. Code is not yet authoritative for
+these — check status tables within each doc for what's done vs. open.
+
+| Document | What it covers |
+|---|---|
+| [RESET_SYSTEM.md](Pending_Plans/RESET_SYSTEM.md) | Jetson/base/node reset coordination and time-sync recovery |
+| [JETSON_SENSOR_EXPANSION.md](Pending_Plans/JETSON_SENSOR_EXPANSION.md) | Adding temp/humidity, BMV080, GPS, and ICM-20948 IMU sensors directly to the Jetson via I2C |
 
 ## Completed Plans
 

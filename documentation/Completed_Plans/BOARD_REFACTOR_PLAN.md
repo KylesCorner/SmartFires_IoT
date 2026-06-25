@@ -1,3 +1,11 @@
+---
+name: board-refactor-plan
+description: Proposed class-based directory layout (interfaces, sensors, drivers, power, radio, telemetry, platform) for refactoring the node firmware into the single-board Feather M0 architecture.
+category: plan-completed
+status: historical
+superseded_by: software-design
+---
+
 # Project Structure
 SmartFires_IoT/
 ├── platformio.ini

@@ -1,3 +1,7 @@
+// ---
+// description: Hardware abstraction for the PA1010D GPS module, covering fix data and its full-power/standby/backup power-mode transitions.
+// role: interface
+// ---
 #pragma once
 
 #include <stdint.h>

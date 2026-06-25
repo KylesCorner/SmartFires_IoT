@@ -1,3 +1,11 @@
+---
+name: tunable-parameter-architecture-plan
+description: Plan to restructure tunable parameter declarations across node firmware, base firmware, and edge receiver into single-source-of-truth, domain-grouped config files.
+category: plan-completed
+status: historical
+superseded_by: tunable-parameters
+---
+
 # Tunable Parameter Architecture Plan
 
 ## Purpose

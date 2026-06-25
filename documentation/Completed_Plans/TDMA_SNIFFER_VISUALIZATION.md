@@ -1,3 +1,12 @@
+---
+name: tdma-sniffer-visualization
+description: Plan for a dedicated passive-monitoring Feather M0 sniffer plus a Jetson web UI tab to visualize TDMA slot timing, drift, and per-node RSSI/SNR.
+category: plan-completed
+status: historical
+related_docs:
+  - edge-refactor-web-dashboard
+---
+
 # TDMA Sniffer — Firmware, Service, and Visualization
 
 ## Background

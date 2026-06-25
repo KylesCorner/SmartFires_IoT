@@ -1,3 +1,7 @@
+// ---
+// description: ISensor implementation wrapping the PA1010D GPS driver, managing GPS power modes and fix readings.
+// role: implementation
+// ---
 #pragma once
 
 #include "drivers/IGpsDriver.h"

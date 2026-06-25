@@ -1,3 +1,7 @@
+// ---
+// description: Hardware abstraction for the SPS30 particulate-matter sensor driver.
+// role: interface
+// ---
 #pragma once
 #include <stdint.h>
 

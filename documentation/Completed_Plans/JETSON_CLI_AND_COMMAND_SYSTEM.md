@@ -1,3 +1,13 @@
+---
+name: jetson-cli-and-command-system
+description: Design for a split-screen interactive Jetson CLI to view live packet data, send CALIBRATE/RESET commands to nodes, and manage calibration storage and computed orientation.
+category: plan-completed
+status: historical
+related_docs:
+  - orientation-calibration-plan
+  - deployment-schedule
+---
+
 # Jetson CLI and Command System Design
 
 ## Overview

@@ -1,3 +1,8 @@
+// ---
+// description: Tunable TDMA/reliability runtime config struct and reliability-mode enum.
+// role: config
+// docs: [packet-reliability, tdma-protocol]
+// ---
 #pragma once
 
 // Shape of the TDMA/reliability runtime config consumed by TdmaClock,

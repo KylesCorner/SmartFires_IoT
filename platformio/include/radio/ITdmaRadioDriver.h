@@ -1,3 +1,7 @@
+// ---
+// description: Hardware abstraction interface for the TDMA radio driver (send/receive/ack).
+// role: interface
+// ---
 #pragma once
 
 #include <stddef.h>

@@ -1,3 +1,7 @@
+// ---
+// description: Implements TdmaTxQueue's ring-buffer enqueue/dequeue with drop-oldest eviction.
+// role: implementation
+// ---
 #include "radio/TdmaTxQueue.h"
 
 #include <string.h>

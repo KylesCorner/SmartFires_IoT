@@ -279,13 +279,13 @@ def run_sniffer(
     """Run the sniffer ingest loop. Intended to be run in a daemon thread
     alongside the base-station ingest loop (see web_service.run_web)."""
     if log_fn is None:
-        log_fn = lambda msg, node_id=None, source="sniffer": print(msg)  # noqa: E731
+        log_fn = lambda msg, node_id=None, source="sniffer", kind="other": print(msg)  # noqa: E731
 
-    # Every log line from this loop is tagged source="sniffer" so the main
-    # dashboard's log panel can filter to just sniffer activity, the same
-    # way it filters by node — see LiveState.push_log / main_page.js.
-    def slog(msg: str, node_id: Optional[int] = None) -> None:
-        log_fn(msg, node_id, source="sniffer")
+    # Every log line from this loop is tagged source="sniffer" so the Live
+    # Log page can filter to just sniffer activity, the same way it filters
+    # by node — see LiveState.push_log / live_log_page.js.
+    def slog(msg: str, node_id: Optional[int] = None, kind: str = "other") -> None:
+        log_fn(msg, node_id, source="sniffer", kind=kind)
 
     anchor = _SyncAnchor()
     slog(f"[SNIFFER] Listening on {cfg.port} @ {cfg.baud}, num_slots={cfg.num_slots}")
@@ -315,10 +315,12 @@ def run_sniffer(
                     slog("[SNIFFER] New base station session detected — sniffer stats reset")
 
                 live_state.push_sniffer_event(event)
+                rx_kind = {"STATUS": "status", "BUNDLE": "bundle"}.get(event["pkt_type"], "other")
                 slog(
                     f"[SNIFFER-RX] type={event['pkt_type']} node={event['node_id']} "
                     f"rssi={event['rssi']} snr={event['snr']} jitter={event['jitter_ms']}",
                     event["node_id"],
+                    kind=rx_kind,
                 )
     except serial.SerialException as exc:
         print(f"[SNIFFER][FATAL] {exc}", file=sys.stderr)

@@ -1,3 +1,7 @@
+// ---
+// description: Hardware abstraction for the ICM-20948 IMU, exposing DMP-computed heading and accuracy readings.
+// role: interface
+// ---
 #pragma once
 
 #include <stdint.h>

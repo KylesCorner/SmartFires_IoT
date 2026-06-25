@@ -1,3 +1,7 @@
+// ---
+// description: Arduino analogRead()-backed IAnalogReader with configurable ADC resolution.
+// role: implementation
+// ---
 #pragma once
 
 #include "interfaces/IAnalogReader.h"

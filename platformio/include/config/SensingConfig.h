@@ -1,3 +1,8 @@
+// ---
+// description: Duty-cycle cadence profiles plus each sensor's own independently-tuned sample/wake timing and calibration constants.
+// role: config
+// docs: [duty-cycling, tunable-parameters]
+// ---
 #pragma once
 
 // Sensing domain — duty-cycle cadence profiles and each sensor's own

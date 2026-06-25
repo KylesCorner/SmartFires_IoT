@@ -1,3 +1,8 @@
+// ---
+// description: BatteryMonitor's ADC/voltage threshold and sampling-cadence constants.
+// role: config
+// docs: [tunable-parameters]
+// ---
 #pragma once
 
 // Power domain — single source of truth for BatteryMonitor's ADC/voltage

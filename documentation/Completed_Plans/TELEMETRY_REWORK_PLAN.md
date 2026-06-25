@@ -1,3 +1,13 @@
+---
+name: telemetry-rework-plan
+description: Large-scale plan to move telemetry from text-based full-state streaming to a binary protocol with delta packets, periodic refreshes, Feather-side queueing, and session time sync.
+category: plan-completed
+status: historical
+superseded_by: software-design
+related_docs:
+  - binary-packet-pipeline
+---
+
 # SmartFires Telemetry Rework Plan
 
 ## Purpose

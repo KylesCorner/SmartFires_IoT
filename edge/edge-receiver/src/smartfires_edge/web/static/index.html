@@ -10,7 +10,10 @@
   <main>
     <div class="layout">
       <section class="panel left-panel">
-        <h1>Live Sensor Readings</h1>
+        <div class="log-header">
+          <h1>Live Sensor Readings</h1>
+          <button id="new-session-btn" class="new-session-btn">New Session</button>
+        </div>
         <div>
           <strong>Nodes</strong>
           <div id="node-checkboxes" class="checkbox-row"></div>
@@ -45,6 +48,8 @@
                 <th>Lat</th>
                 <th>Lon</th>
                 <th>Batt %</th>
+                <th>Heading</th>
+                <th>Heading Acc</th>
                 <th>Last seen</th>
               </tr>
             </thead>
@@ -52,19 +57,6 @@
           </table>
         </div>
       </section>
-    </div>
-
-    <div class="panel log-panel">
-      <div class="log-header">
-        <h2>Live Log</h2>
-        <div id="log-tabs" class="log-tabs"></div>
-        <button id="new-session-btn" class="new-session-btn">New Session</button>
-      </div>
-      <pre id="log-output" class="log-output"></pre>
-      <div class="log-command">
-        <input id="cmd-input" type="text" placeholder="command…" autocomplete="off" />
-        <button id="cmd-send">Send</button>
-      </div>
     </div>
   </main>
 

@@ -1,3 +1,7 @@
+// ---
+// description: Passive LoRa sniffer firmware entrypoint — promiscuous-mode RFM95 receive loop emitting NDJSON packet records over USB serial, no TDMA/ACK/transmit.
+// role: entrypoint
+// ---
 #include <Arduino.h>
 #include <RH_RF95.h>
 #include <SPI.h>

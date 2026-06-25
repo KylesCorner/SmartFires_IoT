@@ -1,3 +1,7 @@
+// ---
+// description: Abstraction for reading a raw analog value from a pin, decoupling sensors from the Arduino analogRead() API.
+// role: interface
+// ---
 #pragma once
 
 #include <stdint.h>

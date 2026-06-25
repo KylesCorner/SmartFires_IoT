@@ -1,3 +1,7 @@
+// ---
+// description: Hardware abstraction for the SHT31 temperature/humidity sensor driver.
+// role: interface
+// ---
 #pragma once
 
 #include <stdint.h>

@@ -1,3 +1,7 @@
+// ---
+// description: Implements CalibrationDebug's cmd-type/status name lookups and CmdAckPayload log-line formatting.
+// role: implementation
+// ---
 #include "calibration/CalibrationDebug.h"
 
 #include "logging/DebugLogger.h"

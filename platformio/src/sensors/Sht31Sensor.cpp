@@ -1,3 +1,7 @@
+// ---
+// description: Implements Sht31Sensor's begin/wake/sleep/sample lifecycle, trigger-reading exposure, and SensorSnapshot fill.
+// role: implementation
+// ---
 #include "sensors/Sht31Sensor.h"
 
 #include "interfaces/ISensor.h"

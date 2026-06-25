@@ -119,6 +119,15 @@ class PacketLossTracker:
             self.nodes[node_id] = NodeStats(node_id=node_id)
         self.nodes[node_id].observe(seq=seq, rssi=rssi)
 
+    def reset_node(self, node_id: int) -> None:
+        """Clear one node's sequence baseline, e.g. on AWAKEN (reboot).
+
+        A reboot restarts the node's wire seq counter from 0, so the old
+        first_seq/last_seq baseline would otherwise count the gap between the
+        previous session's last seq and the new seq 0 as missing packets.
+        """
+        self.nodes[node_id] = NodeStats(node_id=node_id)
+
     def to_dict(self) -> dict:
         return {
             "updated_at": datetime.now(timezone.utc).isoformat(),

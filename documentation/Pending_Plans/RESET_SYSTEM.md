@@ -1,3 +1,14 @@
+---
+name: reset-system
+description: Plan to wire up base-station and per-node CMD_RESET handling end-to-end, including Jetson auto-reset of the base on session start.
+category: plan-pending
+status: draft
+related_docs:
+  - tdma-protocol
+  - packet-reliability
+  - uart-jetson-bridge
+---
+
 # Reset System
 
 ## Background

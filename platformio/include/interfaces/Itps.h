@@ -1,3 +1,7 @@
+// ---
+// description: Abstraction for enabling/disabling a TPS (throttle/sensor power-switch style) line.
+// role: interface
+// ---
 #pragma once
 
 class Itps{

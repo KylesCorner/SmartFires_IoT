@@ -1,3 +1,11 @@
+---
+name: network-reliability-notes
+description: Session notes capturing the state of the Feather-to-Feather LoRa AWAKEN/TIME_SYNC handshake and time-source policy after a debugging session.
+category: plan-completed
+status: historical
+superseded_by: tdma-protocol
+---
+
 # Network Reliability Notes
 
 ## Current Situation

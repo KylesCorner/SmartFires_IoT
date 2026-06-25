@@ -1,3 +1,16 @@
+---
+name: debug-filter
+description: How to use the PlatformIO monitor filter and SFDBG_* env vars to filter structured debug logs by stream and level.
+category: reference
+status: current
+last_verified: 2026-06-23
+source_refs:
+  - platformio/monitor/filter_smartfires_debug.py
+related_docs:
+  - flashing
+  - packet-reliability
+---
+
 # SmartFires Debug Monitor
 
 The SmartFires node debug build prints structured debug logs over USB serial.

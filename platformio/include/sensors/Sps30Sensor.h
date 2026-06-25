@@ -1,3 +1,7 @@
+// ---
+// description: ISensor implementation wrapping the SPS30 particulate-matter driver, exposing PM1.0/2.5/4.0/10 readings.
+// role: implementation
+// ---
 #pragma once
 
 #include "drivers/ISps30Driver.h"
