@@ -3,7 +3,7 @@ name: flashing
 description: PlatformIO flash, monitor, and build commands for every Feather M0 environment, plus upload troubleshooting.
 category: reference
 status: current
-last_verified: 2026-06-23
+last_verified: 2026-06-25
 source_refs:
   - platformio/platformio.ini
 related_docs:

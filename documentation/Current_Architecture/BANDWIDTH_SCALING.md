@@ -3,7 +3,7 @@ name: bandwidth-scaling
 description: Airtime math and node-count scaling table for the current TDMA/bundle scheme.
 category: architecture
 status: current
-last_verified: 2026-06-23
+last_verified: 2026-06-25
 source_refs:
   - platformio/include/telemetry/BinaryPacket.h
   - platformio/include/config/NetworkConfig.h
