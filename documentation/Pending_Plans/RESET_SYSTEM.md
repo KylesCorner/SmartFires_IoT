@@ -175,19 +175,9 @@ if not sync_thread_started:
     sync_thread_started = True
 ```
 
-**Trigger 2 — `reset_event`** (around line 394, existing new-session block):
+**Trigger 2 — `reset_event` (REMOVED, do not re-add without explicit request)**
 
-```python
-if reset_event is not None and reset_event.is_set():
-    reset_event.clear()
-    # ...existing session teardown and new session_id creation...
-
-    _send_base_reset(ser, write_lock, cmd_seq_state, log_fn)
-    time.sleep(0.5)
-    _send_time_sync(..., reason="new_session", ...)
-```
-
-The 500 ms sleep gives the RH_RF95 `begin()` call time to complete before the TIME_SYNC is sent. The base typically reinitializes in under 200 ms.
+An earlier version of this plan wired the web "New Session" button's `reset_event` handler to also hard-reset every configured node and then self-reset the base (`_send_base_reset(node_id=0)`), before rolling the Jetson-side `session_id`/CSV/tracker state. That caused issues in the field and was reverted — the `reset_event` block in `ingest_service.py` now does **only** Jetson-side data clearing (close/save the current CSV, roll a new `session_id`/`session_dir`/`session_meta`, reset the packet-loss tracker and live dashboard state) followed by a courtesy `_send_time_sync(reason="new_session")` so the new `session_id` propagates without touching the base or node radios. Per-node and per-base resets remain available only via the dedicated per-node "Reset" button (`node_reset_queue`) and Trigger 1 above (session start), not via "New Session".
 
 ---
 
@@ -272,27 +262,28 @@ Phase 1 can be deployed and tested independently (base just ignores the CMD_RESE
 
 ## Known Limitation — `kMaxPendingCommands` vs. node count
 
-**Status: open, must fix before deploying more than 4 nodes.**
+**Status: open, relevant if a burst of per-node resets (or CMD_CALIBRATE) is ever queued faster than the base can drain them.**
 
-The Jetson's "New Session" web flow (`/api/new_session` → `reset_event` handler in
-`ingest_service.py`) hard-resets every node in `cfg.nodes` before resetting the base,
-by enqueueing one `CMD_RESET` per node in a tight loop (see "Full Flows" — this is an
-extension beyond the original per-node-reset design above). Each enqueue lands in the
-base's `_pendingCommands` ring (`SmartFiresBaseApp.h`), sized by
+The Jetson's "New Session" web flow (`/api/new_session`) no longer touches node or
+base resets at all (see "Trigger 2 (REMOVED)" above) — it now does pure Jetson-side
+data clearing. The remaining path that can still hit this limit is the per-node
+"Reset" button (`node_reset_queue` → one `CMD_RESET` enqueue per click). Each enqueue
+lands in the base's `_pendingCommands` ring (`SmartFiresBaseApp.h`), sized by
 `kMaxPendingCommands = 4`. That queue is shared with `CMD_CALIBRATE` and only drains
 during the base's own reserved TDMA slot 0 (once per ~3.6s frame at default
 `NUM_SLOTS=4`/`slotWidthMs=900`), so it can't be assumed to drain between enqueue calls.
 
-With more than 4 configured nodes, the 5th+ `enqueuePendingCommand()` calls return
-`false` (`QUEUE_FULL`) and those nodes silently never get reset — visible only as a
+If more than 4 node resets (or a mix of resets/calibrates) are queued before the base
+drains its current queue, the 5th+ `enqueuePendingCommand()` calls return `false`
+(`QUEUE_FULL`) and those commands silently never get sent — visible only as a
 `tx_cmd_reset_queue ... result=QUEUE_FULL` line in the base's debug log
 (`/debug` page), not surfaced anywhere in the Jetson UI.
 
-**Fix before scaling past 4 nodes** — either:
+**Fix if this becomes a real problem** — either:
 
 - Bump `kMaxPendingCommands` on the base (cheap, bounded by `kPendingCommandPayloadSize`
   per slot; reflash the base), or
-- Batch the Jetson-side reset loop: send ≤4 at a time, then wait roughly one TDMA frame
-  period before sending the next batch, so the queue has actually drained.
+- Batch any future bulk-reset UI flow: send ≤4 at a time, then wait roughly one TDMA
+  frame period before sending the next batch, so the queue has actually drained.
 
 Tracked in code at `SmartFiresBaseApp.h`'s `kMaxPendingCommands` declaration.
