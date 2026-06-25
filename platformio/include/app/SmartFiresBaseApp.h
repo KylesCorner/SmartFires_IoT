@@ -111,6 +111,16 @@ private:
     uint16_t ackMask = 0;
     bool dirty = false;
     uint8_t dirtyTriggerSeq = 0;
+
+    // Bounded retry / circuit-breaker for a node that's gone unreachable.
+    // failedSendAttempts counts consecutive sendAckSummary() failures since
+    // the last reset; once it reaches kMaxAckSummarySendAttempts,
+    // retryHeld suppresses further attempts until genuinely new telemetry
+    // arrives from this node (handleTelemetryAckSummary()) or it re-AWAKENs
+    // (resetAckTracker()) — both reset both fields to zero/false.
+    uint8_t failedSendAttempts = 0;
+    bool retryHeld = false;
+
     bool lastSentInitialized = false;
     uint8_t lastSentAckBaseSeq = 0;
     uint16_t lastSentAckMask = 0;

@@ -498,6 +498,17 @@ bool SmartFiresBaseApp::handleTelemetryAckSummary(uint8_t nodeId, uint8_t seq) {
   recordTelemetrySequence(*tracker, seq);
   tracker->dirty = true;
   tracker->dirtyTriggerSeq = seq;
+
+  // Genuinely new telemetry from this node is the "heard something new"
+  // signal — un-hold a previously give-up-on tracker and give it a fresh
+  // retry budget, regardless of how it got held.
+  if (tracker->retryHeld) {
+    LOG_INFO("base", "ack_summary_unheld node=%u seq=%u reason=new_telemetry",
+             static_cast<unsigned int>(nodeId), static_cast<unsigned int>(seq));
+  }
+  tracker->failedSendAttempts = 0;
+  tracker->retryHeld = false;
+
   LOG_DEBUG("base", "ack_dirty node=%u seq=%u ack_base=%u mask=0x%04X",
             static_cast<unsigned int>(nodeId),
             static_cast<unsigned int>(seq),
@@ -531,6 +542,8 @@ SmartFiresBaseApp::AckTracker *SmartFiresBaseApp::findOrCreateAckTracker(
   freeTracker->ackMask = 0;
   freeTracker->dirty = false;
   freeTracker->dirtyTriggerSeq = 0;
+  freeTracker->failedSendAttempts = 0;
+  freeTracker->retryHeld = false;
   freeTracker->lastSentInitialized = false;
   freeTracker->lastSentAckBaseSeq = 0;
   freeTracker->lastSentAckMask = 0;
@@ -556,6 +569,8 @@ void SmartFiresBaseApp::resetAckTracker(uint8_t nodeId) {
     tracker.ackMask = 0;
     tracker.dirty = false;
     tracker.dirtyTriggerSeq = 0;
+    tracker.failedSendAttempts = 0;
+    tracker.retryHeld = false;
     tracker.lastSentInitialized = false;
     tracker.lastSentAckBaseSeq = 0;
     tracker.lastSentAckMask = 0;
@@ -732,7 +747,8 @@ bool SmartFiresBaseApp::sendPendingAckSummary(uint32_t slotIndex) {
     const uint8_t i = static_cast<uint8_t>((_nextAckTrackerFlushIndex + offset) %
                                            kMaxAckTrackedNodes);
     AckTracker &tracker = _ackTrackers[i];
-    if (!tracker.inUse || !tracker.initialized || !tracker.dirty) {
+    if (!tracker.inUse || !tracker.initialized || !tracker.dirty ||
+        tracker.retryHeld) {
       continue;
     }
 
@@ -756,9 +772,29 @@ bool SmartFiresBaseApp::sendPendingAckSummary(uint32_t slotIndex) {
                                    tracker.ackMask, "lora_rx_coalesced",
                                    tracker.dirtyTriggerSeq);
     if (!ok) {
+      tracker.failedSendAttempts++;
+
+      if (tracker.failedSendAttempts >= BaseConfig::kMaxAckSummarySendAttempts) {
+        tracker.retryHeld = true;
+        LOG_WARN("base",
+                 "ack_summary_held node=%u attempts=%u ack_base=%u mask=0x%04X "
+                 "reason=unreachable",
+                 static_cast<unsigned int>(tracker.nodeId),
+                 static_cast<unsigned int>(tracker.failedSendAttempts),
+                 static_cast<unsigned int>(tracker.ackBaseSeq),
+                 static_cast<unsigned int>(tracker.ackMask));
+      } else {
+        LOG_INFO("base",
+                 "ack_summary_retry_failed node=%u attempts=%u max=%u",
+                 static_cast<unsigned int>(tracker.nodeId),
+                 static_cast<unsigned int>(tracker.failedSendAttempts),
+                 static_cast<unsigned int>(BaseConfig::kMaxAckSummarySendAttempts));
+      }
+
       continue;
     }
 
+    tracker.failedSendAttempts = 0;
     tracker.lastSentInitialized = true;
     tracker.lastSentAckBaseSeq = tracker.ackBaseSeq;
     tracker.lastSentAckMask = tracker.ackMask;
@@ -1079,6 +1115,7 @@ void SmartFiresBaseApp::maybeLogHealth() {
   const uint32_t lastRxAgoMs = (_lastRxMs == 0) ? 0xFFFFFFFFu : (now - _lastRxMs);
   uint8_t trackedAckCount = 0;
   uint8_t dirtyAckCount = 0;
+  uint8_t heldAckCount = 0;
   for (uint8_t i = 0; i < kMaxAckTrackedNodes; ++i) {
     const AckTracker &tracker = _ackTrackers[i];
     if (!tracker.inUse) {
@@ -1087,6 +1124,9 @@ void SmartFiresBaseApp::maybeLogHealth() {
     trackedAckCount = static_cast<uint8_t>(trackedAckCount + 1u);
     if (tracker.dirty) {
       dirtyAckCount = static_cast<uint8_t>(dirtyAckCount + 1u);
+    }
+    if (tracker.retryHeld) {
+      heldAckCount = static_cast<uint8_t>(heldAckCount + 1u);
     }
   }
 
@@ -1125,9 +1165,10 @@ void SmartFiresBaseApp::maybeLogHealth() {
 
     LOG_INFO(
       "base",
-      "health_ack tracked=%u dirty=%u session_ms=%lu slot=%lu role=%u pos_ms=%lu last_flush_slot=%ld",
+      "health_ack tracked=%u dirty=%u held=%u session_ms=%lu slot=%lu role=%u pos_ms=%lu last_flush_slot=%ld",
       static_cast<unsigned int>(trackedAckCount),
       static_cast<unsigned int>(dirtyAckCount),
+      static_cast<unsigned int>(heldAckCount),
       static_cast<unsigned long>(ts.session_time_ms),
       static_cast<unsigned long>(slotIndex),
       static_cast<unsigned int>(slotRole),

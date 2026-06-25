@@ -82,7 +82,7 @@ constexpr Geometry kGeometry{kNumSlots, kSlotWidthMs, kGuardMs, kSyncStaleMs};
 // service time -- field-observed ACK_SUMMARY retries on the base were the
 // signal that some nonzero margin is required; tune upward if retries
 // persist, downward once actual wake latency is measured.
-constexpr uint32_t kRxWakeAheadMs = 50;
+constexpr uint32_t kRxWakeAheadMs = 150;
 
 // --- Per-slot TX budgets -----------------------------------------------------
 // Conservative slot-budget estimates used by TdmaRadioService::drainTxQueue()

@@ -29,6 +29,15 @@ constexpr uint8_t kTimeSyncBroadcastAddr = 0xFF;
 constexpr uint32_t kUartBaud = 115200;
 constexpr uint32_t kAckSummaryMinIntervalMs = 25;
 
+// Bounded retry for ACK_SUMMARY before giving up on an unreachable node.
+// Each attempt is one sendAckSummary() call, which already contains
+// RHReliableDatagram's own link-layer retry burst (kLinkRetries @
+// kLinkAckTimeoutMs) — this counts app-level attempts on top of that, not
+// individual radio transmissions. 3 = 1 normal attempt + 2 extra. After this
+// many consecutive failures, the tracker is held (no further attempts) until
+// new telemetry arrives from that node or it re-AWAKENs.
+constexpr uint8_t kMaxAckSummarySendAttempts = 3;
+
 // TDMA geometry: shared with the node builds via NetworkConfig::kGeometry,
 // so these three can no longer drift from NUM_SLOTS/slotWidthMs/guardMs.
 constexpr uint8_t kTdmaNumSlots = NetworkConfig::kGeometry.numSlots;
