@@ -508,6 +508,277 @@ function onCanvasClick(e) {
   }
 }
 
+// --- Sub-tabs (Timeline / Slot Activity / Plots) ----------------------------
+
+let snifferActiveTab = "timeline";
+
+function setActiveTab(tab) {
+  snifferActiveTab = tab;
+  document.querySelectorAll(".sniffer-subnav-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.tab === tab);
+  });
+  document.querySelectorAll(".sniffer-tab").forEach((el) => {
+    el.classList.toggle("active", el.id === `sniffer-tab-${tab}`);
+  });
+  if (tab === "activity") refreshActivityTable();
+  if (tab === "plots") refreshPlots();
+}
+
+function initSubnav() {
+  document.querySelectorAll(".sniffer-subnav-btn").forEach((btn) => {
+    btn.addEventListener("click", () => setActiveTab(btn.dataset.tab));
+  });
+}
+
+// --- Shared TDMA slot-match helper -------------------------------------------
+//
+// Mirrors the firmware's compile-time slot=(node_id-1)%num_slots assignment
+// (same convention as the expected-transmitter label row in draw() above) to
+// flag packets whose node_id doesn't match the slot their session_ms falls
+// in. Purely derived from fields the backend already emits per event
+// (session_ms, num_slots, node_id) — no new wire data needed.
+
+function frameAndSlotFor(sessionMs, numSlots) {
+  const framePeriodMs = numSlots * SLOT_WIDTH_MS;
+  const framePhase = ((sessionMs % framePeriodMs) + framePeriodMs) % framePeriodMs;
+  return {
+    frame: Math.floor(sessionMs / framePeriodMs),
+    slot: Math.floor(framePhase / SLOT_WIDTH_MS),
+  };
+}
+
+function expectedNodeForSlot(slot) {
+  return slot === 0 ? 0 : slot + 1;
+}
+
+// Returns null when slot-match isn't applicable: TIME_SYNC is the anchor
+// itself, bare RadioHead frames carry no SmartFires node_id, or we haven't
+// heard a TIME_SYNC yet (no num_slots).
+function slotInfoFor(ev) {
+  if (ev.pkt_type === "TIME_SYNC" || ev.node_id == null || ev.session_ms == null || !sniffer.numSlots) {
+    return null;
+  }
+  const { frame, slot } = frameAndSlotFor(ev.session_ms, sniffer.numSlots);
+  const expected = expectedNodeForSlot(slot);
+  return { frame, slot, expected, match: ev.node_id === expected };
+}
+
+// --- Top-line summary counters ----------------------------------------------
+
+function renderSummaryCard(container, value, label, warn) {
+  const card = document.createElement("div");
+  card.className = "sniffer-summary-card" + (warn ? " warn" : "");
+  const v = document.createElement("div");
+  v.className = "sniffer-summary-value";
+  v.textContent = value;
+  const l = document.createElement("div");
+  l.className = "sniffer-summary-label";
+  l.textContent = label;
+  card.append(v, l);
+  container.appendChild(card);
+}
+
+function refreshSummary() {
+  const container = document.getElementById("sniffer-summary-row");
+  if (!container) return;
+  container.innerHTML = "";
+
+  const events = sniffer.events;
+  const now = Date.now();
+  const last60s = events.filter((ev) => ev._wallMs >= now - 60_000).length;
+  const nodeIds = new Set(events.filter((ev) => ev.node_id != null).map((ev) => ev.node_id));
+  const rssiSamples = events.filter((ev) => ev.rssi != null).slice(-100).map((ev) => ev.rssi);
+  const avgRssi = rssiSamples.length
+    ? rssiSamples.reduce((a, b) => a + b, 0) / rssiSamples.length
+    : null;
+
+  let guardViolations = 0;
+  let wrongSlot = 0;
+  for (const ev of events) {
+    if (ev.guard_violation) guardViolations++;
+    const info = slotInfoFor(ev);
+    if (info && !info.match) wrongSlot++;
+  }
+
+  renderSummaryCard(container, fmt(events.length), "Buffered Packets");
+  renderSummaryCard(container, fmt(last60s), "Last 60s");
+  renderSummaryCard(container, fmt(nodeIds.size), "Unique Nodes");
+  renderSummaryCard(container, avgRssi != null ? `${avgRssi.toFixed(1)} dBm` : "—", "Avg RSSI (last 100)");
+  renderSummaryCard(container, fmt(wrongSlot), "Wrong-Slot Packets", wrongSlot > 0);
+  renderSummaryCard(container, fmt(guardViolations), "Guard Violations", guardViolations > 0);
+}
+
+// --- Slot Activity tab: per (frame, slot) table -----------------------------
+
+const MAX_ACTIVITY_FRAMES = 40;
+
+function refreshActivityTable() {
+  const tbody = document.querySelector("#sniffer-activity-table tbody");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+  if (!sniffer.numSlots) return;
+
+  const groups = new Map(); // "frame:slot" -> aggregate
+  for (const ev of sniffer.events) {
+    const info = slotInfoFor(ev);
+    if (!info) continue;
+    const key = `${info.frame}:${info.slot}`;
+    let g = groups.get(key);
+    if (!g) {
+      g = {
+        frame: info.frame,
+        slot: info.slot,
+        expected: info.expected,
+        nodes: new Set(),
+        packets: 0,
+        rssiSum: 0,
+        rssiCount: 0,
+        jitterMin: null,
+        jitterMax: null,
+        guardViolations: 0,
+        wrongSlot: 0,
+      };
+      groups.set(key, g);
+    }
+    g.packets++;
+    g.nodes.add(ev.node_id);
+    if (ev.rssi != null) {
+      g.rssiSum += ev.rssi;
+      g.rssiCount++;
+    }
+    if (ev.jitter_ms != null) {
+      g.jitterMin = g.jitterMin == null ? ev.jitter_ms : Math.min(g.jitterMin, ev.jitter_ms);
+      g.jitterMax = g.jitterMax == null ? ev.jitter_ms : Math.max(g.jitterMax, ev.jitter_ms);
+    }
+    if (ev.guard_violation) g.guardViolations++;
+    if (!info.match) g.wrongSlot++;
+  }
+
+  const frames = [...new Set([...groups.values()].map((g) => g.frame))]
+    .sort((a, b) => b - a)
+    .slice(0, MAX_ACTIVITY_FRAMES);
+  const frameSet = new Set(frames);
+
+  const rows = [...groups.values()]
+    .filter((g) => frameSet.has(g.frame))
+    .sort((a, b) => b.frame - a.frame || a.slot - b.slot);
+
+  for (const g of rows) {
+    const tr = document.createElement("tr");
+    if (g.wrongSlot > 0) tr.classList.add("sniffer-row-warn");
+    const seenFrom = [...g.nodes].sort((a, b) => a - b).map((n) => (n === 0 ? "Base" : n)).join(", ");
+    const avgRssi = g.rssiCount ? (g.rssiSum / g.rssiCount).toFixed(1) : "—";
+    const jitterRange = g.jitterMin != null ? `${g.jitterMin.toFixed(1)} … ${g.jitterMax.toFixed(1)}` : "—";
+    tr.innerHTML = `
+      <td>${g.frame}</td>
+      <td>${g.slot}</td>
+      <td>${g.expected === 0 ? "Base" : g.expected}</td>
+      <td>${seenFrom}</td>
+      <td>${g.packets}</td>
+      <td>${avgRssi}</td>
+      <td>${jitterRange}</td>
+      <td>${g.guardViolations}</td>
+      <td>${g.wrongSlot > 0 ? g.wrongSlot : "—"}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+// --- Plots tab: RSSI / jitter over time --------------------------------------
+
+const NODE_COLOR_PALETTE = ["#3b82c4", "#3fae5c", "#d4b340", "#9b59b6", "#e8743a", "#5dade2", "#c0392b", "#1abc9c"];
+
+function colorForNode(nodeId) {
+  if (nodeId == null) return "#6b7280";
+  return NODE_COLOR_PALETTE[((nodeId % NODE_COLOR_PALETTE.length) + NODE_COLOR_PALETTE.length) % NODE_COLOR_PALETTE.length];
+}
+
+function plotScales() {
+  return {
+    x: {
+      type: "linear",
+      ticks: {
+        callback: (value) => new Date(value).toLocaleTimeString(),
+        color: "#aab4c0",
+        maxTicksLimit: 8,
+      },
+      grid: { color: "#2a2f36" },
+    },
+    y: {
+      ticks: { color: "#aab4c0" },
+      grid: { color: "#2a2f36" },
+    },
+  };
+}
+
+let rssiChart = null;
+let jitterChart = null;
+
+function initPlots() {
+  rssiChart = new Chart(document.getElementById("sniffer-rssi-chart").getContext("2d"), {
+    type: "scatter",
+    data: { datasets: [] },
+    options: {
+      animation: false,
+      maintainAspectRatio: false,
+      scales: plotScales(),
+      plugins: { legend: { labels: { color: "#e6e6e6" } } },
+    },
+  });
+
+  jitterChart = new Chart(document.getElementById("sniffer-jitter-chart").getContext("2d"), {
+    type: "scatter",
+    data: { datasets: [] },
+    options: {
+      animation: false,
+      maintainAspectRatio: false,
+      scales: plotScales(),
+      plugins: { legend: { labels: { color: "#e6e6e6" } } },
+    },
+  });
+}
+
+function refreshPlots() {
+  if (!rssiChart || !jitterChart) return;
+
+  const byNode = new Map(); // node_id, or "rh" for bare RadioHead frames -> events
+  for (const ev of sniffer.events) {
+    if (ev.pkt_type === "TIME_SYNC") continue;
+    const key = ev.node_id != null ? ev.node_id : "rh";
+    if (!byNode.has(key)) byNode.set(key, []);
+    byNode.get(key).push(ev);
+  }
+
+  const rssiDatasets = [];
+  const jitterDatasets = [];
+  for (const [key, evs] of byNode) {
+    const nodeId = key === "rh" ? null : key;
+    const label = nodeId == null ? "RadioHead / Unknown" : laneLabel(nodeId);
+    const color = colorForNode(nodeId);
+
+    const rssiPoints = evs.filter((ev) => ev.rssi != null).map((ev) => ({ x: ev._wallMs, y: ev.rssi }));
+    if (rssiPoints.length) {
+      rssiDatasets.push({ label, data: rssiPoints, backgroundColor: color, pointRadius: 3 });
+    }
+
+    const jitterEvs = evs.filter((ev) => ev.jitter_ms != null);
+    if (jitterEvs.length) {
+      jitterDatasets.push({
+        label,
+        data: jitterEvs.map((ev) => ({ x: ev._wallMs, y: ev.jitter_ms })),
+        backgroundColor: jitterEvs.map((ev) => (ev.guard_violation ? "#e74c3c" : color)),
+        pointRadius: 3,
+      });
+    }
+  }
+
+  rssiChart.data.datasets = rssiDatasets;
+  rssiChart.update();
+
+  jitterChart.data.datasets = jitterDatasets;
+  jitterChart.update();
+}
+
 function showDisabled() {
   sniffer.notConfigured = true;
   document.getElementById("sniffer-disabled").style.display = "block";
@@ -571,10 +842,18 @@ function init() {
   document.getElementById("sniffer-play-toggle").addEventListener("click", togglePlay);
   document.getElementById("sniffer-step-back").addEventListener("click", () => stepView(-1));
   document.getElementById("sniffer-step-forward").addEventListener("click", () => stepView(1));
+  initSubnav();
+  initPlots();
   connectSnifferSocket();
   requestAnimationFrame(tick);
   pollStats();
   setInterval(pollStats, 5000);
+  refreshSummary();
+  setInterval(refreshSummary, 2000);
+  setInterval(() => {
+    if (snifferActiveTab === "activity") refreshActivityTable();
+    if (snifferActiveTab === "plots") refreshPlots();
+  }, 2000);
 }
 
 document.addEventListener("DOMContentLoaded", init);

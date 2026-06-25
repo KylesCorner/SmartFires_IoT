@@ -8,67 +8,130 @@
 <body>
   <main>
     <section class="panel sniffer-top-panel">
-      <h1>TDMA Timeline</h1>
-      <p class="section-hint">
-        Each lane is one node's assigned TDMA slot, aligned to the live session clock
-        overheard from the base station's TIME_SYNC broadcasts. Dashed lines mark slot
-        boundaries; shaded bands are the guard window. The dedicated "RadioHead / Unknown"
-        row holds bare RadioHead frames (e.g. RHReliableDatagram ACKs) that carry no
-        SmartFires node_id of their own. Click any marker to inspect it below.
-      </p>
+      <h1>TDMA Sniffer</h1>
       <div id="sniffer-disabled" class="sniffer-disabled" style="display:none;">
         Sniffer not connected — start <code>smartfires-edge web</code> with
         <code>--sniffer-port &lt;port&gt;</code>.
       </div>
-      <div class="sniffer-toolbar">
-        <div class="sniffer-toolbar-group">
-          <span class="sniffer-toolbar-label">Window:</span>
-          <div id="sniffer-zoom-buttons" class="time-range-row"></div>
-        </div>
-        <div class="sniffer-toolbar-group sniffer-playback">
-          <button id="sniffer-step-back" class="sniffer-step-btn" title="Step back">◀</button>
-          <button id="sniffer-play-toggle" class="sniffer-play-btn">⏸ Pause</button>
-          <button id="sniffer-step-forward" class="sniffer-step-btn" title="Step forward">▶</button>
-          <span id="sniffer-live-indicator" class="sniffer-live-indicator"></span>
-        </div>
-      </div>
-      <div class="sniffer-timeline-row">
-        <div id="sniffer-canvas-wrapper" class="sniffer-canvas-wrapper">
-          <canvas id="sniffer-timeline"></canvas>
-        </div>
-        <div id="sniffer-legend" class="sniffer-legend"></div>
+      <div id="sniffer-summary-row" class="sniffer-summary-row"></div>
+      <div id="sniffer-subnav" class="sniffer-subnav">
+        <button class="sniffer-subnav-btn active" data-tab="timeline">Timeline</button>
+        <button class="sniffer-subnav-btn" data-tab="activity">Slot Activity</button>
+        <button class="sniffer-subnav-btn" data-tab="plots">Plots</button>
       </div>
     </section>
 
-    <div class="sniffer-bottom-row">
+    <div id="sniffer-tab-timeline" class="sniffer-tab active">
       <section class="panel">
-        <h2>Per-Node Stats</h2>
-        <table id="sniffer-stats-table">
-          <thead>
-            <tr>
-              <th>Node</th>
-              <th>Packets</th>
-              <th>Avg RSSI</th>
-              <th>Avg SNR</th>
-              <th>Jitter σ (ms)</th>
-              <th>Guard Viol.</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
+        <p class="section-hint">
+          Each lane is one node's assigned TDMA slot, aligned to the live session clock
+          overheard from the base station's TIME_SYNC broadcasts. Dashed lines mark slot
+          boundaries; shaded bands are the guard window. The dedicated "RadioHead / Unknown"
+          row holds bare RadioHead frames (e.g. RHReliableDatagram ACKs) that carry no
+          SmartFires node_id of their own. Click any marker to inspect it below.
+        </p>
+        <div class="sniffer-toolbar">
+          <div class="sniffer-toolbar-group">
+            <span class="sniffer-toolbar-label">Window:</span>
+            <div id="sniffer-zoom-buttons" class="time-range-row"></div>
+          </div>
+          <div class="sniffer-toolbar-group sniffer-playback">
+            <button id="sniffer-step-back" class="sniffer-step-btn" title="Step back">◀</button>
+            <button id="sniffer-play-toggle" class="sniffer-play-btn">⏸ Pause</button>
+            <button id="sniffer-step-forward" class="sniffer-step-btn" title="Step forward">▶</button>
+            <span id="sniffer-live-indicator" class="sniffer-live-indicator"></span>
+          </div>
+        </div>
+        <div class="sniffer-timeline-row">
+          <div id="sniffer-canvas-wrapper" class="sniffer-canvas-wrapper">
+            <canvas id="sniffer-timeline"></canvas>
+          </div>
+          <div id="sniffer-legend" class="sniffer-legend"></div>
+        </div>
+      </section>
+
+      <div class="sniffer-bottom-row">
+        <section class="panel">
+          <h2>Per-Node Stats</h2>
+          <table id="sniffer-stats-table">
+            <thead>
+              <tr>
+                <th>Node</th>
+                <th>Packets</th>
+                <th>Avg RSSI</th>
+                <th>Avg SNR</th>
+                <th>Jitter σ (ms)</th>
+                <th>Guard Viol.</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </section>
+
+        <section class="panel">
+          <h2>Packet Detail</h2>
+          <p class="section-hint">Click a marker on the timeline above to inspect it.</p>
+          <div id="sniffer-detail-empty" class="sniffer-detail-empty">No packet selected.</div>
+          <table id="sniffer-detail-table" class="sniffer-detail-table" style="display:none;">
+            <tbody></tbody>
+          </table>
+        </section>
+      </div>
+    </div>
+
+    <div id="sniffer-tab-activity" class="sniffer-tab">
+      <section class="panel">
+        <h2>TDMA Slot Activity</h2>
+        <p class="section-hint">
+          Every TDMA frame/slot seen in the buffered window, grouped from the same packets as
+          the Timeline tab. "Expected" is the node that compile-time slot assignment
+          (<code>slot = (node_id − 1) % num_slots</code>) says should own that slot; a row is
+          flagged when a different node's packet landed there. Most recent frames first.
+        </p>
+        <div class="sniffer-activity-table-wrap">
+          <table id="sniffer-activity-table">
+            <thead>
+              <tr>
+                <th>Frame</th>
+                <th>Slot</th>
+                <th>Expected</th>
+                <th>Seen From</th>
+                <th>Packets</th>
+                <th>Avg RSSI</th>
+                <th>Jitter range (ms)</th>
+                <th>Guard Viol.</th>
+                <th>Wrong Slot</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <div id="sniffer-tab-plots" class="sniffer-tab">
+      <section class="panel">
+        <h2>RSSI over time</h2>
+        <p class="section-hint">One series per node, from the same buffered packets as the Timeline tab.</p>
+        <div class="chart-container">
+          <canvas id="sniffer-rssi-chart"></canvas>
+        </div>
       </section>
 
       <section class="panel">
-        <h2>Packet Detail</h2>
-        <p class="section-hint">Click a marker on the timeline above to inspect it.</p>
-        <div id="sniffer-detail-empty" class="sniffer-detail-empty">No packet selected.</div>
-        <table id="sniffer-detail-table" class="sniffer-detail-table" style="display:none;">
-          <tbody></tbody>
-        </table>
+        <h2>Slot jitter over time</h2>
+        <p class="section-hint">
+          Deviation (ms) from each node's expected slot center. Points outside the guard
+          window are drawn in red.
+        </p>
+        <div class="chart-container">
+          <canvas id="sniffer-jitter-chart"></canvas>
+        </div>
       </section>
     </div>
   </main>
 
+  <script src="/static/vendor/chart.umd.js"></script>
   <script src="/static/js/nav.js"></script>
   <script src="/static/js/api.js"></script>
   <script src="/static/js/sniffer_page.js"></script>
