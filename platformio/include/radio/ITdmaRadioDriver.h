@@ -1,6 +1,7 @@
 // ---
-// description: Hardware abstraction interface for the TDMA radio driver (send/receive/ack).
+// description: Hardware abstraction interface for the TDMA radio driver (send/receive/ack/sleep).
 // role: interface
+// docs: [tdma-protocol]
 // ---
 #pragma once
 

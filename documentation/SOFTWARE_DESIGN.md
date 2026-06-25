@@ -3,7 +3,7 @@ name: software-design
 description: Master system architecture — hardware topology, firmware/edge module layout, wire protocol.
 category: architecture
 status: current
-last_verified: 2026-06-23
+last_verified: 2026-06-25
 source_refs:
   - platformio/platformio.ini
   - platformio/include/telemetry/BinaryPacket.h
@@ -207,9 +207,11 @@ This class is the boundary between internal sensor units and the on-air binary p
 
 The LoRa transmission path is split into explicit layers:
 
-- `TdmaClock` computes session time and determines slot timing from sync state
+- `TdmaClock` computes session time, determines slot timing from sync state, and (for
+  nodes in `AppLayerAckSummary` mode) gates when Rx should be open vs. when the radio can sleep
 - `TdmaTxQueue` buffers outgoing payloads, dropping the oldest item when full
-- `TdmaRadioService` processes incoming sync packets and drains the queue during allowed send windows
+- `TdmaRadioService` processes incoming sync packets, drains the queue during allowed send
+  windows, and sleeps the radio outside the base's slot 0 to cut power draw
 - `RadioHeadTdmaDriver` translates the abstract radio interface to RadioHead calls on Feather hardware
 
 This keeps slot timing, buffering, and hardware access separated so each can be tested independently.

@@ -74,6 +74,16 @@ constexpr uint32_t kSyncStaleMs = 1320000;  // 22 min
 
 constexpr Geometry kGeometry{kNumSlots, kSlotWidthMs, kGuardMs, kSyncStaleMs};
 
+// How long before slot 0 a node starts waking its radio for
+// TdmaClock::baseRxWindowOpen() (see radio/TdmaConfig.h's rxWakeAheadMs for
+// the full rationale: absorbs both SX1276 sleep->Rx latency and main-loop
+// jitter from blocking sensor reads, neither of which guardMs accounts for).
+// Starting value, not yet bench-characterized against worst-case sensor
+// service time -- field-observed ACK_SUMMARY retries on the base were the
+// signal that some nonzero margin is required; tune upward if retries
+// persist, downward once actual wake latency is measured.
+constexpr uint32_t kRxWakeAheadMs = 50;
+
 // --- Per-slot TX budgets -----------------------------------------------------
 // Conservative slot-budget estimates used by TdmaRadioService::drainTxQueue()
 // to avoid crossing into the next node's slot. Named here (rather than left
@@ -178,6 +188,7 @@ inline TdmaConfig nodeTdmaProfile() {
   cfg.slotWidthMs = kSlotWidthMs;
   cfg.guardMs = kGuardMs;
   cfg.syncStaleMs = kSyncStaleMs;
+  cfg.rxWakeAheadMs = kRxWakeAheadMs;
   cfg.queueDepth = kQueueDepth;
   cfg.enableLinkAck = (kReliabilityMode == TdmaReliabilityMode::StrictLinkAck);
   cfg.maxRetries = kLinkRetries;

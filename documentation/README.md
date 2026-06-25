@@ -22,7 +22,7 @@ In-depth reference for subsystems as they exist in the current codebase.
 | Document | Covers |
 |---|---|
 | [TUNABLE_PARAMETERS.md](Current_Architecture/TUNABLE_PARAMETERS.md) | Every tunable constant — TDMA timing, sensor floors, duty cycle, battery, Jetson edge runtime |
-| [TDMA_PROTOCOL.md](Current_Architecture/TDMA_PROTOCOL.md) | Slot assignment, frame layout, session clock, TX budget, TIME_SYNC, boot handshake, scaling |
+| [TDMA_PROTOCOL.md](Current_Architecture/TDMA_PROTOCOL.md) | Slot assignment, frame layout, session clock, TX budget, Rx power gating, TIME_SYNC, boot handshake, scaling |
 | [PACKET_RELIABILITY.md](Current_Architecture/PACKET_RELIABILITY.md) | StrictLinkAck vs AppLayerAckSummary modes, pending window, ACK_SUMMARY format and dispatch |
 | [DUTY_CYCLING.md](Current_Architecture/DUTY_CYCLING.md) | DutyCycleController phases, config presets, trigger sensor, sample dispatch, error handling |
 | [UART_JETSON_BRIDGE.md](Current_Architecture/UART_JETSON_BRIDGE.md) | Frame format, Feather↔Jetson protocol, FrameReceiver state machine, ingest loop, SessionManager |

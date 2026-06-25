@@ -14,6 +14,7 @@ static TdmaConfig makeTestConfig() {
   cfg.slotWidthMs = 900;
   cfg.guardMs = 20;
   cfg.syncStaleMs = 1320000;
+  cfg.rxWakeAheadMs = 50;
   return cfg;
 }
 
@@ -72,6 +73,38 @@ void test_synced_rx_window_closed_outside_base_slot() {
   TEST_ASSERT_TRUE(tdma.baseRxWindowOpen());
 }
 
+void test_rx_window_wake_ahead_opens_before_base_slot() {
+  FakeClock clock;
+  TdmaClock tdma(makeTestConfig(), clock);
+
+  clock.set(0);
+  tdma.applySync(/*sessionId=*/1, /*sessionTimeMs=*/0);
+
+  // Slot 3 is the last slot in the frame (numSlots=4), immediately preceding
+  // slot 0's wraparound. sessionNow == 2700 -> start of slot 3, well before
+  // the 50 ms wake-ahead window (which starts at slotWidthMs - rxWakeAheadMs
+  // = 850 ms into the slot, i.e. sessionNow == 3550).
+  clock.advance(2700);
+  TEST_ASSERT_EQUAL_UINT8(3, tdma.currentSlotNumber());
+  TEST_ASSERT_FALSE(tdma.baseRxWindowOpen());
+
+  clock.advance(849);  // sessionNow == 3549, 1 ms before the wake-ahead window
+  TEST_ASSERT_EQUAL_UINT8(3, tdma.currentSlotNumber());
+  TEST_ASSERT_FALSE(tdma.baseRxWindowOpen());
+
+  clock.advance(1);  // sessionNow == 3550 -> wake-ahead window opens
+  TEST_ASSERT_EQUAL_UINT8(3, tdma.currentSlotNumber());
+  TEST_ASSERT_TRUE(tdma.baseRxWindowOpen());
+
+  clock.advance(49);  // sessionNow == 3599, last ms of slot 3
+  TEST_ASSERT_EQUAL_UINT8(3, tdma.currentSlotNumber());
+  TEST_ASSERT_TRUE(tdma.baseRxWindowOpen());
+
+  clock.advance(1);  // sessionNow == 3600 -> slot 0 itself, still open
+  TEST_ASSERT_EQUAL_UINT8(0, tdma.currentSlotNumber());
+  TEST_ASSERT_TRUE(tdma.baseRxWindowOpen());
+}
+
 void test_rx_window_independent_of_own_slot_assignment() {
   // baseRxWindowOpen() must not depend on mySlot()/nodeId at all -- every
   // node, regardless of which slot it owns, listens during slot 0 because
@@ -125,6 +158,7 @@ int main() {
   RUN_TEST(test_pre_sync_rx_window_always_open);
   RUN_TEST(test_synced_rx_window_open_during_base_slot);
   RUN_TEST(test_synced_rx_window_closed_outside_base_slot);
+  RUN_TEST(test_rx_window_wake_ahead_opens_before_base_slot);
   RUN_TEST(test_rx_window_independent_of_own_slot_assignment);
   RUN_TEST(test_stale_sync_falls_back_to_always_open);
 

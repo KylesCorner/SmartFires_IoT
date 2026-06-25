@@ -31,9 +31,12 @@ public:
   // True while it's safe to listen for base-originated traffic (TIME_SYNC,
   // ACK_SUMMARY, CMD_CALIBRATE/RESET) — i.e. slot 0, the base's permanently
   // reserved slot, the only slot the base ever transmits in. Also true
-  // unconditionally before first sync or once sync goes stale, since slot
-  // timing can't be trusted yet/anymore: callers should fall back to
-  // continuous receive in both cases, mirroring myTurn()'s own fallback.
+  // during the last rxWakeAheadMs of the prior slot, so the radio is already
+  // listening before the base's earliest possible transmit rather than
+  // racing to wake exactly at the slot-0 boundary. Also true unconditionally
+  // before first sync or once sync goes stale, since slot timing can't be
+  // trusted yet/anymore: callers should fall back to continuous receive in
+  // both cases, mirroring myTurn()'s own fallback.
   bool baseRxWindowOpen() const;
 
 private:

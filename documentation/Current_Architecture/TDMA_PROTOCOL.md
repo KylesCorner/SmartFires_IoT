@@ -3,16 +3,19 @@ name: tdma-protocol
 description: Slot geometry, session clock, boot handshake, and TX budget for the TDMA radio layer.
 category: architecture
 status: current
-last_verified: 2026-06-23
+last_verified: 2026-06-25
 source_refs:
   - platformio/include/radio/TdmaConfig.h
   - platformio/include/config/NetworkConfig.h
   - platformio/src/radio/TdmaClock.cpp
   - platformio/src/radio/TdmaRadioService.cpp
+  - platformio/include/radio/ITdmaRadioDriver.h
+  - platformio/src/platform/RadioHeadTdmaDriver.cpp
 related_docs:
   - packet-reliability
   - bandwidth-scaling
   - tunable-parameters
+  - radio-rx-gating
 ---
 
 # TDMA Protocol
@@ -95,6 +98,49 @@ all records on the Jetson share a common timeline.
 falls within this node's slot window. When sync is stale (22 min without
 `TIME_SYNC`), `myTurn()` returns true unconditionally — the node transmits
 immediately rather than going silent indefinitely.
+
+## Rx Power Gating
+
+Nodes sleep the SX1276 outside the base's slot 0 to cut radio power draw, since the base
+only ever transmits during that one reserved slot (`TIME_SYNC`/`ACK_SUMMARY`/
+`CMD_CALIBRATE`/`CMD_RESET` — see `SmartFiresBaseApp::maybeSendInBaseWindow()`, gated on its
+own `_baseTdmaClock.myTurn()`) and node telemetry in `AppLayerAckSummary` mode is
+fire-and-forget (`_driver.send()`, no ACK wait), so a node's own slot needs no Rx either.
+
+`TdmaClock::baseRxWindowOpen()` mirrors `myTurn()`'s shape:
+
+```
+slot 0 (base)                       : Rx open  -- the only slot the base ever transmits in
+last rxWakeAheadMs of the prior slot: Rx open  -- wake-ahead margin (see below)
+any other slot                      : Rx closed -- radio sleeps
+pre-sync or stale sync              : Rx open unconditionally -- same fallback as myTurn()
+```
+
+- No guard-band exclusion on the slot-0 side (unlike `myTurn()`): a receiver listening a
+  little longer than necessary is harmless, whereas a transmitter running past its guard
+  band risks colliding with the next slot's owner.
+- `rxWakeAheadMs` (50 ms default) is a **dedicated wake-ahead margin, distinct from
+  `guardMs`**. `guardMs` only covers crystal drift; `baseRxWindowOpen()` is checked once per
+  main-loop tick, and the node's loop also services sensors with blocking I2C/UART reads — if
+  a sensor read is still in flight when slot 0 begins, the node doesn't attempt to wake the
+  radio until that read returns, which can exceed `guardMs`. This was field-observed: without
+  the wake-ahead margin, nodes missed the start of the base's slot-0 `ACK_SUMMARY` send often
+  enough to show up as extra link-layer retries on the base (`ACK_SUMMARY` is sent via
+  `sendToWait()`, so a missed reception shows up as an immediate base-side retry). `50` ms is
+  a starting value, not yet bench-characterized against worst-case sensor service time.
+
+`TdmaRadioService::updateRxPower()` (called first in `update()`, before `drainTxQueue()`)
+calls `ITdmaRadioDriver::sleep()` whenever `baseRxWindowOpen()` is false, and otherwise runs
+`checkIncomingTimeSync()` as before — `available()`/`receive()` re-arm Rx mode on their own
+regardless of sleep state, so there is no separate "wake" call to make. Gating is **opt-in
+only for `AppLayerAckSummary` mode**: `StrictLinkAck` mode's `drainTxQueue()` calls
+`sendToWait()` for its own telemetry, which needs Rx immediately after TX inside the node's
+own slot for the link-layer ACK, so that mode keeps the radio Rx-continuous exactly as before
+gating existed.
+
+See [RADIO_RX_GATING.md](../Pending_Plans/RADIO_RX_GATING.md) for the full design rationale,
+the SX1276 current-draw estimates behind the power-savings projection, and remaining
+test/bench-verification work.
 
 ## TX Slot Budget
 

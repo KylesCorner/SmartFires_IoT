@@ -125,13 +125,32 @@ Added `TdmaClock::baseRxWindowOpen()` (`include/radio/TdmaClock.h`,
   guard-band exclusion. `myTurn()` carves the guard off both ends of *its* slot because a
   transmitter running long risks colliding with the next slot's owner; a receiver listening a
   little extra is harmless, so the full slot stays open.
-- No separate wake-ahead margin was added. The base itself never transmits before
-  `posInSlot >= guardMs` into slot 0 (the same guard band `myTurn()` already enforces on the
-  base's own send gating) — so a node that starts listening at `posInSlot == 0` always has at
-  least the full 20 ms guard band before the base could possibly transmit. That happens to be
-  enough margin "for free" without inventing a new constant. Revisit only if bench testing
-  (see below) shows the SX1276's sleep→Rx wake time exceeds 20 ms on the actual RFM95 modules.
 - True unconditionally when `!hasSync() || syncStale()` — same fallback shape as `myTurn()`.
+
+**Revised after field testing — a wake-ahead margin turned out to be necessary, not optional.**
+The original version of this section argued that no separate wake-ahead margin was needed,
+reasoning that the base never transmits before `posInSlot >= guardMs` into slot 0, so a node
+starting to listen at `posInSlot == 0` would always have the 20 ms guard band as margin "for
+free." That reasoning only accounted for crystal drift (what `guardMs` actually measures) — it
+missed that `baseRxWindowOpen()` is only checked once per main-loop tick, and the node's loop
+also services sensors (blocking I2C/UART reads) every iteration. If a sensor read is still in
+flight when slot 0 begins, the node doesn't attempt to wake the radio until that read returns —
+which can exceed 20 ms. Observed in practice: the base's `ACK_SUMMARY` send (`sendToWait()`,
+link-layer ACK required) started retrying immediately after this change shipped, consistent
+with nodes missing the start of slot 0 often enough to miss the ACK_SUMMARY's preamble.
+
+Fix: added `TdmaConfig::rxWakeAheadMs` (default `50` ms, mirrored as
+`NetworkConfig::kRxWakeAheadMs`) — `baseRxWindowOpen()` now also returns true during the last
+`rxWakeAheadMs` of the *prior* slot (the last slot in the frame, since slot 0 is first), so the
+node starts listening before slot 0's boundary rather than racing to notice it on the same tick
+it arrives. Deliberately a **new, dedicated constant** rather than increasing the shared
+`guardMs` — `guardMs` is subtracted from both ends of every slot's *TX* budget everywhere
+(`myTurn()`'s gating, the `slotWidthMs` `static_assert`s in `NetworkConfig.h`), so growing it
+would shrink every node's usable transmit window globally; `rxWakeAheadMs` only affects when a
+node starts listening and has no TX-side blast radius.
+`50` ms is a starting value, not bench-characterized against worst-case sensor service time —
+tune upward if base-side retries persist, downward once actual wake latency is measured (see
+Open Questions).
 
 ### Gating point — **implemented**
 
@@ -182,14 +201,19 @@ sync, fall into the same "always call checkIncomingTimeSync()" branch as the
    (`src/platform/RadioHeadTdmaDriver.cpp`). No new state — RadioHead re-arms the mode
    register on the next `send()`/`sendToWait()`/`available()` call regardless of current mode.
 3. **Done.** `TdmaClock::baseRxWindowOpen()` added (`include/radio/TdmaClock.h`,
-   `src/radio/TdmaClock.cpp`) — pure function of existing state, no new stored state.
+   `src/radio/TdmaClock.cpp`) — function of existing state plus the new `rxWakeAheadMs` field
+   (item 5).
 4. **Done.** `TdmaRadioService::update()` now calls a new `updateRxPower()` private method
    (`include/radio/TdmaRadioService.h`, `src/radio/TdmaRadioService.cpp`) which gates
    `checkIncomingTimeSync()` vs. `_driver.sleep()` per the pseudocode above. Tracks
    `_radioAsleep` so `sleep()` isn't called redundantly every tick, and logs `rx_sleep`/
    `rx_wake` transitions via the existing `LOG_DEBUG("radio", ...)` convention.
-5. **Done — no new constants needed.** Confirmed `guardMs` alone provides sufficient margin
-   without a dedicated wake-ahead constant (see Design section above).
+5. **Done — one new constant, added after field testing.** `TdmaConfig::rxWakeAheadMs`
+   (`include/radio/TdmaConfig.h`, default `50` ms) / `NetworkConfig::kRxWakeAheadMs`
+   (`include/config/NetworkConfig.h`), wired into `nodeTdmaProfile()`. Originally this
+   checklist item said no new constant was needed — that assumption was wrong (see the
+   "Revised after field testing" note in the Design section above) and was corrected once
+   base-side `ACK_SUMMARY` retries showed up during real use.
 6. **Deferred.** `FakeRadio` (a `test/support/fakes/FakeRadio.h` implementing
    `ITdmaRadioDriver`) does not exist yet. Not created in this pass because no native test
    currently exercises `TdmaRadioService` at all — the native `build_src_filter` only ever
@@ -236,9 +260,9 @@ At `NUM_SLOTS=4` (frame = 3,600 ms, slot = 900 ms), using SX1276 datasheet typic
 | Scenario | Rx-on time/frame | Avg radio current (approx.) |
 |---|---|---|
 | Today (Rx-continuous except while TXing) | ~3,260 ms | ~12.1 mA |
-| Gated (Rx only during base's 900 ms slot 0) | 900 ms | ~5.3 mA |
+| Gated (slot 0 + 50 ms wake-ahead) | ~950 ms | ~5.5 mA |
 
-That's roughly a **56% cut in average radio current** from gating alone, with no change to
+That's roughly a **55% cut in average radio current** from gating alone, with no change to
 reliability semantics. A later phase could shrink the 900 ms listen window down to just the
 guard band plus the base's actual transmit time within slot 0 (likely well under 200 ms),
 pushing this toward a ~75% cut — but that requires first measuring how tightly the base's
@@ -254,9 +278,14 @@ optimization actually moves on top of sensor duty cycling before investing furth
 
 ## Open questions
 
-- Does the SX1276 need wake-ahead margin beyond the existing 20 ms `guardMs` for oscillator
-  startup from sleep, specifically on the RFM95W modules in use? Datasheet says sub-ms for
-  the synthesizer but crystal startup can be longer — needs a bench measurement, not a guess.
+- **Resolved (field-observed) — yes, wake-ahead margin beyond `guardMs` was needed,** though
+  the dominant cause turned out to be main-loop jitter from blocking sensor reads, not SX1276
+  oscillator startup specifically (the two are conflated in `rxWakeAheadMs` for now since both
+  show up as "radio wasn't listening yet when the base transmitted"). Fixed via
+  `rxWakeAheadMs = 50` ms (see Design/Implementation checklist above). Still open: whether 50
+  ms is enough under worst-case sensor timing, or whether it should be split into a separate
+  "loop jitter" margin vs. "oscillator startup" margin if 50 ms proves insufficient or
+  unnecessarily conservative once measured.
 - Should `baseRxWindowOpen()` live on `TdmaClock` (parallel to `myTurn()`) or on
   `TdmaRadioService` directly? Leaning `TdmaClock` for symmetry with `myTurn()` and because
   it's pure session-clock math with no radio-driver dependency, consistent with `TdmaClock`'s

@@ -108,5 +108,18 @@ bool TdmaClock::baseRxWindowOpen() const {
   // Unlike myTurn(), no guard-band exclusion here: a receiver listening a
   // little longer than strictly necessary is harmless, whereas a transmitter
   // running past its guard band risks colliding with the next slot's owner.
-  return currentSlotNumber() == 0;
+  const uint8_t whichSlot = currentSlotNumber();
+  if (whichSlot == 0) {
+    return true;
+  }
+
+  // Wake-ahead: start listening during the tail of the prior slot (the last
+  // slot in the frame, since slot 0 is the first), rather than racing to
+  // notice the slot-0 boundary on the same loop tick it arrives.
+  if (_cfg.numSlots > 0 && whichSlot == static_cast<uint8_t>(_cfg.numSlots - 1) &&
+      positionInSlotMs() >= _cfg.slotWidthMs - _cfg.rxWakeAheadMs) {
+    return true;
+  }
+
+  return false;
 }

@@ -3,7 +3,7 @@ name: packet-reliability
 description: StrictLinkAck vs AppLayerAckSummary reliability modes, retry gating, and ACK_SUMMARY.
 category: architecture
 status: current
-last_verified: 2026-06-23
+last_verified: 2026-06-25
 source_refs:
   - platformio/include/config/NetworkConfig.h
   - platformio/include/radio/TdmaConfig.h
@@ -12,6 +12,7 @@ source_refs:
 related_docs:
   - tdma-protocol
   - tunable-parameters
+  - radio-rx-gating
 ---
 
 # Packet Reliability
@@ -25,9 +26,10 @@ acknowledgement exchange.
 | Packet | Direction | Reliability | Rationale |
 |---|---|---|---|
 | `AWAKEN` | Node → Base | Link-layer ACK (`sendToWait`) | Boot-critical; node must know base is alive |
-| `TIME_SYNC` | Base → Nodes | Fire-and-forget broadcast | Periodic; next sync supersedes a missed one |
+| `TIME_SYNC` (periodic broadcast) | Base → Nodes | Fire-and-forget broadcast (`send()` to `RH_BROADCAST_ADDRESS`) | Periodic; next sync supersedes a missed one |
+| `TIME_SYNC` (direct, AWAKEN-triggered) | Base → Node | Link-layer ACK (`sendToWait`) | `sendDirectTimeSync()` is a distinct unicast path from the periodic broadcast above — replies to one node's `AWAKEN` |
 | `BUNDLE` / `STATUS` | Node → Base | Configurable (see below) | Telemetry — governed by reliability mode |
-| `ACK_SUMMARY` | Base → Node | Fire-and-forget | Periodic summary; loss costs one retry cycle |
+| `ACK_SUMMARY` | Base → Node | Link-layer ACK (`sendToWait`) | Corrected — `SmartFiresBaseApp::sendAckSummary()` blocks on the link ACK, it is not fire-and-forget. A missed reception triggers RadioHead's own link-layer retry (`kLinkRetries`/`kLinkAckTimeoutMs`, independent of `TdmaConfig::reliabilityMode`) immediately — this is what surfaces as base-side retries if a node's Rx happens to be asleep when the base transmits; see [radio-rx-gating](../Pending_Plans/RADIO_RX_GATING.md) |
 
 ## Reliability Modes
 

@@ -258,7 +258,9 @@ PacketHandler
     on 15th sample: encodeBundlePayload() → bundleReady = true
 
 TdmaRadioService::update()
-  checkIncomingTimeSync()  ← polls driver, decodes binary BinaryPacket::TimeSyncPayload
+  updateRxPower()          ← sleeps the radio outside the base's slot 0 (AppLayerAckSummary
+                              mode only); checkIncomingTimeSync() runs whenever Rx is open,
+                              polling the driver and decoding binary BinaryPacket::TimeSyncPayload
   drainTxQueue()           ← sends multiple payloads per TDMA slot while budget allows
                               and app-layer reliability retransmits pending misses
 ```
@@ -438,6 +440,7 @@ node) — not `N`.
 |---|---|---|
 | `slotWidthMs` | 900 ms | Fits worst-case bundle TX (340 ms) + link-ACK timeout (250 ms) + 2×20 ms guard |
 | `guardMs` | 20 ms | Covers crystal drift between 10-min sync intervals at 50 ppm |
+| `rxWakeAheadMs` | 50 ms | How long before slot 0 a node starts waking its radio for Rx gating — separate from `guardMs`, also covers main-loop jitter, not just drift |
 | `kLinkRetries` | 3 | Link-layer (RHReliableDatagram) retries — only active under `StrictLinkAck` mode |
 | `kLinkAckTimeoutMs` | 250 ms | Link-layer per-attempt timeout — only active under `StrictLinkAck` mode |
 | `syncStaleMs` | 1 320 000 ms | After 22 min without TIME_SYNC, fall back to immediate TX |
@@ -464,6 +467,25 @@ Updated on every `TdmaClock::applySync()` call (triggered by incoming TIME_SYNC)
 `TdmaTxQueue` holds 8 entries (`NetworkConfig::kQueueDepth`, capped by
 `kQueueCapacityHardCap`). When full, the oldest entry is evicted — the queue always
 holds the freshest data. `TdmaRadioService::drainTxQueue()` sends one payload per slot.
+
+### Rx power gating
+
+Nodes sleep the SX1276 (`ITdmaRadioDriver::sleep()` → `RH_RF95::sleep()`) outside the
+base's slot 0, since the base only ever transmits there (`TIME_SYNC`/`ACK_SUMMARY`/
+`CMD_CALIBRATE`/`CMD_RESET`) and node telemetry is fire-and-forget (no Rx needed during a
+node's own slot). `TdmaClock::baseRxWindowOpen()` mirrors `myTurn()`'s shape:
+
+- Open for all of slot 0 (no guard-band exclusion — a receiver listening a little extra is
+  harmless, unlike a transmitter).
+- Open during the last `rxWakeAheadMs` of the prior slot — a dedicated wake-ahead margin,
+  not a `guardMs` bump, since it has to absorb main-loop jitter (a blocking sensor read in
+  flight when slot 0 begins) on top of crystal drift.
+- Open unconditionally pre-sync or once sync goes stale, mirroring `myTurn()`'s own fallback.
+
+Gating is opt-in only for `AppLayerAckSummary` mode; `StrictLinkAck` (diagnostics-only, not
+deployed) keeps the radio Rx-continuous since it needs to hear its own link-layer ACK right
+after its own TX slot. See `documentation/Pending_Plans/RADIO_RX_GATING.md` for the full
+design rationale and remaining test/bench-verification work.
 
 ---
 
@@ -502,6 +524,7 @@ SmartFiresNodeApp::update() — sensing begins
 | AWAKEN boot handshake | **Done** | Node broadcasts PKT_AWAKEN every 5 s until TIME_SYNC received; sensors withheld until synced |
 | SHT31 sensor wired end-to-end | **Done** | fillSnapshot() implemented |
 | TDMA clock + slot gating | **Done** | TdmaClock, TdmaRadioService |
+| Rx power gating | **Code done; tests/bench pending** | `baseRxWindowOpen()`/`updateRxPower()`/`sleep()` shipped and wired in; `TdmaRadioService`/`SmartFiresBaseApp` native test coverage and hardware bench verification still open — see `documentation/Pending_Plans/RADIO_RX_GATING.md` |
 | TIME_SYNC binary decode | **Done** | TdmaRadioService uses BinaryPacket::decodeTimeSync() |
 | Base station port | **Done** | SmartFiresBaseApp fully implemented: LoRa RX, UART framing, TIME_SYNC, ACK_SUMMARY, node assignment |
 | edge-receiver packet bundle decode | **Done** | `smartfires_edge/packet.py` for 20-byte FullStatePayload + 12-byte deltas |
@@ -601,3 +624,4 @@ Base station link (USB, not UART — see `UART_JETSON_BRIDGE.md`):
 - **Drop-oldest queue:** `TdmaTxQueue` (8 entries) always holds the freshest data. No blocking between sensing and TX.
 - **Stale-sync fallback:** if no TIME_SYNC for 22 min (2× the 10-min broadcast interval), `TdmaClock::myTurn()` returns true unconditionally — node transmits immediately rather than going silent.
 - **TIME_SYNC driven by Jetson NTP, not GPS.** GPS PPS sync deferred; current crystal drift between synced nodes is within the 20 ms guard band.
+- **Rx power gating (`AppLayerAckSummary` mode only):** nodes sleep the radio outside the base's slot 0, since that's the only slot the base ever transmits in and node telemetry is fire-and-forget. `TdmaClock::baseRxWindowOpen()` mirrors `myTurn()`'s pre-sync/stale-sync fallback. A dedicated `rxWakeAheadMs` (not a `guardMs` bump) opens the window slightly before slot 0 to absorb main-loop jitter from blocking sensor reads, not just crystal drift — added after field testing showed nodes missing the start of slot 0 without it. See "Rx power gating" above and `documentation/Pending_Plans/RADIO_RX_GATING.md`.

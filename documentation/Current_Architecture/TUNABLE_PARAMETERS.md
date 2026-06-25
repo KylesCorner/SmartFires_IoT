@@ -3,7 +3,7 @@ name: tunable-parameters
 description: Every tunable constant in the system — TDMA, sensing/duty-cycle, power, Jetson.
 category: architecture
 status: current
-last_verified: 2026-06-23
+last_verified: 2026-06-25
 source_refs:
   - platformio/include/config/NetworkConfig.h
   - platformio/include/config/SensingConfig.h
@@ -34,6 +34,7 @@ automatically.
 | `kNumSlots` | 4 (from `NUM_SLOTS` build flag) | TDMA slots per frame; must match across all node Feathers |
 | `kSlotWidthMs` | 900 ms | Slot duration; fits worst-case one bundle TX (340 ms) + one link-ACK timeout (250 ms) + 2× guard |
 | `kGuardMs` | 20 ms | Guard time at slot edges; covers ≤50 ppm crystal drift at 22 min max sync interval |
+| `kRxWakeAheadMs` | 50 ms | How long before slot 0 a node starts waking its radio for Rx gating (`TdmaClock::baseRxWindowOpen()`); distinct from `kGuardMs` — also covers main-loop jitter from blocking sensor reads, not just crystal drift. Starting value, not yet bench-characterized |
 | `kSyncStaleMs` | 1 320 000 ms (22 min) | Node transmits unconditionally after this long without a TIME_SYNC |
 | `kBaseAddr` | 0x01 | RadioHead address of the base station |
 | `kRadioFrequencyMhz` | 915.0 MHz | LoRa carrier frequency |

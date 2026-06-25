@@ -43,6 +43,16 @@ struct TdmaConfig {
   uint32_t guardMs = 20;
   uint32_t syncStaleMs = 1320000;
 
+  // How long before slot 0 (the base's slot) begins that a node should start
+  // waking its radio for TdmaClock::baseRxWindowOpen(). Distinct from
+  // guardMs (which only covers clock drift): this also has to absorb
+  // ordinary main-loop jitter -- e.g. a blocking sensor read still in flight
+  // when slot 0 begins delays the next checkIncomingTimeSync() call past the
+  // base's earliest possible transmit. Field-observed: without this, nodes
+  // missed the start of the base's slot-0 ACK_SUMMARY send often enough to
+  // show up as extra link-layer retries on the base.
+  uint32_t rxWakeAheadMs = 50;
+
   uint8_t queueDepth = 4;
   bool enableLinkAck = true;
   uint8_t maxRetries = 1;
