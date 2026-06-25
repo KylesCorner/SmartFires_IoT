@@ -246,10 +246,11 @@ send timing is bounded within its slot (it can dequeue up to 3 packets per `upda
 in priority order, not a fixed single timestamp), so it's listed as future work, not part of
 this plan.
 
-This is radio-current only. Per `duty-cycling`, sensor/MCU duty cycling is currently disabled
-(`kThresholdEnabled = false`), so sensors run back-to-back continuously regardless of this
-change — worth a whole-node current budget pass to see how much of total battery draw this
-radio optimization actually moves before investing further here.
+This is radio-current only. Per `duty-cycling`, sensor/MCU duty cycling is now build-flag
+selected (`SMARTFIRES_DUTY_CYCLE_CONTINUOUS`) — the real node build duty-cycles sensors
+(`kThresholdEnabled = true`), while only the debug build runs them back-to-back continuously.
+Worth a whole-node current budget pass to see how much of total battery draw this radio
+optimization actually moves on top of sensor duty cycling before investing further here.
 
 ## Open questions
 
