@@ -87,32 +87,36 @@ automatically.
 
 Two named constant sets exist in `SensingConfig::DutyCycle`. There are no
 `dutyCycleCfgContinuous()` / `dutyCycleCfg()` factory functions — the only
-runtime factory is `DutyCycleConfig::make(...)` (`include/power/DutyCycleController.h`),
-and `main.cpp` currently wires it up using the **`kThreshold*`** constant set,
-not `kContinuous*`. Since `kThresholdEnabled` is `false`, `DutyCycleController`
-runs with duty cycling disabled regardless — sensors are serviced back-to-back
-every `samplePeriodMs` rather than cycling through `IdleSleeping` /
-`WarmingUp` / `ActiveSampling` / `CooldownSleeping`.
+runtime factory is `DutyCycleConfig::make(...)` (`include/power/DutyCycleController.h`).
+`main.cpp` wires it up exclusively from a third, derived `kActive*` set, which
+`SensingConfig.h` resolves to either `kThreshold*` or `kContinuous*` at
+compile time based on the `SMARTFIRES_DUTY_CYCLE_CONTINUOUS` build flag
+(set per-environment in `platformio.ini`):
 
-### Threshold constant set (what `main.cpp` actually wires up)
+| `SMARTFIRES_DUTY_CYCLE_CONTINUOUS` | Active set | Environment |
+|---|---|---|
+| `1` (default if unset) | `kContinuous*` (`enabled = false`) | `feather_m0_lora_node_debug` |
+| `0` | `kThreshold*` (`enabled = true`) | `feather_m0_lora_node` |
+
+### Threshold constant set (real node build — `enabled = true`)
 
 | Constant | Value | Meaning |
 |---|---|---|
-| `kThresholdEnabled` | false | Duty-cycle gate is disabled — sensors run back-to-back at `samplePeriodMs` |
-| `kThresholdMinSleepMs` | 3 000 ms | Minimum idle sleep before wake (unused while disabled) |
-| `kThresholdMaxWakeMs` | 1 000 ms | Max additional wake delay (unused while disabled) |
-| `kThresholdActiveSampleMs` | 30 000 ms | Duration of the `ActiveSampling` window (unused while disabled) |
-| `kThresholdSamplePeriodMs` | 750 ms | Master loop cadence — how often the sensor-service tick fires (carries a `//TEMP` marker in source, not yet retuned) |
+| `kThresholdEnabled` | true | Duty-cycle gate is active — full `IdleSleeping`/`WarmingUp`/`ActiveSampling`/`CooldownSleeping` cycle runs |
+| `kThresholdMinSleepMs` | 3 000 ms | Minimum idle sleep before wake |
+| `kThresholdMaxWakeMs` | 1 000 ms | Max additional wake delay |
+| `kThresholdActiveSampleMs` | 30 000 ms | Duration of the `ActiveSampling` window |
+| `kThresholdSamplePeriodMs` | 750 ms | Sample cadence within `ActiveSampling` (carries a `//TEMP` marker in source, not yet retuned) |
 | `kThresholdWarmupMs` | 10 000 ms | Sensor stabilization delay after wake |
-| `kThresholdTempDeltaThresholdC` | 1.0 °C | Temperature delta to trigger early wake (unused while disabled) |
-| `kThresholdHumidityDeltaThresholdPct` | 5.0 %RH | Humidity delta to trigger early wake (unused while disabled) |
+| `kThresholdTempDeltaThresholdC` | 1.0 °C | Temperature delta to trigger early wake |
+| `kThresholdHumidityDeltaThresholdPct` | 5.0 %RH | Humidity delta to trigger early wake |
 | `kThresholdFailOnSampleError` | false | Sensor errors do not halt the node |
 
-### Continuous constant set (defined, but not wired up by any current build)
+### Continuous constant set (debug build — `enabled = false`)
 
 | Constant | Value | Meaning |
 |---|---|---|
-| `kContinuousEnabled` | false | Same effective behavior as Threshold — duty cycle gate skipped |
+| `kContinuousEnabled` | false | Duty-cycle gate is disabled — sensors run back-to-back at `samplePeriodMs` |
 | `kContinuousMinSleepMs` | 0 ms | Not used in continuous mode |
 | `kContinuousMaxWakeMs` | 0 ms | Not used in continuous mode |
 | `kContinuousActiveSampleMs` | 0 ms | Not used in continuous mode |

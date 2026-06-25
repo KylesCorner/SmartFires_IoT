@@ -30,6 +30,22 @@
 
 #include <stdint.h>
 
+// ---------------------------------------------------------------------------
+// Build-flag resolution
+// ---------------------------------------------------------------------------
+// SMARTFIRES_DUTY_CYCLE_CONTINUOUS picks which of the two DutyCycle profiles
+// below main.cpp wires into DutyCycleConfig — set per-environment in
+// platformio.ini (feather_m0_lora_node_debug vs feather_m0_lora_node).
+//   1 = kContinuous*  — back-to-back sampling, no sleep/wake (debug env,
+//       for fast iteration without waiting on duty-cycle timing)
+//   0 = kThreshold*    — real sleep/wake duty cycling gated on a
+//       temp/humidity threshold crossing (real node env)
+// Defaults to continuous so any env that doesn't set the flag keeps the
+// behavior every build has shipped with historically.
+#ifndef SMARTFIRES_DUTY_CYCLE_CONTINUOUS
+#define SMARTFIRES_DUTY_CYCLE_CONTINUOUS 1
+#endif
+
 namespace SensingConfig {
 
 // ---------------------------------------------------------------------------
@@ -38,11 +54,8 @@ namespace SensingConfig {
 // Two named profiles, matching DutyCycleController.h's two factories.
 namespace DutyCycle {
 
-// kContinuous: what every production node build ships today
-// (DutyCycleConfig::dutyCycleCfgContinuous(), used by main.cpp) — duty
-// cycling disabled, sensors serviced back-to-back at samplePeriodMs. This is
-// the cadence each sensor's minSamplePeriodMs floor is checked against at
-// boot (see main.cpp's sensor-floor validation log).
+// kContinuous: the debug-build profile (SMARTFIRES_DUTY_CYCLE_CONTINUOUS=1)
+// — duty cycling disabled, sensors serviced back-to-back at samplePeriodMs.
 constexpr bool kContinuousEnabled = false;  // false = no sleep/wake cycling; sensors run back-to-back at samplePeriodMs
 constexpr uint32_t kContinuousMinSleepMs = 0;
 constexpr uint32_t kContinuousMaxWakeMs = 0;
@@ -53,12 +66,12 @@ constexpr float kContinuousTempDeltaThresholdC = 0.0f;
 constexpr float kContinuousHumidityDeltaThresholdPct = 0.0f;
 constexpr bool kContinuousFailOnSampleError = false;
 
-// kThresholdTriggered: the trigger-based wake/sleep profile
-// (DutyCycleConfig::dutyCycleCfg()) — not used by any build today, kept
-// available as a documented alternate operating mode. samplePeriodMs here
-// carries forward a pre-existing "//TEMP" marker from before this
-// consolidation; flagged as a real value, not silently dropped.
-constexpr bool kThresholdEnabled = false;
+// kThresholdTriggered: the real-node-build profile
+// (SMARTFIRES_DUTY_CYCLE_CONTINUOUS=0) — trigger-based wake/sleep duty
+// cycling. samplePeriodMs here carries forward a pre-existing "//TEMP"
+// marker from before this consolidation; flagged as a real value, not
+// silently dropped.
+constexpr bool kThresholdEnabled = true;
 constexpr uint32_t kThresholdMinSleepMs = 3000;
 constexpr uint32_t kThresholdMaxWakeMs = 1000;
 constexpr uint32_t kThresholdActiveSampleMs = 30000;
@@ -67,6 +80,30 @@ constexpr uint32_t kThresholdWarmupMs = 10000;
 constexpr float kThresholdTempDeltaThresholdC = 1.0f;
 constexpr float kThresholdHumidityDeltaThresholdPct = 5.0f;
 constexpr bool kThresholdFailOnSampleError = false;
+
+// kActive*: the profile main.cpp actually wires into DutyCycleConfig::make(),
+// selected at compile time by SMARTFIRES_DUTY_CYCLE_CONTINUOUS.
+#if SMARTFIRES_DUTY_CYCLE_CONTINUOUS
+constexpr bool kActiveEnabled = kContinuousEnabled;
+constexpr uint32_t kActiveMinSleepMs = kContinuousMinSleepMs;
+constexpr uint32_t kActiveMaxWakeMs = kContinuousMaxWakeMs;
+constexpr uint32_t kActiveActiveSampleMs = kContinuousActiveSampleMs;
+constexpr uint32_t kActiveSamplePeriodMs = kContinuousSamplePeriodMs;
+constexpr uint32_t kActiveWarmupMs = kContinuousWarmupMs;
+constexpr float kActiveTempDeltaThresholdC = kContinuousTempDeltaThresholdC;
+constexpr float kActiveHumidityDeltaThresholdPct = kContinuousHumidityDeltaThresholdPct;
+constexpr bool kActiveFailOnSampleError = kContinuousFailOnSampleError;
+#else
+constexpr bool kActiveEnabled = kThresholdEnabled;
+constexpr uint32_t kActiveMinSleepMs = kThresholdMinSleepMs;
+constexpr uint32_t kActiveMaxWakeMs = kThresholdMaxWakeMs;
+constexpr uint32_t kActiveActiveSampleMs = kThresholdActiveSampleMs;
+constexpr uint32_t kActiveSamplePeriodMs = kThresholdSamplePeriodMs;
+constexpr uint32_t kActiveWarmupMs = kThresholdWarmupMs;
+constexpr float kActiveTempDeltaThresholdC = kThresholdTempDeltaThresholdC;
+constexpr float kActiveHumidityDeltaThresholdPct = kThresholdHumidityDeltaThresholdPct;
+constexpr bool kActiveFailOnSampleError = kThresholdFailOnSampleError;
+#endif
 
 }  // namespace DutyCycle
 

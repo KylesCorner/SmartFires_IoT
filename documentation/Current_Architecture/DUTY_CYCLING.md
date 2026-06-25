@@ -39,10 +39,11 @@ CooldownSleeping ─────────────────────
 Error (fatal sensor failure, if failOnSampleError = true)
 ```
 
-This is the full state machine as implemented, but **it is not what runs
-today** — every current build has `cfg.enabled = false`
-(`SensingConfig::DutyCycle::kThresholdEnabled`), and `DutyCycleController::update()`
-short-circuits to a reduced path while disabled:
+This is the full state machine as implemented. Whether a build actually
+exercises all of it depends on a compile-time flag — see below.
+
+When `cfg.enabled = false`, `DutyCycleController::update()` short-circuits to
+a reduced path:
 
 - `begin()` always transitions `NotStarted → WarmingUp` unconditionally.
 - While disabled, `IdleSleeping`'s threshold-trigger logic (`updateSleeping()`)
@@ -66,38 +67,55 @@ are never functionally exercised.
 (`include/power/DutyCycleController.h`) — there is no separate
 `dutyCycleCfgContinuous()` / `dutyCycleCfg()` pair of factories. Two named
 constant sets exist in `SensingConfig::DutyCycle` (`kThreshold*` and
-`kContinuous*`); `main.cpp` currently wires up the **`kThreshold*`** set.
+`kContinuous*`); a build flag picks which one `main.cpp` actually wires up.
 
 > **Authoritative values:** `platformio/include/config/SensingConfig.h` — `SensingConfig::DutyCycle` namespace.
 > For the full parameter table see [TUNABLE_PARAMETERS.md](TUNABLE_PARAMETERS.md#sensing--duty-cycle).
 
-### Current shipped behavior
+### Profile selection: `SMARTFIRES_DUTY_CYCLE_CONTINUOUS`
 
-`kThresholdEnabled` is `false`, so every current build runs with the duty-cycle
-gate **disabled** regardless of which named constant set is wired in — the
-controller never cycles through `IdleSleeping` → `WarmingUp` →
-`ActiveSampling` → `CooldownSleeping`. Sensors are instead serviced
-back-to-back at `samplePeriodMs = 750 ms` (`kThresholdSamplePeriodMs`).
+`SensingConfig.h` resolves a `kActive*` constant set (`kActiveEnabled`,
+`kActiveMinSleepMs`, etc.) from the `SMARTFIRES_DUTY_CYCLE_CONTINUOUS`
+build flag, and `main.cpp` constructs `DutyCycleConfig::make(...)` from
+`kActive*` exclusively — it never references `kThreshold*`/`kContinuous*`
+directly.
 
-| Parameter | Value (as wired by `main.cpp`) | Meaning |
+| `SMARTFIRES_DUTY_CYCLE_CONTINUOUS` | Active set | Set in platformio.ini for |
 |---|---|---|
-| `minSleepMs` | 3 000 ms | Minimum time in `IdleSleeping` before waking (unused while disabled) |
-| `maxWakeMs` | 1 000 ms | Max additional wake delay (unused while disabled) |
+| `1` (default if unset) | `kContinuous*` (`enabled = false`) | `feather_m0_lora_node_debug` |
+| `0` | `kThreshold*` (`enabled = true`) | `feather_m0_lora_node` |
+
+### `kThreshold*` — real node build (`enabled = true`)
+
+The full state machine above runs as designed: `IdleSleeping` →
+`WarmingUp` → `ActiveSampling` → `CooldownSleeping`, with early wake on a
+temp/humidity threshold crossing.
+
+| Parameter | Value | Meaning |
+|---|---|---|
+| `minSleepMs` | 3 000 ms | Minimum time in `IdleSleeping` before waking |
+| `maxWakeMs` | 1 000 ms | Max additional wake delay |
 | `warmupMs` | 10 000 ms | Time in `WarmingUp` — sensor stabilization delay |
-| `activeSampleMs` | 30 000 ms | Duration of the `ActiveSampling` window (unused while disabled) |
-| `samplePeriodMs` | 750 ms | Master loop cadence while disabled — how often sensors are serviced |
-| `tempDeltaThresholdC` | 1.0 °C | Threshold to trigger early wake from idle (unused while disabled) |
-| `humidityDeltaThresholdPct` | 5.0 %RH | Threshold to trigger early wake from idle (unused while disabled) |
+| `activeSampleMs` | 30 000 ms | Duration of the `ActiveSampling` window |
+| `samplePeriodMs` | 750 ms | Sample cadence within `ActiveSampling` |
+| `tempDeltaThresholdC` | 1.0 °C | Threshold to trigger early wake from idle |
+| `humidityDeltaThresholdPct` | 5.0 %RH | Threshold to trigger early wake from idle |
 | `failOnSampleError` | false | Whether sensor errors are fatal |
 
-### Continuous constant set (defined, not currently wired up)
+### `kContinuous*` — debug build (`enabled = false`)
 
-`SensingConfig::DutyCycle::kContinuous*` is a second named constant set with
-the same `enabled = false` behavior as Threshold, differing in its temp/humidity
-delta thresholds (both `0.0`, vs. Threshold's `1.0`/`5.0`) and `samplePeriodMs`
-(`750 ms`, same value as Threshold today). No current build references it —
-`main.cpp` only constructs `DutyCycleConfig::make(...)` from the `kThreshold*`
-constants.
+Duty-cycle gate disabled — sensors run back-to-back at `samplePeriodMs`,
+skipping `IdleSleeping`/`CooldownSleeping` entirely (see the disabled-path
+behavior above). Used by `feather_m0_lora_node_debug` for fast iteration
+without waiting on real sleep/wake timing.
+
+| Parameter | Value | Meaning |
+|---|---|---|
+| `samplePeriodMs` | 750 ms | Master loop cadence — how often sensors are serviced |
+| `warmupMs` | 10 000 ms | One-time warmup delay at boot before first sample |
+| `tempDeltaThresholdC` / `humidityDeltaThresholdPct` | 0.0 | Unused while disabled |
+| `minSleepMs` / `maxWakeMs` / `activeSampleMs` | 0 ms | Unused while disabled |
+| `failOnSampleError` | false | Whether sensor errors are fatal |
 
 ## Trigger Sensor
 

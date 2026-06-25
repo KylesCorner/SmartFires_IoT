@@ -108,20 +108,20 @@ uint8_t makeInitialRadioAddr(uint32_t uidHash) {
 
 // Boot-time validation: warns if a sensor's own minSamplePeriodMs floor
 // (config/SensingConfig.h) is slower than the duty-cycle cadence actually
-// driving it (config/SensingConfig.h's DutyCycle::kContinuousSamplePeriodMs).
+// driving it (config/SensingConfig.h's DutyCycle::kActiveSamplePeriodMs).
 // This is not necessarily a bug — a sensor slower than the master loop
 // simply won't produce a fresh sample on every cycle, by design — but it
 // was previously impossible to even check, since the two values lived in
 // unrelated files with no comparison between them.
 void logSensorFloorVsCadence(const char *sensorName, uint32_t minSamplePeriodMs) {
-  if (minSamplePeriodMs > SensingConfig::DutyCycle::kContinuousSamplePeriodMs) {
+  if (minSamplePeriodMs > SensingConfig::DutyCycle::kActiveSamplePeriodMs) {
     LOG_WARN("sensing",
              "sensor_floor_above_cadence sensor=%s min_period_ms=%lu "
              "cadence_ms=%lu (expected if intentional; sensor will not "
              "produce a fresh sample on every cycle)",
              sensorName, static_cast<unsigned long>(minSamplePeriodMs),
              static_cast<unsigned long>(
-                 SensingConfig::DutyCycle::kContinuousSamplePeriodMs));
+                 SensingConfig::DutyCycle::kActiveSamplePeriodMs));
   }
 }
 
@@ -200,15 +200,15 @@ BatteryMonitor battery(batteryCfg, analog, clock);
 // -----------------------------------------------------------------------------
 
 DutyCycleConfig dutyCfg = DutyCycleConfig::make(
-    SensingConfig::DutyCycle::kThresholdEnabled,
-    SensingConfig::DutyCycle::kThresholdMinSleepMs,
-    SensingConfig::DutyCycle::kThresholdMaxWakeMs,
-    SensingConfig::DutyCycle::kThresholdActiveSampleMs,
-    SensingConfig::DutyCycle::kThresholdSamplePeriodMs,
-    SensingConfig::DutyCycle::kThresholdWarmupMs,
-    SensingConfig::DutyCycle::kThresholdTempDeltaThresholdC,
-    SensingConfig::DutyCycle::kThresholdHumidityDeltaThresholdPct,
-    SensingConfig::DutyCycle::kThresholdFailOnSampleError);
+    SensingConfig::DutyCycle::kActiveEnabled,
+    SensingConfig::DutyCycle::kActiveMinSleepMs,
+    SensingConfig::DutyCycle::kActiveMaxWakeMs,
+    SensingConfig::DutyCycle::kActiveActiveSampleMs,
+    SensingConfig::DutyCycle::kActiveSamplePeriodMs,
+    SensingConfig::DutyCycle::kActiveWarmupMs,
+    SensingConfig::DutyCycle::kActiveTempDeltaThresholdC,
+    SensingConfig::DutyCycle::kActiveHumidityDeltaThresholdPct,
+    SensingConfig::DutyCycle::kActiveFailOnSampleError);
 DutyCycleController duty(dutyCfg, sht31, sensors, sensorCount, clock, battery);
 
 // -----------------------------------------------------------------------------
@@ -345,7 +345,7 @@ void setup() {
 
   LOG_INFO("sensing", "cadence_ms=%lu",
            static_cast<unsigned long>(
-               SensingConfig::DutyCycle::kContinuousSamplePeriodMs));
+               SensingConfig::DutyCycle::kActiveSamplePeriodMs));
   logSensorFloorVsCadence("sht31", sht31Cfg.minSamplePeriodMs);
   logSensorFloorVsCadence("wind", windCfg.minSamplePeriodMs);
   logSensorFloorVsCadence("gps", gpsCfg.minSamplePeriodMs);
