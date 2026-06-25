@@ -83,6 +83,9 @@ private:
     uint8_t targetNodeId = 0;
     uint8_t payload[kPendingCommandPayloadSize] = {};
     uint8_t len = 0;
+    // Consecutive sendToWait() failures for this entry — see
+    // BaseConfig::kMaxPendingCommandSendAttempts.
+    uint8_t failedSendAttempts = 0;
   };
 
   // KNOWN LIMITATION: the Jetson's "New Session" flow (ingest_service.py's
@@ -196,7 +199,7 @@ private:
   NodeAssignment *findOrCreateNodeAssignment(uint32_t uidHash);
   bool handleTelemetryAckSummary(uint8_t nodeId, uint8_t seq);
   AckTracker *findOrCreateAckTracker(uint8_t nodeId);
-  void resetAckTracker(uint8_t nodeId);
+  void resetAckTracker(uint8_t nodeId, const char *reason);
   void recordTelemetrySequence(AckTracker &tracker, uint8_t seq);
   void updateTelemetryReceiptWindow(AckTracker &tracker, uint8_t seq);
   bool sendAckSummary(uint8_t nodeId, uint8_t ackBaseSeq, uint16_t ackMask,

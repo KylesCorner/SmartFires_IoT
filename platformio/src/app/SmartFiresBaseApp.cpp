@@ -319,7 +319,7 @@ void SmartFiresBaseApp::processIncomingLoRa() {
         assignment->pendingRadioAddr = pkt.from;
         assignment->pendingTriggerSeq = hdr.seq;
         syncQueued = true;
-        resetAckTracker(assignment->nodeId);
+        resetAckTracker(assignment->nodeId, "awaken");
       }
       LOG_INFO("base", "awaken_local_time_sync_queued count=%lu result=%s",
                static_cast<unsigned long>(_awakenRxCount),
@@ -550,20 +550,24 @@ SmartFiresBaseApp::AckTracker *SmartFiresBaseApp::findOrCreateAckTracker(
   return freeTracker;
 }
 
-void SmartFiresBaseApp::resetAckTracker(uint8_t nodeId) {
+void SmartFiresBaseApp::resetAckTracker(uint8_t nodeId, const char *reason) {
   for (uint8_t i = 0; i < kMaxAckTrackedNodes; ++i) {
     AckTracker &tracker = _ackTrackers[i];
     if (!tracker.inUse || tracker.nodeId != nodeId) {
       continue;
     }
 
-    // AWAKEN means the node lost its session (reboot/brownout) and its own
-    // telemetry seq counter restarted near 0. Without this reset,
-    // recordTelemetrySequence()'s modulo-256 "old duplicate" branch
-    // (deltaFromBase >= 128) swallows every post-reboot packet forever,
-    // since the new low seq numbers all look "behind" the stale
-    // ackBaseSeq — freezing ackBaseSeq/ackMask and permanently suppressing
-    // ACK_SUMMARY sends as "unchanged".
+    // Called both on AWAKEN (node already rebooted, seq counter restarted
+    // near 0) and proactively when the base itself queues a CMD_RESET for
+    // this node (it knows the reboot is imminent, no need to wait for the
+    // AWAKEN to find out). Without this reset, recordTelemetrySequence()'s
+    // modulo-256 "old duplicate" branch (deltaFromBase >= 128) swallows
+    // every post-reboot packet forever, since the new low seq numbers all
+    // look "behind" the stale ackBaseSeq — freezing ackBaseSeq/ackMask and
+    // permanently suppressing ACK_SUMMARY sends as "unchanged". Clearing
+    // `dirty` here also stops sendPendingAckSummary() from spending the
+    // base's next TDMA window acking pre-reset sequence numbers nobody
+    // will ever ask about again.
     tracker.initialized = false;
     tracker.ackBaseSeq = 0;
     tracker.ackMask = 0;
@@ -578,8 +582,8 @@ void SmartFiresBaseApp::resetAckTracker(uint8_t nodeId) {
     tracker.receiptWindowStartSeq = 0;
     tracker.receiptWindowMask = 0;
 
-    LOG_INFO("base", "ack_tracker_reset node=%u reason=awaken",
-             static_cast<unsigned int>(nodeId));
+    LOG_INFO("base", "ack_tracker_reset node=%u reason=%s",
+             static_cast<unsigned int>(nodeId), reason);
     return;
   }
 }
@@ -700,15 +704,35 @@ bool SmartFiresBaseApp::sendPendingCommand() {
     }
 
     const bool ok = _radio.sendToWait(cmd.payload, cmd.len, cmd.targetNodeId);
-    LOG_INFO("base", "tx_pending_cmd_flush node=%u len=%u result=%s",
-             static_cast<unsigned int>(cmd.targetNodeId),
-             static_cast<unsigned int>(cmd.len), ok ? "OK" : "FAIL");
-    if (!ok) {
+    if (ok) {
+      LOG_INFO("base", "tx_pending_cmd_flush node=%u len=%u attempts=%u result=OK",
+               static_cast<unsigned int>(cmd.targetNodeId),
+               static_cast<unsigned int>(cmd.len),
+               static_cast<unsigned int>(cmd.failedSendAttempts + 1u));
+      cmd.inUse = false;
+      return true;
+    }
+
+    // No RadioHead link ACK within sendToWait()'s own retry burst. Bounded
+    // give-up below — otherwise an unreachable node (e.g. one that already
+    // rebooted and missed this window) would have this entry retried
+    // forever, once per base window, permanently occupying this slot.
+    cmd.failedSendAttempts++;
+    if (cmd.failedSendAttempts >= BaseConfig::kMaxPendingCommandSendAttempts) {
+      LOG_WARN("base",
+               "tx_pending_cmd_give_up node=%u len=%u attempts=%u reason=no_link_ack",
+               static_cast<unsigned int>(cmd.targetNodeId),
+               static_cast<unsigned int>(cmd.len),
+               static_cast<unsigned int>(cmd.failedSendAttempts));
+      cmd.inUse = false;
       continue;
     }
 
-    cmd.inUse = false;
-    return true;
+    LOG_INFO("base", "tx_pending_cmd_retry node=%u len=%u attempts=%u max=%u",
+             static_cast<unsigned int>(cmd.targetNodeId),
+             static_cast<unsigned int>(cmd.len),
+             static_cast<unsigned int>(cmd.failedSendAttempts),
+             static_cast<unsigned int>(BaseConfig::kMaxPendingCommandSendAttempts));
   }
   return false;
 }
@@ -729,6 +753,7 @@ bool SmartFiresBaseApp::enqueuePendingCommand(uint8_t targetNodeId,
     cmd.inUse = true;
     cmd.targetNodeId = targetNodeId;
     cmd.len = len;
+    cmd.failedSendAttempts = 0;
     memcpy(cmd.payload, payload, len);
     return true;
   }
@@ -1018,6 +1043,12 @@ bool SmartFiresBaseApp::handleJetsonCommandPayload(const uint8_t *payload, uint8
       LOG_INFO("base", "uart_cmd_reset_self_done radio_reinit=%s", ok ? "OK" : "FAIL");
       return true;
     }
+
+    // The base is telling this node to reset, so the reboot (and the seq
+    // counter restart it brings) is a foregone conclusion — drain this
+    // node's ACK/sequence state now rather than waiting for its next
+    // AWAKEN to do it. See resetAckTracker() for why this matters.
+    resetAckTracker(cmd.node_id, "cmd_reset");
 
     uint8_t loraPayload[BinaryPacket::kCmdResetLoRaSize] = {};
     const uint8_t loraLen = BinaryPacket::encodeCmdResetPayload(

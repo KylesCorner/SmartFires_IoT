@@ -38,6 +38,17 @@ constexpr uint32_t kAckSummaryMinIntervalMs = 25;
 // new telemetry arrives from that node or it re-AWAKENs.
 constexpr uint8_t kMaxAckSummarySendAttempts = 3;
 
+// Bounded retry for a queued CMD_CALIBRATE/CMD_RESET before giving up on a
+// node that isn't link-acking it. Each attempt is one sendToWait() call from
+// sendPendingCommand(), which already contains RHReliableDatagram's own
+// link-layer retry burst (kLinkRetries @ kLinkAckTimeoutMs) — this counts
+// base-window attempts on top of that (one per ~frame period), not
+// individual radio transmissions. Without this cap, a node that never
+// link-acks (e.g. it already rebooted and missed the window) would have its
+// queued command retried forever, once per base window, permanently
+// occupying one of the kMaxPendingCommands slots.
+constexpr uint8_t kMaxPendingCommandSendAttempts = 3;
+
 // TDMA geometry: shared with the node builds via NetworkConfig::kGeometry,
 // so these three can no longer drift from NUM_SLOTS/slotWidthMs/guardMs.
 constexpr uint8_t kTdmaNumSlots = NetworkConfig::kGeometry.numSlots;
