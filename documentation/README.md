@@ -48,7 +48,7 @@ these — check status tables within each doc for what's done vs. open.
 |---|---|
 | [RESET_SYSTEM.md](Pending_Plans/RESET_SYSTEM.md) | Jetson/base/node reset coordination and time-sync recovery |
 | [JETSON_SENSOR_EXPANSION.md](Pending_Plans/JETSON_SENSOR_EXPANSION.md) | Adding temp/humidity, BMV080, GPS, and ICM-20948 IMU sensors directly to the Jetson via I2C |
-| [RADIO_RX_GATING.md](Pending_Plans/RADIO_RX_GATING.md) | Sleeping the node's SX1276 outside the base's TDMA window to cut radio power draw |
+| [WATCHDOG_TIMER.md](Pending_Plans/WATCHDOG_TIMER.md) | Hardware watchdog for nodes (Phase 1) and the base station (Phase 2) to auto-recover from unrecoverable hangs |
 
 ## Completed Plans
 
@@ -68,3 +68,4 @@ the code is now the authoritative record.
 | [JETSON_CLI_AND_COMMAND_SYSTEM.md](Completed_Plans/JETSON_CLI_AND_COMMAND_SYSTEM.md) | Jetson split-screen CLI and command system design |
 | [ORIENTATION_CALIBRATION_PLAN.md](Completed_Plans/ORIENTATION_CALIBRATION_PLAN.md) | Node orientation calibration and absolute heading plan |
 | [LINK_STATS_PACKET_PLAN.md](Completed_Plans/LINK_STATS_PACKET_PLAN.md) | Extending PKT_STATUS with lifetime retransmit/fail counters |
+| [RADIO_RX_GATING.md](Completed_Plans/RADIO_RX_GATING.md) | Sleeping the node's SX1276 outside the base's TDMA window to cut radio power draw |
