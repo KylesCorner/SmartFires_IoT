@@ -522,6 +522,11 @@ table th {
   color: #e6e6e6;
 }
 
+.sniffer-step-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .sniffer-play-btn {
   min-width: 84px;
 }

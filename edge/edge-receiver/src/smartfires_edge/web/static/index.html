@@ -19,8 +19,18 @@
           <div id="node-checkboxes" class="checkbox-row"></div>
           <strong>Metrics</strong>
           <div id="metric-checkboxes" class="checkbox-row"></div>
-          <strong>Time range</strong>
-          <div id="time-range-buttons" class="time-range-row"></div>
+          <div class="sniffer-toolbar">
+            <div class="sniffer-toolbar-group">
+              <span class="sniffer-toolbar-label">Window:</span>
+              <div id="time-range-buttons" class="time-range-row"></div>
+            </div>
+            <div class="sniffer-toolbar-group sniffer-playback">
+              <button id="chart-step-back" class="sniffer-step-btn" title="Step back">◀</button>
+              <button id="chart-play-toggle" class="sniffer-play-btn">⏸ Pause</button>
+              <button id="chart-step-forward" class="sniffer-step-btn" title="Step forward">▶</button>
+              <span id="chart-live-indicator" class="sniffer-live-indicator"></span>
+            </div>
+          </div>
         </div>
         <div class="chart-container">
           <canvas id="sensor-chart"></canvas>

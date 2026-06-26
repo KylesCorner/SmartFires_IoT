@@ -22,11 +22,19 @@ const METRIC_COLORS = {
 const NODE_DASH_PATTERNS = [[], [5, 5], [2, 3], [8, 3, 2, 3]];
 
 const TIME_RANGES = [
-  { label: "All time",    ms: null,            fetchLimit: 2000 },
-  { label: "Last 5 min",  ms: 5 * 60 * 1000,  fetchLimit: 150  },
-  { label: "Last 15 min", ms: 15 * 60 * 1000, fetchLimit: 400  },
-  { label: "Last hour",   ms: 60 * 60 * 1000, fetchLimit: 2000 },
+  { label: "All time",    ms: null },
+  { label: "Last 5 min",  ms: 5 * 60 * 1000  },
+  { label: "Last 15 min", ms: 15 * 60 * 1000 },
+  { label: "Last hour",   ms: 60 * 60 * 1000 },
 ];
+
+// The live telemetry buffer holds up to 2000 samples per node server-side
+// (see live_state.py) — fetch the whole thing and apply the selected time
+// range client-side so pause/step playback can scrub within it without an
+// extra round trip per window change.
+const TELEMETRY_FETCH_LIMIT = 2000;
+// Each step button press moves the view by half the current window.
+const STEP_FRACTION = 0.5;
 
 const state = {
   selectedNodes:   new Set(),
@@ -38,6 +46,8 @@ const state = {
   markers:         {},
   baseMarker:      null,
   mapFitted:       false,
+  live:            true,
+  pausedViewEndMs: null,   // set when paused; the timestamp at the right edge of the chart
 };
 
 // ---------------------------------------------------------------------------
@@ -100,13 +110,73 @@ function buildTimeRangeButtons() {
     btn.className = "time-range-btn" + (state.timeRangeMs === range.ms ? " active" : "");
     btn.textContent = range.label;
     btn.addEventListener("click", () => {
+      // Changing the window while paused keeps the center of the current
+      // view stable, rather than anchoring to either edge.
+      if (!state.live && state.timeRangeMs && range.ms) {
+        const center = state.pausedViewEndMs - state.timeRangeMs / 2;
+        state.pausedViewEndMs = Math.min(Date.now(), center + range.ms / 2);
+      }
       state.timeRangeMs = range.ms;
       container.querySelectorAll(".time-range-btn").forEach((b) => b.classList.remove("active"));
       btn.classList.add("active");
+      renderPlaybackUI();
       refreshChart();
     });
     container.appendChild(btn);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Playback controls (pause / step / live) — mirrors the TDMA sniffer page's
+// "Window" toolbar so the live chart can be frozen and scrubbed back through
+// the buffered samples instead of always tracking Date.now().
+// ---------------------------------------------------------------------------
+
+function currentViewEndMs() {
+  return state.live ? Date.now() : state.pausedViewEndMs;
+}
+
+function renderPlaybackUI() {
+  const toggleBtn = document.getElementById("chart-play-toggle");
+  const indicator = document.getElementById("chart-live-indicator");
+  if (state.live) {
+    toggleBtn.textContent = "⏸ Pause";
+    indicator.innerHTML = `<span class="conn-dot online"></span> LIVE`;
+  } else {
+    toggleBtn.textContent = "▶ Go Live";
+    const end = new Date(state.pausedViewEndMs);
+    indicator.innerHTML = state.timeRangeMs
+      ? `<span class="conn-dot offline"></span> Viewing ${new Date(state.pausedViewEndMs - state.timeRangeMs).toLocaleTimeString()} – ${end.toLocaleTimeString()}`
+      : `<span class="conn-dot offline"></span> Viewing up to ${end.toLocaleTimeString()}`;
+  }
+  // Stepping needs a finite window size to step by — disable while "All time" is selected.
+  document.getElementById("chart-step-back").disabled = state.timeRangeMs === null;
+  document.getElementById("chart-step-forward").disabled = state.timeRangeMs === null;
+}
+
+function setLive(isLive) {
+  if (isLive) {
+    state.live = true;
+    state.pausedViewEndMs = null;
+  } else if (state.live) {
+    state.pausedViewEndMs = Date.now();
+    state.live = false;
+  }
+  renderPlaybackUI();
+  refreshChart();
+}
+
+function togglePlay() {
+  setLive(!state.live);
+}
+
+function stepView(direction) {
+  if (state.timeRangeMs === null) return; // no fixed window to step by
+  setLive(false); // stepping always means "look away from now"
+  const delta = direction * state.timeRangeMs * STEP_FRACTION;
+  state.pausedViewEndMs = Math.min(Date.now(), state.pausedViewEndMs + delta);
+  renderPlaybackUI();
+  refreshChart();
 }
 
 function buildBaseScales() {
@@ -160,12 +230,17 @@ async function refreshChart() {
     return;
   }
 
-  const currentRange = TIME_RANGES.find((r) => r.ms === state.timeRangeMs) ?? TIME_RANGES[0];
-  const cutoff = state.timeRangeMs ? Date.now() - state.timeRangeMs : 0;
+  const viewEndMs = currentViewEndMs();
+  const cutoff = state.timeRangeMs ? viewEndMs - state.timeRangeMs : 0;
 
   const perNodeSamples = await Promise.all(
-    nodeIds.map((nodeId) => Api.telemetryRecent(nodeId, currentRange.fetchLimit))
+    nodeIds.map((nodeId) => Api.telemetryRecent(nodeId, TELEMETRY_FETCH_LIMIT))
   );
+
+  const inWindow = (s) => {
+    const t = Date.parse(s.timestamp);
+    return t >= cutoff && t <= viewEndMs;
+  };
 
   // Per-metric maximum across all nodes within the time window (axis min is always 0).
   const metricMax = {};
@@ -173,7 +248,7 @@ async function refreshChart() {
     let hi = 0;
     for (const samples of perNodeSamples) {
       for (const s of samples) {
-        if (Date.parse(s.timestamp) < cutoff) continue;
+        if (!inWindow(s)) continue;
         if (s[metric] !== "" && s[metric] !== undefined && s[metric] !== null) {
           const v = Number(s[metric]);
           if (v > hi) hi = v;
@@ -226,7 +301,7 @@ async function refreshChart() {
       const metaDef = METRICS.find((m) => m.key === metric);
       const points = samples
         .filter((s) => {
-          if (Date.parse(s.timestamp) < cutoff) return false;
+          if (!inWindow(s)) return false;
           return s[metric] !== "" && s[metric] !== undefined && s[metric] !== null;
         })
         .map((s) => ({ x: Date.parse(s.timestamp), y: Number(s[metric]) }))
@@ -362,6 +437,10 @@ function wireNewSessionButton() {
       state.chart.options.scales = buildBaseScales();
       state.chart.update();
 
+      state.live = true;
+      state.pausedViewEndMs = null;
+      renderPlaybackUI();
+
       state.knownNodes.clear();
       state.selectedNodes.clear();
       document.getElementById("node-checkboxes").innerHTML = "";
@@ -396,6 +475,10 @@ async function init() {
   initMap();
   wireBaseStationForm();
   wireNewSessionButton();
+  document.getElementById("chart-play-toggle").addEventListener("click", togglePlay);
+  document.getElementById("chart-step-back").addEventListener("click", () => stepView(-1));
+  document.getElementById("chart-step-forward").addEventListener("click", () => stepView(1));
+  renderPlaybackUI();
   await pollNodes();
   await refreshChart();
   setInterval(pollNodes, 2000);
