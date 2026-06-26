@@ -531,6 +531,12 @@ table th {
   margin-left: 0.4rem;
 }
 
+.sniffer-mute-btn.active {
+  background: #3b82c4;
+  color: #15191e;
+  border-color: #3b82c4;
+}
+
 .sniffer-bottom-row {
   display: flex;
   gap: 1rem;

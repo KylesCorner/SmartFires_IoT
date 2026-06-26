@@ -56,6 +56,123 @@ const PKT_COLORS = {
 const UNKNOWN_COLOR = "#c0392b";
 const UNKNOWN_LABEL = "UNKNOWN / other";
 
+// --- Audio feedback ----------------------------------------------------
+//
+// The canvas already reads like a DAW timeline (swim lanes + time grid), so
+// sound follows the same piano-roll convention: row position -> pitch,
+// packet type -> timbre. That way the same packet type sounds recognizably
+// the same on every row, just transposed. Pitch is quantized to a
+// pentatonic scale (rather than a raw linear row->Hz mapping) so it stays
+// musical as more node lanes fill in, instead of getting dense/atonal.
+// TIME_SYNC is the one exception: it's already drawn as a full-height line
+// across every lane (the session-clock anchor), so it gets its own
+// fixed-pitch metronome "tick" rather than a row pitch.
+
+const PENTATONIC_SEMITONES = [0, 2, 4, 7, 9]; // major pentatonic
+const ROW_ROOT_HZ = 196; // G3
+const TIME_SYNC_TICK_HZ = 1760; // A6 — well above any row's pitch, reads as a click track
+
+function rowPitchHz(rowIndex) {
+  const semitone = PENTATONIC_SEMITONES[rowIndex % 5] + 12 * Math.floor(rowIndex / 5);
+  return ROW_ROOT_HZ * Math.pow(2, semitone / 12);
+}
+
+// RH/Unknown is always row 0 and Base Station is always row 1 (mirroring
+// their fixed lanes above the node lanes); nodes ascend from row 2 in the
+// same order as their canvas lane (see laneIndexFor()).
+function rowIndexFor(ev) {
+  if (ev.pkt_type === "RH_ACK" || ev.pkt_type === "RH_RAW") return 0;
+  if (ev.node_id === 0) return 1;
+  if (ev.node_id != null) return 2 + laneIndexFor(ev.node_id);
+  return 0;
+}
+
+// [oscillator wave, duration, peak gain] per packet type, tuned so frequent
+// benign traffic (BUNDLE/STATUS) stays soft and short, commands/handshakes
+// stand out, and link-layer noise (RH_*) stays quiet in the background.
+const PKT_TIMBRE = {
+  BUNDLE: { wave: "triangle", durationMs: 90, gain: 0.12 },
+  STATUS: { wave: "sine", durationMs: 140, gain: 0.14 },
+  FULL_STATE: { wave: "triangle", durationMs: 90, gain: 0.12 },
+  AWAKEN: { wave: "sawtooth", durationMs: 260, gain: 0.16, sweep: 1.5 }, // upward chirp
+  ACK_SUMMARY: { wave: "square", durationMs: 60, gain: 0.08 },
+  CMD_CALIBRATE: { wave: "sawtooth", durationMs: 180, gain: 0.18 },
+  CMD_RESET: { wave: "sawtooth", durationMs: 180, gain: 0.18 },
+  CMD_ACK: { wave: "sine", durationMs: 70, gain: 0.1 },
+  RH_ACK: { wave: "sine", durationMs: 30, gain: 0.04 },
+  RH_RAW: { wave: "square", durationMs: 50, gain: 0.05 },
+};
+const UNKNOWN_TIMBRE = { wave: "square", durationMs: 120, gain: 0.15, detune: -700 }; // dissonant
+
+const audio = {
+  ctx: null,
+  enabled: false,
+};
+
+function initAudioContext() {
+  if (!audio.ctx) {
+    audio.ctx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (audio.ctx.state === "suspended") audio.ctx.resume();
+}
+
+function playTone(freq, { wave, durationMs, gain, sweep, detune }) {
+  const ctx = audio.ctx;
+  const now = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  const amp = ctx.createGain();
+  osc.type = wave;
+  osc.frequency.setValueAtTime(freq, now);
+  if (sweep) osc.frequency.exponentialRampToValueAtTime(freq * sweep, now + durationMs / 1000);
+  if (detune) osc.detune.setValueAtTime(detune, now);
+  amp.gain.setValueAtTime(gain, now);
+  amp.gain.exponentialRampToValueAtTime(0.001, now + durationMs / 1000);
+  osc.connect(amp).connect(ctx.destination);
+  osc.start(now);
+  osc.stop(now + durationMs / 1000 + 0.02);
+}
+
+function playPacketSound(ev) {
+  if (!audio.enabled || !audio.ctx) return;
+
+  if (ev.pkt_type === "TIME_SYNC") {
+    playTone(TIME_SYNC_TICK_HZ, { wave: "square", durationMs: 35, gain: 0.06 });
+    return;
+  }
+
+  const timbre = PKT_TIMBRE[ev.pkt_type] ?? UNKNOWN_TIMBRE;
+  const freq = rowPitchHz(rowIndexFor(ev));
+  playTone(freq, timbre);
+
+  // Guard violations are the one thing already flagged visually (white
+  // stroke) regardless of packet type, so layer a sharp dissonant overtone
+  // on top rather than inventing a separate per-type "bad" timbre.
+  if (ev.guard_violation) {
+    playTone(freq * 1.05, { wave: "sawtooth", durationMs: 60, gain: 0.08, detune: -50 });
+  }
+}
+
+function renderAudioToggle() {
+  const btn = document.getElementById("sniffer-audio-toggle");
+  btn.textContent = audio.enabled ? "🔊" : "🔇";
+  btn.classList.toggle("active", audio.enabled);
+  btn.title = audio.enabled ? "Mute sound effects" : "Enable sound effects";
+}
+
+function setAudioEnabled(enabled) {
+  audio.enabled = enabled;
+  if (enabled) initAudioContext();
+  localStorage.setItem("snifferAudioEnabled", enabled ? "1" : "0");
+  renderAudioToggle();
+}
+
+function initAudio() {
+  audio.enabled = localStorage.getItem("snifferAudioEnabled") === "1";
+  if (audio.enabled) initAudioContext();
+  renderAudioToggle();
+  document.getElementById("sniffer-audio-toggle").addEventListener("click", () => setAudioEnabled(!audio.enabled));
+}
+
 const sniffer = {
   events: [],            // buffered events within MAX_RETAIN_MS
   laneOf: new Map(),     // node_id -> lane index
@@ -289,6 +406,7 @@ function onSnifferEvent(ev) {
   ev._id = ++sniffer.idCounter;
   sniffer.events.push(ev);
   pruneEvents();
+  playPacketSound(ev);
 
   if (ev.pkt_type === "TIME_SYNC" && ev.session_ms != null) {
     sniffer.lastAnchor = { wallMs: ev._wallMs, sessionMs: ev.session_ms };
@@ -844,6 +962,7 @@ function init() {
   document.getElementById("sniffer-play-toggle").addEventListener("click", togglePlay);
   document.getElementById("sniffer-step-back").addEventListener("click", () => stepView(-1));
   document.getElementById("sniffer-step-forward").addEventListener("click", () => stepView(1));
+  initAudio();
   initSubnav();
   initPlots();
   connectSnifferSocket();
