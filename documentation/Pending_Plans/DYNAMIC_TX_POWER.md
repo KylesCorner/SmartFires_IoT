@@ -119,9 +119,14 @@ on STATUS packet from node N:
     if retxDelta == 0 and failDelta == 0 and rssiAvg > kRssiHeadroomThreshold:
         // comfortably linked for a full STATUS interval — step power down
         target = max(currentTxPowerDbm[N] - kPowerStepDbm, kMinTxPowerDbm)
-    elif retxDelta > kRetryAlarmThreshold or rssiAvg < kRssiFloorThreshold:
-        // link degrading — step power up immediately, don't wait for it to fail outright
+    elif rssiAvg < kRssiFloorThreshold:
+        // uplink itself is weak — step power up immediately, don't wait for it to fail outright
         target = min(currentTxPowerDbm[N] + kPowerStepDbm, kRadioTxPowerDbm /* ceiling = today's static default */)
+    elif retxDelta > kRetryAlarmThreshold:
+        // retries are high but RSSI is fine — the downlink (ACK_SUMMARY delivery), not the
+        // node's TX strength, is the likely fault. Log it; a TX power bump can't fix a
+        // downlink problem and would just spend battery for nothing.
+        return
     else:
         return  // no change
 
@@ -144,6 +149,13 @@ Key properties:
   something this control loop should do on its own.
 - **One change in flight per node at a time** (`pendingTxPowerDbm` gate) — avoids
   compounding an unconfirmed change with another before knowing if the node received it.
+- **RSSI and retry-rate are different fault signals, not interchangeable triggers.** RSSI
+  reflects uplink signal strength only (measured at the base on receipt). `retx_total`
+  growth under `AppLayerAckSummary` mode is driven by the node not seeing its packet
+  confirmed in `ACK_SUMMARY` — which depends on the downlink. High retry rate with healthy
+  RSSI usually means the downlink, not the node's TX strength, is the fault — raising the
+  node's TX power doesn't fix that. Only a low `rssiAvg` triggers a power-up; a high
+  `retxDelta` alone is logged for visibility, not acted on by this loop.
 
 ### Fail-safe behavior
 
@@ -161,28 +173,112 @@ Key properties:
   `currentTxPowerDbm` as unknown and don't issue further deltas relative to it until it
   re-establishes contact (re-`AWAKEN`s), to avoid stacking blind adjustments onto a node
   that might already be back at its hardware-reset default.
+- **The STATUS-gated trigger above is blind to a fully-dark uplink — pair it with a
+  silence timeout.** The decision loop only runs when a STATUS packet arrives; a node
+  whose uplink dies completely never sends one, so the loop never fires and never asks it
+  to raise power. Track time-since-last-received-packet-of-any-kind per node (already free
+  — it's the same timestamp the `rssiHistory` update touches on every inbound frame) and
+  once it exceeds roughly `2 × kStatusIntervalMs` (the same 2×-interval shape as
+  `syncStaleMs`), treat the node as link-down by the rule above, and optionally send a
+  small, bounded number of best-effort `CMD_SET_TX_POWER(N, kRadioTxPowerDbm)` probes in
+  case only the uplink — not the downlink — is actually dead.
+- **Node-side mirror of the same fallback.** `TdmaClock` already reverts to immediate-TX
+  behavior once it hasn't seen a TIME_SYNC within `syncStaleMs` (22 min). Extend that same
+  trigger to also reset the node's local `currentTxPowerDbm` to `kRadioTxPowerDbm`. This
+  doesn't reintroduce a second decision-maker (see "Decision" above) — the node isn't
+  judging link quality, it's discarding a base instruction it can no longer trust and
+  falling back to the one value already known to work. No new packet or bandwidth needed;
+  it reuses clock state the firmware already maintains.
+
+### Link liveness — what "active" means, and why TIME_SYNC frequency isn't the lever
+
+"Link active" is defined separately for each direction, from state each side already
+maintains — no new packet type:
+
+- **Base's view of a node:** time since the last received packet of any kind from that
+  node (already touched on every inbound frame for the `rssiHistory` update above).
+- **Node's view of the base:** `TdmaClock::hasSync()` / time since the last applied
+  TIME_SYNC, already tracked for the existing `syncStaleMs` fallback.
+
+Sending TIME_SYNC more frequently doesn't sharpen either of these. It's broadcast and
+fire-and-forget, so a node hearing it more often confirms only that the node's *receiver*
+still works — it says nothing about whether that node's own uplink is reaching the base,
+which is the actual blind spot identified above. The fix for that blind spot is the
+base-side silence timeout, not a faster TIME_SYNC cadence.
+
+### Telemetry and observability
+
+The base already tracks `currentTxPowerDbm` per node for its own decision loop (see
+above), but that's base-local state — it doesn't reach the Jetson or get logged anywhere a
+person can see it without separately surfacing it. Close that loop the same way
+heading/battery already are: put the value on the wire.
+
+- **`StatusPayload` gains a `tx_power_dbm` field** — the node's own record of its
+  currently-applied TX power, written at STATUS-encode time. Sourcing it from the node
+  (what it actually applied) rather than the base (what it last commanded) means the
+  Jetson sees ground truth even if a `CMD_SET_TX_POWER`/`CMD_ACK` round-trip is mid-flight
+  or was missed — same reasoning as the fail-safe section's insistence on treating
+  unconfirmed state as unknown.
+- **Node-side serial log** on every applied `CMD_SET_TX_POWER` (old value, new value, seq),
+  next to the existing `CMD_CALIBRATE`/`CMD_RESET` log lines in `CalibrationDebug.cpp` —
+  this is what a bench/field engineer watching the node's serial monitor needs to see to
+  confirm a step actually landed.
+- **Base-side debug log** at both ends of the decision: when the loop *decides* to send
+  `CMD_SET_TX_POWER` (node, target, and *why* — RSSI floor, headroom step-down, or a
+  silence-timeout probe) and when the `CMD_ACK` confirms or times out. The base already has
+  a path for this straight to the web dashboard — `DebugLogger` → `FramedDebugLogSink` →
+  `PKT_DEBUG_LOG` → the Jetson's `/debug` page and `/ws/base-debug` stream — so this is new
+  log call sites, not new plumbing.
+- **Web node list** shows per-node TX power as a column, sourced from
+  `StatusPayload.tx_power_dbm` (not the base's own `currentTxPowerDbm`, for the same
+  ground-truth reason above).
+
+This gives a power change three separate, traceable touchpoints instead of one
+base-internal variable: node applies it and logs it locally → the new value rides home in
+the next STATUS → the base separately logs its own decision/ack timeline → the web surfaces
+both the current value (node list) and the change history (base debug log stream).
 
 ## Implementation checklist (not started)
 
 1. Add `CMD_SET_TX_POWER` packet type + payload to `BinaryPacket.h` and `packet.py`
    (passive decode only on the Jetson side — it doesn't originate or act on these).
-2. Add `ITdmaRadioDriver::setTxPower(int8_t)` and the `RadioHeadTdmaDriver` implementation
+2. Add `tx_power_dbm` (`int8_t`) to `StatusPayload` (`BinaryPacket.h`), set to the node's
+   currently-applied TX power at STATUS-encode time; mirror the field in `packet.py`. Bumps
+   `STATUS` from 20 to 21 payload bytes (25 to 26 bytes on air) — update `CLAUDE.md`'s
+   wire-protocol tables and `BANDWIDTH_SCALING.md` accordingly.
+3. Add `ITdmaRadioDriver::setTxPower(int8_t)` and the `RadioHeadTdmaDriver` implementation
    (thin wrapper over `RH_RF95::setTxPower()`, same pattern as the existing `sleep()`
    passthrough from `radio-rx-gating`).
-3. Add node-side dispatch in `CalibrationDebug.cpp`/`SmartFiresNodeApp.cpp` alongside the
-   existing `CMD_CALIBRATE`/`CMD_RESET` handling.
-4. Extend the base's per-node assignment table with the state fields above.
-5. Implement the decision loop in `SmartFiresBaseApp` (or a small new
+4. Add node-side dispatch in `CalibrationDebug.cpp`/`SmartFiresNodeApp.cpp` alongside the
+   existing `CMD_CALIBRATE`/`CMD_RESET` handling, including a serial (`@SFDBG`) log line on
+   apply — old value, new value, seq — matching the existing CALIBRATE/RESET log pattern.
+5. Extend the base's per-node assignment table with the state fields above.
+6. Implement the decision loop in `SmartFiresBaseApp` (or a small new
    `TxPowerController`-style collaborator it owns), gated on `STATUS` arrival the same way
    `ACK_SUMMARY` dispatch is gated on TDMA slot 0.
-6. Add `kPowerStepDbm`, `kMinTxPowerDbm`, `kRssiHeadroomThreshold`,
+7. Add base-side `DebugLogger`/`FramedDebugLogSink` log lines (same `PKT_DEBUG_LOG` path
+   already streamed to the Jetson's `/debug` page and `/ws/base-debug` stream) at both
+   decision points: when the loop issues a `CMD_SET_TX_POWER` (node, target, triggering
+   reason — RSSI floor, headroom step-down, or silence-timeout probe) and when the
+   corresponding `CMD_ACK` confirms or times out.
+8. Add `kPowerStepDbm`, `kMinTxPowerDbm`, `kRssiHeadroomThreshold`,
    `kRssiFloorThreshold`, `kRetryAlarmThreshold` to `BaseConfig.h`, documented in
    `tunable-parameters`.
-7. Native tests using `FakeRadio`/`FakeClock` (per the gap already flagged in
+9. Native tests using `FakeRadio`/`FakeClock` (per the gap already flagged in
    `radio-rx-gating`'s testing section) — this plan adds another consumer that needs that
    fake, worth building it once for both.
-8. Surface `currentTxPowerDbm` per node on the Jetson dashboard (read-only) — visibility
-   only, not control.
+10. Surface per-node TX power as a column in the Jetson web dashboard's node list
+    (read-only, visibility only, not control) — sourced from the new
+    `StatusPayload.tx_power_dbm` field (item 2) so the displayed value reflects what the
+    node has actually confirmed applying, not just what the base last commanded.
+11. Add the base-side per-node silence timeout (≈`2 × kStatusIntervalMs`) alongside the
+    STATUS-gated trigger, including the bounded best-effort `CMD_SET_TX_POWER` probe
+    behavior described in "Fail-safe behavior" above.
+12. Add the node-side reset of `currentTxPowerDbm` to `kRadioTxPowerDbm` on `TdmaClock`
+    stale-sync (reuse `syncStaleMs`, no new packet).
+13. Add `kBaseRadioTxPowerDbm` (`BaseConfig.h`) and wire the base's `main.cpp`
+    construction to use it instead of inheriting the shared `NetworkConfig::kRadioTxPowerDbm`
+    default — see "Base station TX power ceiling" below.
 
 ## Open questions
 
@@ -196,6 +292,48 @@ Key properties:
   walking back down from the baseline ceiling again — re-deriving is simpler and self-
   correcting, but means a base reboot temporarily costs the battery savings already earned
   until the loop re-converges.
+- Exact silence-timeout multiplier (`2 × kStatusIntervalMs` assumed above) and the bound on
+  how many best-effort `CMD_SET_TX_POWER` probes to send into silence before giving up on a
+  node — both need bench/field tuning, not just picked analytically, same as the power-step
+  constants above.
+- Whether +20 dBm on the base (see below) needs a per-deployment regulatory check against
+  the actual antenna gain in use, or whether it's safely under Part 15 limits for every
+  antenna this project is likely to use — not resolved here.
+
+## Base station TX power ceiling (separate, static change)
+
+The per-node control loop above only ever walks a *node's* TX power up toward
+`kRadioTxPowerDbm` — it never questions whether the base's own TX power is part of the
+problem. It can be: every base→node frame (`TIME_SYNC`, `ACK_SUMMARY`,
+`CMD_CALIBRATE`/`CMD_RESET`, and now `CMD_SET_TX_POWER`) is fire-and-forget with no
+app-layer retry, so a weak downlink is invisible to this plan's control loop and can
+masquerade as a node-side problem (see the RSSI-vs-retry disambiguation note above).
+
+Today the base and every node share one constant — `NetworkConfig::kRadioTxPowerDbm = 13`
+(`NetworkConfig.h:103`) — pulled through the same `RadioHeadTdmaDriver::Config::radioHeadCfg()`
+factory and applied identically by `RadioHeadTdmaDriver.cpp:41`'s
+`_rf95.setTxPower(_cfg.txPowerDbm, false)`. There's no role split, so the base can't be
+raised without also raising every node's static ceiling.
+
+**Decision: split it, and raise the base.** The base runs off the Jetson/USB supply, not a
+node battery, so TX current is free there in a way it categorically isn't for nodes — this
+plan's entire reason for *not* just running every node at max power doesn't apply to the
+base. Add a `kBaseRadioTxPowerDbm` constant (`BaseConfig.h`) and have the base's
+`main.cpp` construction (currently lines 17-19, `radioHeadCfg(0x01)` under
+`#if defined(LORA_BASE)`) use it instead of inheriting the shared default. Leave
+`NetworkConfig::kRadioTxPowerDbm` untouched — it stays the per-node ceiling this plan's
+control loop targets.
+
+**Target +20 dBm, not the hardware max of +23 dBm.** `setTxPower()` is already called with
+`useRFO=false` (PA_BOOST), which RadioHead clamps to +5..+23 dBm. +20 dBm is the top of
+that range without engaging the SX1276's high-power `PA_DAC` trim (which RadioHead
+auto-enables above +20 dBm) — only 3 dB of headroom is given up for a cleaner margin under
+the chip's rated limits. Revisit +23 dBm later only if field soak data shows the extra 3 dB
+is actually needed.
+
+**Regulatory caveat.** Verify +20 dBm conducted is within Part 15 limits for the configured
+bandwidth/SF and the deployed antenna's gain before shipping this — not re-derived here
+since it depends on the specific antenna in use.
 
 ## Footnote: dynamic spreading factor is deferred
 
