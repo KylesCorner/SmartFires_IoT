@@ -194,6 +194,11 @@ def create_app(
         """Wall-clock time on the Jetson, for display in the dashboard top bar."""
         return {"epoch_s": time.time()}
 
+    @app.get("/api/session")
+    def session() -> dict:
+        """Current ingest session id, for display next to the clock in the top bar."""
+        return live_state.session_info()
+
     # ------------------------------------------------------------------
     # Data API
     # ------------------------------------------------------------------

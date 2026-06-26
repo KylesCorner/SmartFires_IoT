@@ -9,6 +9,7 @@ const NAV_LINKS = [
 let _connDot = null;
 let _baseLinkDot = null;
 let _clockEl = null;
+let _sessionEl = null;
 let _clockOffsetMs = 0; // Jetson epoch_s*1000 - Date.now(), resynced periodically
 
 function renderNav(activePath) {
@@ -30,6 +31,12 @@ function renderNav(activePath) {
   _clockEl.title = "Jetson system clock — the time the edge computer itself is reporting";
   nav.appendChild(_clockEl);
 
+  _sessionEl = document.createElement("span");
+  _sessionEl.className = "nav-clock";
+  _sessionEl.textContent = "session —";
+  _sessionEl.title = "Current ingest session id — changes when a new session is started";
+  nav.appendChild(_sessionEl);
+
   _connDot = document.createElement("span");
   _connDot.className = "conn-dot";
   _connDot.title = "Map tile connectivity: checking whether the Jetson can reach the internet to fetch new map tiles…";
@@ -49,6 +56,8 @@ function renderNav(activePath) {
   _pollServerTime();
   setInterval(_pollServerTime, 30_000);
   setInterval(_tickClock, 1000);
+  _pollSession();
+  setInterval(_pollSession, 5_000);
 }
 
 async function _pollConnectivity() {
@@ -90,4 +99,14 @@ function _tickClock() {
   if (_clockEl) {
     _clockEl.textContent = new Date(Date.now() + _clockOffsetMs).toLocaleTimeString();
   }
+}
+
+async function _pollSession() {
+  try {
+    const resp = await fetch("/api/session");
+    const { session_id } = await resp.json();
+    if (_sessionEl) {
+      _sessionEl.textContent = session_id ? `session ${session_id}` : "session —";
+    }
+  } catch (_) {}
 }

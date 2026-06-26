@@ -190,6 +190,8 @@ def run_receive(
     session_start = time.time()
     session_stamp = _make_session_stamp(session_start)
     session_ctx = {"session_id": session_id, "session_start": session_start}
+    if live_state is not None:
+        live_state.set_session(session_id, session_start)
 
     session_dir = cfg.data_dir / session_stamp
     state_path = session_dir / "packet_loss_state.json"
@@ -540,6 +542,7 @@ def run_receive(
                         if live_state is not None:
                             live_state.tracker = tracker
                             live_state.reset()
+                            live_state.set_session(session_id, session_start)
 
                         _send_time_sync(
                             ser=ser,

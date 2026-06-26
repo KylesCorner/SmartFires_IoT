@@ -55,6 +55,9 @@ const Api = {
   async serverTime() {
     return (await fetch("/api/server_time")).json();
   },
+  async session() {
+    return (await fetch("/api/session")).json();
+  },
 };
 
 function fmt(value) {

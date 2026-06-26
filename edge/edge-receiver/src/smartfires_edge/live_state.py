@@ -50,6 +50,23 @@ class LiveState:
         self._link_connected = False
         self._link_error: str | None = None
         self._link_changed_at = time.time()
+        self._session_id: int | None = None
+        self._session_start: float | None = None
+
+    def set_session(self, session_id: int, session_start: float) -> None:
+        """Called by the ingest thread on startup and on each new-session reset."""
+        with self._lock:
+            self._session_id = session_id
+            self._session_start = session_start
+
+    def session_info(self) -> dict[str, Any]:
+        with self._lock:
+            session_id = self._session_id
+            session_start = self._session_start
+        return {
+            "session_id": f"0x{session_id:08X}" if session_id is not None else None,
+            "session_start": session_start,
+        }
 
     def set_link_connected(self, connected: bool, error: str | None = None) -> None:
         """Called by the ingest thread when the base station serial link opens/drops."""
