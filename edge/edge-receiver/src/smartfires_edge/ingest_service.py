@@ -1,5 +1,4 @@
 import json
-import os
 import queue
 import random
 import sys
@@ -33,11 +32,18 @@ from smartfires_edge.uart_receiver import iter_packets
 
 
 def _append_jsonl(path: Path, payload: dict) -> None:
+    # flush() (not fsync()) deliberately: this runs inline in the same loop
+    # that drains the base station's serial port one byte at a time
+    # (uart_receiver.iter_packets). fsync() blocks until the write physically
+    # lands on disk; on a slow/busy disk that stall can outlast the OS's
+    # serial input buffer, dropping bytes and desyncing FrameReceiver's frame
+    # parser for the rest of the session. flush() just hands the bytes to the
+    # OS and returns immediately, matching DurableCsvLogger's default
+    # (fsync_every_row=False) for the same reason.
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(payload, sort_keys=True) + "\n")
         f.flush()
-        os.fsync(f.fileno())
 
 
 def _pkt_type_name(pkt_type: int | None) -> str:
