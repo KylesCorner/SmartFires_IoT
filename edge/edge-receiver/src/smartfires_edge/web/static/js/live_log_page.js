@@ -6,11 +6,14 @@
 //
 // Sniffer cross-filter: a sniffed frame's node_id reflects the SmartFires
 // header it carries (0 = base broadcast, e.g. TIME_SYNC/ACK_SUMMARY; N = that
-// node; null = no header, e.g. a bare RadioHead ACK). If "Sniffer" is the
-// only source checked, all sniffer traffic shows. If Base/Node boxes are
-// also checked, sniffer entries are restricted to those — so checking
-// "Node 2" + "Sniffer" shows only sniffer-captured frames attributable to
-// node 2, not every node's sniffed traffic.
+// node), or for bare RadioHead frames with no header (RH_ACK/RH_RAW), the
+// TDMA-slot owner inferred server-side (rh_owner_node_id — see
+// sniffer_service.py). null only remains for frames neither header nor
+// RadioHead addressing could attribute. If "Sniffer" is the only source
+// checked, all sniffer traffic shows. If Base/Node boxes are also checked,
+// sniffer entries are restricted to those — so checking "Node 2" +
+// "Sniffer" shows only sniffer-captured frames attributable to node 2, not
+// every node's sniffed traffic.
 
 const LOG_MAX_LINES = 5000;
 const BASE_BUCKET = "base";

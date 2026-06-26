@@ -316,10 +316,17 @@ def run_sniffer(
 
                 live_state.push_sniffer_event(event)
                 rx_kind = {"STATUS": "status", "BUNDLE": "bundle"}.get(event["pkt_type"], "other")
+                # Bare RadioHead frames (RH_ACK/RH_RAW) carry no SmartFires
+                # header, so node_id is None — fall back to rh_owner_node_id
+                # (the TDMA slot attribution computed above) so the Live Log
+                # page's per-node filter can still bucket these correctly.
+                attributed_node_id = (
+                    event["node_id"] if event["node_id"] is not None else event["rh_owner_node_id"]
+                )
                 slog(
-                    f"[SNIFFER-RX] type={event['pkt_type']} node={event['node_id']} "
+                    f"[SNIFFER-RX] type={event['pkt_type']} node={attributed_node_id} "
                     f"rssi={event['rssi']} snr={event['snr']} jitter={event['jitter_ms']}",
-                    event["node_id"],
+                    attributed_node_id,
                     kind=rx_kind,
                 )
     except serial.SerialException as exc:
