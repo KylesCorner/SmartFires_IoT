@@ -89,6 +89,7 @@ h1, h2 {
   border: 1px solid #2a2f36;
   border-radius: 8px;
   padding: 1rem;
+  overflow-x: auto;
 }
 
 .left-panel {
@@ -144,6 +145,10 @@ table th, table td {
   text-align: left;
   padding: 0.35rem 0.5rem;
   border-bottom: 1px solid #2a2f36;
+}
+
+#node-table th, #node-table td {
+  white-space: nowrap;
 }
 
 table th {
