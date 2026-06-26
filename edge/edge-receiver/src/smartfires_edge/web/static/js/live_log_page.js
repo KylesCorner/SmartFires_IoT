@@ -1,61 +1,110 @@
-// Dedicated Live Log page. Two independent, combined (AND) filters:
-//   - source: All / Sniffer / Node <id>  (which radio link produced the line)
-//   - kind:   All / Status / Bundle      (which packet category the line reports)
+// Dedicated Live Log page. Two independent, combined (AND) multi-select filters:
+//   - source: any combination of Base / Node <id> / Sniffer
+//   - kind:   any combination of Status / Bundle / Other
 // Both are driven by fields LiveState.push_log already attaches to every
 // entry (node_id, source, kind) — see live_state.py.
+//
+// Sniffer cross-filter: a sniffed frame's node_id reflects the SmartFires
+// header it carries (0 = base broadcast, e.g. TIME_SYNC/ACK_SUMMARY; N = that
+// node; null = no header, e.g. a bare RadioHead ACK). If "Sniffer" is the
+// only source checked, all sniffer traffic shows. If Base/Node boxes are
+// also checked, sniffer entries are restricted to those — so checking
+// "Node 2" + "Sniffer" shows only sniffer-captured frames attributable to
+// node 2, not every node's sniffed traffic.
 
 const LOG_MAX_LINES = 5000;
-
-const FIXED_SOURCE_TABS = [null, "sniffer"];
-const KIND_TABS = [null, "status", "bundle"];
+const BASE_BUCKET = "base";
 
 const state = {
   ws: null,
   entries: [],
   knownNodeIds: new Set(),
-  activeSource: null, // null = All, "sniffer" = sniffer-only, number = that node
-  activeKind: null,   // null = All, "status", "bundle"
+  activeSources: new Set([BASE_BUCKET, "sniffer"]), // grows as nodes are discovered
+  activeKinds: new Set(["status", "bundle", "other"]),
 };
 
-function sourceTabLabel(tabId) {
-  if (tabId === null) return "All";
-  if (tabId === "sniffer") return "Sniffer";
-  return `Node ${tabId}`;
+function ingestEntryBucket(entry) {
+  return entry.node_id === null || entry.node_id === undefined ? BASE_BUCKET : entry.node_id;
 }
 
-function kindTabLabel(kindId) {
-  if (kindId === null) return "All";
-  if (kindId === "status") return "Status";
-  if (kindId === "bundle") return "Bundle";
-  return kindId;
+// Returns null for sniffed frames with no node attribution at all (unknown/raw).
+function snifferEntryBucket(entry) {
+  if (entry.node_id === null || entry.node_id === undefined) return null;
+  return entry.node_id === 0 ? BASE_BUCKET : entry.node_id;
 }
 
-function entryMatchesSource(entry, tabId) {
-  if (tabId === null) return true;
-  if (tabId === "sniffer") return entry.source === "sniffer";
-  return entry.node_id === tabId || entry.node_id === null;
+function entryMatchesSource(entry) {
+  if (state.activeSources.size === 0) return false;
+
+  if (entry.source === "sniffer") {
+    if (!state.activeSources.has("sniffer")) return false;
+    const nodeBoxesChecked = [...state.activeSources].filter((s) => s !== "sniffer");
+    if (nodeBoxesChecked.length === 0) return true; // sniffer-only: show everything sniffed
+    const bucket = snifferEntryBucket(entry);
+    return bucket !== null && nodeBoxesChecked.includes(bucket);
+  }
+
+  return state.activeSources.has(ingestEntryBucket(entry));
 }
 
-function entryMatchesKind(entry, kindId) {
-  if (kindId === null) return true;
-  return entry.kind === kindId;
+function entryKindBucket(entry) {
+  return entry.kind === "status" || entry.kind === "bundle" ? entry.kind : "other";
+}
+
+function entryMatchesKind(entry) {
+  if (state.activeKinds.size === 0) return false;
+  return state.activeKinds.has(entryKindBucket(entry));
 }
 
 function entryMatchesFilters(entry) {
-  return entryMatchesSource(entry, state.activeSource) && entryMatchesKind(entry, state.activeKind);
+  return entryMatchesSource(entry) && entryMatchesKind(entry);
+}
+
+function sourceTabLabel(bucket) {
+  if (bucket === BASE_BUCKET) return "Base";
+  if (bucket === "sniffer") return "Sniffer";
+  return `Node ${bucket}`;
+}
+
+function allSourceBuckets() {
+  return [BASE_BUCKET, ...Array.from(state.knownNodeIds).sort((a, b) => a - b), "sniffer"];
+}
+
+function toggleSetMember(set, value) {
+  if (set.has(value)) {
+    set.delete(value);
+  } else {
+    set.add(value);
+  }
 }
 
 function renderSourceTabs() {
   const container = document.getElementById("log-source-tabs");
   container.innerHTML = "";
 
-  const tabs = [...FIXED_SOURCE_TABS, ...Array.from(state.knownNodeIds).sort((a, b) => a - b)];
-  for (const tabId of tabs) {
+  const buckets = allSourceBuckets();
+
+  const allBtn = document.createElement("button");
+  const allSelected = buckets.every((b) => state.activeSources.has(b));
+  allBtn.className = "log-tab" + (allSelected ? " active" : "");
+  allBtn.textContent = "All";
+  allBtn.addEventListener("click", () => {
+    if (allSelected) {
+      state.activeSources.clear();
+    } else {
+      state.activeSources = new Set(buckets);
+    }
+    renderSourceTabs();
+    renderOutput();
+  });
+  container.appendChild(allBtn);
+
+  for (const bucket of buckets) {
     const btn = document.createElement("button");
-    btn.className = "log-tab" + (state.activeSource === tabId ? " active" : "");
-    btn.textContent = sourceTabLabel(tabId);
+    btn.className = "log-tab" + (state.activeSources.has(bucket) ? " active" : "");
+    btn.textContent = sourceTabLabel(bucket);
     btn.addEventListener("click", () => {
-      state.activeSource = tabId;
+      toggleSetMember(state.activeSources, bucket);
       renderSourceTabs();
       renderOutput();
     });
@@ -63,16 +112,39 @@ function renderSourceTabs() {
   }
 }
 
+const KIND_BUCKETS = ["status", "bundle", "other"];
+
+function kindTabLabel(kind) {
+  if (kind === "status") return "Status";
+  if (kind === "bundle") return "Bundle";
+  return "Other";
+}
+
 function renderKindTabs() {
   const container = document.getElementById("log-kind-tabs");
   container.innerHTML = "";
 
-  for (const kindId of KIND_TABS) {
+  const allBtn = document.createElement("button");
+  const allSelected = KIND_BUCKETS.every((k) => state.activeKinds.has(k));
+  allBtn.className = "log-tab" + (allSelected ? " active" : "");
+  allBtn.textContent = "All";
+  allBtn.addEventListener("click", () => {
+    if (allSelected) {
+      state.activeKinds.clear();
+    } else {
+      state.activeKinds = new Set(KIND_BUCKETS);
+    }
+    renderKindTabs();
+    renderOutput();
+  });
+  container.appendChild(allBtn);
+
+  for (const kind of KIND_BUCKETS) {
     const btn = document.createElement("button");
-    btn.className = "log-tab" + (state.activeKind === kindId ? " active" : "");
-    btn.textContent = kindTabLabel(kindId);
+    btn.className = "log-tab" + (state.activeKinds.has(kind) ? " active" : "");
+    btn.textContent = kindTabLabel(kind);
     btn.addEventListener("click", () => {
-      state.activeKind = kindId;
+      toggleSetMember(state.activeKinds, kind);
       renderKindTabs();
       renderOutput();
     });
@@ -105,8 +177,9 @@ function onLogEntry(entry) {
   }
 
   let tabsChanged = false;
-  if (entry.node_id !== null && entry.node_id !== undefined && !state.knownNodeIds.has(entry.node_id)) {
+  if (entry.node_id !== null && entry.node_id !== undefined && entry.node_id !== 0 && !state.knownNodeIds.has(entry.node_id)) {
     state.knownNodeIds.add(entry.node_id);
+    state.activeSources.add(entry.node_id); // newly discovered nodes default to visible
     tabsChanged = true;
   }
 
