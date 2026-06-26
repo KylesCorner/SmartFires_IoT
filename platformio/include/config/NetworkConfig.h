@@ -101,7 +101,6 @@ constexpr uint8_t kRadioIntPin = 3;
 constexpr uint8_t kRadioRstPin = 4;
 constexpr float kRadioFrequencyMhz = 915.0f;
 constexpr int8_t kRadioTxPowerDbm = 13;
-constexpr uint16_t kRadioCadTimeoutMs = 10;
 
 // Link-layer retry count / ACK timeout. Single source for two fields that
 // used to be set independently and could drift: TdmaConfig::maxRetries /

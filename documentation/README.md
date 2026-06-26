@@ -25,8 +25,9 @@ In-depth reference for subsystems as they exist in the current codebase.
 | [TDMA_PROTOCOL.md](Current_Architecture/TDMA_PROTOCOL.md) | Slot assignment, frame layout, session clock, TX budget, Rx power gating, TIME_SYNC, boot handshake, scaling |
 | [PACKET_RELIABILITY.md](Current_Architecture/PACKET_RELIABILITY.md) | StrictLinkAck vs AppLayerAckSummary modes, pending window, ACK_SUMMARY format and dispatch |
 | [DUTY_CYCLING.md](Current_Architecture/DUTY_CYCLING.md) | DutyCycleController phases, config presets, trigger sensor, sample dispatch, error handling |
-| [UART_JETSON_BRIDGE.md](Current_Architecture/UART_JETSON_BRIDGE.md) | Frame format, Feather↔Jetson protocol, FrameReceiver state machine, ingest loop, SessionManager |
+| [JETSON_BRIDGE.md](Current_Architecture/UART_JETSON_BRIDGE.md) | Frame format, Feather↔Jetson protocol, FrameReceiver state machine, ingest loop, SessionManager |
 | [BANDWIDTH_SCALING.md](Current_Architecture/BANDWIDTH_SCALING.md) | Airtime math, per-node service rate, node-count scaling table |
+| [LORA_VS_LORAWAN.md](Current_Architecture/LORA_VS_LORAWAN.md) | Custom RadioHead/TDMA stack vs. LoRaWAN, mesh capability, CAD explainer, range/optimization levers |
 
 ## User Reference
 
@@ -49,6 +50,7 @@ these — check status tables within each doc for what's done vs. open.
 | [RESET_SYSTEM.md](Pending_Plans/RESET_SYSTEM.md) | Jetson/base/node reset coordination and time-sync recovery |
 | [JETSON_SENSOR_EXPANSION.md](Pending_Plans/JETSON_SENSOR_EXPANSION.md) | Adding temp/humidity, BMV080, GPS, and ICM-20948 IMU sensors directly to the Jetson via I2C |
 | [WATCHDOG_TIMER.md](Pending_Plans/WATCHDOG_TIMER.md) | Hardware watchdog for nodes (Phase 1) and the base station (Phase 2) to auto-recover from unrecoverable hangs |
+| [DYNAMIC_TX_POWER.md](Pending_Plans/DYNAMIC_TX_POWER.md) | Base-station-driven per-node TX power adjustment using RSSI/retry telemetry; dynamic SF deferred |
 
 ## Completed Plans
 

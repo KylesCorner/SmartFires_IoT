@@ -21,7 +21,6 @@ public:
     int8_t txPowerDbm;
     uint8_t retries;
     uint16_t timeoutMs;
-    uint16_t cadTimeoutMs;
 
     // Thin wrapper: every field besides `address` (which varies per board,
     // assigned from uid_hash) comes straight from config/NetworkConfig.h.
@@ -39,7 +38,6 @@ public:
       cfg.txPowerDbm = NetworkConfig::kRadioTxPowerDbm;
       cfg.retries = NetworkConfig::kLinkRetries;
       cfg.timeoutMs = NetworkConfig::kLinkAckTimeoutMs;
-      cfg.cadTimeoutMs = NetworkConfig::kRadioCadTimeoutMs;
       return cfg;
     }
   };

@@ -41,9 +41,6 @@ bool RadioHeadTdmaDriver::begin() {
   _rf95.setTxPower(_cfg.txPowerDbm, false);
   _manager.setRetries(_cfg.retries);
   _manager.setTimeout(_cfg.timeoutMs);
-  // Temporarily disable explicit CAD timeout while debugging missed packets
-  // between node and base; leave RadioHead on its default behavior.
-  // _rf95.setCADTimeout(_cfg.cadTimeoutMs);
 
   _healthy = true;
   return true;
