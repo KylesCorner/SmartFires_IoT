@@ -309,9 +309,7 @@ function updateNodeTable(nodes) {
   tbody.innerHTML = "";
   const sorted = Object.values(nodes).sort((a, b) => a.node_id - b.node_id);
   for (const info of sorted) {
-    const lastSeen = info.last_seen
-      ? new Date(info.last_seen * 1000).toLocaleTimeString()
-      : "—";
+    const lastSeen = fmtTime(info.last_seen);
     const heading = info.heading_deg !== null && info.heading_deg !== undefined && info.heading_deg !== ""
       ? `${info.heading_deg}°`
       : "—";
@@ -319,7 +317,7 @@ function updateNodeTable(nodes) {
       ? `±${info.heading_accuracy_deg}°`
       : "—";
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${info.node_id}</td><td>${fmt(info.lat)}</td><td>${fmt(
+    tr.innerHTML = `<td>${info.node_id}</td><td>${fmtSerial(info.uid_hash)}</td><td>${fmt(info.lat)}</td><td>${fmt(
       info.lon
     )}</td><td>${fmt(info.battery_pct)}</td><td>${heading}</td><td>${headingAcc}</td><td>${lastSeen}</td>`;
     tbody.appendChild(tr);

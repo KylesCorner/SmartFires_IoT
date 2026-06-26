@@ -35,6 +35,7 @@ class LiveState:
         self.tracker: Optional[PacketLossTracker] = None
         self._session_start_retx: dict[int, int] = {}
         self._session_start_fail: dict[int, int] = {}
+        self._uid_hash: dict[int, int] = {}
         self._log_ring: deque[dict] = deque(maxlen=2000)
         self._log_lock = threading.Lock()
         self._log_total = 0
@@ -130,9 +131,11 @@ class LiveState:
                     "snr_count": 0,
                     "jitter_samples": deque(maxlen=200),
                     "guard_violations": 0,
+                    "last_seen": None,
                 },
             )
             stats["packets"] += 1
+            stats["last_seen"] = time.time()
             if event.get("rssi") is not None:
                 stats["rssi_sum"] += event["rssi"]
                 stats["rssi_count"] += 1
@@ -166,6 +169,7 @@ class LiveState:
                     "avg_snr": round(s["snr_sum"] / s["snr_count"], 1) if s["snr_count"] else None,
                     "jitter_std_ms": round(statistics.pstdev(jitter), 1) if len(jitter) >= 2 else None,
                     "guard_violations": s["guard_violations"],
+                    "last_seen": s.get("last_seen"),
                 }
             return result
 
@@ -173,6 +177,11 @@ class LiveState:
         """Called by sniffer_service when a new base-station session is detected."""
         with self._sniffer_lock:
             self._sniffer_stats.clear()
+
+    def set_uid_hash(self, node_id: int, uid_hash: int) -> None:
+        """Record a node's hardware serial (SAMD21 uid_hash), learned from AWAKEN."""
+        with self._lock:
+            self._uid_hash[node_id] = uid_hash
 
     def _events_for(self, node_id: int) -> deque:
         return self.reception_events.setdefault(node_id, deque(maxlen=500))
@@ -233,6 +242,7 @@ class LiveState:
                 )
                 result[node_id] = {
                     "node_id": node_id,
+                    "uid_hash": self._uid_hash.get(node_id),
                     "lat": status.get("lat"),
                     "lon": status.get("lon"),
                     "battery_mv": status.get("battery_mv"),

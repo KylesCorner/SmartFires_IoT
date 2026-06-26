@@ -4,6 +4,7 @@ import json
 import queue
 import socket
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -187,6 +188,11 @@ def create_app(
         loop = asyncio.get_running_loop()
         online = await loop.run_in_executor(None, _check_online)
         return {"online": online}
+
+    @app.get("/api/server_time")
+    def server_time() -> dict:
+        """Wall-clock time on the Jetson, for display in the dashboard top bar."""
+        return {"epoch_s": time.time()}
 
     # ------------------------------------------------------------------
     # Data API

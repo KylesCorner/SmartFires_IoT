@@ -176,6 +176,15 @@ def run_receive(
     sync_state = {"next_seq": 0}
     cmd_seq_state = {"next_seq": 0}
     session_manager = SessionManager()
+    if live_state is not None:
+        # Carry forward node serials (uid_hash) learned in prior runs — they're
+        # persisted in session.json by SessionManager and tied to hardware, not
+        # to this particular ingest session, so the dashboard shouldn't have to
+        # wait for a fresh AWAKEN before showing them.
+        for node_id in cfg.nodes:
+            uid_hash = session_manager.get_uid_hash_for_node(node_id)
+            if uid_hash is not None:
+                live_state.set_uid_hash(node_id, uid_hash)
 
     session_id = random.randint(1, 0xFFFFFFFF)
     session_start = time.time()
@@ -321,6 +330,8 @@ def run_receive(
                         if uid_hash is not None:
                             aw = session_manager.on_awaken(int(hdr_node), int(uid_hash))
                             session_meta.on_awaken(int(hdr_node), int(uid_hash))
+                            if live_state is not None:
+                                live_state.set_uid_hash(int(hdr_node), int(uid_hash))
                             log_fn(
                                 f"[EDGE][AWAKEN] node={aw['node_id']} uid=0x{aw['uid_hash']:08x}",
                                 int(hdr_node),

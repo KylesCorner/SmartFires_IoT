@@ -52,8 +52,26 @@ const Api = {
       })
     ).json();
   },
+  async serverTime() {
+    return (await fetch("/api/server_time")).json();
+  },
 };
 
 function fmt(value) {
   return value === null || value === undefined || value === "" ? "—" : value;
+}
+
+// Formats an epoch-seconds timestamp (e.g. live_state's "last_seen" fields)
+// as a local clock time, consistent across every page that shows one.
+function fmtTime(epochSeconds) {
+  return epochSeconds ? new Date(epochSeconds * 1000).toLocaleTimeString() : "—";
+}
+
+// Formats a node's hardware serial (SAMD21 uid_hash) the same way it's shown
+// elsewhere in the dashboard (e.g. AWAKEN/STATUS log lines): 0x-prefixed,
+// zero-padded 32-bit hex.
+function fmtSerial(uidHash) {
+  return uidHash === null || uidHash === undefined
+    ? "—"
+    : "0x" + Number(uidHash).toString(16).padStart(8, "0");
 }

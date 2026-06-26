@@ -28,13 +28,22 @@ nav.topnav a.active {
   border-bottom: 2px solid #e8743a;
 }
 
+.nav-clock {
+  margin-left: auto;
+  align-self: center;
+  color: #aab4c0;
+  font-size: 0.85rem;
+  font-family: monospace;
+  cursor: default;
+}
+
 .conn-dot {
   display: inline-block;
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: #3a4048;
-  margin-left: auto;
+  margin-left: 1rem;
   align-self: center;
   flex-shrink: 0;
   transition: background 0.4s;

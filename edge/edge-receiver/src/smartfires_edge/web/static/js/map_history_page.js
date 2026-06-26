@@ -202,7 +202,7 @@ function updateLossTable(nodes) {
   const sorted = Object.values(nodes || {}).sort((a, b) => a.node_id - b.node_id);
   if (sorted.length === 0) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td colspan="9" style="color:#6a7480;font-style:italic">No nodes connected this session yet.</td>`;
+    tr.innerHTML = `<td colspan="10" style="color:#6a7480;font-style:italic">No nodes connected this session yet.</td>`;
     tbody.appendChild(tr);
     return;
   }
@@ -222,6 +222,7 @@ function updateLossTable(nodes) {
       <td>${fmt(info.last_rssi)}</td>
       <td>${fmt(info.retx_session)}</td>
       <td>${fmt(info.fail_session)}</td>
+      <td>${fmtTime(info.last_seen)}</td>
       <td><button class="reset-node-btn" data-node-id="${info.node_id}">Reset</button></td>
     `;
     tbody.appendChild(tr);

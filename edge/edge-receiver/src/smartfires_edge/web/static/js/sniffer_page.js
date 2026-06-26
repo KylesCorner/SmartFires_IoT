@@ -826,6 +826,7 @@ async function pollStats() {
         <td>${fmt(s.avg_snr)}</td>
         <td>${fmt(s.jitter_std_ms)}</td>
         <td>${fmt(s.guard_violations)}</td>
+        <td>${fmtTime(s.last_seen)}</td>
       `;
       tbody.appendChild(tr);
     }
