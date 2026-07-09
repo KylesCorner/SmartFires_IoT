@@ -1,0 +1,59 @@
+@SFDBG	v=1	node=143	src=radio	lvl=D	seq=1421	t=54904	msg=rx_sleep slot=1
+@SFDBG	v=1	node=143	src=duty	lvl=D	seq=1422	t=54910	msg=sample_tick phase_elapsed_ms=35838 sensor_count=5
+@SFDBG	v=1	node=143	src=sht31	lvl=D	seq=1423	t=54915	msg=status ready=1 healthy=1 state=3 duty_class=AlwaysOn
+@SFDBG	v=1	node=143	src=sht31	lvl=D	seq=1424	t=54942	msg=sht31,temp_c=22.80,humidity_pct=41.57,valid=1,t_ms=54940
+@SFDBG	v=1	node=143	src=gps	lvl=D	seq=1425	t=54948	msg=status ready=0 healthy=1 state=3 duty_class=AlwaysOn
+@SFDBG	v=1	node=143	src=gps	lvl=D	seq=1426	t=54953	msg=sample_skipped reason=not_ready
+@SFDBG	v=1	node=143	src=imu	lvl=D	seq=1427	t=54956	msg=status ready=1 healthy=1 state=3 duty_class=DutyCycled
+@SFDBG	v=1	node=143	src=imu	lvl=D	seq=1428	t=54966	msg=imu,heading_deg=341.7,accuracy_deg=0.08,valid=1,t_ms=54964
+@SFDBG	v=1	node=143	src=sps30	lvl=D	seq=1429	t=54972	msg=status ready=1 healthy=1 state=3 duty_class=WarmupHeavy
+@SFDBG	v=1	node=143	src=sps30	lvl=W	seq=1430	t=54979	msg=sample_failed reason=driver_read_failed
+@SFDBG	v=1	node=143	src=sps30	lvl=W	seq=1431	t=54984	msg=sample_failed
+@SFDBG	v=1	node=143	src=wind	lvl=D	seq=1432	t=54986	msg=status ready=1 healthy=1 state=3 duty_class=WarmupHeavy
+@SFDBG	v=1	node=143	src=wind	lvl=D	seq=1433	t=54993	msg=wind,raw_rv=1,raw_tmp=1,rv_v=0.005,tmp_v=0.005,temp_c=90.64,zero_v=-0.016,wind_mph=0.00,wind_mps=0.00,valid=1,t_ms=54990
+@SFDBG	v=1	node=143	src=battery	lvl=I	seq=1434	t=55004	msg=battery,raw=631,adc_v=2.033,v=4.067,pct=86.7,low=0,valid=1,t_ms=54481
+@SFDBG	v=1	node=143	src=duty	lvl=D	seq=1435	t=55010	msg=fresh_sample_ready=1
+@SFDBG	v=1	node=143	src=app	lvl=D	seq=1436	t=55013	msg=snapshot_session_ms=80212
+@SFDBG	v=1	node=143	src=app	lvl=D	seq=1437	t=55017	msg=build_snapshot_start session_ms=80212 sensor_count=5
+@SFDBG	v=1	node=143	src=battery	lvl=D	seq=1438	t=55022	msg=snapshot_fill battery_mv=4066 battery_pct=86
+@SFDBG	v=1	node=143	src=app	lvl=D	seq=1439	t=55027	msg=build_snapshot_done session_ms=80212 battery_valid=1 sensor_flags=0x000B
+@SFDBG	v=1	node=143	src=packet	lvl=D	seq=1440	t=55034	msg=push_start session_ms=80212 sensor_flags=0x000B has_ref=1 delta_count=1
+@SFDBG	v=1	node=143	src=packet	lvl=D	seq=1441	t=55041	msg=delta_dt ref_session_ms=78606 prev_session_ms=79379 sample_session_ms=80212 dtMs=833 dtTicks=3
+@SFDBG	v=1	node=143	src=packet	lvl=D	seq=1442	t=55049	msg=bundle_delta_added count=2/14
+@SFDBG	v=1	node=143	src=app	lvl=I	seq=1443	t=55053	msg=telemetry_ready snapshot_built session_ms=80212 battery_valid=1 battery_mv=4066 battery_pct=86
+@SFDBG	v=1	node=143	src=packet	lvl=D	seq=1444	t=55061	msg=handler_push_done status_ready=0 bundle_ready=0 push_bundle_ready=0
+@SFDBG	v=1	node=143	src=duty	lvl=D	seq=1445	t=55067	msg=telemetry_mark_sent
+@SFDBG	v=1	node=143	src=app	lvl=D	seq=1446	t=55070	msg=telemetry_marked_sent
+@SFDBG	v=1	node=143	src=radio	lvl=I	seq=1447	t=55098	msg=retx_gate_open reason=ack_window_elapsed seq=3 age_ms=10973 wait_ms=8000
+@SFDBG	v=1	node=143	src=radio	lvl=D	seq=1448	t=55105	msg=retx_candidate seq=3 index=0 len=194 attempts=1
+@SFDBG	v=1	node=143	src=radio	lvl=D	seq=1449	t=55110	msg=tx_noack pkt=BUNDLE seq=3 len=194 slot=89
+@SFDBG	v=1	node=143	src=radio	lvl=I	seq=1450	t=55116	msg=retx_sent count=1 pkt=BUNDLE seq=3 len=194 attempt=2 slot=89 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=1/8 pending=1 dropped=0
+@SFDBG	v=1	node=143	src=radio	lvl=D	seq=1451	t=55127	msg=retx_mark_sent seq=3 index=0 attempts=2
+@SFDBG	v=1	node=143	src=radio	lvl=D	seq=1452	t=55131	msg=tx_noack pkt=BUNDLE seq=5 len=194 slot=89
+@SFDBG	v=1	node=143	src=radio	lvl=D	seq=1453	t=55435	msg=pending_add seq=5 index=1 len=194 sent_ok=1 pending=2
+@SFDBG	v=1	node=143	src=radio	lvl=I	seq=1454	t=55441	msg=tx_sent count=7 pkt=BUNDLE seq=5 len=194 slot=89 mode=APP_ACK_SUMMARY link_ack=OFF retries_used=0 q=0/8 pending=2 dropped=0
+@SFDBG	v=1	node=143	src=duty	lvl=D	seq=1455	t=55664	msg=sample_tick phase_elapsed_ms=36592 sensor_count=5
+@SFDBG	v=1	node=143	src=sht31	lvl=D	seq=1456	t=55669	msg=status ready=1 healthy=1 state=3 duty_class=AlwaysOn
+@SFDBG	v=1	node=143	src=sht31	lvl=D	seq=1457	t=55696	msg=sht31,temp_c=22.81,humidity_pct=41.97,valid=1,t_ms=55694
+@SFDBG	v=1	node=143	src=gps	lvl=D	seq=1458	t=55704	msg=status ready=1 healthy=1 state=3 duty_class=AlwaysOn
+@SFDBG	v=1	node=143	src=gps	lvl=D	seq=1459	t=55710	msg=gps,fix=0,fixq=0,sats=0,lat=0.000000,lon=0.000000,alt=0.00,t=18:26:54,valid=0,t_ms=55707
+@SFDBG	v=1	node=143	src=imu	lvl=D	seq=1460	t=55717	msg=status ready=1 healthy=1 state=3 duty_class=DutyCycled
+@SFDBG	v=1	node=143	src=imu	lvl=D	seq=1461	t=55728	msg=imu,heading_deg=341.7,accuracy_deg=0.08,valid=1,t_ms=55725
+@SFDBG	v=1	node=143	src=sps30	lvl=D	seq=1462	t=55734	msg=status ready=1 healthy=1 state=3 duty_class=WarmupHeavy
+@SFDBG	v=1	node=143	src=sps30	lvl=W	seq=1463	t=55741	msg=sample_failed reason=driver_read_failed
+@SFDBG	v=1	node=143	src=sps30	lvl=W	seq=1464	t=55746	msg=sample_failed
+@SFDBG	v=1	node=143	src=wind	lvl=D	seq=1465	t=55748	msg=status ready=1 healthy=1 state=3 duty_class=WarmupHeavy
+@SFDBG	v=1	node=143	src=wind	lvl=D	seq=1466	t=55756	msg=wind,raw_rv=2,raw_tmp=1,rv_v=0.011,tmp_v=0.005,temp_c=90.64,zero_v=-0.016,wind_mph=0.00,wind_mps=0.00,valid=1,t_ms=55752
+@SFDBG	v=1	node=143	src=battery	lvl=I	seq=1467	t=55767	msg=battery,raw=645,adc_v=2.079,v=4.157,pct=95.7,low=0,valid=1,t_ms=55504
+@SFDBG	v=1	node=143	src=duty	lvl=D	seq=1468	t=55773	msg=fresh_sample_ready=1
+@SFDBG	v=1	node=143	src=app	lvl=D	seq=1469	t=55776	msg=snapshot_session_ms=80975
+@SFDBG	v=1	node=143	src=app	lvl=D	seq=1470	t=55779	msg=build_snapshot_start session_ms=80975 sensor_count=5
+@SFDBG	v=1	node=143	src=battery	lvl=D	seq=1471	t=55785	msg=snapshot_fill battery_mv=4157 battery_pct=95
+@SFDBG	v=1	node=143	src=app	lvl=D	seq=1472	t=55790	msg=build_snapshot_done session_ms=80975 battery_valid=1 sensor_flags=0x000B
+@SFDBG	v=1	node=143	src=packet	lvl=D	seq=1473	t=55797	msg=push_start session_ms=80975 sensor_flags=0x000B has_ref=1 delta_count=2
+@SFDBG	v=1	node=143	src=packet	lvl=D	seq=1474	t=55804	msg=delta_dt ref_session_ms=78606 prev_session_ms=80212 sample_session_ms=80975 dtMs=763 dtTicks=3
+@SFDBG	v=1	node=143	src=packet	lvl=D	seq=1475	t=55813	msg=bundle_delta_added count=3/14
+@SFDBG	v=1	node=143	src=app	lvl=I	seq=1476	t=55817	msg=telemetry_ready snapshot_built session_ms=80975 battery_valid=1 battery_mv=4157 battery_pct=95
+@SFDBG	v=1	node=143	src=packet	lvl=D	seq=1477	t=55826	msg=handler_push_done status_ready=0 bundle_ready=0 push_bundle_ready=0
+@SFDBG	v=1	node=143	src=duty	lvl=D	seq=1478	t=55832	msg=telemetry_mark_sent
+@SFDBG	v=1	node=143	src=app	lvl=D	seq=1479	t=55835	msg=telemetry_marked_sent
