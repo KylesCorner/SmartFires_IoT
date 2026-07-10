@@ -12,6 +12,10 @@
 #include <Arduino.h>
 #include <math.h>
 
+#if defined(LORA_NODE)
+#include "platform/Samd21RamMonitor.h"
+#endif
+
 namespace {
 
 const char *phaseName(DutyCyclePhase phase) {
@@ -299,8 +303,19 @@ void DutyCycleController::updateSampling() {
                 dutyClassName(sensor->dutyClass()));
 
       if (sensor->ready()) {
+#if defined(LORA_NODE)
+        gRamMonitor.checkpoint(
+            "sensor_sample_pre",
+            sensorName);
+#endif
         if (sensor->sample()) {
           sampledAny = true;
+
+#if defined(LORA_NODE)
+          gRamMonitor.checkpoint(
+              "sensor_sample_post",
+              sensorName);
+#endif
 
           char buf[180];
           sensor->writeTelemetry(buf, sizeof(buf));
@@ -353,40 +368,122 @@ void DutyCycleController::updateSampling() {
     transitionTo(DutyCyclePhase::CooldownSleeping);
   }
 }
-
 bool DutyCycleController::beginSensors() {
   for (size_t i = 0; i < _sensorCount; ++i) {
     ISensor *sensor = _sensors[i];
 
     if (!sensor) {
-      LOG_WARN("duty", "begin_skip_null_sensor index=%u",
-               static_cast<unsigned int>(i));
+      LOG_WARN(
+          "duty",
+          "begin_skip_null_sensor index=%u",
+          static_cast<unsigned int>(i));
+
       continue;
     }
 
     const char *sensorName = sensor->name();
 
-    LOG_INFO(sensorName, "begin_start duty_class=%s",
-             dutyClassName(sensor->dutyClass()));
+    LOG_INFO(
+        sensorName,
+        "begin_start duty_class=%s",
+        dutyClassName(sensor->dutyClass()));
 
-    if (!sensor->begin()) {
-      LOG_ERROR(sensorName, "begin_failed");
-      if (!sensor->reset()) {
-        LOG_ERROR(sensorName, "reset_failed");
-      } else {
-        LOG_INFO(sensorName, "begin_ok_after_reset");
-        return true;
-      }
+#if defined(LORA_NODE)
+    gRamMonitor.checkpoint(
+        "sensor_begin_pre",
+        sensorName);
+#endif
+
+    const bool beginOk = sensor->begin();
+
+#if defined(LORA_NODE)
+    gRamMonitor.checkpoint(
+        "sensor_begin_post",
+        sensorName);
+#endif
+
+    if (beginOk) {
+      LOG_INFO(sensorName, "begin_ok");
+      continue;
+    }
+
+    LOG_ERROR(sensorName, "begin_failed");
+
+#if defined(LORA_NODE)
+    gRamMonitor.checkpoint(
+        "sensor_reset_pre",
+        sensorName);
+#endif
+
+    const bool resetOk = sensor->reset();
+
+#if defined(LORA_NODE)
+    gRamMonitor.checkpoint(
+        "sensor_reset_post",
+        sensorName);
+#endif
+
+    if (!resetOk) {
+      LOG_ERROR(sensorName, "reset_failed");
 
       _error = DutyCycleError::SensorBeginFailed;
+
       return false;
     }
 
-    LOG_INFO(sensorName, "begin_ok");
+    LOG_INFO(sensorName, "begin_ok_after_reset");
+
+    /*
+     * IMPORTANT:
+     * Continue initializing the remaining sensors.
+     *
+     * The old code returned true here and accidentally skipped
+     * every remaining sensor.
+     */
   }
 
   return true;
 }
+
+// bool DutyCycleController::beginSensors() {
+//   for (size_t i = 0; i < _sensorCount; ++i) {
+//     ISensor *sensor = _sensors[i];
+
+//     if (!sensor) {
+//       LOG_WARN("duty", "begin_skip_null_sensor index=%u",
+//                static_cast<unsigned int>(i));
+//       continue;
+//     }
+
+//     const char *sensorName = sensor->name();
+
+//     LOG_INFO(sensorName, "begin_start duty_class=%s",
+//              dutyClassName(sensor->dutyClass()));
+
+// #if defined(LORA_NODE)
+//     gRamMonitor.checkpoint(
+//         "sensor_begin_pre",
+//         sensorName);
+// #endif
+
+//     if (!sensor->begin()) {
+//       LOG_ERROR(sensorName, "begin_failed");
+//       if (!sensor->reset()) {
+//         LOG_ERROR(sensorName, "reset_failed");
+//       } else {
+//         LOG_INFO(sensorName, "begin_ok_after_reset");
+//         return true;
+//       }
+
+//       _error = DutyCycleError::SensorBeginFailed;
+//       return false;
+//     }
+
+//     LOG_INFO(sensorName, "begin_ok");
+//   }
+
+//   return true;
+// }
 
 bool DutyCycleController::sleepDutyCycledSensors() {
   bool ok = true;
