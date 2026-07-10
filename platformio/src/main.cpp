@@ -53,6 +53,9 @@ void loop() {
 
 #include <Wire.h>
 
+#include "config/SystemHealthConfig.h"
+#include "platform/Samd21RamMonitor.h"
+
 #include "app/SmartFiresNodeApp.h"
 #include "platform/BoardIdentify.h"
 
@@ -133,6 +136,16 @@ void logSensorFloorVsCadence(const char *sensorName, uint32_t minSamplePeriodMs)
 ArduinoClock clock;
 ArduinoAnalogReader analog;
 
+Samd21RamMonitor::Config ramMonitorCfg =
+    Samd21RamMonitor::Config::make(
+        SystemHealthConfig::Ram::kSamplePeriodMs,
+        SystemHealthConfig::Ram::kLogPeriodMs,
+        SystemHealthConfig::Ram::kWarnFreeBytes,
+        SystemHealthConfig::Ram::kCriticalFreeBytes,
+        SystemHealthConfig::Ram::kNewLowLogStepBytes);
+
+Samd21RamMonitor gRamMonitor(ramMonitorCfg);
+
 // -----------------------------------------------------------------------------
 // Sensors
 // -----------------------------------------------------------------------------
@@ -183,7 +196,8 @@ SensirionUartSps30Driver sps30Driver(Serial1);
 Sps30Sensor sps30(sps30Cfg, sps30Driver, clock);
 
 ISensor *sensors[] = {
-    &sht31, &gps, &imu, &sps30, &wind,
+    &sht31, &gps, &sps30, &wind,
+    // &imu
 };
 
 constexpr size_t sensorCount = sizeof(sensors) / sizeof(sensors[0]);
@@ -285,15 +299,24 @@ void setup() {
 
   gLog.setMinLevel(LogLevel::Debug);
 
+  gRamMonitor.begin();
+
   LOG_INFO("boot", "SmartFires node starting");
   LOG_INFO("boot", "node_id=%u", initialRadioAddr);
 
   gps.reset();
 
+  gRamMonitor.checkpoint("setup", "before_wire");
+
   Wire.begin();
   analog.begin();
+
+  gRamMonitor.checkpoint("setup", "after_wire");
+
   delay(100);
   scanI2C();
+
+  gRamMonitor.checkpoint("setup", "after_i2c_scan");
   // duty.resetSensors();
   // testBeginSensors();
   LOG_INFO("boot", "SmartFires Feather TDMA node starting");
@@ -352,12 +375,16 @@ void setup() {
   logSensorFloorVsCadence("imu", imuCfg.minSamplePeriodMs);
   logSensorFloorVsCadence("sps30", sps30Cfg.minSamplePeriodMs);
 
+  gRamMonitor.checkpoint("app_begin", "before");
+
   if (!app.begin()) {
     LOG_INFO("boot", "smart_fires_app_status=%d", 1);
     while (true) {
       delay(500);
     }
   }
+
+  gRamMonitor.checkpoint("app_begin", "after");
 
   LOG_INFO("boot", "smart_fires_app_status=%d", 0);
 }
@@ -366,7 +393,16 @@ unsigned long previousMillis = 0; // Stores last time event triggered
 const long interval = 500;        // Interval (milliseconds)
 
 void loop() {
+   // Capture the state before entering the application.
+  gRamMonitor.update();
+
   app.update();
+
+  // This normally does nothing because of the sample-period gate.
+  // But if app.update() took unusually long, this captures the result
+  // immediately after it returns.
+  gRamMonitor.update();
+
   delay(25);
 }
 
