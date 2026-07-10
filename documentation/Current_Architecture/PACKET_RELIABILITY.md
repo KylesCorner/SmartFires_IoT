@@ -1,18 +1,21 @@
 ---
 name: packet-reliability
-description: StrictLinkAck vs AppLayerAckSummary reliability modes, retry gating, and ACK_SUMMARY.
+description: StrictLinkAck vs AppLayerAckSummary reliability modes, retry gating, ACK_SUMMARY, and the waitPacketSent() hang risk.
 category: architecture
 status: current
-last_verified: 2026-06-25
+last_verified: 2026-07-10
 source_refs:
   - platformio/include/config/NetworkConfig.h
   - platformio/include/radio/TdmaConfig.h
+  - platformio/include/radio/ITdmaRadioDriver.h
   - platformio/src/radio/TdmaRadioService.cpp
+  - platformio/src/platform/RadioHeadTdmaDriver.cpp
   - platformio/src/app/SmartFiresBaseApp.cpp
 related_docs:
   - tdma-protocol
   - tunable-parameters
   - radio-rx-gating
+  - watchdog-timer
 ---
 
 # Packet Reliability
@@ -26,10 +29,108 @@ acknowledgement exchange.
 | Packet | Direction | Reliability | Rationale |
 |---|---|---|---|
 | `AWAKEN` | Node → Base | Link-layer ACK (`sendToWait`) | Boot-critical; node must know base is alive |
-| `TIME_SYNC` (periodic broadcast) | Base → Nodes | Fire-and-forget broadcast (`send()` to `RH_BROADCAST_ADDRESS`) | Periodic; next sync supersedes a missed one |
+| `TIME_SYNC` (periodic broadcast) | Base → Nodes | Fire-and-forget broadcast (`send()` to `RH_BROADCAST_ADDRESS`) | Periodic; next sync supersedes a missed one. Never ACKed — see below |
 | `TIME_SYNC` (direct, AWAKEN-triggered) | Base → Node | Link-layer ACK (`sendToWait`) | `sendDirectTimeSync()` is a distinct unicast path from the periodic broadcast above — replies to one node's `AWAKEN` |
 | `BUNDLE` / `STATUS` | Node → Base | Configurable (see below) | Telemetry — governed by reliability mode |
-| `ACK_SUMMARY` | Base → Node | Link-layer ACK (`sendToWait`) | Corrected — `SmartFiresBaseApp::sendAckSummary()` blocks on the link ACK, it is not fire-and-forget. A missed reception triggers RadioHead's own link-layer retry (`kLinkRetries`/`kLinkAckTimeoutMs`, independent of `TdmaConfig::reliabilityMode`) immediately — this is what surfaces as base-side retries if a node's Rx happens to be asleep when the base transmits; see [radio-rx-gating](../Pending_Plans/RADIO_RX_GATING.md) |
+| `ACK_SUMMARY` | Base → Node | Link-layer ACK (`sendToWait`) | `SmartFiresBaseApp::sendAckSummary()` blocks on the link ACK, it is not fire-and-forget. A missed reception triggers RadioHead's own link-layer retry (`kLinkRetries`/`kLinkAckTimeoutMs`, independent of `TdmaConfig::reliabilityMode`) immediately — this is what surfaces as base-side retries if a node's Rx happens to be asleep when the base transmits; see [radio-rx-gating](../Pending_Plans/RADIO_RX_GATING.md) |
+| `CMD_CALIBRATE` / `CMD_RESET` | Base → Node | Link-layer ACK (`sendToWait`) | `SmartFiresBaseApp::sendPendingCommand()` blocks on the link ACK; gives up after `BaseConfig::kMaxPendingCommandSendAttempts` and drops the command (`reason=no_link_ack`) if it never arrives |
+
+**All four link-ACKed packet types above depend on the receiving node actually
+sending that ACK back** — see "waitPacketSent() has no timeout" below for how
+that ACK is generated on the node side, and why it isn't as simple as letting
+RadioHead handle it automatically.
+
+## `waitPacketSent()` Has No Timeout
+
+### The bug
+
+RadioHead's `RHGenericDriver::waitPacketSent()` (no-arg overload) is
+`while (_mode == RHModeTx) YIELD;` — it blocks until the SX1276's DIO0 pin
+signals TX-done, with **no timeout**. `_mode` only leaves `RHModeTx` from the
+DIO0 interrupt handler (`RH_RF95::handleInterrupt()`). If that interrupt is
+ever missed, the call never returns and the single-threaded firmware hangs
+completely, with no further log output and no recovery short of a power
+cycle.
+
+DIO0 is edge-triggered (`attachInterrupt(..., RISING)`,
+`RH_RF95.cpp:108`) rather than level-triggered, which the library's own
+source comments acknowledge as a known "slim chance of missing events" (see
+`RH_RF95.cpp:153-174`). A missed edge is gone forever — there is nothing to
+re-trigger it. This was confirmed in the field via a device log where the
+node hung for ~115 seconds mid-cycle, immediately after logging `rx_wake`,
+then recovered and resumed completely normal operation (proving it was a
+genuine wait-condition stall, not memory corruption — and proving the same
+call path had already succeeded hundreds of times earlier in that same
+session before hitting this).
+
+Two independent call paths reach this:
+
+1. **`RHReliableDatagram::acknowledge()`** (vendored, protected, unreachable
+   from application code) — fired automatically whenever RadioHead's
+   `recvfromAck()` accepts a unicast datagram. This is what caused the field
+   incident above: the node's `checkIncomingTimeSync()` received an
+   `ACK_SUMMARY`, RadioHead auto-ACKed it, and the ACK's own
+   `waitPacketSent()` hung.
+2. **`RHReliableDatagram::sendtoWait()`** itself, for its own outbound
+   transmission — completely independent of path 1, see "Base Station Risk"
+   below.
+
+### The fix (node-side receive path)
+
+The node's `TdmaRadioService::checkIncomingTimeSync()` now calls
+`_driver.receive(packet, /*autoAck=*/false)`, disabling RadioHead's
+automatic ACK-on-receive entirely (matching what `SmartFiresBaseApp` already
+did for its own receive path). For the three packet types that still need
+an ACK for the base's `sendToWait()` to succeed (`ACK_SUMMARY`,
+`CMD_CALIBRATE`/`CMD_RESET`, and the direct/unicast `TIME_SYNC` reply — the
+periodic broadcast is deliberately never ACKed), the node now calls
+`_driver.acknowledge(packet.from, packet.id)` explicitly.
+
+`ITdmaRadioDriver::acknowledge()` (implemented in
+`RadioHeadTdmaDriver::acknowledge()`) reconstructs the same ACK frame
+RadioHead's own `acknowledge()` would send (`setHeaderId`/`setHeaderFlags`/
+`sendto`, all public RadioHead primitives — only `acknowledge()` itself is
+protected), but **returns immediately after queuing the transmission,
+without calling `waitPacketSent()` at all.** It can't hang, at the cost of
+not confirming the ACK physically finished transmitting before returning —
+an acceptable trade, since the caller doesn't need that confirmation either.
+This pattern already existed on the base side (for `PKT_AWAKEN`) before this
+fix; the node now uses it symmetrically.
+
+`ITdmaRadioDriver::ReceivedPacket` gained a `to` field (previously
+discarded) so the node can tell a broadcast receipt apart from a direct one
+— acking a broadcast would make every node on the channel reply at once and
+collide with each other.
+
+### Base Station Risk — not yet fixed
+
+**The node-side fix above only protects against path 1 (auto-ACK-on-receive).
+Path 2 is completely untouched and remains live on the base station.**
+
+`SmartFiresBaseApp` sends three packet types via `_radio.sendToWait()`:
+`sendDirectTimeSync()`, `sendAckSummary()`, and `sendPendingCommand()`
+(CMD dispatch). RadioHead's `sendtoWait()` calls `sendto()` +
+`waitPacketSent()` for **its own outbound transmission** before it ever gets
+to waiting for the node's reply ACK — the exact same no-timeout call, on the
+exact same missed-DIO0-interrupt risk, just triggered by the base
+transmitting instead of the node auto-replying. Nothing about the node-side
+fix changes this: if the base misses a DIO0 edge while sending any of these
+three packet types, **the base itself hangs completely**, independent of
+node cooperation, node health, or reliability mode.
+
+This has not been observed in a base-station log yet, but the mechanism is
+identical to the one confirmed on the node, and the base exercises this
+exact code path constantly (`ACK_SUMMARY` sends roughly every few seconds
+under normal operation). `documentation/Pending_Plans/WATCHDOG_TIMER.md`
+already names this as Phase 2 (base watchdog), previously deferred as
+"the base has not been reported hanging yet" — this analysis is a concrete,
+mechanism-level reason to no longer treat that as reassurance rather than
+an open question. There is no equivalent "disable the automatic path and
+ack manually" fix available here, because the hang is in the base's *own*
+send, not a reply to something — the base has to actually transmit
+`ACK_SUMMARY`/`TIME_SYNC`/commands to do its job, and RadioHead has no
+timeout-bounded variant of `sendtoWait()` short of patching vendored code.
+A watchdog is the practical mitigation, not a call-site change.
 
 ## Reliability Modes
 

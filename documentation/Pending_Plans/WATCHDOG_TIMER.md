@@ -7,6 +7,7 @@ related_docs:
   - tdma-protocol
   - reset-system
   - tunable-parameters
+  - packet-reliability
 ---
 
 # Watchdog Timer
@@ -33,6 +34,20 @@ timeout:
    (`AWAKEN`, `STATUS`, `BUNDLE`, `CMD_ACK`) funnels through this call. If that IRQ
    edge is ever missed (line glitch, brownout, ESD on an outdoor harness), the call
    never returns — the MCU spins inside RadioHead forever, with no further log output.
+
+   **Update 2026-07-10 — confirmed and partially mitigated.** A device log caught this
+   exact hang: the node's auto-ACK-on-receive of an `ACK_SUMMARY` packet (routed through
+   RadioHead's `RHReliableDatagram::acknowledge()`) called this same no-timeout
+   `waitPacketSent()` and hung for ~115 s before recovering on its own. The node-side
+   trigger (auto-ACK on receive) is now fixed — see
+   [[packet-reliability]]'s "`waitPacketSent()` Has No Timeout" section for the full
+   mechanism and fix. **The base station's exposure is untouched by that fix and remains
+   fully open**: `SmartFiresBaseApp`'s three `sendToWait()` call sites
+   (`sendDirectTimeSync()`, `sendAckSummary()`, `sendPendingCommand()`) each call this
+   identical no-timeout wait for their *own* outbound transmission, independent of
+   anything the node does. This was previously a theoretical "same class of exposure";
+   it's now a specifically analyzed, currently-live risk on hardware that transmits
+   `ACK_SUMMARY` roughly every few seconds during normal operation. See Phase 2 below.
 2. **Shared I2C bus** — SHT31, ICM-20948, and the PA1010D GPS all sit on one `Wire`
    bus with no configured timeout and no bus-recovery sequence anywhere in the
    firmware. A stalled slave (vibration, EMI, marginal pull-ups) can wedge
@@ -202,7 +217,13 @@ Phase 1 ships first and independently — it's the side with the actual field co
 Phase 2 (base) is explicitly deferred per the user's request, since the base has not been
 reported hanging yet, but should get the same treatment once Phase 1 is proven out, since
 it has the same class of exposure (its own infinite retry loop, plus a LoRa radio that can
-enter a bad state per [[reset-system]]'s Background item 2).
+enter a bad state per [[reset-system]]'s Background item 2) — **and, as of the 2026-07-10
+update above, a specifically identified, currently-unmitigated `waitPacketSent()` hang risk
+on its own `ACK_SUMMARY`/`TIME_SYNC`-direct/CMD `sendToWait()` calls**, not just a
+generic "probably also exposed" concern. Unlike item 1's node-side trigger, there is no
+equivalent "disable and hand-roll a non-blocking version" fix available on the base for
+these three call sites, since the base has to actually transmit them to do its job — the
+watchdog is the only practical mitigation here.
 
 `feather_m0_sensor_probe`, `feather_m0_lora_sniffer`, and `native` build environments are
 out of scope — they're bring-up/diagnostic/test tools, not field-deployed firmware.

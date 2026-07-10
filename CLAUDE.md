@@ -295,8 +295,13 @@ CMD_ACK: [PktHeader: 4][CmdAckPayload: 6][crc8: 1]                              
 ```
 
 RadioHead `RHReliableDatagram` handles LoRa framing and addressing.
-Node fresh telemetry uses non-blocking `sendto()` with app-layer reliability; the
-base still receives via `recvfromAck()` and auto-ACKs at the LoRa link layer.
+Node fresh telemetry uses non-blocking `sendto()` with app-layer reliability. Both
+base and node receive with RadioHead's automatic link-layer ACK disabled
+(`autoAck=false`) and ACK explicitly, only for the packet types that need it
+(base: `AWAKEN`; node: `ACK_SUMMARY`, `CMD_CALIBRATE`/`CMD_RESET`, direct `TIME_SYNC`)
+via a non-blocking hand-rolled ACK — RadioHead's own automatic ACK path blocks on a
+no-timeout wait for the radio's TX-done interrupt, which can hang the board forever
+on a missed interrupt; see `documentation/Current_Architecture/PACKET_RELIABILITY.md`.
 
 ### LoRa TIME_SYNC broadcast — base → all nodes (13 bytes)
 

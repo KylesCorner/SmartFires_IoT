@@ -731,7 +731,19 @@ void TdmaRadioService::checkIncomingTimeSync() {
   while (_driver.available()) {
     ITdmaRadioDriver::ReceivedPacket packet;
 
-    if (!_driver.receive(packet)) {
+    // autoAck=false: letting RadioHead ack automatically routes every
+    // unicast receipt (TIME_SYNC-direct, ACK_SUMMARY, CMD_CALIBRATE/RESET)
+    // through RHReliableDatagram::acknowledge(), which calls the no-timeout
+    // overload of waitPacketSent() — a missed DIO0 TX-done interrupt there
+    // hangs the whole node with no recovery (confirmed in the field: see
+    // documentation/Current_Architecture/PACKET_RELIABILITY.md). We still
+    // want these three packet types acked, since the base blocks on it via
+    // sendToWait() — so each branch below calls _driver.acknowledge()
+    // itself once it's confirmed the packet is genuinely unicast and worth
+    // acking, using the non-blocking implementation documented on
+    // ITdmaRadioDriver::acknowledge(). This matches what SmartFiresBaseApp
+    // already does for PKT_AWAKEN on the base side.
+    if (!_driver.receive(packet, /*autoAck=*/false)) {
       LOG_WARN("radio", "receive_failed");
       return;
     }
@@ -752,6 +764,15 @@ void TdmaRadioService::checkIncomingTimeSync() {
     BinaryPacket::AckSummaryPayload ack = {};
 
     if (isTimeSyncPacket(packet, sessionId, sessionMs, assignedNodeId)) {
+      // Only the direct, AWAKEN-triggered TIME_SYNC reply (SmartFiresBaseApp::
+      // sendDirectTimeSync(), unicast, sendToWait()) wants an ACK back. The
+      // periodic broadcast (RH_BROADCAST_ADDRESS, fire-and-forget) must never
+      // get one — every node on the channel would ack the same broadcast at
+      // once and collide with each other.
+      if (packet.to != ITdmaRadioDriver::kBroadcastAddress) {
+        _driver.acknowledge(packet.from, packet.id);
+      }
+
       if (assignedNodeId != 0 && !applyAssignedNodeId(assignedNodeId)) {
         LOG_WARN("radio", "sync_ignore node=%u reason=assignment_apply_failed",
                  static_cast<unsigned int>(assignedNodeId));
@@ -772,6 +793,11 @@ void TdmaRadioService::checkIncomingTimeSync() {
     }
 
     if (_cfg.enableAppReliability && isAckSummaryPacket(packet, ack)) {
+      // ACK_SUMMARY is always sent unicast (never broadcast), so no
+      // packet.to check is needed here unlike the TIME_SYNC branch above.
+      // SmartFiresBaseApp::sendAckSummary() blocks on this via sendToWait().
+      _driver.acknowledge(packet.from, packet.id);
+
       _ackSummaryCount++;
 
       LOG_INFO("radio",
@@ -788,6 +814,12 @@ void TdmaRadioService::checkIncomingTimeSync() {
     if (decodeHeader(packet.data, packet.len, hdr) &&
         (hdr.pkt_type == BinaryPacket::PKT_CMD_CALIBRATE ||
          hdr.pkt_type == BinaryPacket::PKT_CMD_RESET)) {
+      // Always unicast (never broadcast). SmartFiresBaseApp::
+      // sendPendingCommand() blocks on this via sendToWait(); without it,
+      // the base gives up after BaseConfig::kMaxPendingCommandSendAttempts
+      // and the command is dropped (reason=no_link_ack in its log).
+      _driver.acknowledge(packet.from, packet.id);
+
       rememberPendingCommand(packet);
       continue;
     }

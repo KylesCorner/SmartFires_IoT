@@ -100,20 +100,24 @@ bool RadioHeadTdmaDriver::receive(ReceivedPacket &out, bool autoAck) {
 
   uint8_t len = sizeof(out.data);
   uint8_t from = 0;
+  uint8_t to = 0;
   uint8_t id = 0;
 
   // recvfromAck() unconditionally ACKs any accepted unicast datagram — it has
-  // no notion of "the sender didn't ask for one". recvfrom() (inherited from
-  // RHDatagram) skips that ACK entirely, at the cost of also skipping RH's
-  // duplicate-id rejection; callers that need an ACK call acknowledge() once
-  // they've decoded enough of the payload to know it's warranted.
-  const bool ok = autoAck ? _manager.recvfromAck(out.data, &len, &from, nullptr, &id)
-                          : _manager.recvfrom(out.data, &len, &from, nullptr, &id);
+  // no notion of "the sender didn't ask for one", and does so by blocking on
+  // RadioHead's own no-timeout waitPacketSent() (see ITdmaRadioDriver.h).
+  // recvfrom() (inherited from RHDatagram) skips that ACK entirely, at the
+  // cost of also skipping RH's duplicate-id rejection; callers that need an
+  // ACK call acknowledge() once they've decoded enough of the payload to
+  // know it's warranted, and once they've confirmed `to` isn't a broadcast.
+  const bool ok = autoAck ? _manager.recvfromAck(out.data, &len, &from, &to, &id)
+                          : _manager.recvfrom(out.data, &len, &from, &to, &id);
   if (!ok) {
     return false;
   }
 
   out.from = from;
+  out.to = to;
   out.id = id;
   out.len = len;
   out.rssi = static_cast<int8_t>(_rf95.lastRssi());
