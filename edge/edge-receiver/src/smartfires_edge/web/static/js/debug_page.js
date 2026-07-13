@@ -133,10 +133,32 @@ function wireClearButton() {
   });
 }
 
+function downloadTextFile(filename, text) {
+  const blob = new Blob([text], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function wireExportButton() {
+  document.getElementById("debug-export-btn").addEventListener("click", () => {
+    const visible = state.entries.filter(entryMatchesFilters);
+    const text = visible.map(formatEntry).join("\n") + "\n";
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    downloadTextFile(`smartfires-debug-log-${stamp}.txt`, text);
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   renderNav(window.location.pathname);
   renderLevelTabs();
   renderSrcTabs();
   wireClearButton();
+  wireExportButton();
   connectDebugSocket();
 });

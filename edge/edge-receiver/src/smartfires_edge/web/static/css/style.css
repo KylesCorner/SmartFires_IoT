@@ -432,6 +432,31 @@ table th {
   color: #e6e6e6;
 }
 
+.log-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.export-btn {
+  background: #15191e;
+  color: #aab4c0;
+  border: 1px solid #2a2f36;
+  border-radius: 4px;
+  padding: 0.25rem 0.75rem;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+
+.export-btn:hover {
+  background: #20262d;
+  color: #e6e6e6;
+}
+
 .new-session-btn {
   margin-left: auto;
   background: #8b1a1a;
