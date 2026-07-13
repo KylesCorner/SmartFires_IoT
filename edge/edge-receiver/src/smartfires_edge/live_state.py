@@ -135,22 +135,26 @@ class LiveState:
             self._sniffer_ring.append(event)
             self._sniffer_total += 1
 
+            # ACK_SUMMARY resends: the base retransmits at the RadioHead link
+            # layer (RH_FLAGS_RETRY, set by RHReliableDatagram on a missed
+            # link-ack) far more often than any other packet type, since it's
+            # the one type the base still sends with link-layer reliability
+            # enabled. Counted against the *target* node (the payload's own
+            # node_id field, decoded as target_node_id) rather than the
+            # header's node_id=0 "Base" convention, since that's the node the
+            # resend is actually about.
+            if event.get("pkt_type") == "ACK_SUMMARY" and event.get("rh_is_retry"):
+                target_node_id = event.get("target_node_id")
+                if target_node_id is not None:
+                    target_stats = self._sniffer_stats.setdefault(
+                        target_node_id, self._new_node_stats()
+                    )
+                    target_stats["ack_summary_resends"] += 1
+
             node_id = event.get("node_id")
             if node_id is None or event.get("pkt_type") == "TIME_SYNC":
                 return
-            stats = self._sniffer_stats.setdefault(
-                node_id,
-                {
-                    "packets": 0,
-                    "rssi_sum": 0.0,
-                    "rssi_count": 0,
-                    "snr_sum": 0.0,
-                    "snr_count": 0,
-                    "jitter_samples": deque(maxlen=200),
-                    "guard_violations": 0,
-                    "last_seen": None,
-                },
-            )
+            stats = self._sniffer_stats.setdefault(node_id, self._new_node_stats())
             stats["packets"] += 1
             stats["last_seen"] = time.time()
             if event.get("rssi") is not None:
@@ -163,6 +167,20 @@ class LiveState:
                 stats["jitter_samples"].append(event["jitter_ms"])
             if event.get("guard_violation"):
                 stats["guard_violations"] += 1
+
+    @staticmethod
+    def _new_node_stats() -> dict[str, Any]:
+        return {
+            "packets": 0,
+            "rssi_sum": 0.0,
+            "rssi_count": 0,
+            "snr_sum": 0.0,
+            "snr_count": 0,
+            "jitter_samples": deque(maxlen=200),
+            "guard_violations": 0,
+            "ack_summary_resends": 0,
+            "last_seen": None,
+        }
 
     def drain_sniffer(self, since_idx: int) -> tuple[list[dict], int]:
         """Same monotonic-cursor pattern as drain_log."""
@@ -186,6 +204,7 @@ class LiveState:
                     "avg_snr": round(s["snr_sum"] / s["snr_count"], 1) if s["snr_count"] else None,
                     "jitter_std_ms": round(statistics.pstdev(jitter), 1) if len(jitter) >= 2 else None,
                     "guard_violations": s["guard_violations"],
+                    "ack_summary_resends": s.get("ack_summary_resends", 0),
                     "last_seen": s.get("last_seen"),
                 }
             return result

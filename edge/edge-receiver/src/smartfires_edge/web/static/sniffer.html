@@ -28,7 +28,10 @@
           overheard from the base station's TIME_SYNC broadcasts. Dashed lines mark slot
           boundaries; shaded bands are the guard window. The dedicated "RadioHead / Unknown"
           row holds bare RadioHead frames (e.g. RHReliableDatagram ACKs) that carry no
-          SmartFires node_id of their own. Click any marker to inspect it below.
+          SmartFires node_id of their own. A small orange dot above a marker means that
+          packet was a link-layer resend (RadioHead retried it after missing an ack) —
+          ACK_SUMMARY packets are resent this way most often. Click any marker to inspect
+          it below.
         </p>
         <div class="sniffer-toolbar">
           <div class="sniffer-toolbar-group">
@@ -63,6 +66,7 @@
                 <th>Avg SNR</th>
                 <th>Jitter σ (ms)</th>
                 <th>Guard Viol.</th>
+                <th>ACK Resends</th>
                 <th>Last Contact</th>
               </tr>
             </thead>

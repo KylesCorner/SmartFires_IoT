@@ -55,6 +55,11 @@ const PKT_COLORS = {
 };
 const UNKNOWN_COLOR = "#c0392b";
 const UNKNOWN_LABEL = "UNKNOWN / other";
+// Marks a packet whose rh_flags had RH_FLAGS_RETRY set — RHReliableDatagram
+// resent it at the link layer after missing an ack. ACK_SUMMARY is by far
+// the most common offender (the base still sends it with link-layer
+// reliability on), but the dot is drawn for any packet type that qualifies.
+const RESEND_DOT_COLOR = "#ffa500";
 
 // --- Audio feedback ----------------------------------------------------
 //
@@ -239,6 +244,16 @@ function renderLegend() {
     item.appendChild(label);
     el.appendChild(item);
   }
+
+  const resendItem = document.createElement("div");
+  resendItem.className = "sniffer-legend-item";
+  const resendSwatch = document.createElement("span");
+  resendSwatch.className = "sniffer-legend-swatch sniffer-legend-dot";
+  resendSwatch.style.background = RESEND_DOT_COLOR;
+  const resendLabel = document.createElement("span");
+  resendLabel.textContent = "Resend (link-layer retry)";
+  resendItem.append(resendSwatch, resendLabel);
+  el.appendChild(resendItem);
 }
 
 function resizeCanvas() {
@@ -351,6 +366,12 @@ function draw() {
       ctx.strokeRect(x - 3, y, 7, 16);
     }
     ctx.fillRect(x - 3, y, 7, 16);
+    if (ev.rh_is_retry) {
+      ctx.fillStyle = RESEND_DOT_COLOR;
+      ctx.beginPath();
+      ctx.arc(x, y - 4, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
     if (isSelected) {
       ctx.strokeStyle = "#ffd166";
       ctx.lineWidth = 2;
@@ -944,6 +965,7 @@ async function pollStats() {
         <td>${fmt(s.avg_snr)}</td>
         <td>${fmt(s.jitter_std_ms)}</td>
         <td>${fmt(s.guard_violations)}</td>
+        <td>${fmt(s.ack_summary_resends)}</td>
         <td>${fmtTime(s.last_seen)}</td>
       `;
       tbody.appendChild(tr);

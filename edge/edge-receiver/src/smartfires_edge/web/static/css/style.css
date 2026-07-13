@@ -619,6 +619,10 @@ table th {
   flex-shrink: 0;
 }
 
+.sniffer-legend-swatch.sniffer-legend-dot {
+  border-radius: 50%;
+}
+
 #sniffer-timeline {
   background: #15191e;
   border-radius: 6px;
