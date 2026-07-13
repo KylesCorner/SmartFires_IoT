@@ -58,7 +58,25 @@ bool RadioHeadTdmaDriver::send(const uint8_t *data,
 
   _manager.setHeaderId(++_nextDatagramId);
   _manager.setHeaderFlags(RH_FLAGS_NONE, RH_FLAGS_ACK | RH_FLAGS_RETRY);
-  return _manager.sendto(const_cast<uint8_t *>(data), len, to);
+  const bool queued = _manager.sendto(const_cast<uint8_t *>(data), len, to);
+
+  // Bounded wait for the transmission to physically finish, for the same
+  // reason as acknowledge(): without it, nothing stops a subsequent sleep()
+  // (or any other radio call) from aborting this send mid-flight, and
+  // nothing stops the *next* send()/sendToWait() call from hanging on
+  // RH_RF95::send()'s own no-timeout leading waitPacketSent() (it refuses to
+  // start a new transmission while it still believes one is in progress). A
+  // timeout here doesn't necessarily mean the packet was lost — the SX1276
+  // may well have finished transmitting despite a missed TX-done interrupt —
+  // so it's logged, not treated as send failure; `queued` (whether RadioHead
+  // accepted the packet for transmission at all) is the return value.
+  if (queued && !_manager.waitPacketSent(NetworkConfig::kSendTxWaitMs)) {
+    LOG_WARN("radio", "send_tx_timeout to=%u len=%u timeout_ms=%u",
+             static_cast<unsigned int>(to), static_cast<unsigned int>(len),
+             static_cast<unsigned int>(NetworkConfig::kSendTxWaitMs));
+  }
+
+  return queued;
 }
 
 bool RadioHeadTdmaDriver::sendToWait(const uint8_t *data,

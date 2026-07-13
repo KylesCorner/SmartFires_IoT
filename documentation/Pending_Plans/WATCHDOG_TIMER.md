@@ -58,6 +58,20 @@ timeout:
    retransmitting `ACK_SUMMARY` far more than expected. Fixed by using RadioHead's
    *bounded* `waitPacketSent(timeout)` overload instead of no wait at all — see
    [[packet-reliability]] for the full before/after.
+
+   **Update 2026-07-13 (same day) — a second, distinct trigger found and fixed.**
+   `RH_RF95::send()` itself opens with this exact same no-timeout `waitPacketSent()` — it
+   refuses to arm a new transmission while it believes a previous one is still in flight.
+   That makes even RadioHead's "fire-and-forget" `send()` exposed, independent of the
+   auto-ACK trigger above: every node telemetry send and app-layer retransmit in
+   `AppLayerAckSummary` mode goes through it. A device log confirmed this with a second,
+   structurally distinct incident — the radio service went silent for ~115 s right after
+   three consecutive (non-blocking, log-only) `retx_blocked` lines, and the node had lost
+   TDMA sync by the time it recovered, forcing a full AWAKEN/TIME_SYNC handshake redo.
+   `RadioHeadTdmaDriver::send()` now gets the identical bounded-wait treatment as
+   `acknowledge()`. See [[packet-reliability]]'s "The fix (node-side send path)". This
+   also means the base's periodic `TIME_SYNC` broadcast (which uses `send()`, not
+   `sendToWait()`) picked up the same protection for free.
 2. **Shared I2C bus** — SHT31, ICM-20948, and the PA1010D GPS all sit on one `Wire`
    bus with no configured timeout and no bus-recovery sequence anywhere in the
    firmware. A stalled slave (vibration, EMI, marginal pull-ups) can wedge

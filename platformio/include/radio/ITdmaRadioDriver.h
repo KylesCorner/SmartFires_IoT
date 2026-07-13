@@ -28,8 +28,33 @@ public:
   virtual ~ITdmaRadioDriver() = default;
 
   virtual bool begin() = 0;
+
+  // Fire-and-forget send: returns as soon as RadioHead accepts the packet
+  // for transmission, not once the caller's *previous* telemetry send
+  // finished (that already happened, per this same requirement, before this
+  // call was made). Implementations must still wait — with a *bounded*
+  // timeout, never RadioHead's own no-arg waitPacketSent() — for this send's
+  // own transmission to physically finish before returning, for the same
+  // reason as ITdmaRadioDriver::acknowledge(): otherwise nothing prevents a
+  // subsequent sleep() (or the next send()) from acting on the radio while
+  // this transmission is still in flight. A timeout on that wait doesn't
+  // necessarily mean the packet was lost — it's logged, not treated as
+  // failure. The return value reflects only whether RadioHead accepted the
+  // packet for transmission, not whether that bounded wait completed within
+  // budget. See RadioHeadTdmaDriver::send() for the reference implementation.
   virtual bool send(const uint8_t *data, uint8_t len, uint8_t to) = 0;
+
+  // See "Base Station Risk" in packet-reliability doc: implementations of
+  // this one are expected to delegate to RadioHead's own RHReliableDatagram::
+  // sendtoWait(), which blocks on its own no-timeout waitPacketSent() inside
+  // a retry loop we have no way to interrupt from outside without patching
+  // vendored code or reimplementing the whole retry/dedup protocol
+  // ourselves. Unlike send()/acknowledge() above, there is currently no
+  // bounded-wait guarantee here — a missed TX-done interrupt during any
+  // retry attempt can still hang the caller indefinitely. A watchdog is the
+  // intended mitigation for this call, not a call-site fix.
   virtual bool sendToWait(const uint8_t *data, uint8_t len, uint8_t to) = 0;
+
   virtual bool setLocalAddress(uint8_t address) = 0;
 
   virtual bool available() = 0;

@@ -120,6 +120,16 @@ constexpr uint16_t kLinkAckTimeoutMs = 250;
 // tuning once real hardware timing is measured, same as rxWakeAheadMs was.
 constexpr uint16_t kAckTxWaitMs = kAwakenTxBudgetMs;
 
+// Bound on how long RadioHeadTdmaDriver::send() waits for its own telemetry
+// transmission to physically finish sending. Unlike acknowledge()'s payload,
+// send() carries anything up to a full BUNDLE (kBundleTxBudgetMs's ≤194-byte
+// case), so it reuses that largest, already-conservative budget rather than
+// branching on payload size — waiting a bit longer than strictly necessary
+// for a small STATUS/TIME_SYNC payload is harmless (only the timed-out path
+// costs anything), whereas under-timing a BUNDLE would defeat the point.
+// Not bench-verified — same caveat as kAckTxWaitMs above.
+constexpr uint16_t kSendTxWaitMs = kBundleTxBudgetMs;
+
 // --- TX queue / app-layer reliability (operating values shipped today) -----
 constexpr uint8_t kQueueDepth = 8;
 constexpr uint8_t kReliabilityWindowDepth = 8;
