@@ -110,6 +110,16 @@ constexpr int8_t kRadioTxPowerDbm = 13;
 constexpr uint8_t kLinkRetries = 3;
 constexpr uint16_t kLinkAckTimeoutMs = 250;
 
+// Bound on how long acknowledge() waits for its own ACK transmission to
+// physically finish sending (RHGenericDriver::waitPacketSent(timeout)) —
+// distinct from kLinkAckTimeoutMs above, which bounds a different wait (the
+// base waiting to *receive* a reply ACK). Our ACK payload (1-byte body +
+// RadioHead header, ~5-6 bytes on air) is smaller than AWAKEN's 9-byte
+// payload, so this reuses kAwakenTxBudgetMs's conservative margin rather
+// than introducing an untested new number. Not bench-verified — flag for
+// tuning once real hardware timing is measured, same as rxWakeAheadMs was.
+constexpr uint16_t kAckTxWaitMs = kAwakenTxBudgetMs;
+
 // --- TX queue / app-layer reliability (operating values shipped today) -----
 constexpr uint8_t kQueueDepth = 8;
 constexpr uint8_t kReliabilityWindowDepth = 8;

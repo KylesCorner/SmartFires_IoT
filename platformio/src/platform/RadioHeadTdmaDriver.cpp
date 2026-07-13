@@ -5,6 +5,9 @@
 // ---
 #include "platform/RadioHeadTdmaDriver.h"
 
+#include "config/NetworkConfig.h"
+#include "logging/DebugLogger.h"
+
 #include <Arduino.h>
 
 RadioHeadTdmaDriver::RadioHeadTdmaDriver(const Config &cfg)
@@ -138,6 +141,18 @@ void RadioHeadTdmaDriver::acknowledge(uint8_t from, uint8_t id) {
   _manager.setHeaderFlags(RH_FLAGS_ACK);
   uint8_t ack = '!';
   _manager.sendto(&ack, sizeof(ack), from);
+
+  // Bounded wait for the ACK to physically finish transmitting, so nothing
+  // downstream (notably TdmaRadioService::updateRxPower()'s sleep() call,
+  // which has no in-flight-TX guard) can abort it mid-send. Bounded, not
+  // absent, so a missed TX-done interrupt can't hang the board the way
+  // RadioHead's own no-arg waitPacketSent() can — see
+  // ITdmaRadioDriver::acknowledge()'s comment.
+  if (!_manager.waitPacketSent(NetworkConfig::kAckTxWaitMs)) {
+    LOG_WARN("radio", "ack_tx_timeout from=%u id=%u timeout_ms=%u",
+             static_cast<unsigned int>(from), static_cast<unsigned int>(id),
+             static_cast<unsigned int>(NetworkConfig::kAckTxWaitMs));
+  }
 }
 
 bool RadioHeadTdmaDriver::healthy() const {

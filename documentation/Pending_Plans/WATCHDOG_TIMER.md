@@ -48,6 +48,16 @@ timeout:
    anything the node does. This was previously a theoretical "same class of exposure";
    it's now a specifically analyzed, currently-live risk on hardware that transmits
    `ACK_SUMMARY` roughly every few seconds during normal operation. See Phase 2 below.
+
+   **Update 2026-07-13 — the fix's first version had its own bug, now corrected.** The
+   initial mitigation had the node's replacement `acknowledge()` return immediately after
+   `sendto()`, with no wait of any kind — safe from the hang, but with nothing guaranteeing
+   the ACK had finished transmitting before something else (`TdmaRadioService::
+   updateRxPower()`'s `sleep()` call, which has no in-flight-TX guard) could act on the
+   radio next and silently abort it mid-send. This surfaced as the base station
+   retransmitting `ACK_SUMMARY` far more than expected. Fixed by using RadioHead's
+   *bounded* `waitPacketSent(timeout)` overload instead of no wait at all — see
+   [[packet-reliability]] for the full before/after.
 2. **Shared I2C bus** — SHT31, ICM-20948, and the PA1010D GPS all sit on one `Wire`
    bus with no configured timeout and no bus-recovery sequence anywhere in the
    firmware. A stalled slave (vibration, EMI, marginal pull-ups) can wedge

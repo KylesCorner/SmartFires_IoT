@@ -3,7 +3,7 @@ name: packet-reliability
 description: StrictLinkAck vs AppLayerAckSummary reliability modes, retry gating, ACK_SUMMARY, and the waitPacketSent() hang risk.
 category: architecture
 status: current
-last_verified: 2026-07-10
+last_verified: 2026-07-13
 source_refs:
   - platformio/include/config/NetworkConfig.h
   - platformio/include/radio/TdmaConfig.h
@@ -90,12 +90,31 @@ periodic broadcast is deliberately never ACKed), the node now calls
 `RadioHeadTdmaDriver::acknowledge()`) reconstructs the same ACK frame
 RadioHead's own `acknowledge()` would send (`setHeaderId`/`setHeaderFlags`/
 `sendto`, all public RadioHead primitives — only `acknowledge()` itself is
-protected), but **returns immediately after queuing the transmission,
-without calling `waitPacketSent()` at all.** It can't hang, at the cost of
-not confirming the ACK physically finished transmitting before returning —
-an acceptable trade, since the caller doesn't need that confirmation either.
-This pattern already existed on the base side (for `PKT_AWAKEN`) before this
-fix; the node now uses it symmetrically.
+protected), then waits for that ACK to physically finish transmitting via
+`RHGenericDriver::waitPacketSent(timeout)` — the **bounded** overload,
+capped at `NetworkConfig::kAckTxWaitMs`. Bounded, not unbounded and not
+absent: a missed TX-done interrupt makes the call give up after the timeout
+(logged as `ack_tx_timeout`) instead of hanging, but the normal case still
+waits for genuine completion before returning. This pattern already existed
+on the base side (for `PKT_AWAKEN`, originally fire-and-forget — see history
+note below) before this fix; the node now uses it symmetrically, and the
+base's own call picked up the bounded wait too since both share the same
+`RadioHeadTdmaDriver::acknowledge()` implementation.
+
+**History note:** the first version of this fix had `acknowledge()` return
+immediately after `sendto()`, with no wait at all — reasoning that since the
+caller doesn't need confirmation, and an unbounded wait is what caused the
+original hang, removing the wait entirely seemed safe. It wasn't: nothing
+downstream then guaranteed the ACK had finished transmitting before
+`TdmaRadioService::updateRxPower()`'s `sleep()` call (or, in principle, any
+other radio operation) could act next — and `RH_RF95::sleep()` has no guard
+against an in-flight transmission, so it could silently abort a
+still-in-flight ACK. This surfaced in the field as the base station
+retransmitting `ACK_SUMMARY` far more than expected, because nodes weren't
+reliably completing their ACK before the radio got put back to sleep. The
+bounded wait above closes that gap: the ACK is guaranteed to either finish
+or definitively time out before `acknowledge()` returns, so nothing can act
+on the radio mid-transmission.
 
 `ITdmaRadioDriver::ReceivedPacket` gained a `to` field (previously
 discarded) so the node can tell a broadcast receipt apart from a direct one

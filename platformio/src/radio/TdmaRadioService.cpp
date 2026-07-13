@@ -740,9 +740,12 @@ void TdmaRadioService::checkIncomingTimeSync() {
     // want these three packet types acked, since the base blocks on it via
     // sendToWait() — so each branch below calls _driver.acknowledge()
     // itself once it's confirmed the packet is genuinely unicast and worth
-    // acking, using the non-blocking implementation documented on
-    // ITdmaRadioDriver::acknowledge(). This matches what SmartFiresBaseApp
-    // already does for PKT_AWAKEN on the base side.
+    // acking, using the bounded-wait implementation documented on
+    // ITdmaRadioDriver::acknowledge() (waits for its own ACK to finish
+    // transmitting, capped by NetworkConfig::kAckTxWaitMs, so it can't hang
+    // *or* get silently aborted by a sleep() call racing an in-flight send).
+    // This matches what SmartFiresBaseApp already does for PKT_AWAKEN on the
+    // base side.
     if (!_driver.receive(packet, /*autoAck=*/false)) {
       LOG_WARN("radio", "receive_failed");
       return;
