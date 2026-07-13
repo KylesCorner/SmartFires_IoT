@@ -7,7 +7,10 @@
 
 #if defined(LORA_BASE)
 
+#include <Adafruit_SleepyDog.h>
+
 #include "app/SmartFiresBaseApp.h"
+#include "config/SystemHealthConfig.h"
 #include "logging/FramedDebugLogSink.h"
 #include "platform/ArduinoClock.h"
 #include "platform/RadioHeadTdmaDriver.h"
@@ -28,29 +31,47 @@ SmartFiresBaseApp baseApp(baseAppCfg, baseClock, baseRadio, Serial, baseDebugSin
 DebugLogger gLog(baseDebugSink, baseAppCfg.baseAddr);
 
 void setup() {
+  // Read before anything else can touch it — this is the only chance to
+  // observe whether the previous reset was WDT-triggered vs. power-on/other.
+  const uint8_t resetCause = PM->RCAUSE.reg;
+
+  Watchdog.enable(SystemHealthConfig::Watchdog::kBootPhaseTimeoutMs);
+
   Serial.begin(baseAppCfg.uartBaud);
   while (!Serial && millis() < 3000) {
   }
 
   gLog.setMinLevel(LogLevel::Debug);
 
+  LOG_WARN("boot", "reset_cause=0x%02X wdt=%u", resetCause,
+           (resetCause & PM_RCAUSE_WDT) ? 1 : 0);
+
+  Watchdog.reset();
+
   LOG_INFO("boot", "SmartFires base station starting");
   if (!baseApp.begin()) {
     LOG_ERROR("boot", "SmartFires base app begin failed");
+    // Not petted: the WDT is left to expire and reboot the board rather
+    // than spin here forever.
     while (true) {
       delay(500);
     }
   }
   LOG_INFO("boot", "SmartFires base app ready");
+
+  Watchdog.disable();
+  Watchdog.enable(SystemHealthConfig::Watchdog::kSteadyStateTimeoutMs);
 }
 
 void loop() {
   baseApp.update();
+  Watchdog.reset();
   delay(5);
 }
 
 #elif defined(LORA_NODE)
 
+#include <Adafruit_SleepyDog.h>
 #include <Wire.h>
 
 #include "config/SystemHealthConfig.h"
@@ -291,6 +312,15 @@ void scanI2C() {
 }
 
 void setup() {
+  // Read before anything else can touch it — this is the only chance to
+  // observe whether the previous reset was WDT-triggered vs. power-on/other.
+  const uint8_t resetCause = PM->RCAUSE.reg;
+
+  // Boot phase is the longest single stretch (fixed delay, serial wait, I2C
+  // scan, sensor begin()) — armed with the longer of the two timeout tiers,
+  // re-armed to the shorter steady-state one right before loop() begins.
+  Watchdog.enable(SystemHealthConfig::Watchdog::kBootPhaseTimeoutMs);
+
   delay(5000);
   Serial.begin(115200);
   Serial1.begin(115200);
@@ -299,7 +329,11 @@ void setup() {
 
   gLog.setMinLevel(LogLevel::Debug);
 
+  LOG_WARN("boot", "reset_cause=0x%02X wdt=%u", resetCause,
+           (resetCause & PM_RCAUSE_WDT) ? 1 : 0);
+
   gRamMonitor.begin();
+  Watchdog.reset();
 
   LOG_INFO("boot", "SmartFires node starting");
   LOG_INFO("boot", "node_id=%u", initialRadioAddr);
@@ -307,16 +341,19 @@ void setup() {
   gps.reset();
 
   gRamMonitor.checkpoint("setup", "before_wire");
+  Watchdog.reset();
 
   Wire.begin();
   analog.begin();
 
   gRamMonitor.checkpoint("setup", "after_wire");
+  Watchdog.reset();
 
   delay(100);
   scanI2C();
 
   gRamMonitor.checkpoint("setup", "after_i2c_scan");
+  Watchdog.reset();
   // duty.resetSensors();
   // testBeginSensors();
   LOG_INFO("boot", "SmartFires Feather TDMA node starting");
@@ -376,9 +413,12 @@ void setup() {
   logSensorFloorVsCadence("sps30", sps30Cfg.minSamplePeriodMs);
 
   gRamMonitor.checkpoint("app_begin", "before");
+  Watchdog.reset();
 
   if (!app.begin()) {
     LOG_INFO("boot", "smart_fires_app_status=%d", 1);
+    // Not petted: the WDT is left to expire and reboot the board rather
+    // than spin here forever.
     while (true) {
       delay(500);
     }
@@ -387,6 +427,9 @@ void setup() {
   gRamMonitor.checkpoint("app_begin", "after");
 
   LOG_INFO("boot", "smart_fires_app_status=%d", 0);
+
+  Watchdog.disable();
+  Watchdog.enable(SystemHealthConfig::Watchdog::kSteadyStateTimeoutMs);
 }
 
 unsigned long previousMillis = 0; // Stores last time event triggered
@@ -402,6 +445,8 @@ void loop() {
   // But if app.update() took unusually long, this captures the result
   // immediately after it returns.
   gRamMonitor.update();
+
+  Watchdog.reset();
 
   delay(25);
 }
