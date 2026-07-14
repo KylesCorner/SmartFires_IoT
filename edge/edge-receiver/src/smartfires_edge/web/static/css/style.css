@@ -116,6 +116,76 @@ h1, h2 {
   border-radius: 6px;
 }
 
+/* Session timeline — per-node activity strips under the sensor chart */
+
+.timeline-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+
+.timeline-header h2 {
+  font-size: 1rem;
+  margin: 0;
+}
+
+.timeline-range {
+  color: #aab4c0;
+  font-size: 0.8rem;
+  font-family: monospace;
+}
+
+.session-timeline {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.timeline-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.timeline-label {
+  width: 4.5rem;
+  flex: none;
+  font-size: 0.8rem;
+  color: #aab4c0;
+}
+
+.timeline-track {
+  position: relative;
+  flex: 1;
+  height: 16px;
+  background: #15191e;
+  border: 1px solid #2a2f36;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.timeline-seg {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: #28a055;
+}
+
+.timeline-awaken {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #e05252;
+}
+
+.timeline-empty {
+  color: #aab4c0;
+  font-size: 0.85rem;
+}
+
 .checkbox-row {
   display: flex;
   flex-wrap: wrap;

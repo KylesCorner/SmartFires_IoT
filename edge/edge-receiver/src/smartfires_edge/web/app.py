@@ -1,11 +1,9 @@
 import asyncio
-import csv
 import json
 import queue
 import socket
 import threading
 import time
-from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -16,22 +14,13 @@ from pydantic import BaseModel
 
 from smartfires_edge.base_station_store import BaseStationStore
 from smartfires_edge.live_state import LiveState
+from smartfires_edge.telemetry_cache import METRIC_KEYS, SessionTelemetryCache
 from smartfires_edge.tile_cache import TileCache
 
 STATIC_DIR = Path(__file__).parent / "static"
 # Legacy manual tile directory — used as the default cache when no tile_cache_dir
 # is supplied (preserves backward-compat with pre-loaded tile pyramids).
 _LEGACY_TILES_DIR = Path(__file__).parent / "tiles"
-
-TELEMETRY_METRICS = {
-    "temp_c",
-    "humidity_pct",
-    "wind_mps",
-    "pm1_0_ug_m3",
-    "pm2_5_ug_m3",
-    "pm4_0_ug_m3",
-    "pm10_ug_m3",
-}
 
 
 class BaseStationPayload(BaseModel):
@@ -57,54 +46,6 @@ def _check_online() -> bool:
         return False
 
 
-def _read_telemetry_history(
-    data_dir: Path,
-    node_id: int,
-    metric: str,
-    start: Optional[str],
-    end: Optional[str],
-) -> list[dict]:
-    start_dt = datetime.fromisoformat(start) if start else None
-    end_dt = datetime.fromisoformat(end) if end else None
-    results: list[dict] = []
-
-    if not data_dir.exists():
-        return results
-
-    for path in sorted(data_dir.glob("*/telemetry.csv")):
-        with open(path, newline="", encoding="utf-8") as f:
-            for row in csv.DictReader(f):
-                if row.get("packet_type") != "telemetry":
-                    continue
-                try:
-                    if int(row.get("node_id") or -1) != node_id:
-                        continue
-                except ValueError:
-                    continue
-
-                ts_raw = row.get("timestamp")
-                if not ts_raw:
-                    continue
-                try:
-                    ts = datetime.fromisoformat(ts_raw)
-                except ValueError:
-                    continue
-                if start_dt and ts < start_dt:
-                    continue
-                if end_dt and ts > end_dt:
-                    continue
-
-                value = row.get(metric)
-                if value in (None, ""):
-                    continue
-                try:
-                    results.append({"timestamp": ts_raw, "value": float(value)})
-                except ValueError:
-                    continue
-
-    return results
-
-
 def create_app(
     live_state: LiveState,
     data_dir: Path,
@@ -117,6 +58,15 @@ def create_app(
     app = FastAPI(title="SmartFires Dashboard")
     store = base_station_store or BaseStationStore()
     tile_cache = TileCache(tile_cache_dir if tile_cache_dir is not None else _LEGACY_TILES_DIR)
+    telemetry_cache = SessionTelemetryCache()
+
+    def _current_session_csv() -> Optional[Path]:
+        """The active session's CSV — session dirs are UTC-stamped
+        YYYY-MM-DD_HHMMSS names, so the lexicographically last one is current."""
+        if not data_dir.exists():
+            return None
+        paths = sorted(data_dir.glob("*/telemetry.csv"))
+        return paths[-1] if paths else None
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
@@ -215,12 +165,30 @@ def create_app(
     def telemetry_history(
         node: int,
         metric: str,
-        start: Optional[str] = None,
-        end: Optional[str] = None,
-    ) -> list[dict]:
-        if metric not in TELEMETRY_METRICS:
+        start_ms: Optional[int] = None,
+        end_ms: Optional[int] = None,
+        max_points: int = 1500,
+    ) -> dict:
+        """CSV-backed series for the current session, decimated to at most
+        ~2×max_points (each bucket keeps its min and max sample)."""
+        if metric not in METRIC_KEYS:
             raise HTTPException(status_code=400, detail=f"Unknown metric {metric!r}")
-        return _read_telemetry_history(data_dir, node, metric, start, end)
+        return telemetry_cache.history(
+            _current_session_csv(), node, metric, start_ms, end_ms,
+            max_points=min(max(max_points, 10), 4000),
+        )
+
+    @app.get("/api/session/timeline")
+    def session_timeline(buckets: int = 300) -> dict:
+        """Per-node activity counts from session start to now, with AWAKEN
+        (node boot) markers — feeds the main page's session timeline."""
+        info = live_state.session_info()
+        session_start = info.get("session_start")
+        return telemetry_cache.timeline(
+            _current_session_csv(),
+            buckets=min(max(buckets, 10), 2000),
+            session_start_ms=int(session_start * 1000) if session_start else None,
+        )
 
     @app.get("/api/status_history")
     def status_history(limit: int = 5000) -> list[dict]:

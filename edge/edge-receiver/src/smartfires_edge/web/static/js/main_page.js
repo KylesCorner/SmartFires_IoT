@@ -36,6 +36,24 @@ const TELEMETRY_FETCH_LIMIT = 2000;
 // Each step button press moves the view by half the current window.
 const STEP_FRACTION = 0.5;
 
+// CSV-backed history: the live ring only covers the last ~25 minutes, so any
+// wider window is filled from /api/telemetry/history. Fetched results are
+// cached per node+metric; in live mode the baseline is refreshed every
+// HISTORY_REFRESH_MS while the ring covers the growing tail in between.
+const HISTORY_MAX_POINTS = 1200;
+const HISTORY_REFRESH_MS = 30 * 1000;
+// A line is broken (null point) when neighbouring samples are further apart
+// than this — otherwise Chart.js would draw straight lines across outages.
+const GAP_BREAK_MS = 60 * 1000;
+
+// Session timeline strip below the chart.
+const TIMELINE_BUCKETS = 300;
+const TIMELINE_REFRESH_MS = 10 * 1000;
+// Full-rate telemetry is one sample per 750 ms; used to shade activity.
+const SAMPLE_PERIOD_MS = 750;
+
+const historyCache = new Map(); // "node|metric" -> {fetchedAt, startMs, endMs, points, bucketMs}
+
 const state = {
   selectedNodes:   new Set(),
   knownNodes:      new Set(),
@@ -221,7 +239,76 @@ function _fmtVal(v) {
   return v.toFixed(3);
 }
 
+// Fetch (or reuse) the CSV-backed baseline for one node+metric. The cache
+// entry is refetched when the requested window reaches outside what it covers,
+// or — for views that extend past the fetch time — when it goes stale. The
+// CSV is append-only within a session, so purely-historical windows never
+// go stale; session changes clear the cache (see pollNodes).
+async function getHistory(nodeId, metric, startMs, endMs, ringEarliestMs) {
+  const key = `${nodeId}|${metric}`;
+  const now = Date.now();
+  let entry = historyCache.get(key);
+
+  let fetchNeeded =
+    !entry ||
+    startMs < entry.startMs - 1000 ||
+    (endMs > entry.fetchedAt - 1000 && now - entry.fetchedAt > HISTORY_REFRESH_MS);
+  if (!fetchNeeded && endMs > entry.endMs + GAP_BREAK_MS) {
+    // The window extends past the cached data — fine if the live ring
+    // overlaps the cache end (it covers the tail), otherwise refetch.
+    fetchNeeded = ringEarliestMs === null || ringEarliestMs > entry.endMs + GAP_BREAK_MS;
+  }
+  if (fetchNeeded) {
+    const res = await Api.telemetryHistory(
+      nodeId, metric, startMs || undefined, endMs, HISTORY_MAX_POINTS
+    );
+    entry = {
+      fetchedAt: now,
+      startMs,
+      endMs,
+      points: res.points ?? [],
+      bucketMs: res.bucket_ms ?? 0,
+    };
+    historyCache.set(key, entry);
+  }
+  return entry;
+}
+
+// Merge the CSV baseline with the live ring tail into one x-sorted series,
+// inserting null points so reception outages render as gaps instead of the
+// line cutting straight across them.
+function mergeSeries(historyEntry, ringPoints, cutoffMs, viewEndMs) {
+  const ringStart = ringPoints.length ? ringPoints[0].x : Infinity;
+  const merged = historyEntry.points
+    .filter(([t]) => t >= cutoffMs && t <= viewEndMs && t < ringStart)
+    .map(([t, v]) => ({ x: t, y: v }))
+    .concat(ringPoints);
+
+  const gapMs = Math.max(GAP_BREAK_MS, (historyEntry.bucketMs || 0) * 4);
+  const withGaps = [];
+  for (const pt of merged) {
+    const prev = withGaps[withGaps.length - 1];
+    if (prev && prev.y !== null && pt.x - prev.x > gapMs) {
+      withGaps.push({ x: prev.x + 1, y: null });
+    }
+    withGaps.push(pt);
+  }
+  return withGaps;
+}
+
+let chartRefreshInFlight = false;
+
 async function refreshChart() {
+  if (chartRefreshInFlight) return;
+  chartRefreshInFlight = true;
+  try {
+    await _refreshChart();
+  } finally {
+    chartRefreshInFlight = false;
+  }
+}
+
+async function _refreshChart() {
   const nodeIds = [...state.selectedNodes];
   if (nodeIds.length === 0 || state.selectedMetrics.size === 0) {
     state.chart.data.datasets = [];
@@ -242,17 +329,33 @@ async function refreshChart() {
     return t >= cutoff && t <= viewEndMs;
   };
 
+  // One merged series per node+metric: CSV history baseline + live ring tail.
+  const seriesByKey = new Map();
+  await Promise.all(
+    nodeIds.flatMap((nodeId, nodeIdx) =>
+      [...state.selectedMetrics].map(async (metric) => {
+        const samples = perNodeSamples[nodeIdx];
+        const ringPoints = samples
+          .filter((s) => {
+            if (!inWindow(s)) return false;
+            return s[metric] !== "" && s[metric] !== undefined && s[metric] !== null;
+          })
+          .map((s) => ({ x: Date.parse(s.timestamp), y: Number(s[metric]) }))
+          .sort((a, b) => a.x - b.x);
+        const ringEarliest = samples.length ? Date.parse(samples[0].timestamp) : null;
+        const history = await getHistory(nodeId, metric, cutoff, viewEndMs, ringEarliest);
+        seriesByKey.set(`${nodeId}|${metric}`, mergeSeries(history, ringPoints, cutoff, viewEndMs));
+      })
+    )
+  );
+
   // Per-metric maximum across all nodes within the time window (axis min is always 0).
   const metricMax = {};
   for (const metric of state.selectedMetrics) {
     let hi = 0;
-    for (const samples of perNodeSamples) {
-      for (const s of samples) {
-        if (!inWindow(s)) continue;
-        if (s[metric] !== "" && s[metric] !== undefined && s[metric] !== null) {
-          const v = Number(s[metric]);
-          if (v > hi) hi = v;
-        }
+    for (const nodeId of nodeIds) {
+      for (const pt of seriesByKey.get(`${nodeId}|${metric}`) ?? []) {
+        if (pt.y !== null && pt.y > hi) hi = pt.y;
       }
     }
     metricMax[metric] = hi;
@@ -290,25 +393,17 @@ async function refreshChart() {
     axisIdx++;
   }
 
-  // Build datasets with raw values. Nodes sharing the same metric share the same axis;
-  // different nodes are distinguished by line dash pattern.
+  // Build datasets from the merged series. Nodes sharing the same metric share
+  // the same axis; different nodes are distinguished by line dash pattern.
   const datasets = [];
   nodeIds.forEach((nodeId, nodeIdx) => {
-    const samples = perNodeSamples[nodeIdx];
     const dashPattern = NODE_DASH_PATTERNS[nodeIdx % NODE_DASH_PATTERNS.length];
     for (const metric of state.selectedMetrics) {
       const color = METRIC_COLORS[metric] ?? "#aab4c0";
       const metaDef = METRICS.find((m) => m.key === metric);
-      const points = samples
-        .filter((s) => {
-          if (!inWindow(s)) return false;
-          return s[metric] !== "" && s[metric] !== undefined && s[metric] !== null;
-        })
-        .map((s) => ({ x: Date.parse(s.timestamp), y: Number(s[metric]) }))
-        .sort((a, b) => a.x - b.x);
       datasets.push({
         label: `Node ${nodeId} – ${metaDef?.label ?? metric}`,
-        data: points,
+        data: seriesByKey.get(`${nodeId}|${metric}`) ?? [],
         yAxisID: `y_${metric}`,
         borderColor: color,
         backgroundColor: color + "33",
@@ -316,6 +411,7 @@ async function refreshChart() {
         borderWidth: 1.5,
         pointRadius: 0,
         tension: 0.15,
+        spanGaps: false,
       });
     }
   });
@@ -323,6 +419,77 @@ async function refreshChart() {
   state.chart.options.scales = scales;
   state.chart.data.datasets = datasets;
   state.chart.update();
+}
+
+// ---------------------------------------------------------------------------
+// Session timeline — one activity strip per node from session start to now.
+// Green segments = packets received; red ticks = AWAKEN packets (node boots,
+// e.g. watchdog resets); dark background = silence.
+// ---------------------------------------------------------------------------
+
+async function refreshTimeline() {
+  let data;
+  try {
+    data = await Api.sessionTimeline(TIMELINE_BUCKETS);
+  } catch {
+    return;
+  }
+  const container = document.getElementById("session-timeline");
+  const rangeEl = document.getElementById("timeline-range");
+  const spanMs = Math.max(data.end_ms - data.start_ms, 1);
+  rangeEl.textContent =
+    `${new Date(data.start_ms).toLocaleTimeString()} – ${new Date(data.end_ms).toLocaleTimeString()}`;
+
+  const nodeIds = Object.keys(data.nodes).map(Number).sort((a, b) => a - b);
+  container.innerHTML = "";
+  if (nodeIds.length === 0) {
+    container.innerHTML = `<div class="timeline-empty">No node activity yet this session.</div>`;
+    return;
+  }
+
+  const expectedPerBucket = data.bucket_ms / SAMPLE_PERIOD_MS;
+  for (const nodeId of nodeIds) {
+    const counts = data.nodes[String(nodeId)];
+    const row = document.createElement("div");
+    row.className = "timeline-row";
+    const label = document.createElement("span");
+    label.className = "timeline-label";
+    label.textContent = `Node ${nodeId}`;
+    const track = document.createElement("div");
+    track.className = "timeline-track";
+
+    // Merge consecutive active buckets into one segment; shade by fill rate.
+    for (let i = 0; i < counts.length; ) {
+      if (counts[i] === 0) { i++; continue; }
+      let j = i;
+      let total = 0;
+      while (j < counts.length && counts[j] > 0) { total += counts[j]; j++; }
+      const seg = document.createElement("div");
+      seg.className = "timeline-seg";
+      seg.style.left = `${(i / counts.length) * 100}%`;
+      seg.style.width = `${Math.max(((j - i) / counts.length) * 100, 0.2)}%`;
+      const fill = Math.min(total / ((j - i) * expectedPerBucket), 1);
+      seg.style.opacity = (0.35 + 0.65 * fill).toFixed(2);
+      const t0 = new Date(data.start_ms + i * data.bucket_ms).toLocaleTimeString();
+      const t1 = new Date(data.start_ms + j * data.bucket_ms).toLocaleTimeString();
+      seg.title = `Node ${nodeId}: active ${t0} – ${t1}`;
+      track.appendChild(seg);
+      i = j;
+    }
+
+    for (const [t, awakenNode] of data.awaken) {
+      if (awakenNode !== nodeId) continue;
+      const tick = document.createElement("div");
+      tick.className = "timeline-awaken";
+      tick.style.left = `${((t - data.start_ms) / spanMs) * 100}%`;
+      tick.title = `Node ${nodeId} boot (AWAKEN) at ${new Date(t).toLocaleTimeString()}`;
+      track.appendChild(tick);
+    }
+
+    row.appendChild(label);
+    row.appendChild(track);
+    container.appendChild(row);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -400,7 +567,17 @@ function updateNodeTable(nodes) {
 }
 
 async function pollNodes() {
-  const [nodes, baseStation] = await Promise.all([Api.nodes(), Api.getBaseStation()]);
+  const [nodes, baseStation, session] = await Promise.all([
+    Api.nodes(),
+    Api.getBaseStation(),
+    Api.session(),
+  ]);
+  // A session change (New Session pressed here or elsewhere) invalidates all
+  // cached CSV history — it belongs to the previous session's file.
+  if (state.sessionId !== undefined && session.session_id !== state.sessionId) {
+    historyCache.clear();
+  }
+  state.sessionId = session.session_id;
   buildNodeCheckboxes(Object.keys(nodes).map(Number));
   updateMap(nodes, baseStation);
   updateNodeTable(nodes);
@@ -433,6 +610,7 @@ function wireNewSessionButton() {
     try {
       await Api.newSession();
 
+      historyCache.clear();
       state.chart.data.datasets = [];
       state.chart.options.scales = buildBaseScales();
       state.chart.update();
@@ -481,8 +659,10 @@ async function init() {
   renderPlaybackUI();
   await pollNodes();
   await refreshChart();
+  refreshTimeline();
   setInterval(pollNodes, 2000);
   setInterval(refreshChart, 2000);
+  setInterval(refreshTimeline, TIMELINE_REFRESH_MS);
 }
 
 document.addEventListener("DOMContentLoaded", init);

@@ -5,6 +5,15 @@ const Api = {
   async telemetryRecent(nodeId, limit = 300) {
     return (await fetch(`/api/telemetry/recent?node=${nodeId}&limit=${limit}`)).json();
   },
+  async telemetryHistory(nodeId, metric, startMs, endMs, maxPoints = 1200) {
+    const params = new URLSearchParams({ node: nodeId, metric, max_points: maxPoints });
+    if (startMs) params.set("start_ms", Math.floor(startMs));
+    if (endMs) params.set("end_ms", Math.floor(endMs));
+    return (await fetch(`/api/telemetry/history?${params}`)).json();
+  },
+  async sessionTimeline(buckets = 300) {
+    return (await fetch(`/api/session/timeline?buckets=${buckets}`)).json();
+  },
   async statusHistory(limit = 5000) {
     return (await fetch(`/api/status_history?limit=${limit}`)).json();
   },
