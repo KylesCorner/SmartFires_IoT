@@ -172,7 +172,6 @@ def run_receive(
     tracker = PacketLossTracker(cfg.nodes)
     if live_state is not None:
         live_state.tracker = tracker
-    node_gps: dict[int, tuple[float, float]] = {}
     sync_state = {"next_seq": 0}
     cmd_seq_state = {"next_seq": 0}
     session_manager = SessionManager()
@@ -338,6 +337,20 @@ def run_receive(
                                 f"[EDGE][AWAKEN] node={aw['node_id']} uid=0x{aw['uid_hash']:08x}",
                                 int(hdr_node),
                             )
+                        # Log every AWAKEN as a CSV row so node reboots (e.g.
+                        # watchdog-triggered restarts) are visible in telemetry.csv.
+                        # A booting node re-broadcasts AWAKEN every 5 s until it
+                        # receives TIME_SYNC, so one reboot may produce several rows.
+                        awaken_row = {
+                            "timestamp": datetime.utcnow().isoformat(timespec="milliseconds"),
+                            "packet_type": "awaken",
+                            "node_id": hdr_node,
+                            "seq": hdr_seq,
+                            "rssi": event.get("rssi"),
+                            "uid_hash": f"0x{uid_hash:08x}" if isinstance(uid_hash, int) else "",
+                        }
+                        logger.write_row(awaken_row)
+                        _append_jsonl(status_path, awaken_row)
                         log_fn(
                             f"[EDGE][AWAKEN] node={hdr_node} seq={hdr_seq} "
                             f"action=send_time_sync",
@@ -364,10 +377,6 @@ def run_receive(
                             trigger_node=int(hdr_node),
                             trigger_seq=int(hdr_seq),
                         ) if sync_state["next_seq"] == 0 else None
-
-                    gps = event.get("gps")
-                    if gps:
-                        node_gps[int(gps["node_id"])] = (float(gps["lat"]), float(gps["lon"]))
 
                     status = event.get("status")
                     if status:
@@ -463,9 +472,11 @@ def run_receive(
                         pkt["battery_valid"] = ""
                         pkt["battery_mv"] = ""
                         pkt["battery_pct"] = ""
-                        gps_fix = node_gps.get(int(pkt["node_id"]))
-                        pkt["lat"] = gps_fix[0] if gps_fix else ""
-                        pkt["lon"] = gps_fix[1] if gps_fix else ""
+                        # GPS is logged only on status rows as it arrives; telemetry
+                        # rows carry no position so the CSV never contains inferred
+                        # data. Join telemetry to the latest status row downstream.
+                        pkt["lat"] = ""
+                        pkt["lon"] = ""
 
                         if anemometer is not None:
                             jetson_speed, jetson_dir = anemometer.latest()

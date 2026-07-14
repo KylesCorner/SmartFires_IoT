@@ -143,7 +143,9 @@ event dict.
 
 ```python
 for event, receiver, ser in iter_packets(port, baud):
-    # handle AWAKEN: update session, send immediate TIME_SYNC
+    # handle AWAKEN: update session, write "awaken" CSV + JSONL row
+    #   (timestamp + uid_hash — marks node boot, e.g. watchdog restarts),
+    #   send immediate TIME_SYNC
     # handle STATUS: log GPS, battery, heading; write CSV + JSONL
     # handle BUNDLE/FULL_STATE: expand deltas, write telemetry CSV rows
     # handle CMD_ACK: record in session
