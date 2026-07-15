@@ -26,6 +26,16 @@ PKT_CMD_ACK = 0x13
 # Base -> Jetson only, never sent over LoRa — see BinaryPacket.h's PKT_DEBUG_LOG.
 PKT_DEBUG_LOG = 0x14
 
+# sensor_flags bits (SensorSnapshot.h / CLAUDE.md): which sensors had a valid
+# reading this sample. When a bit is clear the corresponding fields carry a
+# node-side hold-last-good substitute (or, pre-fix firmware, a -1.0 placeholder)
+# — either way they are not real measurements and are nulled on decode.
+SENSOR_FLAG_WIND  = 0x01
+SENSOR_FLAG_SHT31 = 0x02
+SENSOR_FLAG_GPS   = 0x04
+SENSOR_FLAG_IMU   = 0x08
+SENSOR_FLAG_SPS30 = 0x10
+
 # ---------- struct formats (little-endian, packed) ----------
 
 # PktHeader: magic(1) pkt_type(1) node_id(1) seq(1)  →  4 bytes
@@ -181,21 +191,26 @@ def _full_state_fields(
     pm4_0_ug10: int,
     pm10_ug10: int,
     rssi: Optional[int],
+    delta_flags: Optional[int] = None,
 ) -> dict:
+    wind_valid = (sensor_flags & SENSOR_FLAG_WIND) != 0
+    sht31_valid = (sensor_flags & SENSOR_FLAG_SHT31) != 0
+    sps30_valid = (sensor_flags & SENSOR_FLAG_SPS30) != 0
     return {
         "node_id": node_id,
         "seq": seq,
         "session_time_ms": session_time,
         "uptime_ms": session_time,
         "sensor_flags": sensor_flags,
-        "wind_mps": round(wind_cms / 100.0, 2),
-        "temp_c": round(temp_cdegc / 100.0, 2),
-        "humidity_pct": round(humidity_cpct / 100.0, 2),
-        "pm1_0_ug_m3": round(pm1_0_ug10 / 10.0, 1),
-        "pm2_5_ug_m3": round(pm2_5_ug10 / 10.0, 1),
-        "pm4_0_ug_m3": round(pm4_0_ug10 / 10.0, 1),
-        "pm10_ug_m3": round(pm10_ug10 / 10.0, 1),
+        "wind_mps": round(wind_cms / 100.0, 2) if wind_valid else None,
+        "temp_c": round(temp_cdegc / 100.0, 2) if sht31_valid else None,
+        "humidity_pct": round(humidity_cpct / 100.0, 2) if sht31_valid else None,
+        "pm1_0_ug_m3": round(pm1_0_ug10 / 10.0, 1) if sps30_valid else None,
+        "pm2_5_ug_m3": round(pm2_5_ug10 / 10.0, 1) if sps30_valid else None,
+        "pm4_0_ug_m3": round(pm4_0_ug10 / 10.0, 1) if sps30_valid else None,
+        "pm10_ug_m3": round(pm10_ug10 / 10.0, 1) if sps30_valid else None,
         "rssi": rssi,
+        "delta_flags": delta_flags,
     }
 
 
@@ -522,7 +537,7 @@ def decode_bundle(raw_lora_payload: bytes, rssi: Optional[int] = None) -> list[d
             d_pm2_5_ug10,
             d_pm4_0_ug,
             d_pm10_ug10,
-            _flags,
+            delta_flags,
         ) = struct.unpack_from(DELTA_FMT, raw_lora_payload, offset)
         offset += DELTA_SIZE
 
@@ -541,6 +556,7 @@ def decode_bundle(raw_lora_payload: bytes, rssi: Optional[int] = None) -> list[d
                 pm4_0_ug10 + (d_pm4_0_ug * 10),
                 pm10_ug10 + d_pm10_ug10,
                 rssi,
+                delta_flags=delta_flags,
             )
         )
 

@@ -3,6 +3,31 @@
 #include <stdint.h>
 #include <stddef.h>
 
+// Minimal no-op stand-ins for the Arduino Print API so headers like
+// logging/DebugLogger.h compile natively. Output is discarded.
+class Print {
+public:
+  template <typename T>
+  void print(T) {}
+  template <typename T>
+  void println(T) {}
+  void println() {}
+};
+
+#ifndef F
+#define F(x) (x)
+#endif
+
+// Analog pin aliases — values are arbitrary on native.
+static const uint8_t A0 = 14;
+static const uint8_t A1 = 15;
+static const uint8_t A2 = 16;
+static const uint8_t A3 = 17;
+static const uint8_t A4 = 18;
+static const uint8_t A5 = 19;
+static const uint8_t A6 = 20;
+static const uint8_t A7 = 21;
+
 #define HIGH 0x1
 #define LOW  0x0
 

@@ -28,7 +28,10 @@
 
 class PacketHandler {
 public:
-    static constexpr uint16_t GPS_FLAG  = 0x04;
+    static constexpr uint16_t WIND_FLAG  = 0x01;
+    static constexpr uint16_t SHT31_FLAG = 0x02;
+    static constexpr uint16_t GPS_FLAG   = 0x04;
+    static constexpr uint16_t SPS30_FLAG = 0x10;
 
     static constexpr uint32_t kStatusIntervalMs = 15u * 60u * 1000u;  // 15 min
 
@@ -95,6 +98,19 @@ private:
     bool     _bundleEncodingEnabled = true;
     uint32_t _retxTotal  = 0;
     uint32_t _failTotal  = 0;
+
+    // Last-good values substituted when a sensor's validity flag is clear, so
+    // SensorSnapshot's -1.0f placeholders never reach the wire (they alias real
+    // readings and, on a bundle reference, poison every delta via the int8 clamp).
+    float _lastGoodWindMps     = 0.0f;
+    float _lastGoodTempC       = 0.0f;
+    float _lastGoodHumidityPct = 0.0f;
+    float _lastGoodPm1_0       = 0.0f;
+    float _lastGoodPm2_5       = 0.0f;
+    float _lastGoodPm4_0       = 0.0f;
+    float _lastGoodPm10        = 0.0f;
+
+    SensorSnapshot gateInvalidSensors(const SensorSnapshot &snap);
 
     static BinaryPacket::FullStatePayload quantize(const SensorSnapshot &snap);
     static BinaryPacket::DeltaPayload     makeDelta(

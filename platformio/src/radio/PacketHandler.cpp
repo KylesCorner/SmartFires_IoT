@@ -63,7 +63,7 @@ bool PacketHandler::push(const SensorSnapshot &snap) {
         return false;
     }
 
-    const BinaryPacket::FullStatePayload sample = quantize(snap);
+    const BinaryPacket::FullStatePayload sample = quantize(gateInvalidSensors(snap));
 
     if (!_hasRef) {
         _ref        = sample;
@@ -172,6 +172,13 @@ void PacketHandler::reset() {
     resetBundleState();
     resetStatusTimer();
     memset(_statusBuf, 0, sizeof(_statusBuf));
+    _lastGoodWindMps     = 0.0f;
+    _lastGoodTempC       = 0.0f;
+    _lastGoodHumidityPct = 0.0f;
+    _lastGoodPm1_0       = 0.0f;
+    _lastGoodPm2_5       = 0.0f;
+    _lastGoodPm4_0       = 0.0f;
+    _lastGoodPm10        = 0.0f;
 }
 
 // ---------- private ----------
@@ -252,6 +259,45 @@ void PacketHandler::tryEncodeStatus(const SensorSnapshot &snap) {
                  static_cast<unsigned int>(_cfg.nodeId),
                  static_cast<unsigned int>(sp.flags));
     }
+}
+
+SensorSnapshot PacketHandler::gateInvalidSensors(const SensorSnapshot &snap) {
+    SensorSnapshot s = snap;
+
+    if (s.sensorFlags & WIND_FLAG) {
+        _lastGoodWindMps = s.windMps;
+    } else {
+        s.windMps = _lastGoodWindMps;
+    }
+
+    if (s.sensorFlags & SHT31_FLAG) {
+        _lastGoodTempC       = s.tempC;
+        _lastGoodHumidityPct = s.humidityPct;
+    } else {
+        s.tempC       = _lastGoodTempC;
+        s.humidityPct = _lastGoodHumidityPct;
+    }
+
+    if (s.sensorFlags & SPS30_FLAG) {
+        _lastGoodPm1_0 = s.pm1_0;
+        _lastGoodPm2_5 = s.pm2_5;
+        _lastGoodPm4_0 = s.pm4_0;
+        _lastGoodPm10  = s.pm10;
+    } else {
+        s.pm1_0 = _lastGoodPm1_0;
+        s.pm2_5 = _lastGoodPm2_5;
+        s.pm4_0 = _lastGoodPm4_0;
+        s.pm10  = _lastGoodPm10;
+    }
+
+    const uint16_t gatedMask =
+        static_cast<uint16_t>(~s.sensorFlags & (WIND_FLAG | SHT31_FLAG | SPS30_FLAG));
+    if (gatedMask != 0) {
+        LOG_DEBUG("packet", "gated_invalid_sensors mask=0x%04X",
+                  static_cast<unsigned int>(gatedMask));
+    }
+
+    return s;
 }
 
 BinaryPacket::FullStatePayload PacketHandler::quantize(const SensorSnapshot &snap) {

@@ -31,6 +31,13 @@ from smartfires_edge.session_meta import SessionMetaLogger
 from smartfires_edge.uart_receiver import iter_packets
 
 
+def _fmt_field(value, spec: str) -> str:
+    # Telemetry fields are None when the sensor's validity flag was clear.
+    if value is None:
+        return "--"
+    return format(value, spec)
+
+
 def _append_jsonl(path: Path, payload: dict) -> None:
     # flush() (not fsync()) deliberately: this runs inline in the same loop
     # that drains the base station's serial port one byte at a time
@@ -496,10 +503,13 @@ def run_receive(
                         log_fn(
                             f"[RX] node={pkt['node_id']} seq={pkt['seq']:3d} "
                             f"t={pkt['timestamp'][11:]} "
-                            f"T={pkt['temp_c']:5.1f}C H={pkt['humidity_pct']:4.1f}% "
-                            f"wind={pkt['wind_mps']:.2f} "
-                            f"PM1.0={pkt['pm1_0_ug_m3']:.1f} PM2.5={pkt['pm2_5_ug_m3']:.1f} "
-                            f"PM4.0={pkt['pm4_0_ug_m3']:.1f} PM10={pkt['pm10_ug_m3']:.1f} "
+                            f"T={_fmt_field(pkt['temp_c'], '5.1f')}C "
+                            f"H={_fmt_field(pkt['humidity_pct'], '4.1f')}% "
+                            f"wind={_fmt_field(pkt['wind_mps'], '.2f')} "
+                            f"PM1.0={_fmt_field(pkt['pm1_0_ug_m3'], '.1f')} "
+                            f"PM2.5={_fmt_field(pkt['pm2_5_ug_m3'], '.1f')} "
+                            f"PM4.0={_fmt_field(pkt['pm4_0_ug_m3'], '.1f')} "
+                            f"PM10={_fmt_field(pkt['pm10_ug_m3'], '.1f')} "
                             f"rssi={pkt['rssi']:4d}",
                             int(pkt["node_id"]),
                             kind="bundle",
