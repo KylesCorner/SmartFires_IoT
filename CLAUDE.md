@@ -254,6 +254,11 @@ SmartFiresNodeApp::update()
 PacketHandler
   push(SensorSnapshot):
     tryEncodeStatus()      ← emits PKT_STATUS on first push, then every 15 min
+    gateInvalidSensors()   ← when a sensor's sensorFlags validity bit is clear,
+                              substitutes hold-last-good values (0 until the first
+                              good reading) so SensorSnapshot's -1.0f placeholders
+                              never reach the wire; the cleared flag bit itself is
+                              still transmitted so consumers can tell
     quantize() → FullStatePayload (fixed-point integers)
     accumulate reference + up to 14 DeltaPayloads
     on 15th sample: encodeBundlePayload() → bundleReady = true
@@ -407,7 +412,7 @@ lets retry-density be correlated with GPS position with no separate packet type 
 | `pm2_5_delta_ug10` | `int16_t` | 0.1 µg/m³ delta |
 | `pm4_0_delta_ug` | `int8_t` | 1.0 µg/m³ delta |
 | `pm10_delta_ug10` | `int16_t` | 0.1 µg/m³ delta |
-| `flags` | `uint8_t` | clamp/overflow bitmask |
+| `flags` | `uint8_t` | clamp/overflow bitmask — logged by the edge as the `delta_flags` CSV column (empty on reference rows) |
 
 ### TimeSyncPayload (8 bytes, packed, little-endian)
 

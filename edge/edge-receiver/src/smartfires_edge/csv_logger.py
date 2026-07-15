@@ -32,6 +32,7 @@ CSV_COLUMNS = [
     "jetson_wind_dir_deg",
     "retx_total",
     "fail_total",
+    "delta_flags",
 ]
 
 

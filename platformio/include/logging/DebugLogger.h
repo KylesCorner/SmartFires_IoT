@@ -187,7 +187,14 @@ private:
   }
 };
 
+#if defined(SMARTFIRES_NATIVE_TEST)
+// Native tests have no serial sink and no main.cpp to define gLog — provide a
+// discard-everything instance so LOG_* macros in code under test just work.
+inline Print gNativeNullLogSink;
+inline DebugLogger gLog(gNativeNullLogSink, 0);
+#else
 extern DebugLogger gLog;
+#endif
 
 #if SMARTFIRES_DEBUG_LOG
 #define LOG_TRACE(src, fmt, ...) gLog.logf(LogLevel::Trace, src, fmt, ##__VA_ARGS__)
