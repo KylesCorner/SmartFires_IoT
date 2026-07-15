@@ -450,11 +450,12 @@ void loop() {
 
   delay(25);
 }
-
 #elif defined(POWER_TEST)
+
 #include <Arduino.h>
 #include <SPI.h>
 #include <Wire.h>
+
 #include "logging/DebugLogger.h"
 
 #include "config/SensingConfig.h"
@@ -561,7 +562,10 @@ constexpr uint8_t RFM95_MODE_SLEEP      = 0x00;
 constexpr uint8_t RFM95_MODE_STDBY      = 0x01;
 constexpr uint8_t RFM95_MODE_RX_CONT    = 0x05;
 
-SPISettings rfm95SpiSettings(1000000, MSBFIRST, SPI_MODE0);
+SPISettings rfm95SpiSettings(
+    1000000,
+    MSBFIRST,
+    SPI_MODE0);
 
 // -----------------------------------------------------------------------------
 // Platform
@@ -569,7 +573,9 @@ SPISettings rfm95SpiSettings(1000000, MSBFIRST, SPI_MODE0);
 
 ArduinoClock clock;
 ArduinoAnalogReader analog;
+
 DebugLogger gLog(Serial, 0xEE);
+
 // -----------------------------------------------------------------------------
 // Optional sensor objects
 // -----------------------------------------------------------------------------
@@ -581,116 +587,126 @@ constexpr uint8_t PIN_WIND_TMP = A2;
 constexpr uint8_t PIN_WIND_ENABLE = A3;
 
 TPSDriver::Config windPowerCfg =
-    TPSDriver::Config::make(PIN_WIND_ENABLE, true);
+    TPSDriver::Config::make(
+        PIN_WIND_ENABLE,
+        true);
 
 TPSDriver windPower(windPowerCfg);
 
-WindSensorRevC::Config windCfg = WindSensorRevC::Config::make(
-    PIN_WIND_RV,
-    PIN_WIND_TMP,
-    SensingConfig::Wind::kMinSamplePeriodMs,
-    SensingConfig::Wind::kWakeDelayMs,
-    SensingConfig::Wind::kDutyClass);
+WindSensorRevC::Config windCfg =
+    WindSensorRevC::Config::make(
+        PIN_WIND_RV,
+        PIN_WIND_TMP,
+        SensingConfig::Wind::kMinSamplePeriodMs,
+        SensingConfig::Wind::kWakeDelayMs,
+        SensingConfig::Wind::kDutyClass);
 
-WindSensorRevC activeSensor(windCfg, analog, windPower, clock);
+WindSensorRevC activeSensor(
+    windCfg,
+    analog,
+    windPower,
+    clock);
 
 #elif POWER_TEST_MODE == POWER_TEST_MODE_SHT31
 
 AdafruitSht31Driver sht31Driver;
 
-Sht31Sensor::Config sht31Cfg = Sht31Sensor::Config::make(
-    SensingConfig::Sht31::kMinSamplePeriodMs,
-    SensingConfig::Sht31::kDutyClass);
+Sht31Sensor::Config sht31Cfg =
+    Sht31Sensor::Config::make(
+        SensingConfig::Sht31::kMinSamplePeriodMs,
+        SensingConfig::Sht31::kDutyClass);
 
-Sht31Sensor activeSensor(sht31Cfg, sht31Driver, clock);
+Sht31Sensor activeSensor(
+    sht31Cfg,
+    sht31Driver,
+    clock);
 
 #elif POWER_TEST_MODE == POWER_TEST_MODE_GPS
 
 AdafruitGpsDriver gpsDriver;
 
-Pa1010dGpsSensor::Config gpsCfg = Pa1010dGpsSensor::Config::make(
-    SensingConfig::Gps::kPeriodicRunTimeMs,
-    SensingConfig::Gps::kPeriodicSleepTimeMs,
-    SensingConfig::Gps::kPeriodicSecondRunTimeMs,
-    SensingConfig::Gps::kPeriodicSecondSleepTimeMs,
-    SensingConfig::Gps::kPeriodicMinSamplePeriodMs,
-    GpsPowerMode::FullPowerContinuous);
+Pa1010dGpsSensor::Config gpsCfg =
+    Pa1010dGpsSensor::Config::make(
+        SensingConfig::Gps::kPeriodicRunTimeMs,
+        SensingConfig::Gps::kPeriodicSleepTimeMs,
+        SensingConfig::Gps::kPeriodicSecondRunTimeMs,
+        SensingConfig::Gps::kPeriodicSecondSleepTimeMs,
+        SensingConfig::Gps::kPeriodicMinSamplePeriodMs,
+        GpsPowerMode::FullPowerContinuous);
 
-Pa1010dGpsSensor activeSensor(gpsCfg, gpsDriver, clock);
+Pa1010dGpsSensor activeSensor(
+    gpsCfg,
+    gpsDriver,
+    clock);
 
 #elif POWER_TEST_MODE == POWER_TEST_MODE_IMU
 
 SparkfunIcm20948Driver imuDriver;
 
-Icm20948Sensor::Config imuCfg = Icm20948Sensor::Config::make(
-    SensingConfig::Imu::kMinSamplePeriodMs,
-    SensingConfig::Imu::kWakeDelayMs,
-    SensingConfig::Imu::kDutyClass);
+Icm20948Sensor::Config imuCfg =
+    Icm20948Sensor::Config::make(
+        SensingConfig::Imu::kMinSamplePeriodMs,
+        SensingConfig::Imu::kWakeDelayMs,
+        SensingConfig::Imu::kDutyClass);
 
-Icm20948Sensor activeSensor(imuCfg, imuDriver, clock);
+Icm20948Sensor activeSensor(
+    imuCfg,
+    imuDriver,
+    clock);
 
 #elif POWER_TEST_MODE == POWER_TEST_MODE_SPS30
 
-Sps30Sensor::Config sps30Cfg = Sps30Sensor::Config::make(
-    SensingConfig::Sps30::kMinSamplePeriodMs,
-    SensingConfig::Sps30::kWakeDelayMs,
-    SensingConfig::Sps30::kDutyClass);
+Sps30Sensor::Config sps30Cfg =
+    Sps30Sensor::Config::make(
+        SensingConfig::Sps30::kMinSamplePeriodMs,
+        SensingConfig::Sps30::kWakeDelayMs,
+        SensingConfig::Sps30::kDutyClass);
 
 SensirionUartSps30Driver sps30Driver(Serial1);
-Sps30Sensor activeSensor(sps30Cfg, sps30Driver, clock);
+
+Sps30Sensor activeSensor(
+    sps30Cfg,
+    sps30Driver,
+    clock);
 
 #endif
 
 // -----------------------------------------------------------------------------
-// Logging helpers
+// Power-test information
 // -----------------------------------------------------------------------------
-
-void logLine(const char *msg) {
-#if POWER_TEST_USE_SERIAL
-  Serial.println(msg);
-#else
-  (void)msg;
-#endif
-}
-
-void logHex8(const char *label, uint8_t value) {
-#if POWER_TEST_USE_SERIAL
-  Serial.print(label);
-  Serial.print("0x");
-
-  if (value < 0x10) {
-    Serial.print('0');
-  }
-
-  Serial.println(value, HEX);
-#else
-  (void)label;
-  (void)value;
-#endif
-}
 
 const char *powerTestModeName() {
   switch (POWER_TEST_MODE) {
   case POWER_TEST_MODE_MCU_RUN:
     return "MCU_RUN_RADIO_SLEEP";
+
   case POWER_TEST_MODE_MCU_STANDBY:
     return "MCU_STANDBY_RADIO_SLEEP";
+
   case POWER_TEST_MODE_I2C_IDLE:
     return "I2C_IDLE";
+
   case POWER_TEST_MODE_RADIO_STANDBY:
     return "RADIO_STANDBY";
+
   case POWER_TEST_MODE_RADIO_RX:
     return "RADIO_RX_CONTINUOUS";
+
   case POWER_TEST_MODE_SHT31:
     return "SHT31_ONLY";
+
   case POWER_TEST_MODE_IMU:
     return "IMU_ONLY";
+
   case POWER_TEST_MODE_GPS:
     return "GPS_ONLY";
+
   case POWER_TEST_MODE_SPS30:
     return "SPS30_ONLY";
+
   case POWER_TEST_MODE_WIND:
     return "WIND_ONLY";
+
   default:
     return "UNKNOWN";
   }
@@ -708,21 +724,34 @@ void rfm95Deselect() {
   digitalWrite(PIN_RFM95_CS, HIGH);
 }
 
-void rfm95WriteReg(uint8_t reg, uint8_t value) {
+void rfm95WriteReg(
+    uint8_t reg,
+    uint8_t value) {
+
   SPI.beginTransaction(rfm95SpiSettings);
+
   rfm95Select();
+
   SPI.transfer(reg | RFM95_WRITE_MASK);
   SPI.transfer(value);
+
   rfm95Deselect();
+
   SPI.endTransaction();
 }
 
 uint8_t rfm95ReadReg(uint8_t reg) {
   SPI.beginTransaction(rfm95SpiSettings);
+
   rfm95Select();
+
   SPI.transfer(reg & RFM95_READ_MASK);
-  const uint8_t value = SPI.transfer(0x00);
+
+  const uint8_t value =
+      SPI.transfer(0x00);
+
   rfm95Deselect();
+
   SPI.endTransaction();
 
   return value;
@@ -737,43 +766,79 @@ void resetRfm95() {
 
   digitalWrite(PIN_RFM95_RST, LOW);
   delay(2);
+
   digitalWrite(PIN_RFM95_RST, HIGH);
   delay(10);
 }
 
 void setRfm95Mode(uint8_t mode) {
-  rfm95WriteReg(RFM95_REG_OP_MODE, RFM95_LONG_RANGE_MODE | mode);
+  rfm95WriteReg(
+      RFM95_REG_OP_MODE,
+      RFM95_LONG_RANGE_MODE | mode);
+
   delay(2);
 
-  const uint8_t opMode = rfm95ReadReg(RFM95_REG_OP_MODE);
-  logHex8("radio: opmode=", opMode);
+  const uint8_t opMode =
+      rfm95ReadReg(RFM95_REG_OP_MODE);
+
+  LOG_DEBUG(
+      "radio",
+      "opmode=0x%02X",
+      static_cast<unsigned int>(opMode));
 }
 
 void configureRadioForPowerTest() {
-  logLine("radio: reset_start");
+  LOG_INFO(
+      "radio",
+      "reset_start");
 
   resetRfm95();
 
-  logLine("radio: reset_done");
+  LOG_INFO(
+      "radio",
+      "reset_done");
 
   SPI.begin();
 
-  const uint8_t version = rfm95ReadReg(RFM95_REG_VERSION);
-  logHex8("radio: version=", version);
+  const uint8_t version =
+      rfm95ReadReg(RFM95_REG_VERSION);
+
+  LOG_INFO(
+      "radio",
+      "version=0x%02X",
+      static_cast<unsigned int>(version));
 
 #if POWER_TEST_MODE == POWER_TEST_MODE_RADIO_STANDBY
-  logLine("radio: mode=standby");
+
+  LOG_INFO(
+      "radio",
+      "mode=standby");
+
   setRfm95Mode(RFM95_MODE_STDBY);
+
 #elif POWER_TEST_MODE == POWER_TEST_MODE_RADIO_RX
-  logLine("radio: mode=rx_continuous");
+
+  LOG_INFO(
+      "radio",
+      "mode=rx_continuous");
+
   setRfm95Mode(RFM95_MODE_RX_CONT);
+
 #else
-  logLine("radio: mode=sleep");
+
+  LOG_INFO(
+      "radio",
+      "mode=sleep");
+
   setRfm95Mode(RFM95_MODE_SLEEP);
+
 #endif
 
   rfm95Deselect();
-  logLine("radio: config_done");
+
+  LOG_INFO(
+      "radio",
+      "config_done");
 }
 
 // -----------------------------------------------------------------------------
@@ -804,6 +869,7 @@ void detachUsbForSleep() {
 void disableAdcForSleep() {
 #if defined(ARDUINO_ARCH_SAMD)
   ADC->CTRLA.bit.ENABLE = 0;
+
   while (ADC->STATUS.bit.SYNCBUSY) {
   }
 #endif
@@ -833,31 +899,34 @@ void enterStandbyForever() {
 
 void scanI2C() {
 #if POWER_TEST_NEEDS_I2C
-  logLine("i2c: scan_start");
+
+  LOG_INFO(
+      "i2c",
+      "scan_start");
 
   uint8_t foundCount = 0;
 
   for (uint8_t addr = 1; addr < 127; ++addr) {
     Wire.beginTransmission(addr);
-    const uint8_t err = Wire.endTransmission();
 
-    if (err == 0) {
+    const uint8_t error =
+        Wire.endTransmission();
+
+    if (error == 0) {
       ++foundCount;
 
-#if POWER_TEST_USE_SERIAL
-      Serial.print("i2c: found addr=0x");
-      if (addr < 0x10) {
-        Serial.print('0');
-      }
-      Serial.println(addr, HEX);
-#endif
+      LOG_INFO(
+          "i2c",
+          "found addr=0x%02X",
+          static_cast<unsigned int>(addr));
     }
   }
 
-#if POWER_TEST_USE_SERIAL
-  Serial.print("i2c: scan_done found_count=");
-  Serial.println(foundCount);
-#endif
+  LOG_INFO(
+      "i2c",
+      "scan_done found_count=%u",
+      static_cast<unsigned int>(foundCount));
+
 #endif
 }
 
@@ -867,43 +936,85 @@ void scanI2C() {
 
 void beginActiveSensor() {
 #if POWER_TEST_HAS_SENSOR
-  logLine("sensor: begin_start");
+
+  const char *sensorName =
+      activeSensor.name();
+
+  LOG_INFO(
+      sensorName,
+      "begin_start mode=%s",
+      powerTestModeName());
 
   if (!activeSensor.begin()) {
-    logLine("sensor: begin_failed");
+    LOG_ERROR(
+        sensorName,
+        "begin_failed");
+
     return;
   }
 
-  logLine("sensor: begin_ok");
+  LOG_INFO(
+      sensorName,
+      "begin_ok");
+
+  LOG_INFO(
+      sensorName,
+      "wake_start");
 
   if (!activeSensor.wake()) {
-    logLine("sensor: wake_failed");
-  } else {
-    logLine("sensor: wake_ok");
+    LOG_ERROR(
+        sensorName,
+        "wake_failed");
+
+    return;
   }
+
+  LOG_INFO(
+      sensorName,
+      "wake_ok");
+
 #else
-  logLine("sensor: none");
+
+  LOG_INFO(
+      "sensor",
+      "none");
+
 #endif
 }
 
 void serviceAndSampleActiveSensor() {
 #if POWER_TEST_HAS_SENSOR
+
   activeSensor.service();
 
   if (!activeSensor.ready()) {
     return;
   }
 
+  const char *sensorName =
+      activeSensor.name();
+
   if (!activeSensor.sample()) {
-    logLine("sensor: sample_failed");
+    LOG_WARN(
+        sensorName,
+        "sample_failed");
+
     return;
   }
 
 #if POWER_TEST_USE_SERIAL
-  char buf[180];
-  activeSensor.writeTelemetry(buf, sizeof(buf));
-  Serial.print("sensor: ");
-  Serial.println(buf);
+
+  char telemetry[180] = {};
+
+  activeSensor.writeTelemetry(
+      telemetry,
+      sizeof(telemetry));
+
+  LOG_DEBUG(
+      sensorName,
+      "%s",
+      telemetry);
+
 #endif
 #endif
 }
@@ -918,93 +1029,169 @@ void setup() {
   delay(3000);
 
 #if POWER_TEST_USE_SERIAL
+
   Serial.begin(115200);
 
-  const uint32_t serialWaitStart = millis();
-  while (!Serial && (millis() - serialWaitStart < 3000)) {
-  }
-  DebugLogger gLog(Serial, 0xEE);
+  const uint32_t serialWaitStart =
+      millis();
 
-  Serial.println();
-  Serial.println("========================================");
-  Serial.println("SmartFires power test");
-  Serial.print("mode: ");
-  Serial.println(powerTestModeName());
-  Serial.println("app: disabled");
-  Serial.println("tdma: disabled");
-  Serial.println("packet layer: disabled");
-  Serial.println("========================================");
+  while (!Serial &&
+         millis() - serialWaitStart < 3000) {
+  }
+
+  gLog.setMinLevel(LogLevel::Debug);
+
+#else
+
+  gLog.setMinLevel(LogLevel::Off);
+
 #endif
 
+  LOG_INFO(
+      "boot",
+      "power_test_start mode=%s",
+      powerTestModeName());
+
+  LOG_INFO(
+      "boot",
+      "app=disabled tdma=disabled packet_layer=disabled");
+
+  LOG_INFO(
+      "boot",
+      "sample_period_ms=%lu",
+      static_cast<unsigned long>(
+          POWER_TEST_SAMPLE_PERIOD_MS));
+
 #if POWER_TEST_NEEDS_SERIAL1
+
   Serial1.begin(115200);
-  logLine("serial1: begin_115200");
+
+  LOG_INFO(
+      "serial1",
+      "begin baud=115200");
+
 #endif
 
 #if POWER_TEST_NEEDS_I2C
+
+  LOG_INFO(
+      "i2c",
+      "begin_start");
+
   Wire.begin();
-  logLine("i2c: begin");
+
+  LOG_INFO(
+      "i2c",
+      "begin_ok");
+
   delay(100);
+
   scanI2C();
+
 #endif
 
 #if POWER_TEST_NEEDS_ANALOG
+
+  LOG_INFO(
+      "analog",
+      "begin_start");
+
   analog.begin();
-  logLine("analog: begin");
+
+  LOG_INFO(
+      "analog",
+      "begin_ok");
+
 #endif
 
   configureRadioForPowerTest();
 
 #if POWER_TEST_MODE == POWER_TEST_MODE_MCU_STANDBY
-  logLine("sleep: entering standby soon");
-  logLine("sleep: USB serial will disconnect");
+
+  LOG_WARN(
+      "sleep",
+      "standby_pending delay_ms=%lu",
+      static_cast<unsigned long>(
+          POWER_TEST_PRE_SLEEP_DELAY_MS));
+
+  LOG_WARN(
+      "sleep",
+      "usb_serial_will_disconnect");
+
 #if POWER_TEST_USE_SERIAL
   Serial.flush();
 #endif
 
   delay(POWER_TEST_PRE_SLEEP_DELAY_MS);
 
+  LOG_WARN(
+      "sleep",
+      "entering_standby");
+
+#if POWER_TEST_USE_SERIAL
+  Serial.flush();
+#endif
+
   detachUsbForSleep();
+
   delay(100);
 
   enterStandbyForever();
+
 #endif
 
   beginActiveSensor();
 
-  logLine("boot: ready");
+  LOG_INFO(
+      "boot",
+      "ready mode=%s",
+      powerTestModeName());
 }
 
 void loop() {
   static uint32_t lastSampleMs = 0;
   static uint32_t lastTickMs = 0;
 
-  const uint32_t now = millis();
+  const uint32_t now =
+      millis();
 
 #if POWER_TEST_HAS_SENSOR
+
   serviceAndSampleActiveSensor();
+
 #endif
 
-  if (now - lastSampleMs >= POWER_TEST_SAMPLE_PERIOD_MS) {
+  if (now - lastSampleMs >=
+      POWER_TEST_SAMPLE_PERIOD_MS) {
+
     lastSampleMs = now;
 
 #if POWER_TEST_HAS_SENSOR
+
     serviceAndSampleActiveSensor();
+
 #endif
   }
 
 #if POWER_TEST_USE_SERIAL
+
   if (now - lastTickMs >= 1000) {
     lastTickMs = now;
-    Serial.print("tick: mode=");
-    Serial.print(powerTestModeName());
-    Serial.print(" ms=");
-    Serial.println(now);
+
+    LOG_DEBUG(
+        "power_test",
+        "tick mode=%s uptime_ms=%lu",
+        powerTestModeName(),
+        static_cast<unsigned long>(now));
   }
+
 #endif
 
   delay(100);
 }
+
 #else
+
 #error "Define exactly one firmware role: LORA_BASE, LORA_NODE or POWER_TEST"
+
 #endif
