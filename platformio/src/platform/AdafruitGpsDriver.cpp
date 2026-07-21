@@ -4,6 +4,8 @@
 // ---
 #include "platform/AdafruitGpsDriver.h"
 
+#include "platform/ResetDiagnostics.h"
+
 #include <Adafruit_PMTK.h>
 #include <Arduino.h>
 
@@ -30,6 +32,10 @@ bool AdafruitGpsDriver::poll() {
   if (!_begun) {
     return false;
   }
+
+  // Per-loop I2C byte drain from the PA1010D — mark it so a hang here is
+  // attributed to ZONE_I2C_GPS (see ResetDiagnostics).
+  ResetDiagnostics::ZoneScope zone(ResetDiagnostics::ZONE_I2C_GPS);
 
   constexpr uint8_t MAX_CHARS_PER_POLL = 16;
 
@@ -150,6 +156,10 @@ bool AdafruitGpsDriver::enterPeriodic(uint8_t type,
 bool AdafruitGpsDriver::sendPmtkPayload(const char *payload) {
   if (!_begun || payload == nullptr)
     return false;
+
+  // The underlying I2C write for every GPS power-mode transition (backup,
+  // standby, periodic) — attributed to ZONE_I2C_GPS on a hang.
+  ResetDiagnostics::ZoneScope zone(ResetDiagnostics::ZONE_I2C_GPS);
 
   uint8_t checksum = 0;
   for (const char *p = payload; *p != '\0'; ++p) {

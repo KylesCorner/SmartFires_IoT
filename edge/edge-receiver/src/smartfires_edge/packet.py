@@ -50,9 +50,42 @@ HEADER_SIZE = struct.calcsize(HEADER_FMT)   # 4
 FULL_STATE_FMT  = "<IHHhHHHHH"
 FULL_STATE_SIZE = struct.calcsize(FULL_STATE_FMT)  # 20
 
-# AwakenPayload: uid_hash(u32)
+# AwakenPayload (legacy, pre-diagnostics): uid_hash(u32)
 AWAKEN_PAYLOAD_FMT = "<I"
 AWAKEN_PAYLOAD_SIZE = struct.calcsize(AWAKEN_PAYLOAD_FMT)  # 4
+# AwakenPayload (current): uid_hash(u32) reset_cause(u8) hang_zone(u8)
+AWAKEN_PAYLOAD_FMT_V2 = "<IBB"
+AWAKEN_PAYLOAD_SIZE_V2 = struct.calcsize(AWAKEN_PAYLOAD_FMT_V2)  # 6
+
+# HangZone enum mirror (platform/ResetDiagnostics.h) — keep in sync, append only.
+HANG_ZONE_NAMES = {
+    0: "UNKNOWN",
+    1: "BOOT",
+    2: "RADIO_TX",
+    3: "I2C_SHT31",
+    4: "I2C_GPS",
+    5: "I2C_IMU",
+    6: "UART_SPS30",
+    7: "LOOP_IDLE",
+}
+
+# SAMD21 PM->RCAUSE bit names (raw reset_cause byte), most-significant cause first.
+_RCAUSE_BITS = [
+    (0x40, "SYST"),  # system reset request
+    (0x20, "WDT"),   # watchdog
+    (0x10, "EXT"),   # external reset pin
+    (0x04, "BOD33"), # 3.3V brownout
+    (0x02, "BOD12"), # 1.2V core brownout
+    (0x01, "POR"),   # power-on reset
+]
+
+
+def reset_cause_names(reset_cause):
+    """Decode a raw SAMD21 RCAUSE byte into a list of set-cause names."""
+    if reset_cause is None:
+        return None
+    names = [name for bit, name in _RCAUSE_BITS if reset_cause & bit]
+    return names or ["NONE"]
 
 # StatusPayload: lat_e7(i32) lon_e7(i32) battery_mv(u16) battery_pct(u8) flags(u8)
 #                heading_deg_x10(u16) heading_accuracy(u16)
@@ -97,7 +130,8 @@ LORA_PAYLOAD_SIZE     = HEADER_SIZE + FULL_STATE_SIZE + 1
 LORA_BUNDLE_MAX_SIZE  = HEADER_SIZE + FULL_STATE_SIZE + 1 + BUNDLE_MAX_DELTAS * DELTA_SIZE + 1
 TIME_SYNC_LORA_SIZE   = HEADER_SIZE + TIME_SYNC_PAYLOAD_SIZE + 1
 ACK_SUMMARY_LORA_SIZE = HEADER_SIZE + ACK_SUMMARY_PAYLOAD_SIZE + 1
-AWAKEN_LORA_SIZE      = HEADER_SIZE + AWAKEN_PAYLOAD_SIZE + 1
+AWAKEN_LORA_SIZE      = HEADER_SIZE + AWAKEN_PAYLOAD_SIZE + 1       # 9 (legacy)
+AWAKEN_LORA_SIZE_V2   = HEADER_SIZE + AWAKEN_PAYLOAD_SIZE_V2 + 1    # 11 (current)
 CMD_CALIBRATE_LORA_SIZE = HEADER_SIZE + CMD_CALIBRATE_PAYLOAD_SIZE + 1
 CMD_RESET_LORA_SIZE   = HEADER_SIZE + CMD_RESET_PAYLOAD_SIZE + 1
 CMD_ACK_LORA_SIZE     = HEADER_SIZE + CMD_ACK_PAYLOAD_SIZE + 1
@@ -292,21 +326,45 @@ def decode_status(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Option
 
 
 def decode_awaken(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Optional[dict]:
-    if len(raw_lora_payload) < AWAKEN_LORA_SIZE:
-        return None
-    if crc8(raw_lora_payload[:-1]) != raw_lora_payload[-1]:
+    # Length-adaptive: accept the current 11-byte frame (uid_hash + reset_cause +
+    # hang_zone) and the legacy 9-byte frame (uid_hash only). This must stay
+    # tolerant of the shorter frame so a not-yet-reflashed node doesn't produce a
+    # decode failure during a firmware rollout — the diagnostic fields just come
+    # back as None. `len` here is the exact LoRa payload the base forwarded.
+    n = len(raw_lora_payload)
+    if n >= AWAKEN_LORA_SIZE_V2:
+        frame_len, has_diag = AWAKEN_LORA_SIZE_V2, True
+    elif n >= AWAKEN_LORA_SIZE:
+        frame_len, has_diag = AWAKEN_LORA_SIZE, False
+    else:
         return None
 
-    magic, pkt_type, node_id, seq = struct.unpack_from(HEADER_FMT, raw_lora_payload, 0)
+    frame = raw_lora_payload[:frame_len]
+    if crc8(frame[:-1]) != frame[-1]:
+        return None
+
+    magic, pkt_type, node_id, seq = struct.unpack_from(HEADER_FMT, frame, 0)
     if magic != PKT_MAGIC or pkt_type != PKT_AWAKEN:
         return None
 
-    (uid_hash,) = struct.unpack_from(AWAKEN_PAYLOAD_FMT, raw_lora_payload, HEADER_SIZE)
+    reset_cause = None
+    hang_zone = None
+    if has_diag:
+        uid_hash, reset_cause, hang_zone = struct.unpack_from(
+            AWAKEN_PAYLOAD_FMT_V2, frame, HEADER_SIZE)
+    else:
+        (uid_hash,) = struct.unpack_from(AWAKEN_PAYLOAD_FMT, frame, HEADER_SIZE)
+
     return {
         "node_id": node_id,
         "seq": seq,
         "rssi": rssi,
         "uid_hash": uid_hash,
+        "reset_cause": reset_cause,
+        "reset_cause_names": reset_cause_names(reset_cause),
+        "hang_zone": hang_zone,
+        "hang_zone_name": (HANG_ZONE_NAMES.get(hang_zone) if hang_zone is not None
+                           else None),
     }
 
 

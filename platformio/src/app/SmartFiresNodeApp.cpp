@@ -6,6 +6,7 @@
 
 #include "calibration/CalibrationDebug.h"
 #include "logging/DebugLogger.h"
+#include "platform/ResetDiagnostics.h"
 
 #include <Arduino.h>
 #include <string.h>
@@ -290,6 +291,11 @@ void SmartFiresNodeApp::sendAwakenHandshake() {
 
   BinaryPacket::AwakenPayload awaken = {};
   awaken.uid_hash = _cfg.deviceUidHash;
+  // Carry this boot's reset cause + prior hang zone out to the base/Jetson so a
+  // watchdog reboot is attributable on the wire (see ResetDiagnostics). Constant
+  // for the life of the boot, so it rides every AWAKEN retry identically.
+  awaken.reset_cause = ResetDiagnostics::resetCause();
+  awaken.hang_zone   = ResetDiagnostics::hangZone();
 
   const uint8_t seqUsed = _awakenSeq;
 
@@ -300,9 +306,12 @@ void SmartFiresNodeApp::sendAwakenHandshake() {
     const bool ok = _radio.sendAwakenHandshake(buf, len);
 
     LOG_INFO("app",
-             "awaken_direct_send seq=%u uid_hash=0x%08lX len=%u ok=%u",
+             "awaken_direct_send seq=%u uid_hash=0x%08lX reset_cause=0x%02X "
+             "hang_zone=%u len=%u ok=%u",
              static_cast<unsigned int>(seqUsed),
              static_cast<unsigned long>(_cfg.deviceUidHash),
+             static_cast<unsigned int>(awaken.reset_cause),
+             static_cast<unsigned int>(awaken.hang_zone),
              static_cast<unsigned int>(len), ok ? 1 : 0);
 
     if (!ok) {

@@ -350,6 +350,11 @@ def run_receive(
                         # watchdog-triggered restarts) are visible in telemetry.csv.
                         # A booting node re-broadcasts AWAKEN every 5 s until it
                         # receives TIME_SYNC, so one reboot may produce several rows.
+                        # reset_cause / hang_zone are present on nodes flashed with
+                        # the reset diagnostics build and None on legacy (9-byte
+                        # AWAKEN) nodes — see packet.decode_awaken.
+                        reset_cause = awaken.get("reset_cause")
+                        hang_zone = awaken.get("hang_zone")
                         awaken_row = {
                             "timestamp": datetime.utcnow().isoformat(timespec="milliseconds"),
                             "packet_type": "awaken",
@@ -357,12 +362,22 @@ def run_receive(
                             "seq": hdr_seq,
                             "rssi": event.get("rssi"),
                             "uid_hash": f"0x{uid_hash:08x}" if isinstance(uid_hash, int) else "",
+                            "reset_cause": reset_cause,
+                            "reset_cause_names": awaken.get("reset_cause_names"),
+                            "hang_zone": hang_zone,
+                            "hang_zone_name": awaken.get("hang_zone_name"),
                         }
                         logger.write_row(awaken_row)
                         _append_jsonl(status_path, awaken_row)
+                        cause_str = (
+                            f" reset_cause=0x{reset_cause:02x}"
+                            f"({','.join(awaken.get('reset_cause_names') or [])})"
+                            f" hang_zone={awaken.get('hang_zone_name')}"
+                            if reset_cause is not None else ""
+                        )
                         log_fn(
-                            f"[EDGE][AWAKEN] node={hdr_node} seq={hdr_seq} "
-                            f"action=send_time_sync",
+                            f"[EDGE][AWAKEN] node={hdr_node} seq={hdr_seq}"
+                            f"{cause_str} action=send_time_sync",
                             int(hdr_node),
                         )
                         _send_time_sync(

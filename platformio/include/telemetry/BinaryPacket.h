@@ -8,7 +8,8 @@
 // Binary wire format for SmartFires telemetry.
 //
 // LoRa payloads — node -> base:
-//   AWAKEN:     [PktHeader:4][AwakenPayload:4][crc8:1]                                    =   9 bytes
+//   AWAKEN:     [PktHeader:4][AwakenPayload:6][crc8:1]                                    =  11 bytes
+//              (legacy pre-diagnostics AwakenPayload was 4 bytes / 9-byte frame; decodeAwaken accepts both)
 //   BUNDLE:     [PktHeader:4][FullStatePayload:20][n_deltas:1][DeltaPayload×n][crc8:1]  ≤ 194 bytes
 //   STATUS:     [PktHeader:4][StatusPayload:20][crc8:1]                                 =  25 bytes
 //   CMD_ACK:    [PktHeader:4][CmdAckPayload:6][crc8:1]                                  =  11 bytes
@@ -63,6 +64,9 @@ struct __attribute__((packed)) PktHeader {
 
 struct __attribute__((packed)) AwakenPayload {
     uint32_t uid_hash;
+    uint8_t  reset_cause;   // raw PM->RCAUSE.reg from this boot (WDT/BOD/POR/...)
+    uint8_t  hang_zone;     // HangZone breadcrumb (platform/ResetDiagnostics.h);
+                            // 0 = ZONE_UNKNOWN when not a WDT reset or breadcrumb invalid
 };
 
 struct __attribute__((packed)) FullStatePayload {
@@ -149,7 +153,7 @@ static constexpr uint8_t DELTA_FLAG_PM4_CLAMPED      = 0x20;
 static constexpr uint8_t DELTA_FLAG_PM10_CLAMPED     = 0x40;
 
 static_assert(sizeof(PktHeader)           ==  4, "PktHeader must be 4 bytes");
-static_assert(sizeof(AwakenPayload)       ==  4, "AwakenPayload must be 4 bytes");
+static_assert(sizeof(AwakenPayload)       ==  6, "AwakenPayload must be 6 bytes");
 static_assert(sizeof(FullStatePayload)    == 20, "FullStatePayload must be 20 bytes");
 static_assert(sizeof(StatusPayload)       == 20, "StatusPayload must be 20 bytes");
 static_assert(sizeof(TimeSyncPayload)     ==  8, "TimeSyncPayload must be 8 bytes");
@@ -163,7 +167,13 @@ static constexpr uint8_t kBundleMaxDeltas = 14;
 
 // LoRa payload sizes (no UART framing). Each includes a trailing CRC-8 byte.
 static constexpr size_t kAwakenLoRaSize =
-    sizeof(PktHeader) + sizeof(AwakenPayload) + 1;                      //   9
+    sizeof(PktHeader) + sizeof(AwakenPayload) + 1;                      //  11
+// Legacy pre-diagnostics AWAKEN frame (uid_hash-only, 4-byte payload). Kept so
+// decodeAwaken() can accept nodes flashed before the reset_cause/hang_zone fields
+// were added, without a length-failure flood during a mixed-firmware rollout.
+static constexpr size_t kAwakenPayloadLegacyLen = 4;
+static constexpr size_t kAwakenLoRaSizeLegacy =
+    sizeof(PktHeader) + kAwakenPayloadLegacyLen + 1;                    //   9
 static constexpr size_t kStatusLoRaSize =
     sizeof(PktHeader) + sizeof(StatusPayload) + 1;                      //  25
 static constexpr size_t kTimeSyncLoRaSize =
@@ -196,7 +206,7 @@ inline uint8_t crc8(const uint8_t* data, size_t len) {
     return crc;
 }
 
-// ---------- encode: raw LoRa AWAKEN payload (4 bytes) ----------
+// ---------- encode: raw LoRa AWAKEN payload (6 bytes) ----------
 
 inline uint8_t encodeAwakenPayload(
     uint8_t node_id, uint8_t seq,
@@ -460,14 +470,28 @@ inline bool decodeStatus(
     return hdr_out.magic == PKT_MAGIC && hdr_out.pkt_type == PKT_STATUS;
 }
 
+// Length-adaptive: accepts both the current 11-byte frame (6-byte payload with
+// reset_cause/hang_zone) and the legacy 9-byte frame (4-byte uid_hash-only
+// payload). On a legacy frame the new fields default to 0 (ZONE_UNKNOWN /
+// reset_cause=0), so a base flashed with this build decodes a not-yet-updated
+// node without a CRC/length failure. `len` is the exact received LoRa payload
+// length, so it is 9 or 11 in practice; the CRC is validated over whichever
+// frame length we actually consume.
 inline bool decodeAwaken(
     const uint8_t* raw, size_t len,
     PktHeader& hdr_out, AwakenPayload& awaken_out)
 {
-    if (len < kAwakenLoRaSize) return false;
-    if (crc8(raw, len - 1) != raw[len - 1]) return false;
+    size_t payload_len;
+    if (len >= kAwakenLoRaSize)              payload_len = sizeof(AwakenPayload); // 6
+    else if (len >= kAwakenLoRaSizeLegacy)   payload_len = kAwakenPayloadLegacyLen; // 4
+    else                                     return false;
+
+    const size_t frame_len = sizeof(PktHeader) + payload_len + 1;
+    if (crc8(raw, frame_len - 1) != raw[frame_len - 1]) return false;
+
+    awaken_out = AwakenPayload{}; // zero-init so legacy frames leave new fields at 0
     memcpy(&hdr_out, raw, sizeof(PktHeader));
-    memcpy(&awaken_out, raw + sizeof(PktHeader), sizeof(AwakenPayload));
+    memcpy(&awaken_out, raw + sizeof(PktHeader), payload_len);
     return hdr_out.magic == PKT_MAGIC && hdr_out.pkt_type == PKT_AWAKEN;
 }
 

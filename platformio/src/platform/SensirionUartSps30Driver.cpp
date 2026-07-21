@@ -4,6 +4,8 @@
 // ---
 #include "platform/SensirionUartSps30Driver.h"
 
+#include "platform/ResetDiagnostics.h"
+
 SensirionUartSps30Driver::SensirionUartSps30Driver(Stream &serial)
     : _serial(serial) {}
 
@@ -24,6 +26,9 @@ bool SensirionUartSps30Driver::startMeasurement() {
     return false;
   }
 
+  // SPS30 UART command exchange — attributed to ZONE_UART_SPS30 on a hang.
+  ResetDiagnostics::ZoneScope zone(ResetDiagnostics::ZONE_UART_SPS30);
+
   // Wake-up sequence is useful if the sensor was previously put into low power
   // by older test code or a future sleep implementation.
   _sensor.wakeUpSequence();
@@ -39,6 +44,8 @@ bool SensirionUartSps30Driver::stopMeasurement() {
   if (!_begun) {
     return false;
   }
+
+  ResetDiagnostics::ZoneScope zone(ResetDiagnostics::ZONE_UART_SPS30);
 
   const int16_t err = _sensor.stopMeasurement();
 
@@ -56,6 +63,9 @@ bool SensirionUartSps30Driver::read(Data &out) {
   if (!_begun || !_measuring) {
     return false;
   }
+
+  // Per-cycle SPS30 measurement read over UART — attributed to ZONE_UART_SPS30.
+  ResetDiagnostics::ZoneScope zone(ResetDiagnostics::ZONE_UART_SPS30);
 
   float nc0p5 = 0.0f;
   float nc1p0 = 0.0f;

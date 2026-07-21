@@ -7,6 +7,7 @@
 
 #include "config/NetworkConfig.h"
 #include "logging/DebugLogger.h"
+#include "platform/ResetDiagnostics.h"
 
 #include <Arduino.h>
 
@@ -56,6 +57,11 @@ bool RadioHeadTdmaDriver::send(const uint8_t *data,
     return false;
   }
 
+  // Radio TX (sendto + waitPacketSent) is the prime WDT-hang suspect — RH_RF95's
+  // leading no-timeout waitPacketSent() can spin on a missed TX-done IRQ. Mark
+  // the zone so such a hang is attributed to ZONE_RADIO_TX (see ResetDiagnostics).
+  ResetDiagnostics::ZoneScope zone(ResetDiagnostics::ZONE_RADIO_TX);
+
   _manager.setHeaderId(++_nextDatagramId);
   _manager.setHeaderFlags(RH_FLAGS_NONE, RH_FLAGS_ACK | RH_FLAGS_RETRY);
   const bool queued = _manager.sendto(const_cast<uint8_t *>(data), len, to);
@@ -85,6 +91,10 @@ bool RadioHeadTdmaDriver::sendToWait(const uint8_t *data,
   if (!_healthy || !data || len == 0) {
     return false;
   }
+
+  // sendtoWait() blocks on RadioHead's own no-timeout waitPacketSent() inside
+  // RH_RF95::send() — the AWAKEN handshake path. Attributed to ZONE_RADIO_TX.
+  ResetDiagnostics::ZoneScope zone(ResetDiagnostics::ZONE_RADIO_TX);
 
   return _manager.sendtoWait(const_cast<uint8_t *>(data), len, to);
 }
@@ -150,6 +160,10 @@ void RadioHeadTdmaDriver::acknowledge(uint8_t from, uint8_t id) {
   if (!_healthy) {
     return;
   }
+
+  // Sends an ACK then waits (bounded) for it to finish transmitting — still a
+  // radio-TX blocking region, so attributed to ZONE_RADIO_TX.
+  ResetDiagnostics::ZoneScope zone(ResetDiagnostics::ZONE_RADIO_TX);
 
   // RHReliableDatagram::acknowledge() does exactly this, but it's protected,
   // so we can't call it directly through `_manager` — mirror it here. The
