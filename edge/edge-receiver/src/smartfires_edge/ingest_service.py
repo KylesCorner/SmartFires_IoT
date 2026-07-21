@@ -202,6 +202,8 @@ def run_receive(
     session_dir = cfg.data_dir / session_stamp
     state_path = session_dir / "packet_loss_state.json"
     status_path = session_dir / "status.jsonl"
+    if live_state is not None:
+        live_state.set_log_dir(session_dir)
 
     logger = DurableCsvLogger(session_dir, fsync_every_row=cfg.fsync_every_row)
 
@@ -549,6 +551,8 @@ def run_receive(
                         session_dir = cfg.data_dir / session_stamp
                         state_path = session_dir / "packet_loss_state.json"
                         status_path = session_dir / "status.jsonl"
+                        if live_state is not None:
+                            live_state.set_log_dir(session_dir)
 
                         logger = DurableCsvLogger(session_dir, fsync_every_row=cfg.fsync_every_row)
                         session_meta = SessionMetaLogger(
