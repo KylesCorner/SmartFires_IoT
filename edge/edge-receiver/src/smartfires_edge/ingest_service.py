@@ -355,6 +355,7 @@ def run_receive(
                         # AWAKEN) nodes — see packet.decode_awaken.
                         reset_cause = awaken.get("reset_cause")
                         hang_zone = awaken.get("hang_zone")
+                        reset_cause_names = awaken.get("reset_cause_names")
                         awaken_row = {
                             "timestamp": datetime.utcnow().isoformat(timespec="milliseconds"),
                             "packet_type": "awaken",
@@ -363,11 +364,17 @@ def run_receive(
                             "rssi": event.get("rssi"),
                             "uid_hash": f"0x{uid_hash:08x}" if isinstance(uid_hash, int) else "",
                             "reset_cause": reset_cause,
-                            "reset_cause_names": awaken.get("reset_cause_names"),
+                            "reset_cause_names": reset_cause_names,
                             "hang_zone": hang_zone,
                             "hang_zone_name": awaken.get("hang_zone_name"),
                         }
-                        logger.write_row(awaken_row)
+                        # CSV cells can't hold a list — reset_cause_names is
+                        # multi-valued (e.g. ["WDT"]) — so the CSV row gets a
+                        # "|"-joined string while status.jsonl keeps the list.
+                        logger.write_row({
+                            **awaken_row,
+                            "reset_cause_names": "|".join(reset_cause_names) if reset_cause_names else "",
+                        })
                         _append_jsonl(status_path, awaken_row)
                         cause_str = (
                             f" reset_cause=0x{reset_cause:02x}"

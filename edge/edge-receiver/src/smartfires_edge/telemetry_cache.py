@@ -43,6 +43,13 @@ def _ts_ms(raw: str) -> Optional[int]:
     return int(d.replace(tzinfo=timezone.utc).timestamp() * 1000)
 
 
+def _int_or_none(raw: str) -> Optional[int]:
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+
 class SessionTelemetryCache:
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -54,7 +61,7 @@ class SessionTelemetryCache:
         self._samples: dict[int, list[tuple]] = {}
         # node -> {absolute ACTIVITY_BUCKET_MS bucket index -> row count}
         self._activity: dict[int, dict[int, int]] = {}
-        self._awaken: list[tuple[int, int]] = []  # (t_ms, node_id)
+        self._awaken: list[dict] = []  # see _ingest_row's "awaken" branch for shape
         self._first_ms: Optional[int] = None
 
     # ------------------------------------------------------------------
@@ -137,7 +144,23 @@ class SessionTelemetryCache:
                 return
             self._samples.setdefault(node, []).append(tuple(vals))
         elif ptype == "awaken":
-            self._awaken.append((t, node))
+            def _col(name: str) -> str:
+                i = idx.get(name)
+                return parts[i] if i is not None and i < len(parts) else ""
+
+            names_raw = _col("reset_cause_names")
+            self._awaken.append({
+                "t_ms": t,
+                "node_id": node,
+                "seq": _int_or_none(_col("seq")),
+                "rssi": _int_or_none(_col("rssi")),
+                # None on legacy (9-byte, uid_hash-only) AWAKEN frames — see
+                # packet.decode_awaken.
+                "reset_cause": _int_or_none(_col("reset_cause")),
+                "reset_cause_names": names_raw.split("|") if names_raw else None,
+                "hang_zone": _int_or_none(_col("hang_zone")),
+                "hang_zone_name": _col("hang_zone_name") or None,
+            })
 
     # ------------------------------------------------------------------
     # Queries
@@ -228,7 +251,10 @@ class SessionTelemetryCache:
                     counts[di] += c
                 nodes[str(node)] = counts
 
-            awaken = [[t, n] for t, n in self._awaken if start <= t <= end]
+            awaken = [
+                [e["t_ms"], e["node_id"]] for e in self._awaken
+                if start <= e["t_ms"] <= end
+            ]
             return {
                 "start_ms": start,
                 "end_ms": end,
@@ -236,3 +262,12 @@ class SessionTelemetryCache:
                 "nodes": nodes,
                 "awaken": awaken,
             }
+
+    def awaken_events(self, path: Optional[Path], limit: int = 500) -> list[dict]:
+        """This session's AWAKEN (node boot/reboot) events, newest first, with
+        reset cause and hang-zone breadcrumb when the node firmware reports
+        them — feeds the Map & History page's reboot event table."""
+        with self._lock:
+            self._refresh(path)
+            events = sorted(self._awaken, key=lambda e: e["t_ms"], reverse=True)
+            return events[: max(limit, 1)]

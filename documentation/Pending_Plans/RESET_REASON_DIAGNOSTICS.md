@@ -35,11 +35,20 @@ capture) remains deferred. Touchpoints as built:
   acknowledge), `ZONE_I2C_SHT31`, `ZONE_I2C_GPS`, `ZONE_I2C_IMU`,
   `ZONE_UART_SPS30`.
 - **Edge:** `ingest_service.py` writes `reset_cause`/`reset_cause_names`/
-  `hang_zone`/`hang_zone_name` into each `awaken` row of `status.jsonl`.
+  `hang_zone`/`hang_zone_name` into each `awaken` row of `status.jsonl` and
+  `telemetry.csv` (the latter was silently crashing the entire ingest loop on
+  every AWAKEN until `csv_logger.CSV_COLUMNS` was updated to include the four
+  new fields — `csv.DictWriter` defaults to `extrasaction="raise"`).
+- **Dashboard restart-bucketing:** `SessionTelemetryCache.awaken_events()` +
+  `GET /api/awaken_events` surface every AWAKEN this session (timestamp, node,
+  reset cause, hang zone, seq, RSSI) in a "Node Reboot Events" table on the
+  Map & History page (`map_history.html`/`map_history_page.js`), colour-flagging
+  WDT-caused reboots. Current-session only (matches the rest of the dashboard);
+  legacy pre-diagnostics AWAKEN frames show "—".
 
 Remaining before moving to `Completed_Plans/`: hardware validation (induced-hang
-test per the Validation section), dashboard restart-bucketing, and the
-SOFTWARE_DESIGN.md / TDMA_PROTOCOL.md / BANDWIDTH_SCALING.md wire-table updates.
+test per the Validation section) and the SOFTWARE_DESIGN.md / TDMA_PROTOCOL.md /
+BANDWIDTH_SCALING.md wire-table updates.
 
 ## Background
 

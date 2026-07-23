@@ -43,6 +43,24 @@
       </section>
 
     </div>
+
+    <section class="panel section-spacer">
+      <h2>Node Reboot Events</h2>
+      <p class="section-hint">Every AWAKEN this session (a node (re)booting, e.g. a watchdog-triggered restart). Reset cause and hang zone are only reported by nodes flashed with the reset-diagnostics firmware — legacy nodes show "—".</p>
+      <table id="awaken-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Node</th>
+            <th>Reset Cause</th>
+            <th>Hang Zone</th>
+            <th>Seq</th>
+            <th>RSSI</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
   </main>
 
   <script src="/static/vendor/leaflet/leaflet.js"></script>

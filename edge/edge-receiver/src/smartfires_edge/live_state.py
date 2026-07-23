@@ -101,6 +101,11 @@ class LiveState:
         with self._session_dir_lock:
             self._session_log_dir = session_dir
 
+    def session_log_dir(self) -> Path | None:
+        """The active session's directory, or None before ingest has started."""
+        with self._session_dir_lock:
+            return self._session_log_dir
+
     def push_log(
         self,
         msg: str,
