@@ -87,3 +87,5 @@ then `sudo udevadm control --reload-rules && sudo udevadm trigger`.
 
 Current working web command: (Do not delete)
 smartfires-edge web --port /dev/smartfires-base --sniffer-port /dev/smartfires-sniffer --num-slots 4
+
+pio device monitor -e feather_m0_lora_node_debug -f log2file
