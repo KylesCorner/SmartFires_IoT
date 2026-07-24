@@ -2,7 +2,7 @@
 name: reset-reason-diagnostics
 description: Plan to report node reset cause (WDT/brownout/power-on) and a hang-zone breadcrumb through the AWAKEN packet, so watchdog reboots can be attributed to the I2C-stall vs RadioHead-hang candidates.
 category: plan-pending
-status: draft
+status: implemented-phase-1-2
 related_docs:
   - watchdog-timer
   - reset-system
@@ -11,6 +11,44 @@ related_docs:
 ---
 
 # Reset Reason Diagnostics
+
+## Implementation status (Phase 1 + Phase 2 shipped)
+
+Both phases below are implemented as of this build; Phase 3 (WDT early-warning PC
+capture) remains deferred. Touchpoints as built:
+
+- **Wire:** `AwakenPayload` grew 4 → 6 bytes (`reset_cause`, `hang_zone`); AWAKEN
+  LoRa frame 9 → 11 bytes. `decodeAwaken` (firmware) and `decode_awaken`
+  (`packet.py`) are length-adaptive — a legacy 9-byte node still decodes, new
+  fields → 0/None.
+- **Breadcrumb:** `include/platform/ResetDiagnostics.h` + `src/platform/
+  ResetDiagnostics.cpp` hold the `.noinit` `ResetBreadcrumb` (magic + zone +
+  ~zone + boot_count), `harvest()`, `markZone()`, and a `ZoneScope` RAII guard.
+- **Linker:** `ldscripts/flash_with_bootloader_noinit.ld` adds a `.noinit
+  (NOLOAD)` section; node envs point `board_build.ldscript` at it and define
+  `-DSMARTFIRES_RESET_DIAG`. Base/native are unchanged (plain zeroed global,
+  stock ldscript).
+- **Harvest + reporting:** `main.cpp` (node) calls `ResetDiagnostics::harvest()`
+  right after reading `PM->RCAUSE`, marks `ZONE_BOOT` → `ZONE_LOOP_IDLE`;
+  `SmartFiresNodeApp::sendAwakenHandshake()` populates the payload.
+- **Zones instrumented:** `ZONE_RADIO_TX` (RadioHeadTdmaDriver send/sendToWait/
+  acknowledge), `ZONE_I2C_SHT31`, `ZONE_I2C_GPS`, `ZONE_I2C_IMU`,
+  `ZONE_UART_SPS30`.
+- **Edge:** `ingest_service.py` writes `reset_cause`/`reset_cause_names`/
+  `hang_zone`/`hang_zone_name` into each `awaken` row of `status.jsonl` and
+  `telemetry.csv` (the latter was silently crashing the entire ingest loop on
+  every AWAKEN until `csv_logger.CSV_COLUMNS` was updated to include the four
+  new fields — `csv.DictWriter` defaults to `extrasaction="raise"`).
+- **Dashboard restart-bucketing:** `SessionTelemetryCache.awaken_events()` +
+  `GET /api/awaken_events` surface every AWAKEN this session (timestamp, node,
+  reset cause, hang zone, seq, RSSI) in a "Node Reboot Events" table on the
+  Map & History page (`map_history.html`/`map_history_page.js`), colour-flagging
+  WDT-caused reboots. Current-session only (matches the rest of the dashboard);
+  legacy pre-diagnostics AWAKEN frames show "—".
+
+Remaining before moving to `Completed_Plans/`: hardware validation (induced-hang
+test per the Validation section) and the SOFTWARE_DESIGN.md / TDMA_PROTOCOL.md /
+BANDWIDTH_SCALING.md wire-table updates.
 
 ## Background
 

@@ -202,6 +202,8 @@ def run_receive(
     session_dir = cfg.data_dir / session_stamp
     state_path = session_dir / "packet_loss_state.json"
     status_path = session_dir / "status.jsonl"
+    if live_state is not None:
+        live_state.set_log_dir(session_dir)
 
     logger = DurableCsvLogger(session_dir, fsync_every_row=cfg.fsync_every_row)
 
@@ -348,6 +350,12 @@ def run_receive(
                         # watchdog-triggered restarts) are visible in telemetry.csv.
                         # A booting node re-broadcasts AWAKEN every 5 s until it
                         # receives TIME_SYNC, so one reboot may produce several rows.
+                        # reset_cause / hang_zone are present on nodes flashed with
+                        # the reset diagnostics build and None on legacy (9-byte
+                        # AWAKEN) nodes — see packet.decode_awaken.
+                        reset_cause = awaken.get("reset_cause")
+                        hang_zone = awaken.get("hang_zone")
+                        reset_cause_names = awaken.get("reset_cause_names")
                         awaken_row = {
                             "timestamp": datetime.utcnow().isoformat(timespec="milliseconds"),
                             "packet_type": "awaken",
@@ -355,12 +363,28 @@ def run_receive(
                             "seq": hdr_seq,
                             "rssi": event.get("rssi"),
                             "uid_hash": f"0x{uid_hash:08x}" if isinstance(uid_hash, int) else "",
+                            "reset_cause": reset_cause,
+                            "reset_cause_names": reset_cause_names,
+                            "hang_zone": hang_zone,
+                            "hang_zone_name": awaken.get("hang_zone_name"),
                         }
-                        logger.write_row(awaken_row)
+                        # CSV cells can't hold a list — reset_cause_names is
+                        # multi-valued (e.g. ["WDT"]) — so the CSV row gets a
+                        # "|"-joined string while status.jsonl keeps the list.
+                        logger.write_row({
+                            **awaken_row,
+                            "reset_cause_names": "|".join(reset_cause_names) if reset_cause_names else "",
+                        })
                         _append_jsonl(status_path, awaken_row)
+                        cause_str = (
+                            f" reset_cause=0x{reset_cause:02x}"
+                            f"({','.join(awaken.get('reset_cause_names') or [])})"
+                            f" hang_zone={awaken.get('hang_zone_name')}"
+                            if reset_cause is not None else ""
+                        )
                         log_fn(
-                            f"[EDGE][AWAKEN] node={hdr_node} seq={hdr_seq} "
-                            f"action=send_time_sync",
+                            f"[EDGE][AWAKEN] node={hdr_node} seq={hdr_seq}"
+                            f"{cause_str} action=send_time_sync",
                             int(hdr_node),
                         )
                         _send_time_sync(
@@ -549,6 +573,8 @@ def run_receive(
                         session_dir = cfg.data_dir / session_stamp
                         state_path = session_dir / "packet_loss_state.json"
                         status_path = session_dir / "status.jsonl"
+                        if live_state is not None:
+                            live_state.set_log_dir(session_dir)
 
                         logger = DurableCsvLogger(session_dir, fsync_every_row=cfg.fsync_every_row)
                         session_meta = SessionMetaLogger(

@@ -325,14 +325,24 @@ void SmartFiresBaseApp::processIncomingLoRa() {
                static_cast<unsigned long>(_awakenRxCount),
                syncQueued ? "QUEUED" : "NO_ASSIGNMENT");
 
+      // Forward exactly the frame length decodeAwaken validated (legacy 9 or
+      // current 11 bytes), not pkt.len — the radio can deliver trailing bytes
+      // beyond the frame, and pkt.len > 11 would overflow `patched`.
+      const size_t awakenLen = pkt.len >= BinaryPacket::kAwakenLoRaSize
+                                   ? BinaryPacket::kAwakenLoRaSize
+                                   : BinaryPacket::kAwakenLoRaSizeLegacy;
       uint8_t patched[BinaryPacket::kAwakenLoRaSize];
-      memcpy(patched, pkt.data, pkt.len);
+      memcpy(patched, pkt.data, awakenLen);
       if (assignment) {
         patched[offsetof(BinaryPacket::PktHeader, node_id)] = assignment->nodeId;
+        // The node computed the trailing crc8 with node_id=0 (unassigned at
+        // boot); recompute after patching or the edge rejects the frame and
+        // drops uid_hash/reset_cause/hang_zone.
+        patched[awakenLen - 1] = BinaryPacket::crc8(patched, awakenLen - 1);
       }
       uint8_t awakenFrame[2 + 1 + 1 + 255 + 1] = {};
       const size_t awakenOutLen = BinaryPacket::encodeBaseFrame(
-          pkt.rssi, patched, pkt.len, awakenFrame, sizeof(awakenFrame));
+          pkt.rssi, patched, awakenLen, awakenFrame, sizeof(awakenFrame));
       if (awakenOutLen > 0) {
         const size_t written = _jetsonUart.write(awakenFrame, awakenOutLen);
         _rxForwardCount++;

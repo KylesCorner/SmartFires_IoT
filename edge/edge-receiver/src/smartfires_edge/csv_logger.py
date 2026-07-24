@@ -33,6 +33,10 @@ CSV_COLUMNS = [
     "retx_total",
     "fail_total",
     "delta_flags",
+    "reset_cause",
+    "reset_cause_names",
+    "hang_zone",
+    "hang_zone_name",
 ]
 
 

@@ -21,7 +21,7 @@ Wildfire IoT sensor network. Remote drone nodes collect environmental data (temp
     runs: SmartFiresNodeApp → PacketHandler → TdmaRadioService → RadioHeadTdmaDriver
     |
     | LoRa 915 MHz (RadioHead RHReliableDatagram, 13 dBm)
-    |   Node → Base: AWAKEN payload (9 bytes, on boot until TIME_SYNC received)
+    |   Node → Base: AWAKEN payload (11 bytes: uid_hash + reset_cause + hang_zone, on boot until TIME_SYNC received)
     |                BUNDLE payload (≤194 bytes, app-layer ACK-paced retry, TDMA-gated)
     |                STATUS payload (25 bytes, GPS + battery + DMP heading + link stats, every 15 min)
     |                CMD_ACK (11 bytes, acknowledges CALIBRATE/RESET commands)
@@ -293,7 +293,7 @@ RadioHeadTdmaDriver::send()               non-blocking LoRa TX for fresh telemet
 ### LoRa payloads — node → base
 
 ```
-AWAKEN:  [PktHeader: 4][AwakenPayload: 4][crc8: 1]                                    =  9 bytes
+AWAKEN:  [PktHeader: 4][AwakenPayload: 6][crc8: 1]                                    = 11 bytes
 BUNDLE:  [PktHeader: 4][FullStatePayload: 20][n_deltas: 1][DeltaPayload×n: n×12][crc8] ≤ 194 bytes
 STATUS:  [PktHeader: 4][StatusPayload: 20][crc8: 1]                                    = 25 bytes
 CMD_ACK: [PktHeader: 4][CmdAckPayload: 6][crc8: 1]                                    = 11 bytes
@@ -321,7 +321,7 @@ slots and call `TdmaClock::applySync(sessionMs)`.
 
 ```
 [0xAA][0x55][len: u8][rssi: i8][LoRa payload][crc8]
-  AWAKEN: len=10  → total frame 14 bytes
+  AWAKEN: len=12  → total frame 16 bytes
   STATUS: len=26  → total frame 30 bytes
   BUNDLE: len≤195 → total frame ≤199 bytes
 ```
@@ -350,7 +350,7 @@ slots and call `TdmaClock::applySync(sessionMs)`.
 | `0x03` | PKT_TIME_SYNC | Base→Nodes | 13 bytes | Broadcast, fire-and-forget |
 | `0x04` | PKT_BUNDLE | Node→Jetson | ≤194 bytes | 15 samples (ref + 14 deltas) |
 | `0x05` | PKT_STATUS | Node→Jetson | 25 bytes | GPS + battery + DMP heading + link stats, every 15 min |
-| `0x06` | PKT_AWAKEN | Node→Base | 9 bytes | Boot handshake; contains uid_hash |
+| `0x06` | PKT_AWAKEN | Node→Base | 11 bytes | Boot handshake; uid_hash + reset_cause + hang_zone (reset diagnostics). Legacy 9-byte uid_hash-only frame still decoded |
 | `0x07` | PKT_ACK_SUMMARY | Base→Node | 9 bytes | Base-generated app-layer reliability bitmap (not relayed from Jetson) |
 | `0x10` | PKT_CMD_CALIBRATE | Jetson→Node | 7 bytes | Forwarded by base; node just logs + ACKs (DMP self-calibrates regardless) |
 | `0x11` | PKT_CMD_RESET | Jetson→Node | 7 bytes | Forwarded by base; node logs + ACKs but does not yet actually reset |
@@ -504,7 +504,7 @@ design rationale and remaining test/bench-verification work.
 
 ```
 Node Feather — SmartFiresNodeApp::begin()
-  │  Broadcasts PKT_AWAKEN (9 bytes) to base station address
+  │  Broadcasts PKT_AWAKEN (11 bytes: uid_hash + reset_cause + hang_zone) to base station address
   │  Re-broadcasts every 5 s while waiting
   │  Sensors and duty cycle are HELD OFF until sync is received
   ▼

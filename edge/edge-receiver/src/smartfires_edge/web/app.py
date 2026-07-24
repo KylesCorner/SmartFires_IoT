@@ -61,12 +61,21 @@ def create_app(
     telemetry_cache = SessionTelemetryCache()
 
     def _current_session_csv() -> Optional[Path]:
-        """The active session's CSV — session dirs are UTC-stamped
-        YYYY-MM-DD_HHMMSS names, so the lexicographically last one is current."""
-        if not data_dir.exists():
+        """The active session's CSV, if it has been written to yet.
+
+        Uses live_state's session_log_dir (set on ingest startup and on every
+        "New Session" reset) rather than globbing data_dir for the
+        lexicographically last telemetry.csv — that glob would keep returning
+        the *previous* session's file for as long as the new session dir has
+        no telemetry.csv yet (the CSV is created lazily on first write_row),
+        making the history-backed chart show stale/foreign session data right
+        after a reset.
+        """
+        session_dir = live_state.session_log_dir()
+        if session_dir is None:
             return None
-        paths = sorted(data_dir.glob("*/telemetry.csv"))
-        return paths[-1] if paths else None
+        csv_path = session_dir / "telemetry.csv"
+        return csv_path if csv_path.exists() else None
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
@@ -188,6 +197,16 @@ def create_app(
             _current_session_csv(),
             buckets=min(max(buckets, 10), 2000),
             session_start_ms=int(session_start * 1000) if session_start else None,
+        )
+
+    @app.get("/api/awaken_events")
+    def awaken_events(limit: int = 500) -> list[dict]:
+        """This session's AWAKEN (node boot/reboot) events, newest first —
+        feeds the Map & History page's reboot event table. Includes reset
+        cause / hang-zone breadcrumb when the node firmware reports them
+        (None on legacy pre-reset-diagnostics nodes)."""
+        return telemetry_cache.awaken_events(
+            _current_session_csv(), limit=min(max(limit, 1), 2000)
         )
 
     @app.get("/api/status_history")

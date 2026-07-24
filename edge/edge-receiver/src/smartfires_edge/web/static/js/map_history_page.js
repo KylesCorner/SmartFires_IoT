@@ -229,6 +229,51 @@ function updateLossTable(nodes) {
   }
 }
 
+// ── Node Reboot Events ───────────────────────────────────────────────────────
+function formatResetCause(ev) {
+  if (ev.reset_cause === null || ev.reset_cause === undefined) return "—";
+  const names = (ev.reset_cause_names || []).join(", ") || "NONE";
+  return names;
+}
+
+function isWatchdogCause(ev) {
+  return Array.isArray(ev.reset_cause_names) && ev.reset_cause_names.includes("WDT");
+}
+
+function updateAwakenTable(events) {
+  const tbody = document.querySelector("#awaken-table tbody");
+  tbody.innerHTML = "";
+  if (!events || events.length === 0) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td colspan="6" style="color:#6a7480;font-style:italic">No AWAKEN events this session yet.</td>`;
+    tbody.appendChild(tr);
+    return;
+  }
+
+  for (const ev of events) {
+    const tr = document.createElement("tr");
+    const causeClass = isWatchdogCause(ev) ? "loss-high" : "";
+    const causeTitle =
+      ev.reset_cause !== null && ev.reset_cause !== undefined
+        ? `raw reset_cause=0x${Number(ev.reset_cause).toString(16).padStart(2, "0")}`
+        : "legacy AWAKEN frame — node not flashed with reset diagnostics";
+    tr.innerHTML = `
+      <td>${new Date(ev.t_ms).toLocaleString()}</td>
+      <td>${ev.node_id}</td>
+      <td class="${causeClass}" title="${causeTitle}">${formatResetCause(ev)}</td>
+      <td>${fmt(ev.hang_zone_name)}</td>
+      <td>${fmt(ev.seq)}</td>
+      <td>${fmt(ev.rssi)}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+async function pollAwakenEvents() {
+  const events = await Api.awakenEvents(500);
+  updateAwakenTable(events);
+}
+
 // ── Per-node hard reset ──────────────────────────────────────────────────────
 function wireResetButtons() {
   const tbody = document.querySelector("#loss-table tbody");
@@ -269,6 +314,7 @@ async function pollAll() {
 
   updateBaseMarker(baseStation);
   try { await pollStatusHistory(); } catch (_) {}
+  try { await pollAwakenEvents(); } catch (_) {}
   updateReceptionTimeline(nodes, timeline);
   updateLossTable(nodes);
 }

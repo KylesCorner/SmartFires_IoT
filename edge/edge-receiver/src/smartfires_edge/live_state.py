@@ -3,6 +3,7 @@ import threading
 import time
 from collections import deque
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Optional
 
 from smartfires_edge.packet_loss import PacketLossTracker
@@ -52,6 +53,8 @@ class LiveState:
         self._link_changed_at = time.time()
         self._session_id: int | None = None
         self._session_start: float | None = None
+        self._session_dir_lock = threading.Lock()
+        self._session_log_dir: Path | None = None
 
     def set_session(self, session_id: int, session_start: float) -> None:
         """Called by the ingest thread on startup and on each new-session reset."""
@@ -84,6 +87,25 @@ class LiveState:
                 "changed_at": self._link_changed_at,
             }
 
+    def set_log_dir(self, session_dir: Path) -> None:
+        """Point the on-disk log/debug files at a new session directory.
+
+        Called by the ingest thread on startup and on each "New Session"
+        reset, mirroring how session_dir tracks telemetry.csv/status.jsonl —
+        otherwise the Live Log / Debug pages' content only lives in the
+        in-memory ring buffers and is lost on process restart, which is
+        exactly the data needed to diagnose a reboot that happened between
+        rsyncs.
+        """
+        session_dir.mkdir(parents=True, exist_ok=True)
+        with self._session_dir_lock:
+            self._session_log_dir = session_dir
+
+    def session_log_dir(self) -> Path | None:
+        """The active session's directory, or None before ingest has started."""
+        with self._session_dir_lock:
+            return self._session_log_dir
+
     def push_log(
         self,
         msg: str,
@@ -91,15 +113,26 @@ class LiveState:
         source: str = "ingest",
         kind: str = "other",
     ) -> None:
+        entry = {
+            "t": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+            "msg": msg,
+            "node_id": node_id,
+            "source": source,
+            "kind": kind,
+        }
         with self._log_lock:
-            self._log_ring.append({
-                "t": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
-                "msg": msg,
-                "node_id": node_id,
-                "source": source,
-                "kind": kind,
-            })
+            self._log_ring.append(entry)
             self._log_total += 1
+        with self._session_dir_lock:
+            log_dir = self._session_log_dir
+        if log_dir is not None:
+            # Open/append/flush/close per line (no fsync — see
+            # ingest_service._append_jsonl's rationale): matches
+            # live_log_page.js's own "Save" export format (`t  msg`), so the
+            # file greps identically to what the dashboard shows.
+            with open(log_dir / "ingest_log.log", "a", encoding="utf-8") as f:
+                f.write(f"{entry['t']}  {msg}\n")
+                f.flush()
 
     def drain_log(self, since_idx: int) -> tuple[list[dict], int]:
         """Return log entries after since_idx and the new cursor.
@@ -119,6 +152,21 @@ class LiveState:
         with self._base_debug_lock:
             self._base_debug_ring.append(record)
             self._base_debug_total += 1
+        with self._session_dir_lock:
+            log_dir = self._session_log_dir
+        if log_dir is not None:
+            # record["t"] is the firmware's own millis() counter, not wall
+            # time — stamp arrival time separately so this file can be
+            # correlated against telemetry.csv/status.jsonl timestamps.
+            ts_wall = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+            with open(log_dir / "base_debug.log", "a", encoding="utf-8") as f:
+                f.write(
+                    f"{ts_wall} [{record.get('lvl', '?')}] "
+                    f"node={record.get('node', '?')} src={record.get('src', '?')} "
+                    f"seq={record.get('seq', '-')} t={record.get('t', '-')}  "
+                    f"{record.get('msg', '')}\n"
+                )
+                f.flush()
 
     def drain_base_debug(self, since_idx: int) -> tuple[list[dict], int]:
         """Same monotonic-cursor pattern as drain_log."""

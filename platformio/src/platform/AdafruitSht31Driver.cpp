@@ -6,6 +6,7 @@
 #include "platform/AdafruitSht31Driver.h"
 
 #include "logging/DebugLogger.h"
+#include "platform/ResetDiagnostics.h"
 
 #include <Arduino.h>
 #include <Wire.h>
@@ -112,9 +113,11 @@ bool AdafruitSht31Driver::begin(uint8_t address) {
   return ok;
 }
 
-bool AdafruitSht31Driver::read(float &temperatureC,
-                               float &humidityPct) {
+bool AdafruitSht31Driver::read(float &temperatureC, float &humidityPct) {
+  // Marks the shared-I2C SHT31 transaction so a WDT reboot that hangs here is
+  // attributed to ZONE_I2C_SHT31 (see ResetDiagnostics).
   ReadError finalError = ReadError::None;
+  ResetDiagnostics::ZoneScope zone(ResetDiagnostics::ZONE_I2C_SHT31);
 
   for (uint8_t attempt = 0; attempt < kReadAttempts; ++attempt) {
     float temp = NAN;

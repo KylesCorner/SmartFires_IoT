@@ -4,6 +4,8 @@
 // ---
 #include "platform/SparkfunIcm20948Driver.h"
 
+#include "platform/ResetDiagnostics.h"
+
 #include <math.h>
 
 SparkfunIcm20948Driver::SparkfunIcm20948Driver(TwoWire &wire)
@@ -53,6 +55,11 @@ bool SparkfunIcm20948Driver::read(Data &out) {
   if (!_begun) {
     return false;
   }
+
+  // DMP FIFO read over the shared I2C bus — attributed to ZONE_I2C_IMU on a hang
+  // (see ResetDiagnostics). Note the IMU is currently commented out of the node
+  // sensor array, so this path is dormant in the shipping build.
+  ResetDiagnostics::ZoneScope zone(ResetDiagnostics::ZONE_I2C_IMU);
 
   icm_20948_DMP_data_t dmpData;
   _imu.readDMPdataFromFIFO(&dmpData);

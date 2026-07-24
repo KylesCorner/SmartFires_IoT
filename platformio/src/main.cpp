@@ -75,6 +75,7 @@ void loop() {
 #include <Wire.h>
 
 #include "config/SystemHealthConfig.h"
+#include "platform/ResetDiagnostics.h"
 #include "platform/Samd21RamMonitor.h"
 
 #include "app/SmartFiresNodeApp.h"
@@ -316,6 +317,11 @@ void setup() {
   // observe whether the previous reset was WDT-triggered vs. power-on/other.
   const uint8_t resetCause = PM->RCAUSE.reg;
 
+  // Harvest the prior run's hang-zone breadcrumb (retained in .noinit RAM across
+  // a warm reset) and re-arm it for this run, before anything can hang. Both
+  // resetCause and the harvested zone ride out to the base in the AWAKEN packet.
+  ResetDiagnostics::harvest(resetCause);
+
   // Boot phase is the longest single stretch (fixed delay, serial wait, I2C
   // scan, sensor begin()) — armed with the longer of the two timeout tiers,
   // re-armed to the shorter steady-state one right before loop() begins.
@@ -329,8 +335,10 @@ void setup() {
 
   gLog.setMinLevel(LogLevel::Debug);
 
-  LOG_WARN("boot", "reset_cause=0x%02X wdt=%u", resetCause,
-           (resetCause & PM_RCAUSE_WDT) ? 1 : 0);
+  LOG_WARN("boot", "reset_cause=0x%02X wdt=%u hang_zone=%u boot_count=%u",
+           resetCause, (resetCause & PM_RCAUSE_WDT) ? 1 : 0,
+           static_cast<unsigned int>(ResetDiagnostics::hangZone()),
+           static_cast<unsigned int>(ResetDiagnostics::bootCount()));
 
   gRamMonitor.begin();
   Watchdog.reset();
@@ -427,6 +435,12 @@ void setup() {
   gRamMonitor.checkpoint("app_begin", "after");
 
   LOG_INFO("boot", "smart_fires_app_status=%d", 0);
+
+  // Boot done: from here a hang is in loop() code. ZoneScope inside the drivers
+  // narrows it further; if none is active when the WDT fires, the breadcrumb
+  // reads ZONE_LOOP_IDLE — itself the useful "both prime suspects innocent"
+  // signal.
+  ResetDiagnostics::markZone(ResetDiagnostics::ZONE_LOOP_IDLE);
 
   Watchdog.disable();
   Watchdog.enable(SystemHealthConfig::Watchdog::kSteadyStateTimeoutMs);

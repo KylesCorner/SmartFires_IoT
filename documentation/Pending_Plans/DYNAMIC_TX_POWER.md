@@ -73,6 +73,21 @@ Modeled directly on `CMD_CALIBRATE`/`CMD_RESET` (`PktHeader` + small payload + C
 base→node, acknowledged by the existing `CMD_ACK` (`0x13`) path — no new ack packet type
 needed.
 
+**Transport: reuse the existing pending-command queue.** Base-originated
+`CMD_SET_TX_POWER` sends go through the same `enqueuePendingCommand()`/`_pendingCommands`
+machinery that already defers Jetson-forwarded `CMD_CALIBRATE`/`CMD_RESET` to the base's
+slot-0 window — no parallel send path. Two consequences the decision loop must respect:
+
+- `kMaxPendingCommands` is 4 (`SmartFiresBaseApp.h`) and the queue is *shared* with
+  user-issued calibrate/reset commands; a full queue silently fails to enqueue
+  (`QUEUE_FULL` — the same limitation already documented for the per-node Reset button in
+  `RESET_SYSTEM.md`). With more than ~4 nodes all stepping in the same STATUS interval,
+  or with user resets queued, some enqueues will fail.
+- A failed enqueue must be treated as "no change issued": do **not** set
+  `pendingTxPowerDbm` — the loop simply retries the decision at the next STATUS interval.
+  Whether `kMaxPendingCommands` needs bumping is a deployment-size question, not one this
+  plan resolves.
+
 ```
 CmdSetTxPowerPayload (proposed):
   node_id   : uint8_t   (redundant with PktHeader.node_id, mirrors CMD_RESET's pattern)
@@ -160,14 +175,24 @@ Key properties:
 ### Fail-safe behavior
 
 - **Boot default is always the static baseline.** A node that reboots (power cycle, MCU
-  reset, hard `CMD_RESET`) comes back up at `kRadioTxPowerDbm`, not whatever the base last
-  commanded — the base's per-node state is reset to match on `findOrCreateNodeAssignment()`
-  re-registration (a fresh `AWAKEN` after reset looks identical to a first-ever boot from
-  the base's point of view, so this falls out of existing logic for free).
+  reset, WDT recovery, hard `CMD_RESET`) comes back up at `kRadioTxPowerDbm`, not whatever
+  the base last commanded. The base-side state reset does **not** fall out of
+  `findOrCreateNodeAssignment()` for free — for a known `uid_hash` that function *reuses*
+  the existing assignment record, so extended fields would persist across the node's
+  reboot. The base's AWAKEN handler already explicitly calls
+  `resetAckTracker(assignment->nodeId, "awaken")` for exactly this reason
+  (`SmartFiresBaseApp.cpp`, AWAKEN dispatch); reset
+  `currentTxPowerDbm`/`pendingTxPowerDbm`/`rssiHistory`/`lastRetxTotal`/`lastFailTotal` at
+  that same call site. One explicit line, same shape as the existing tracker reset. Bonus:
+  the AWAKEN payload now carries `reset_cause`/`hang_zone` (see
+  `RESET_REASON_DIAGNOSTICS.md`), so the base's debug log line for this reset can be
+  bucketed by why the node rebooted.
 - **Unconfirmed change reverts on timeout.** If `CMD_ACK` doesn't arrive within a bounded
-  window (mirror the existing `CLI_CMD_ACK_TIMEOUT_S`-style pattern used for
-  calibrate/reset), clear `pendingTxPowerDbm` and re-arm for another decision next
-  `STATUS` interval rather than assuming the change took effect.
+  window, clear `pendingTxPowerDbm` and re-arm for another decision next `STATUS` interval
+  rather than assuming the change took effect. Note the existing `CLI_CMD_ACK_TIMEOUT_S`
+  (5 s, `edge-receiver`'s `config.py`) is a *Jetson-side* warn timeout — the base has no
+  equivalent today, so this needs a new base-side constant (`kCmdAckTimeoutMs`,
+  `BaseConfig.h`) rather than a mirror of existing base code.
 - **Stale-sync-style safety net.** If a node goes quiet for longer than
   `kSyncStaleMs`-equivalent at the base's per-node tracking layer, treat its
   `currentTxPowerDbm` as unknown and don't issue further deltas relative to it until it
@@ -189,6 +214,28 @@ Key properties:
   judging link quality, it's discarding a base instruction it can no longer trust and
   falling back to the one value already known to work. No new packet or bandwidth needed;
   it reuses clock state the firmware already maintains.
+
+### Interaction with the watchdog reboot rate
+
+The hardware WDT is now shipped on both node and base, and the overnight 2026-07-14 soak
+recorded **15 WDT-recovered node reboots in one night**. Under the boot-default fail-safe
+above, every one of those reboots discards the node's converged power level and restarts
+it at the full `kRadioTxPowerDbm` baseline — and reconvergence is deliberately slow (one
+`kPowerStepDbm` step per 15-minute STATUS interval, so e.g. 13 → 5 dBm takes a full hour
+of clean link). At the observed reboot rate, a node could spend most of its time walking
+back down rather than sitting at its converged level, eroding most of the battery savings
+this plan exists to capture.
+
+This is a sequencing dependency, not a design flaw: the fail-safe is correct (a
+just-rebooted node at reduced power with no base contact is exactly the stuck state the
+plan must avoid), and `RESET_REASON_DIAGNOSTICS.md` (phases 1–2 implemented) exists to
+attribute and fix those hangs — current attribution points at the RadioHead
+`waitPacketSent()` path and shared-I2C stalls. **Land the hang fixes, or at least confirm
+the reboot rate has dropped to a few per week, before expecting this plan's projected
+savings to materialize.** The control loop itself can ship earlier — it's correct at any
+reboot rate, just less profitable at a high one — and its per-node debug log of
+AWAKEN-triggered power resets (bucketed by `reset_cause`, see above) doubles as a free
+measurement of exactly how much convergence time reboots are costing.
 
 ### Link liveness — what "active" means, and why TIME_SYNC frequency isn't the lever
 
@@ -252,18 +299,24 @@ both the current value (node list) and the change history (base debug log stream
 4. Add node-side dispatch in `CalibrationDebug.cpp`/`SmartFiresNodeApp.cpp` alongside the
    existing `CMD_CALIBRATE`/`CMD_RESET` handling, including a serial (`@SFDBG`) log line on
    apply — old value, new value, seq — matching the existing CALIBRATE/RESET log pattern.
-5. Extend the base's per-node assignment table with the state fields above.
+5. Extend the base's per-node assignment table with the state fields above, and reset
+   those fields in the AWAKEN handler alongside the existing
+   `resetAckTracker(nodeId, "awaken")` call (see "Fail-safe behavior" — this does *not*
+   happen automatically via `findOrCreateNodeAssignment()`).
 6. Implement the decision loop in `SmartFiresBaseApp` (or a small new
    `TxPowerController`-style collaborator it owns), gated on `STATUS` arrival the same way
-   `ACK_SUMMARY` dispatch is gated on TDMA slot 0.
+   `ACK_SUMMARY` dispatch is gated on TDMA slot 0. Sends go through the existing
+   `enqueuePendingCommand()` queue; a failed (queue-full) enqueue leaves
+   `pendingTxPowerDbm` unset so the decision re-arms next interval.
 7. Add base-side `DebugLogger`/`FramedDebugLogSink` log lines (same `PKT_DEBUG_LOG` path
    already streamed to the Jetson's `/debug` page and `/ws/base-debug` stream) at both
    decision points: when the loop issues a `CMD_SET_TX_POWER` (node, target, triggering
    reason — RSSI floor, headroom step-down, or silence-timeout probe) and when the
    corresponding `CMD_ACK` confirms or times out.
 8. Add `kPowerStepDbm`, `kMinTxPowerDbm`, `kRssiHeadroomThreshold`,
-   `kRssiFloorThreshold`, `kRetryAlarmThreshold` to `BaseConfig.h`, documented in
-   `tunable-parameters`.
+   `kRssiFloorThreshold`, `kRetryAlarmThreshold`, and `kCmdAckTimeoutMs` (base-side
+   CMD_ACK revert window — no base-side equivalent exists today) to `BaseConfig.h`,
+   documented in `tunable-parameters`.
 9. Native tests using `FakeRadio`/`FakeClock` (per the gap already flagged in
    `radio-rx-gating`'s testing section) — this plan adds another consumer that needs that
    fake, worth building it once for both.
@@ -299,6 +352,12 @@ both the current value (node list) and the change history (base debug log stream
 - Whether +20 dBm on the base (see below) needs a per-deployment regulatory check against
   the actual antenna gain in use, or whether it's safely under Part 15 limits for every
   antenna this project is likely to use — not resolved here.
+- Behavior under the debug build: `feather_m0_lora_node_debug` sets
+  `SMARTFIRES_STATUS_INTERVAL_MS=1000`, so the STATUS-gated loop would fire every second
+  with thresholds tuned for 15-minute deltas — likely churning power changes constantly on
+  the bench. Options: disable the loop below some minimum interval, scale thresholds by
+  the interval, or accept it as intentionally fast convergence for bench testing. Needs a
+  decision before flashing the debug env with this feature.
 
 ## Base station TX power ceiling (separate, static change)
 
@@ -311,16 +370,16 @@ masquerade as a node-side problem (see the RSSI-vs-retry disambiguation note abo
 
 Today the base and every node share one constant — `NetworkConfig::kRadioTxPowerDbm = 13`
 (`NetworkConfig.h:103`) — pulled through the same `RadioHeadTdmaDriver::Config::radioHeadCfg()`
-factory and applied identically by `RadioHeadTdmaDriver.cpp:41`'s
-`_rf95.setTxPower(_cfg.txPowerDbm, false)`. There's no role split, so the base can't be
-raised without also raising every node's static ceiling.
+factory and applied identically by the `_rf95.setTxPower(_cfg.txPowerDbm, false)` call in
+`RadioHeadTdmaDriver::begin()` (`RadioHeadTdmaDriver.cpp`). There's no role split, so the
+base can't be raised without also raising every node's static ceiling.
 
 **Decision: split it, and raise the base.** The base runs off the Jetson/USB supply, not a
 node battery, so TX current is free there in a way it categorically isn't for nodes — this
 plan's entire reason for *not* just running every node at max power doesn't apply to the
 base. Add a `kBaseRadioTxPowerDbm` constant (`BaseConfig.h`) and have the base's
-`main.cpp` construction (currently lines 17-19, `radioHeadCfg(0x01)` under
-`#if defined(LORA_BASE)`) use it instead of inheriting the shared default. Leave
+`main.cpp` construction (the `radioHeadCfg(0x01)` call under `#if defined(LORA_BASE)`)
+use it instead of inheriting the shared default. Leave
 `NetworkConfig::kRadioTxPowerDbm` untouched — it stays the per-node ceiling this plan's
 control loop targets.
 

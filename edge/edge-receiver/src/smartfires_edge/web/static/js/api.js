@@ -17,6 +17,9 @@ const Api = {
   async statusHistory(limit = 5000) {
     return (await fetch(`/api/status_history?limit=${limit}`)).json();
   },
+  async awakenEvents(limit = 500) {
+    return (await fetch(`/api/awaken_events?limit=${limit}`)).json();
+  },
   async receptionTimeline(bins = 50) {
     return (await fetch(`/api/reception_timeline?bins=${bins}`)).json();
   },
