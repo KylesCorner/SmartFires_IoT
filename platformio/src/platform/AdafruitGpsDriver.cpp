@@ -5,18 +5,20 @@
 #include "platform/AdafruitGpsDriver.h"
 
 #include "platform/ResetDiagnostics.h"
+#include "logging/DebugLogger.h"
 
 #include <Adafruit_PMTK.h>
 #include <Arduino.h>
 
-AdafruitGpsDriver::AdafruitGpsDriver(TwoWire &wire, uint8_t wakePin)
-    : _gps(&wire), _wakePin(wakePin) {}
+AdafruitGpsDriver::AdafruitGpsDriver(TwoWire &wire, uint8_t wakePin, uint8_t resetPin)
+    : _gps(&wire), _wakePin(wakePin), _resetPin(resetPin) {}
 
 bool AdafruitGpsDriver::begin(uint8_t address) {
-  pinMode(_wakePin, OUTPUT);
-  digitalWrite(_wakePin, LOW);
+  // pinMode(_wakePin, OUTPUT);
+  // digitalWrite(_wakePin, LOW);
 
   if (!_gps.begin(address)) {
+    LOG_ERROR("gps_driver","begin failed");
     _begun = false;
     return false;
   }
@@ -185,5 +187,15 @@ bool AdafruitGpsDriver::enterAlwaysLocateBackup() {
 }
 
 bool AdafruitGpsDriver::reset() {
-  return true;
+
+    pinMode(_resetPin, OUTPUT);
+
+    // // Hold the sensor in reset.
+    digitalWrite(_resetPin, LOW);
+    delay(10);
+
+    // // Release the sensor and allow it to boot.
+    digitalWrite(_resetPin, HIGH);
+    delay(10);
+    return true;
 }

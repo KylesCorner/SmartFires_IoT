@@ -12,7 +12,7 @@
 
 class AdafruitGpsDriver final : public IGpsDriver {
 public:
-  explicit AdafruitGpsDriver(TwoWire &wire = Wire, uint8_t wakePin = 11);
+  explicit AdafruitGpsDriver(TwoWire &wire = Wire, uint8_t wakePin = 11, uint8_t resetPin = 10);
 
   bool begin(uint8_t address) override;
   bool poll() override;
@@ -34,5 +34,6 @@ private:
   bool enterPeriodic(uint8_t type, const GpsPeriodicConfig &cfg);
   Adafruit_GPS _gps;
   uint8_t _wakePin;
+  uint8_t _resetPin;
   bool _begun = false;
 };

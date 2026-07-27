@@ -359,7 +359,9 @@ bool Pa1010dGpsSensor::reset() {
     return false;
   }
 
-  return begin();
+  return true;
+
+  // return begin();
 }
 
 const Pa1010dGpsSensor::Reading &Pa1010dGpsSensor::reading() const {
