@@ -181,8 +181,8 @@ bool DutyCycleController::telemetryReady() const {
 uint32_t DutyCycleController::phaseElapsedMs() const {
   return _clock.millis() - _phaseStartMs;
 }
-
-void DutyCycleController::transitionTo(DutyCyclePhase next) {
+void DutyCycleController::transitionTo(
+    DutyCyclePhase next) {
   const DutyCyclePhase prev = _phase;
   const uint32_t now = _clock.millis();
   const uint32_t elapsed = now - _phaseStartMs;
@@ -190,16 +190,61 @@ void DutyCycleController::transitionTo(DutyCyclePhase next) {
   _phase = next;
   _phaseStartMs = now;
 
-  LOG_INFO("duty", "transition from=%s to=%s elapsed_ms=%lu", phaseName(prev),
-           phaseName(next), static_cast<unsigned long>(elapsed));
+  LOG_INFO(
+      "duty",
+      "transition from=%s to=%s elapsed_ms=%lu",
+      phaseName(prev),
+      phaseName(next),
+      static_cast<unsigned long>(elapsed));
 
   if (next == DutyCyclePhase::ActiveSampling) {
     _freshSampleReady = false;
-    _lastSampleMs = _clock.millis() - _cfg.samplePeriodMs;
 
-    LOG_DEBUG("duty", "active_sampling_enter force_first_sample=1");
+    // Force an immediate first sample.
+    _lastSampleMs =
+        now - _cfg.samplePeriodMs;
+
+    LOG_DEBUG(
+        "duty",
+        "active_sampling_enter force_first_sample=1");
+  }
+
+  if (next == DutyCyclePhase::CooldownSleeping) {
+    // This timestamp covers both CooldownSleeping and
+    // IdleSleeping. The five-minute interval starts when the
+    // active window ends.
+    _sleepStartMs = now;
+    _triggerLatched = false;
+
+    LOG_DEBUG(
+        "duty",
+        "sleep_cycle_enter timed_sleep_ms=%lu "
+        "min_sleep_ms=%lu",
+        static_cast<unsigned long>(
+            _cfg.timedSleepMs),
+        static_cast<unsigned long>(
+            _cfg.minSleepMs));
   }
 }
+
+// void DutyCycleController::transitionTo(DutyCyclePhase next) {
+//   const DutyCyclePhase prev = _phase;
+//   const uint32_t now = _clock.millis();
+//   const uint32_t elapsed = now - _phaseStartMs;
+
+//   _phase = next;
+//   _phaseStartMs = now;
+
+//   LOG_INFO("duty", "transition from=%s to=%s elapsed_ms=%lu", phaseName(prev),
+//            phaseName(next), static_cast<unsigned long>(elapsed));
+
+//   if (next == DutyCyclePhase::ActiveSampling) {
+//     _freshSampleReady = false;
+//     _lastSampleMs = _clock.millis() - _cfg.samplePeriodMs;
+
+//     LOG_DEBUG("duty", "active_sampling_enter force_first_sample=1");
+//   }
+// }
 
 bool DutyCycleController::thresholdCrossed(
     const ITriggerSensor::Reading &r) const {
@@ -225,44 +270,61 @@ bool DutyCycleController::thresholdCrossed(
   return crossed;
 }
 
+// void DutyCycleController::updateSleeping() {
+//   if (_triggerSensor.ready()) {
+//     if (!_triggerSensor.sample()) {
+//       LOG_WARN("trigger", "sample_failed phase=%s", phaseName(_phase));
+//     }
+
+//     const auto &r = _triggerSensor.triggerReading();
+
+//     if (r.valid && isnan(_baselineTempC)) {
+//       _baselineTempC = r.tempC;
+//       _baselineHumidityPct = r.humidityPct;
+
+//       LOG_INFO("trigger", "baseline_set temp_c=%.2f humidity_pct=%.2f",
+//                _baselineTempC, _baselineHumidityPct);
+//     }
+
+//     if (r.valid && phaseElapsedMs() >= _cfg.minSleepMs && thresholdCrossed(r)) {
+//       if (!wakeDutyCycledSensors()) {
+//         LOG_ERROR("duty", "wake_after_trigger_failed error=%d",
+//                   static_cast<int>(_error));
+//         transitionTo(DutyCyclePhase::Error);
+//         return;
+//       }
+
+//       LOG_INFO("trigger", "triggered waking_sensors=1");
+//       transitionTo(DutyCyclePhase::WarmingUp);
+//     }
+//   }
+// }
+
 void DutyCycleController::updateSleeping() {
-  if (_triggerSensor.ready()) {
-    if (!_triggerSensor.sample()) {
-      LOG_WARN("trigger", "sample_failed phase=%s", phaseName(_phase));
-    }
-
-    const auto &r = _triggerSensor.triggerReading();
-
-    if (r.valid && isnan(_baselineTempC)) {
-      _baselineTempC = r.tempC;
-      _baselineHumidityPct = r.humidityPct;
-
-      LOG_INFO("trigger", "baseline_set temp_c=%.2f humidity_pct=%.2f",
-               _baselineTempC, _baselineHumidityPct);
-    }
-
-    if (r.valid && phaseElapsedMs() >= _cfg.minSleepMs && thresholdCrossed(r)) {
-      if (!wakeDutyCycledSensors()) {
-        LOG_ERROR("duty", "wake_after_trigger_failed error=%d",
-                  static_cast<int>(_error));
-        transitionTo(DutyCyclePhase::Error);
-        return;
-      }
-
-      LOG_INFO("trigger", "triggered waking_sensors=1");
-      transitionTo(DutyCyclePhase::WarmingUp);
-    }
-  }
+  sampleSleepTrigger();
+  wakeFromSleepIfNeeded();
 }
 
+// void DutyCycleController::updateCooldownSleeping() {
+//   if (_triggerSensor.ready()) {
+//     if (!_triggerSensor.sample()) {
+//       LOG_WARN("trigger", "sample_failed phase=%s", phaseName(_phase));
+//     }
+//   }
+
+//   if (phaseElapsedMs() >= _cfg.minSleepMs) {
+//     transitionTo(DutyCyclePhase::IdleSleeping);
+//   }
+// }
+
 void DutyCycleController::updateCooldownSleeping() {
-  if (_triggerSensor.ready()) {
-    if (!_triggerSensor.sample()) {
-      LOG_WARN("trigger", "sample_failed phase=%s", phaseName(_phase));
-    }
+  sampleSleepTrigger();
+
+  if (wakeFromSleepIfNeeded()) {
+    return;
   }
 
-  if (phaseElapsedMs() >= _cfg.minSleepMs) {
+  if (sleepElapsedMs() >= _cfg.minSleepMs) {
     transitionTo(DutyCyclePhase::IdleSleeping);
   }
 }
@@ -594,4 +656,156 @@ bool DutyCycleController::resetSensors() {
   }
 
   return ok;
+}
+bool DutyCycleController::triggerWakeEnabled() const {
+  return
+      _cfg.wakeMode ==
+          DutyCycleMode::SensorTriggered ||
+      _cfg.wakeMode ==
+          DutyCycleMode::Hybrid;
+}
+
+bool DutyCycleController::timedWakeEnabled() const {
+  return
+      _cfg.wakeMode ==
+          DutyCycleMode::Timed ||
+      _cfg.wakeMode ==
+          DutyCycleMode::Hybrid;
+}
+
+uint32_t
+DutyCycleController::sleepElapsedMs() const {
+  return _clock.millis() - _sleepStartMs;
+}
+
+void DutyCycleController::sampleSleepTrigger() {
+  if (!triggerWakeEnabled()) {
+    return;
+  }
+
+  if (!_triggerSensor.ready()) {
+    return;
+  }
+
+  if (!_triggerSensor.sample()) {
+    LOG_WARN(
+        "trigger",
+        "sample_failed phase=%s",
+        phaseName(_phase));
+    return;
+  }
+
+  const auto &reading =
+      _triggerSensor.triggerReading();
+
+  if (!reading.valid) {
+    return;
+  }
+
+  if (isnan(_baselineTempC) ||
+      isnan(_baselineHumidityPct)) {
+    _baselineTempC = reading.tempC;
+    _baselineHumidityPct =
+        reading.humidityPct;
+
+    LOG_INFO(
+        "trigger",
+        "baseline_set temp_c=%.2f "
+        "humidity_pct=%.2f",
+        _baselineTempC,
+        _baselineHumidityPct);
+
+    return;
+  }
+
+  if (thresholdCrossed(reading)) {
+    _triggerLatched = true;
+
+    LOG_INFO(
+        "trigger",
+        "wake_request_latched "
+        "sleep_elapsed_ms=%lu",
+        static_cast<unsigned long>(
+            sleepElapsedMs()));
+  }
+}
+
+bool DutyCycleController::wakeFromSleepIfNeeded() {
+  const uint32_t elapsed = sleepElapsedMs();
+
+  const bool triggerDue =
+      triggerWakeEnabled() &&
+      _triggerLatched &&
+      elapsed >= _cfg.minSleepMs;
+
+  const bool timerDue =
+      timedWakeEnabled() &&
+      _cfg.timedSleepMs > 0 &&
+      elapsed >= _cfg.timedSleepMs;
+
+  if (!triggerDue && !timerDue) {
+    return false;
+  }
+
+  const char *reason = nullptr;
+
+  if (triggerDue && timerDue) {
+    reason = "trigger_and_timer";
+  } else if (triggerDue) {
+    reason = "trigger";
+  } else {
+    reason = "timer";
+  }
+
+  LOG_INFO(
+      "duty",
+      "sleep_wakeup reason=%s "
+      "sleep_elapsed_ms=%lu",
+      reason,
+      static_cast<unsigned long>(elapsed));
+
+  if (!wakeDutyCycledSensors()) {
+    LOG_ERROR(
+        "duty",
+        "wake_from_sleep_failed "
+        "reason=%s error=%d",
+        reason,
+        static_cast<int>(_error));
+
+    transitionTo(DutyCyclePhase::Error);
+    return true;
+  }
+
+  transitionTo(DutyCyclePhase::WarmingUp);
+  return true;
+}
+
+DutyCycleMode DutyCycleController::mode() const {
+  if (!_cfg.enabled) {
+    return DutyCycleMode::Continuous;
+  }
+
+  return _cfg.wakeMode;
+}
+
+bool DutyCycleController::sleeping() const {
+  return
+      _phase == DutyCyclePhase::CooldownSleeping ||
+      _phase == DutyCyclePhase::IdleSleeping;
+}
+
+uint32_t
+DutyCycleController::timedSleepRemainingMs() const {
+  if (mode() != DutyCycleMode::Timed ||
+      !sleeping()) {
+    return 0;
+  }
+
+  const uint32_t elapsedMs = sleepElapsedMs();
+
+  if (elapsedMs >= _cfg.timedSleepMs) {
+    return 0;
+  }
+
+  return _cfg.timedSleepMs - elapsedMs;
 }

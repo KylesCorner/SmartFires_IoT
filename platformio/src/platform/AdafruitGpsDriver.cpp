@@ -14,8 +14,11 @@ AdafruitGpsDriver::AdafruitGpsDriver(TwoWire &wire, uint8_t wakePin, uint8_t res
     : _gps(&wire), _wakePin(wakePin), _resetPin(resetPin) {}
 
 bool AdafruitGpsDriver::begin(uint8_t address) {
-  // pinMode(_wakePin, OUTPUT);
-  // digitalWrite(_wakePin, LOW);
+  pinMode(_wakePin, OUTPUT);
+  digitalWrite(_wakePin, LOW);
+
+  pinMode(_resetPin, OUTPUT);
+  digitalWrite(_resetPin, HIGH);
 
   if (!_gps.begin(address)) {
     LOG_ERROR("gps_driver","begin failed");

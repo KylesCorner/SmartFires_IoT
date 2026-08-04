@@ -12,6 +12,12 @@
 #include <string.h>
 
 namespace {
+  bool dutyPhaseSleepsRadio(
+    DutyCyclePhase phase) {
+      return
+          phase == DutyCyclePhase::CooldownSleeping ||
+          phase == DutyCyclePhase::IdleSleeping;
+    }
 
 const char *boolName(bool v) { return v ? "true" : "false"; }
 
@@ -53,14 +59,35 @@ bool decodePacketHeader(const uint8_t *payload,
 
 } // namespace
 
-SmartFiresNodeApp::SmartFiresNodeApp(
-    const Config &cfg, IClock &clock, DutyCycleController &duty,
-    PacketHandler &packetHandler, TdmaRadioService &radio, TdmaClock &tdmaClock,
-    ISensor **sensors, size_t sensorCount, BatteryMonitor *battery)
-    : _cfg(cfg), _clock(clock), _duty(duty), _packetHandler(packetHandler),
-      _radio(radio), _tdmaClock(tdmaClock), _sensors(sensors),
-      _sensorCount(sensorCount), _battery(battery) {}
+// SmartFiresNodeApp::SmartFiresNodeApp(
+//     const Config &cfg, IClock &clock, DutyCycleController &duty,
+//     PacketHandler &packetHandler, TdmaRadioService &radio, TdmaClock &tdmaClock,
+//     ISensor **sensors, size_t sensorCount, BatteryMonitor *battery)
+//     : _cfg(cfg), _clock(clock), _duty(duty), _packetHandler(packetHandler),
+//       _radio(radio), _tdmaClock(tdmaClock), _sensors(sensors),
+//       _sensorCount(sensorCount), _battery(battery) {}
 
+SmartFiresNodeApp::SmartFiresNodeApp(
+    const Config &cfg,
+    IClock &clock,
+    DutyCycleController &duty,
+    PacketHandler &packetHandler,
+    TdmaRadioService &radio,
+    TdmaClock &tdmaClock,
+    IMcuSleep &mcuSleep,
+    ISensor **sensors,
+    size_t sensorCount,
+    BatteryMonitor *battery)
+    : _cfg(cfg),
+      _clock(clock),
+      _duty(duty),
+      _packetHandler(packetHandler),
+      _radio(radio),
+      _tdmaClock(tdmaClock),
+      _mcuSleep(mcuSleep),
+      _sensors(sensors),
+      _sensorCount(sensorCount),
+      _battery(battery) {}
 bool SmartFiresNodeApp::begin() {
   LOG_INFO("app",
            "begin node_id=%u uid_hash=0x%08lX enable_battery=%s "
@@ -119,6 +146,12 @@ void SmartFiresNodeApp::update() {
   }
 
   // Always poll radio so TIME_SYNC packets are processed.
+  // _radio.update();
+    const bool radioShouldSleep =
+      dutyPhaseSleepsRadio(_duty.phase()) &&
+      !_forceRadioAwake;
+
+  _radio.setDutySleep(radioShouldSleep);
   _radio.update();
 
   if (_tdmaClock.consumeSessionChanged()) {
@@ -143,6 +176,14 @@ void SmartFiresNodeApp::update() {
   const bool hasFreshSync = _tdmaClock.hasSync() && !_tdmaClock.syncStale();
 
   if (hasFreshSync && !_syncActive) {
+    if (_forceRadioAwake) {
+      _forceRadioAwake = false;
+
+      LOG_INFO(
+          "sleep",
+          "post_standby_sync_reacquired "
+          "radio_override_cleared=1");
+    }
     _syncActive = true;
     _awakenOnlyNotified = false;
     _packetHandler.resetStatusTimer();
@@ -183,6 +224,16 @@ void SmartFiresNodeApp::update() {
   }
 
   _duty.update();
+  const bool radioShouldSleepAfterDutyUpdate =
+    dutyPhaseSleepsRadio(_duty.phase()) &&
+    !_forceRadioAwake;
+
+  _radio.setDutySleep(
+      radioShouldSleepAfterDutyUpdate);
+
+  if (maybeEnterTimedMcuSleep()) {
+    return;
+  }
 
   if (_cfg.enableBattery && _battery && _battery->ready()) {
     if (_battery->sample()) {
@@ -491,3 +542,61 @@ bool SmartFiresNodeApp::sendCmdAck(uint8_t cmdType, uint8_t status) {
   return ok;
 }
 
+bool SmartFiresNodeApp::maybeEnterTimedMcuSleep() {
+  if (_duty.mode() != DutyCycleMode::Timed ||
+      !_duty.sleeping()) {
+    _mcuSleptThisCycle = false;
+    return false;
+  }
+
+  if (_mcuSleptThisCycle) {
+    return false;
+  }
+
+  const uint32_t remainingMs =
+      _duty.timedSleepRemainingMs();
+
+  // RTCZero uses whole-second alarms. Leave the fractional
+  // remainder for the normal controller loop.
+  const uint32_t standbyMs =
+      (remainingMs / 1000UL) * 1000UL;
+
+  if (standbyMs < 1000UL) {
+    return false;
+  }
+
+  LOG_INFO(
+      "sleep",
+      "timed_mcu_sleep_start "
+      "remaining_ms=%lu standby_ms=%lu",
+      static_cast<unsigned long>(remainingMs),
+      static_cast<unsigned long>(standbyMs));
+
+  // NodeApp owns radio sleep. Put the RFM95 down before
+  // entering SAMD21 standby.
+  _radio.setDutySleep(true);
+
+  const uint32_t elapsedMs =
+      _mcuSleep.sleepFor(standbyMs);
+
+  _mcuSleptThisCycle = true;
+
+  // TDMA session timing is no longer trustworthy after a
+  // multi-minute blackout. Require a new TIME_SYNC.
+  _tdmaClock.reset();
+  _syncActive = false;
+
+  // The duty controller is still technically in a sleeping
+  // phase until it sees compensated time. Override phase-based
+  // radio sleep so AWAKEN/TIME_SYNC can occur.
+  _forceRadioAwake = true;
+  _radio.setDutySleep(false);
+
+  LOG_INFO(
+      "sleep",
+      "timed_mcu_sleep_complete "
+      "elapsed_ms=%lu radio_override=1",
+      static_cast<unsigned long>(elapsedMs));
+
+  return true;
+}

@@ -77,6 +77,7 @@ void loop() {
 #include "config/SystemHealthConfig.h"
 #include "platform/ResetDiagnostics.h"
 #include "platform/Samd21RamMonitor.h"
+#include "platform/Samd21RtcSleep.h"
 
 #include "app/SmartFiresNodeApp.h"
 #include "platform/BoardIdentify.h"
@@ -156,6 +157,7 @@ void logSensorFloorVsCadence(const char *sensorName, uint32_t minSamplePeriodMs)
 // Platform
 // -----------------------------------------------------------------------------
 ArduinoClock clock;
+Samd21RtcSleep mcuSleep(clock);
 ArduinoAnalogReader analog;
 
 Samd21RamMonitor::Config ramMonitorCfg =
@@ -198,7 +200,7 @@ Pa1010dGpsSensor::Config gpsCfg = Pa1010dGpsSensor::Config::make(
     SensingConfig::Gps::kPeriodicSecondRunTimeMs,
     SensingConfig::Gps::kPeriodicSecondSleepTimeMs,
     SensingConfig::Gps::kPeriodicMinSamplePeriodMs,
-    GpsPowerMode::PeriodicBackup);
+    GpsPowerMode::Backup);
 Pa1010dGpsSensor gps(gpsCfg, gpsDriver, clock);
 
 SparkfunIcm20948Driver imuDriver;
@@ -235,18 +237,44 @@ BatteryMonitor battery(batteryCfg, analog, clock);
 // Duty Cycle
 // -----------------------------------------------------------------------------
 
-DutyCycleConfig dutyCfg = DutyCycleConfig::make(
-    SensingConfig::DutyCycle::kActiveEnabled,
-    SensingConfig::DutyCycle::kActiveMinSleepMs,
-    SensingConfig::DutyCycle::kActiveMaxWakeMs,
-    SensingConfig::DutyCycle::kActiveActiveSampleMs,
-    SensingConfig::DutyCycle::kActiveSamplePeriodMs,
-    SensingConfig::DutyCycle::kActiveWarmupMs,
-    SensingConfig::DutyCycle::kActiveTempDeltaThresholdC,
-    SensingConfig::DutyCycle::kActiveHumidityDeltaThresholdPct,
-    SensingConfig::DutyCycle::kActiveFailOnSampleError);
-DutyCycleController duty(dutyCfg, sht31, sensors, sensorCount, clock, battery);
+// DutyCycleConfig dutyCfg = DutyCycleConfig::make(
+//     SensingConfig::DutyCycle::kActiveEnabled,
+//     SensingConfig::DutyCycle::kActiveMinSleepMs,
+//     SensingConfig::DutyCycle::kActiveMaxWakeMs,
+//     SensingConfig::DutyCycle::kActiveActiveSampleMs,
+//     SensingConfig::DutyCycle::kActiveSamplePeriodMs,
+//     SensingConfig::DutyCycle::kActiveWarmupMs,
+//     SensingConfig::DutyCycle::kActiveTempDeltaThresholdC,
+//     SensingConfig::DutyCycle::kActiveHumidityDeltaThresholdPct,
+//     SensingConfig::DutyCycle::kActiveFailOnSampleError);
+// DutyCycleController duty(dutyCfg, sht31, sensors, sensorCount, clock, battery);
 
+DutyCycleConfig dutyCfg =
+    DutyCycleConfig::make(
+        SensingConfig::DutyCycle::kActiveMode,
+        SensingConfig::DutyCycle::kActiveMinSleepMs,
+        SensingConfig::DutyCycle::kActiveMaxWakeMs,
+        SensingConfig::DutyCycle::
+            kActiveActiveSampleMs,
+        SensingConfig::DutyCycle::
+            kActiveSamplePeriodMs,
+        SensingConfig::DutyCycle::kActiveWarmupMs,
+        SensingConfig::DutyCycle::
+            kActiveTimedSleepMs,
+        SensingConfig::DutyCycle::
+            kActiveTempDeltaThresholdC,
+        SensingConfig::DutyCycle::
+            kActiveHumidityDeltaThresholdPct,
+        SensingConfig::DutyCycle::
+            kActiveFailOnSampleError);
+
+DutyCycleController duty(
+    dutyCfg,
+    sht31,
+    sensors,
+    sensorCount,
+    clock,
+    battery);
 // -----------------------------------------------------------------------------
 // Networking
 // -----------------------------------------------------------------------------
@@ -277,16 +305,28 @@ RadioHeadTdmaDriver radioDriver(radioDriverCfg);
 
 TdmaRadioService tdmaRadio(tdmaCfg, tdmaClock, tdmaQueue, radioDriver);
 
-SmartFiresNodeApp::Config appCfg = SmartFiresNodeApp::Config::appCfg(
-  kUnassignedNodeId, nodeUidHash, true, false,
-  NetworkConfig::kEnableTelemetryTx);
 
 // -----------------------------------------------------------------------------
 // App
 // -----------------------------------------------------------------------------
+SmartFiresNodeApp::Config appCfg = SmartFiresNodeApp::Config::appCfg(
+  kUnassignedNodeId, nodeUidHash, true, false,
+  NetworkConfig::kEnableTelemetryTx);
 
-SmartFiresNodeApp app(appCfg, clock, duty, packetHandler, tdmaRadio, tdmaClock,
-                      sensors, sensorCount, &battery);
+SmartFiresNodeApp app(
+    appCfg,
+    clock,
+    duty,
+    packetHandler,
+    tdmaRadio,
+    tdmaClock,
+    mcuSleep,
+    sensors,
+    sensorCount,
+    &battery);
+
+// SmartFiresNodeApp app(appCfg, clock, duty, packetHandler, tdmaRadio, tdmaClock,
+//                       sensors, sensorCount, &battery);
 
 DebugLogger gLog(Serial, initialRadioAddr);
 
@@ -353,6 +393,7 @@ void setup() {
 
   Wire.begin();
   analog.begin();
+  mcuSleep.begin();
 
   gRamMonitor.checkpoint("setup", "after_wire");
   Watchdog.reset();

@@ -151,8 +151,27 @@ bool TdmaRadioService::begin() {
   return true;
 }
 
+// void TdmaRadioService::update() {
+//   if (_state != TdmaRadioState::Ready) {
+//     return;
+//   }
+
+//   updateRxPower();
+//   drainTxQueue();
+//   maybeLogRetransmitHealth();
+// }
+
 void TdmaRadioService::update() {
   if (_state != TdmaRadioState::Ready) {
+    return;
+  }
+
+  if (_dutySleepRequested) {
+    if (!_radioAsleep) {
+      _driver.sleep();
+      _radioAsleep = true;
+    }
+
     return;
   }
 
@@ -181,6 +200,7 @@ bool TdmaRadioService::sendAwakenHandshake(const uint8_t *payload, uint8_t len) 
   }
 
   const bool ok = _driver.sendToWait(payload, len, _cfg.baseAddr);
+  _radioAsleep = false;
 
   if (!ok) {
     _error = TdmaRadioError::SendFailed;
@@ -219,6 +239,8 @@ bool TdmaRadioService::sendImmediate(const uint8_t *payload,
   const bool ok = requireLinkAck
                       ? _driver.sendToWait(payload, len, _cfg.baseAddr)
                       : _driver.send(payload, len, _cfg.baseAddr);
+  _radioAsleep = false;
+
   if (!ok) {
     _error = TdmaRadioError::SendFailed;
     _failedSendCount++;
@@ -541,6 +563,7 @@ void TdmaRadioService::drainTxQueue() {
                 static_cast<unsigned long>(slotIndex));
 
       ok = _driver.send(payload, len, _cfg.baseAddr);
+      _radioAsleep = false;
     }
 
     for (uint8_t attempt = 1; useLinkAck && attempt <= maxAttempts; ++attempt) {
@@ -558,6 +581,7 @@ void TdmaRadioService::drainTxQueue() {
 
       if (_driver.sendToWait(payload, len, _cfg.baseAddr)) {
         ok = true;
+        _radioAsleep = false;
 
         LOG_DEBUG("radio", "link_ack_rx ack_ok seq=%u attempt=%u retries_used=%u",
                   static_cast<unsigned int>(hdr.seq),
@@ -1451,4 +1475,32 @@ void TdmaRadioService::maybeLogRetransmitHealth() {
            _hasReceivedAckSummary ? 1 : 0);
 
   _lastRetxHealthLogMs = nowMs;
+}
+
+void TdmaRadioService::setDutySleep(
+    bool requested) {
+  if (_dutySleepRequested == requested) {
+    return;
+  }
+
+  _dutySleepRequested = requested;
+
+  LOG_INFO(
+      "radio",
+      "duty_sleep changed=%u",
+      requested ? 1 : 0);
+
+  if (requested) {
+    if (!_radioAsleep) {
+      _driver.sleep();
+      _radioAsleep = true;
+    }
+
+    return;
+  }
+
+  // The hardware may still physically be asleep, but the next
+  // available()/send()/sendToWait() call rearms it. Clearing
+  // this flag prevents stale software state after wake.
+  _radioAsleep = false;
 }

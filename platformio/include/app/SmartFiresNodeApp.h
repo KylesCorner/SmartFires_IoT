@@ -12,6 +12,7 @@
 #include "radio/PacketHandler.h"
 #include "radio/TdmaClock.h"
 #include "radio/TdmaRadioService.h"
+#include "platform/IMcuSleep.h"
 
 class SmartFiresNodeApp {
 public:
@@ -42,6 +43,17 @@ public:
                       TdmaClock &tdmaClock,
                       ISensor **sensors, size_t sensorCount,
                       BatteryMonitor *battery);
+                      SmartFiresNodeApp(
+    const Config &cfg,
+    IClock &clock,
+    DutyCycleController &duty,
+    PacketHandler &packetHandler,
+    TdmaRadioService &radio,
+    TdmaClock &tdmaClock,
+    IMcuSleep &mcuSleep,
+    ISensor **sensors,
+    size_t sensorCount,
+    BatteryMonitor *battery);
 
     bool begin();
     void update();
@@ -57,6 +69,7 @@ private:
     PacketHandler       &_packetHandler;
     TdmaRadioService    &_radio;
     TdmaClock           &_tdmaClock;
+    IMcuSleep           &_mcuSleep;
 
     ISensor **_sensors;
     size_t    _sensorCount;
@@ -70,8 +83,12 @@ private:
     uint8_t  _awakenSeq        = 0;
     uint8_t _cmdSeq = 0;
 
+    bool _forceRadioAwake = false;
+    bool _mcuSleptThisCycle = false;
+
     void sendAwakenHandshake();
     SensorSnapshot buildSnapshot() const;
     void handleIncomingCommands();
     bool sendCmdAck(uint8_t cmdType, uint8_t status);
+    bool maybeEnterTimedMcuSleep();
 };

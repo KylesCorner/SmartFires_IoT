@@ -63,7 +63,12 @@ public:
 
   uint32_t lastTxSlotIndex() const;
 
+  void setDutySleep(bool requested);
+
 private:
+
+  bool _dutySleepRequested = false;
+
   // Compile-time capacity ceiling. Single source: NetworkConfig.h's
   // kReliabilityWindowHardCap, so the operating kReliabilityWindowDepth
   // value and this cap can never silently diverge.
