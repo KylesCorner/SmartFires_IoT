@@ -11,6 +11,7 @@ from smartfires_edge.packet import (
     FRAME_M0,
     FRAME_M1,
     HEADER_FMT,
+    HEADER_SIZE,
     PKT_AWAKEN,
     PKT_BUNDLE,
     PKT_FULL_STATE,
@@ -86,8 +87,9 @@ class FrameReceiver:
             pkt_type = raw_payload[1] if len(raw_payload) >= 2 else 0xFF
             hdr_node = None
             hdr_seq = None
-            if len(raw_payload) >= 4:
-                magic, _hdr_pkt, node_id, seq = struct.unpack_from(HEADER_FMT, raw_payload, 0)
+            if len(raw_payload) >= HEADER_SIZE:
+                magic, _hdr_pkt, node_id, seq, _flags = struct.unpack_from(
+                    HEADER_FMT, raw_payload, 0)
                 if magic == PKT_MAGIC:
                     hdr_node = node_id
                     hdr_seq = seq

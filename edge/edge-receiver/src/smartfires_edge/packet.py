@@ -38,9 +38,18 @@ SENSOR_FLAG_SPS30 = 0x10
 
 # ---------- struct formats (little-endian, packed) ----------
 
-# PktHeader: magic(1) pkt_type(1) node_id(1) seq(1)  →  4 bytes
-HEADER_FMT  = "<BBBB"
-HEADER_SIZE = struct.calcsize(HEADER_FMT)   # 4
+# PktHeader: magic(1) pkt_type(1) node_id(1) seq(1) flags(1)  →  5 bytes
+HEADER_FMT  = "<BBBBB"
+HEADER_SIZE = struct.calcsize(HEADER_FMT)   # 5
+
+# PktHeader.flags bits (BinaryPacket.h PKT_FLAG_*). WINDOW_FIRST/WINDOW_LAST
+# bound one Timed duty-cycle active window and are set only on PKT_BUNDLE.
+PKT_FLAG_WINDOW_FIRST = 0x01
+PKT_FLAG_WINDOW_LAST  = 0x02
+
+# Legacy pre-flags header (4 bytes, no flags byte). Only still recognised on
+# AWAKEN — see decode_awaken().
+LEGACY_HEADER_SIZE = 4
 
 # FullStatePayload:
 #   session_time(u32) sensor_flags(u16)
@@ -130,8 +139,10 @@ LORA_PAYLOAD_SIZE     = HEADER_SIZE + FULL_STATE_SIZE + 1
 LORA_BUNDLE_MAX_SIZE  = HEADER_SIZE + FULL_STATE_SIZE + 1 + BUNDLE_MAX_DELTAS * DELTA_SIZE + 1
 TIME_SYNC_LORA_SIZE   = HEADER_SIZE + TIME_SYNC_PAYLOAD_SIZE + 1
 ACK_SUMMARY_LORA_SIZE = HEADER_SIZE + ACK_SUMMARY_PAYLOAD_SIZE + 1
-AWAKEN_LORA_SIZE      = HEADER_SIZE + AWAKEN_PAYLOAD_SIZE + 1       # 9 (legacy)
-AWAKEN_LORA_SIZE_V2   = HEADER_SIZE + AWAKEN_PAYLOAD_SIZE_V2 + 1    # 11 (current)
+# The legacy AWAKEN frame predates the header flags byte, so it sizes off the
+# 4-byte header, not HEADER_SIZE.
+AWAKEN_LORA_SIZE      = LEGACY_HEADER_SIZE + AWAKEN_PAYLOAD_SIZE + 1  # 9 (legacy)
+AWAKEN_LORA_SIZE_V2   = HEADER_SIZE + AWAKEN_PAYLOAD_SIZE_V2 + 1      # 12 (current)
 CMD_CALIBRATE_LORA_SIZE = HEADER_SIZE + CMD_CALIBRATE_PAYLOAD_SIZE + 1
 CMD_RESET_LORA_SIZE   = HEADER_SIZE + CMD_RESET_PAYLOAD_SIZE + 1
 CMD_ACK_LORA_SIZE     = HEADER_SIZE + CMD_ACK_PAYLOAD_SIZE + 1
@@ -157,7 +168,7 @@ def crc8(data: bytes) -> int:
 
 def encode_time_sync_frame(session_id: int, session_time_ms: int, seq: int = 0) -> bytes:
     """Encode a TIME_SYNC UART frame from Jetson to the base Feather."""
-    hdr = struct.pack(HEADER_FMT, PKT_MAGIC, PKT_TIME_SYNC, 0, seq & 0xFF)
+    hdr = struct.pack(HEADER_FMT, PKT_MAGIC, PKT_TIME_SYNC, 0, seq & 0xFF, 0)
     ts = struct.pack(
         TIME_SYNC_PAYLOAD_FMT,
         session_id & 0xFFFFFFFF,
@@ -173,7 +184,7 @@ def encode_time_sync_frame(session_id: int, session_time_ms: int, seq: int = 0) 
 
 def encode_ack_summary_frame(node_id: int, ack_base_seq: int, ack_mask: int, seq: int = 0) -> bytes:
     """Encode an ACK_SUMMARY UART frame for base-station forwarding."""
-    hdr = struct.pack(HEADER_FMT, PKT_MAGIC, PKT_ACK_SUMMARY, 0, seq & 0xFF)
+    hdr = struct.pack(HEADER_FMT, PKT_MAGIC, PKT_ACK_SUMMARY, 0, seq & 0xFF, 0)
     ack = struct.pack(
         ACK_SUMMARY_PAYLOAD_FMT,
         node_id & 0xFF,
@@ -190,7 +201,7 @@ def encode_ack_summary_frame(node_id: int, ack_base_seq: int, ack_mask: int, seq
 
 def encode_cmd_calibrate_frame(node_id: int, duration_s: int = 60, seq: int = 0) -> bytes:
     """Encode a CMD_CALIBRATE UART frame for base-station forwarding."""
-    hdr = struct.pack(HEADER_FMT, PKT_MAGIC, PKT_CMD_CALIBRATE, 0, seq & 0xFF)
+    hdr = struct.pack(HEADER_FMT, PKT_MAGIC, PKT_CMD_CALIBRATE, 0, seq & 0xFF, 0)
     cmd = struct.pack(CMD_CALIBRATE_PAYLOAD_FMT, node_id & 0xFF, duration_s & 0xFF)
     lora_payload_no_crc = hdr + cmd
     lora_crc = crc8(lora_payload_no_crc)
@@ -202,7 +213,7 @@ def encode_cmd_calibrate_frame(node_id: int, duration_s: int = 60, seq: int = 0)
 
 def encode_cmd_reset_frame(node_id: int, reset_type: int = 0, seq: int = 0) -> bytes:
     """Encode a CMD_RESET UART frame for base-station forwarding."""
-    hdr = struct.pack(HEADER_FMT, PKT_MAGIC, PKT_CMD_RESET, 0, seq & 0xFF)
+    hdr = struct.pack(HEADER_FMT, PKT_MAGIC, PKT_CMD_RESET, 0, seq & 0xFF, 0)
     cmd = struct.pack(CMD_RESET_PAYLOAD_FMT, node_id & 0xFF, reset_type & 0xFF)
     lora_payload_no_crc = hdr + cmd
     lora_crc = crc8(lora_payload_no_crc)
@@ -226,6 +237,7 @@ def _full_state_fields(
     pm10_ug10: int,
     rssi: Optional[int],
     delta_flags: Optional[int] = None,
+    pkt_flags: int = 0,
 ) -> dict:
     wind_valid = (sensor_flags & SENSOR_FLAG_WIND) != 0
     sht31_valid = (sensor_flags & SENSOR_FLAG_SHT31) != 0
@@ -245,6 +257,11 @@ def _full_state_fields(
         "pm10_ug_m3": round(pm10_ug10 / 10.0, 1) if sps30_valid else None,
         "rssi": rssi,
         "delta_flags": delta_flags,
+        # PktHeader.flags of the bundle this sample arrived in — every row
+        # expanded from one bundle repeats its window markers.
+        "pkt_flags": pkt_flags,
+        "window_first": 1 if pkt_flags & PKT_FLAG_WINDOW_FIRST else 0,
+        "window_last": 1 if pkt_flags & PKT_FLAG_WINDOW_LAST else 0,
     }
 
 
@@ -259,7 +276,7 @@ def decode_gps(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Optional[
     if crc8(raw_lora_payload[:-1]) != raw_lora_payload[-1]:
         return None
 
-    magic, pkt_type, node_id, seq = struct.unpack_from(HEADER_FMT, raw_lora_payload, 0)
+    magic, pkt_type, node_id, seq, hdr_flags = struct.unpack_from(HEADER_FMT, raw_lora_payload, 0)
     if magic != PKT_MAGIC or pkt_type != PKT_STATUS:
         return None
 
@@ -289,7 +306,7 @@ def decode_status(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Option
     if crc8(raw_lora_payload[:-1]) != raw_lora_payload[-1]:
         return None
 
-    magic, pkt_type, node_id, seq = struct.unpack_from(HEADER_FMT, raw_lora_payload, 0)
+    magic, pkt_type, node_id, seq, hdr_flags = struct.unpack_from(HEADER_FMT, raw_lora_payload, 0)
     if magic != PKT_MAGIC or pkt_type != PKT_STATUS:
         return None
 
@@ -326,16 +343,18 @@ def decode_status(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Option
 
 
 def decode_awaken(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Optional[dict]:
-    # Length-adaptive: accept the current 11-byte frame (uid_hash + reset_cause +
-    # hang_zone) and the legacy 9-byte frame (uid_hash only). This must stay
-    # tolerant of the shorter frame so a not-yet-reflashed node doesn't produce a
-    # decode failure during a firmware rollout — the diagnostic fields just come
-    # back as None. `len` here is the exact LoRa payload the base forwarded.
+    # Length-adaptive: accept the current 12-byte frame (5-byte header with the
+    # flags byte, uid_hash + reset_cause + hang_zone) and the legacy 9-byte frame
+    # (4-byte header, uid_hash only), each parsed against its own header size.
+    #
+    # A node old enough to send the legacy frame also encodes BUNDLE/STATUS with
+    # the 4-byte header, which this decoder cannot read — accepting its AWAKEN
+    # only keeps the handshake visible, it does not make the node usable.
     n = len(raw_lora_payload)
     if n >= AWAKEN_LORA_SIZE_V2:
-        frame_len, has_diag = AWAKEN_LORA_SIZE_V2, True
+        frame_len, header_size, has_diag = AWAKEN_LORA_SIZE_V2, HEADER_SIZE, True
     elif n >= AWAKEN_LORA_SIZE:
-        frame_len, has_diag = AWAKEN_LORA_SIZE, False
+        frame_len, header_size, has_diag = AWAKEN_LORA_SIZE, LEGACY_HEADER_SIZE, False
     else:
         return None
 
@@ -343,7 +362,11 @@ def decode_awaken(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Option
     if crc8(frame[:-1]) != frame[-1]:
         return None
 
-    magic, pkt_type, node_id, seq = struct.unpack_from(HEADER_FMT, frame, 0)
+    if has_diag:
+        magic, pkt_type, node_id, seq, _hdr_flags = struct.unpack_from(
+            HEADER_FMT, frame, 0)
+    else:
+        magic, pkt_type, node_id, seq = struct.unpack_from("<BBBB", frame, 0)
     if magic != PKT_MAGIC or pkt_type != PKT_AWAKEN:
         return None
 
@@ -351,9 +374,9 @@ def decode_awaken(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Option
     hang_zone = None
     if has_diag:
         uid_hash, reset_cause, hang_zone = struct.unpack_from(
-            AWAKEN_PAYLOAD_FMT_V2, frame, HEADER_SIZE)
+            AWAKEN_PAYLOAD_FMT_V2, frame, header_size)
     else:
-        (uid_hash,) = struct.unpack_from(AWAKEN_PAYLOAD_FMT, frame, HEADER_SIZE)
+        (uid_hash,) = struct.unpack_from(AWAKEN_PAYLOAD_FMT, frame, header_size)
 
     return {
         "node_id": node_id,
@@ -375,7 +398,7 @@ def decode_time_sync(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Opt
     if crc8(raw_lora_payload[:-1]) != raw_lora_payload[-1]:
         return None
 
-    magic, pkt_type, node_id, seq = struct.unpack_from(HEADER_FMT, raw_lora_payload, 0)
+    magic, pkt_type, node_id, seq, hdr_flags = struct.unpack_from(HEADER_FMT, raw_lora_payload, 0)
     if magic != PKT_MAGIC or pkt_type != PKT_TIME_SYNC:
         return None
 
@@ -400,7 +423,7 @@ def decode_ack_summary(raw_lora_payload: bytes, rssi: Optional[int] = None) -> O
     if crc8(raw_lora_payload[:-1]) != raw_lora_payload[-1]:
         return None
 
-    magic, pkt_type, hdr_node_id, seq = struct.unpack_from(HEADER_FMT, raw_lora_payload, 0)
+    magic, pkt_type, hdr_node_id, seq, hdr_flags = struct.unpack_from(HEADER_FMT, raw_lora_payload, 0)
     if magic != PKT_MAGIC or pkt_type != PKT_ACK_SUMMARY:
         return None
 
@@ -421,7 +444,7 @@ def decode_cmd_calibrate(raw_lora_payload: bytes) -> Optional[dict]:
     if crc8(raw_lora_payload[:-1]) != raw_lora_payload[-1]:
         return None
 
-    magic, pkt_type, hdr_node_id, seq = struct.unpack_from(HEADER_FMT, raw_lora_payload, 0)
+    magic, pkt_type, hdr_node_id, seq, hdr_flags = struct.unpack_from(HEADER_FMT, raw_lora_payload, 0)
     if magic != PKT_MAGIC or pkt_type != PKT_CMD_CALIBRATE:
         return None
 
@@ -440,7 +463,7 @@ def decode_cmd_reset(raw_lora_payload: bytes) -> Optional[dict]:
     if crc8(raw_lora_payload[:-1]) != raw_lora_payload[-1]:
         return None
 
-    magic, pkt_type, hdr_node_id, seq = struct.unpack_from(HEADER_FMT, raw_lora_payload, 0)
+    magic, pkt_type, hdr_node_id, seq, hdr_flags = struct.unpack_from(HEADER_FMT, raw_lora_payload, 0)
     if magic != PKT_MAGIC or pkt_type != PKT_CMD_RESET:
         return None
 
@@ -459,7 +482,7 @@ def decode_cmd_ack(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Optio
     if crc8(raw_lora_payload[:-1]) != raw_lora_payload[-1]:
         return None
 
-    magic, pkt_type, node_id, seq = struct.unpack_from(HEADER_FMT, raw_lora_payload, 0)
+    magic, pkt_type, node_id, seq, hdr_flags = struct.unpack_from(HEADER_FMT, raw_lora_payload, 0)
     if magic != PKT_MAGIC or pkt_type != PKT_CMD_ACK:
         return None
 
@@ -481,7 +504,7 @@ def decode_debug_log(raw_lora_payload: bytes) -> Optional[str]:
     if len(raw_lora_payload) < HEADER_SIZE:
         return None
 
-    magic, pkt_type, _node_id, _seq = struct.unpack_from(HEADER_FMT, raw_lora_payload, 0)
+    magic, pkt_type, _node_id, _seq, _hdr_flags = struct.unpack_from(HEADER_FMT, raw_lora_payload, 0)
     if magic != PKT_MAGIC or pkt_type != PKT_DEBUG_LOG:
         return None
 
@@ -508,7 +531,7 @@ def decode_full_state(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Op
     if crc8(raw_lora_payload[:-1]) != raw_lora_payload[-1]:
         return None
 
-    magic, pkt_type, node_id, seq = struct.unpack_from(HEADER_FMT, raw_lora_payload, 0)
+    magic, pkt_type, node_id, seq, hdr_flags = struct.unpack_from(HEADER_FMT, raw_lora_payload, 0)
     if magic != PKT_MAGIC or pkt_type != PKT_FULL_STATE:
         return None
 
@@ -531,6 +554,7 @@ def decode_full_state(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Op
         pm4_0_ug10,
         pm10_ug10,
         rssi,
+        pkt_flags=hdr_flags,
     )
 
 
@@ -542,7 +566,7 @@ def decode_bundle(raw_lora_payload: bytes, rssi: Optional[int] = None) -> list[d
     if crc8(raw_lora_payload[:-1]) != raw_lora_payload[-1]:
         return []
 
-    magic, pkt_type, node_id, seq = struct.unpack_from(HEADER_FMT, raw_lora_payload, 0)
+    magic, pkt_type, node_id, seq, hdr_flags = struct.unpack_from(HEADER_FMT, raw_lora_payload, 0)
     if magic != PKT_MAGIC or pkt_type != PKT_BUNDLE:
         return []
 
@@ -581,6 +605,7 @@ def decode_bundle(raw_lora_payload: bytes, rssi: Optional[int] = None) -> list[d
             pm4_0_ug10,
             pm10_ug10,
             rssi,
+            pkt_flags=hdr_flags,
         )
     ]
 
@@ -615,6 +640,7 @@ def decode_bundle(raw_lora_payload: bytes, rssi: Optional[int] = None) -> list[d
                 pm10_ug10 + d_pm10_ug10,
                 rssi,
                 delta_flags=delta_flags,
+                pkt_flags=hdr_flags,
             )
         )
 

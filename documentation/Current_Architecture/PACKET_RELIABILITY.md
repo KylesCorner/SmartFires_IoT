@@ -146,7 +146,7 @@ exposure `acknowledge()`'s first version turned out to have.
 `send()` now calls `RHGenericDriver::waitPacketSent(NetworkConfig::
 kSendTxWaitMs)` after `sendto()`, logging `send_tx_timeout` if it gives up.
 `kSendTxWaitMs` reuses `kBundleTxBudgetMs` (the largest existing per-slot TX
-budget, sized for a ≤194-byte `BUNDLE`) rather than branching on payload
+budget, sized for a ≤195-byte `BUNDLE`) rather than branching on payload
 size — waiting a bit longer than strictly necessary for a small `STATUS`/
 `TIME_SYNC` send costs nothing but a few extra milliseconds in the rare
 timeout case; under-timing a `BUNDLE` would defeat the point. A timeout

@@ -3,7 +3,7 @@ name: uart-jetson-bridge
 description: Frame format and routing between the base station Feather and the Jetson over USB CDC.
 category: architecture
 status: current
-last_verified: 2026-06-23
+last_verified: 2026-08-17
 source_refs:
   - platformio/include/telemetry/BinaryPacket.h
   - platformio/src/app/SmartFiresBaseApp.cpp
@@ -82,37 +82,37 @@ Wraps a received LoRa payload with RSSI metadata.
 
 | Packet type | LoRa payload | `len` | Total frame |
 |---|---|---:|---:|
-| `AWAKEN` | 9 bytes | 10 | 14 bytes |
-| `STATUS` | 25 bytes | 26 | 30 bytes |
-| `BUNDLE` | ≤194 bytes | ≤195 | ≤199 bytes |
-| `CMD_ACK` | 11 bytes | 12 | 16 bytes |
+| `AWAKEN` | 12 bytes | 13 | 17 bytes |
+| `STATUS` | 26 bytes | 27 | 31 bytes |
+| `BUNDLE` | ≤195 bytes | ≤196 | ≤200 bytes |
+| `CMD_ACK` | 12 bytes | 13 | 17 bytes |
 
-### Jetson → Feather: TIME_SYNC frame (16 bytes)
-
-```
-[0xAA][0x55][len=12][PKT_TIME_SYNC payload: 12 bytes][crc8]
-```
-
-The 12-byte payload is `PktHeader (4 bytes) + TimeSyncPayload (8 bytes)`.
-
-### Jetson → Feather: ACK_SUMMARY frame (legacy, 13 bytes)
+### Jetson → Feather: TIME_SYNC frame (17 bytes)
 
 ```
-[0xAA][0x55][len=9][PKT_ACK_SUMMARY payload: 9 bytes][crc8]
+[0xAA][0x55][len=13][PKT_TIME_SYNC payload: 13 bytes][crc8]
+```
+
+The 13-byte payload is `PktHeader (5 bytes) + TimeSyncPayload (8 bytes)`.
+
+### Jetson → Feather: ACK_SUMMARY frame (legacy, 14 bytes)
+
+```
+[0xAA][0x55][len=10][PKT_ACK_SUMMARY payload: 10 bytes][crc8]
 ```
 
 This frame format is kept here for protocol reference only. Standard-packet
 app reliability is now base-managed, so `SmartFiresBaseApp` rejects Jetson
 `ACK_SUMMARY` frames during normal operation.
 
-### Jetson → Feather: command frames (CMD_CALIBRATE / CMD_RESET, 11 bytes total)
+### Jetson → Feather: command frames (CMD_CALIBRATE / CMD_RESET, 12 bytes total)
 
 ```
-[0xAA][0x55][len=7][command payload: 7 bytes][crc8]
+[0xAA][0x55][len=8][command payload: 8 bytes][crc8]
 ```
 
-The 7-byte payload is `PktHeader (4 bytes) + CmdCalibratePayload/CmdResetPayload (2 bytes)
-+ crc8 (1 byte)`. Total frame size (2 magic + 1 len + 7 data + 1 crc8) is 11 bytes.
+The 8-byte payload is `PktHeader (5 bytes) + CmdCalibratePayload/CmdResetPayload (2 bytes)
++ crc8 (1 byte)`. Total frame size (2 magic + 1 len + 8 data + 1 crc8) is 12 bytes.
 
 ## Jetson-side Frame Parser (uart_receiver.py)
 

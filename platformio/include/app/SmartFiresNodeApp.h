@@ -86,13 +86,23 @@ private:
     bool _forceRadioAwake = false;
     bool _mcuSleptThisCycle = false;
 
-    // Phase 1 instrumentation (rtc-subsecond-sleep): offset of the
-    // pre-sleep session clock relative to the local sleep-compensated
-    // clock (sessionNowMs() - millis()). Projecting it forward at
-    // resync time isolates RTC sleep error from the awake gap spent
-    // waiting for the fresh TIME_SYNC. Compared against the new sync
-    // to measure real-world error vs guardMs.
+    // Deadline for draining the TX queue before entering MCU standby, so a
+    // window-flush bundle isn't parked in the queue for the whole sleep.
+    uint32_t _txDrainDeadlineMs = 0;
+    bool     _txDrainDeadlineValid = false;
+
+    // Duty phase as of the last update(), for detecting the active-window
+    // open/close edges that drive PktHeader WINDOW_FIRST/WINDOW_LAST.
+    DutyCyclePhase _lastDutyPhase = DutyCyclePhase::NotStarted;
+
+    // rtc-subsecond-sleep instrumentation: offset of the pre-sleep session
+    // clock relative to the local sleep-compensated clock
+    // (sessionNowMs() - millis()), plus the sync origin it was captured
+    // against. Projecting the offset forward when the next TIME_SYNC lands
+    // isolates RTC sleep error from the awake gap in between, measuring
+    // real-world error against guardMs.
     uint32_t _predictedSessionOffsetMs = 0;
+    uint32_t _predictedSyncLocalMs = 0;
     bool _predictedValid = false;
 
     void sendAwakenHandshake();
@@ -100,4 +110,9 @@ private:
     void handleIncomingCommands();
     bool sendCmdAck(uint8_t cmdType, uint8_t status);
     bool maybeEnterTimedMcuSleep();
+    bool radioMustStayAwakeToDrain() const;
+    bool enqueueTelemetryPayload(const uint8_t *buf, uint8_t len);
+    bool takeAndEnqueueBundle();
+    void updateWindowMarkers();
+    void logWakePhaseErrorOnNextSync();
 };

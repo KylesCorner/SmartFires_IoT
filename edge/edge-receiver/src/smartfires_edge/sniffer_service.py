@@ -20,6 +20,9 @@ from smartfires_edge.config import SnifferConfig
 from smartfires_edge.live_state import LiveState
 from smartfires_edge.packet import (
     HEADER_FMT,
+    HEADER_SIZE,
+    PKT_FLAG_WINDOW_FIRST,
+    PKT_FLAG_WINDOW_LAST,
     PKT_ACK_SUMMARY,
     PKT_AWAKEN,
     PKT_BUNDLE,
@@ -130,15 +133,15 @@ def _slot_timing(node_id: int, session_ms: int, num_slots: int) -> tuple[float, 
     return jitter_ms, guard_violation
 
 
-def _peek_header(raw: bytes) -> tuple[Optional[int], Optional[int], Optional[int]]:
-    """Best-effort header peek (pkt_type, node_id, seq) without CRC validation,
-    used only for logging when full decode fails."""
-    if len(raw) < 4:
-        return None, None, None
-    magic, pkt_type, node_id, seq = struct.unpack_from(HEADER_FMT, raw, 0)
+def _peek_header(raw: bytes) -> tuple[Optional[int], Optional[int], Optional[int], int]:
+    """Best-effort header peek (pkt_type, node_id, seq, flags) without CRC
+    validation, used only for logging when full decode fails."""
+    if len(raw) < HEADER_SIZE:
+        return None, None, None, 0
+    magic, pkt_type, node_id, seq, flags = struct.unpack_from(HEADER_FMT, raw, 0)
     if magic != PKT_MAGIC:
-        return None, None, None
-    return pkt_type, node_id, seq
+        return None, None, None, 0
+    return pkt_type, node_id, seq, flags
 
 
 def _decode_rx_event(
@@ -152,7 +155,7 @@ def _decode_rx_event(
     except ValueError:
         return None
 
-    pkt_type, hdr_node_id, hdr_seq = _peek_header(raw)
+    pkt_type, hdr_node_id, hdr_seq, hdr_flags = _peek_header(raw)
     rssi = rx.get("rssi")
     snr = rx.get("snr")
     t_ms = int(rx.get("t_ms", 0))
@@ -179,6 +182,13 @@ def _decode_rx_event(
         decode_full_state(raw, rssi)
     elif pkt_type == PKT_BUNDLE:
         decode_bundle(raw, rssi)
+        # Timed duty-cycle window markers, so the sniffer view shows where each
+        # active window starts and ends rather than an undifferentiated bundle
+        # stream.
+        if hdr_flags & PKT_FLAG_WINDOW_FIRST:
+            extra["window_first"] = True
+        if hdr_flags & PKT_FLAG_WINDOW_LAST:
+            extra["window_last"] = True
     elif pkt_type == PKT_ACK_SUMMARY:
         # Header node_id stays 0 (broadcast convention) — these are base
         # station transmissions, so they land in the dedicated base lane.

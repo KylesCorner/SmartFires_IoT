@@ -76,6 +76,15 @@ namespace DutyCycle {
 // ~1 ms alarm resolution; below this the enter/exit overhead isn't worth it).
 constexpr uint32_t kMinMcuStandbyMs = 250;
 
+// How long the node stays awake at the end of an active window waiting for the
+// TX queue to drain before entering standby anyway. The window-flush bundle is
+// enqueued at window close and needs this node's TDMA slot, which comes around
+// once per frame (NUM_SLOTS × slotWidthMs = 3.6 s at the default geometry), so
+// this covers roughly one frame plus main-loop slack. Exceeding it means the
+// base is unreachable, in which case sleeping is better than burning the
+// window's power budget waiting.
+constexpr uint32_t kMaxTxDrainBeforeStandbyMs = 5000;
+
 // ---------------------------------------------------------------------------
 // Continuous profile
 // ---------------------------------------------------------------------------

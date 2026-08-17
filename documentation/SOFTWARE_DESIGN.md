@@ -287,6 +287,11 @@ Jetson UART command
 
 The current protocol is binary and fixed-size where practical.
 
+Every packet begins with a 5-byte `PktHeader` (`magic`, `pkt_type`, `node_id`,
+`seq`, `flags`). The `flags` byte carries `PKT_FLAG_WINDOW_FIRST`/
+`PKT_FLAG_WINDOW_LAST`, which bound one `Timed` duty-cycle active window and are
+set on `BUNDLE` only — see `duty-cycling` and `CLAUDE.md`'s wire protocol tables.
+
 Node to base packets:
 
 - `AWAKEN`: boot signal before the session is synchronized

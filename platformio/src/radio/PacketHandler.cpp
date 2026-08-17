@@ -8,6 +8,7 @@
 
 #include <limits.h>
 #include <math.h>
+#include <stddef.h>
 #include <string.h>
 
 namespace {
@@ -88,19 +89,65 @@ bool PacketHandler::push(const SensorSnapshot &snap) {
         return false;
     }
 
+    return encodeAccumulatedBundle(0);
+}
+
+// --- Timed duty-cycle windows ---
+
+void PacketHandler::beginWindow() {
+    _pendingBundleFlags |= BinaryPacket::PKT_FLAG_WINDOW_FIRST;
+
+    LOG_DEBUG("packet", "window_begin pending_flags=0x%02X",
+              static_cast<unsigned int>(_pendingBundleFlags));
+}
+
+bool PacketHandler::flushWindow() {
+    // A bundle that completed but hasn't been taken yet owns _bundleBuf, so
+    // encoding over it would lose it. Stamp WINDOW_LAST onto that frame in
+    // place instead.
+    if (_bundleReady) {
+        _bundleBuf[offsetof(BinaryPacket::PktHeader, flags)] |=
+            BinaryPacket::PKT_FLAG_WINDOW_LAST;
+        _bundleBuf[_bundleLen - 1] =
+            BinaryPacket::crc8(_bundleBuf, _bundleLen - 1);
+
+        LOG_DEBUG("packet", "window_flush stamped_ready_bundle=1");
+        return true;
+    }
+
+    if (!_bundleEncodingEnabled || !_hasRef) {
+        // Nothing accumulated since the last bundle — this window's samples all
+        // went out already, just without a WINDOW_LAST marker on the final one.
+        LOG_DEBUG("packet", "window_flush_empty delta_count=%u",
+                  static_cast<unsigned int>(_deltaCount));
+        return false;
+    }
+
+    return encodeAccumulatedBundle(BinaryPacket::PKT_FLAG_WINDOW_LAST);
+}
+
+bool PacketHandler::encodeAccumulatedBundle(uint8_t extraFlags) {
+    const uint8_t flags =
+        static_cast<uint8_t>(_pendingBundleFlags | extraFlags);
+
     _bundleLen = BinaryPacket::encodeBundlePayload(
         _cfg.nodeId, _seq++,
         _ref, _deltas, _deltaCount,
-        _bundleBuf, sizeof(_bundleBuf));
+        _bundleBuf, sizeof(_bundleBuf), flags);
 
     _bundleReady = (_bundleLen > 0);
     _hasRef      = false;
     _deltaCount  = 0;
 
     if (_bundleReady) {
-        LOG_INFO("packet", "bundle_encoded len=%u node=%u",
+        // Only consumed once it actually reached a frame — a failed encode must
+        // not swallow the WINDOW_FIRST marker for this window.
+        _pendingBundleFlags = 0;
+
+        LOG_INFO("packet", "bundle_encoded len=%u node=%u flags=0x%02X",
                  static_cast<unsigned int>(_bundleLen),
-                 static_cast<unsigned int>(_cfg.nodeId));
+                 static_cast<unsigned int>(_cfg.nodeId),
+                 static_cast<unsigned int>(flags));
     } else {
         LOG_WARN("packet", "bundle_encode_failed node=%u",
                  static_cast<unsigned int>(_cfg.nodeId));
@@ -188,6 +235,7 @@ void PacketHandler::resetBundleState() {
     _deltaCount  = 0;
     _bundleReady = false;
     _bundleLen   = 0;
+    _pendingBundleFlags = 0;
     memset(&_ref, 0, sizeof(_ref));
     memset(&_prevSample, 0, sizeof(_prevSample));
     memset(_deltas, 0, sizeof(_deltas));

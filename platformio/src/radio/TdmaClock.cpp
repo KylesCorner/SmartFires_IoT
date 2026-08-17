@@ -48,6 +48,10 @@ bool TdmaClock::syncStale() const {
   return (_clock.millis() - _syncLocalMs) > _cfg.syncStaleMs;
 }
 
+uint32_t TdmaClock::syncLocalMs() const {
+  return _syncLocalMs;
+}
+
 uint32_t TdmaClock::sessionNowMs() const {
   if (!_hasSync) {
     return _clock.millis();

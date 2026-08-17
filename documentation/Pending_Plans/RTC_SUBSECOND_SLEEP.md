@@ -2,7 +2,7 @@
 name: rtc-subsecond-sleep
 description: Plan to replace RTCZero's whole-second calendar-mode alarm (used by Samd21RtcSleep for MCU standby) with the SAMD21 RTC's raw COUNT32 tick-counter mode, so sleep-elapsed time is known to ~1 ms instead of ~1 s — precise enough that a node can resume its TDMA session across a sleep instead of discarding sync and re-running the full AWAKEN handshake every wake.
 category: plan-pending
-status: in-progress — T0–T4 implemented 2026-08-12; awaiting user compile/test + T5 bake
+status: in-progress — Phase 1 (T0–T4) shipped; Phase 2 (T6) implemented 2026-08-17, awaiting user compile/flash + bake. T8 dropped (Hybrid deprecated).
 related_docs:
   - mcu-duty-cycle-changelog
   - duty-cycling
@@ -96,9 +96,24 @@ Once Phase 1 data supports it:
    fresh `TIME_SYNC` first.
 3. Re-run the Phase 1 instrumentation to confirm live slot behavior (not just the "predicted
    vs. actual" comparison) matches expectations with sync genuinely preserved.
-4. Consider whether `Hybrid` mode should also gain real MCU standby at this point (currently it
-   never calls `maybeEnterTimedMcuSleep()` — see `mcu-duty-cycle-changelog` implication 4);
-   revisit once the underlying sleep path is trusted.
+4. ~~Consider whether `Hybrid` mode should also gain real MCU standby at this point.~~
+   **Dropped — `Hybrid` is being deprecated.** `DutyCycleMode::Hybrid` and the
+   `feather_m0_lora_node_hybrid` env are left in place but are not a target for further
+   work; Phase 2 is validated on `Timed` only.
+
+### Phase 2 addendum — active-window markers on the wire
+
+Added alongside T6 rather than as a separate plan, because the two share a cause: with the
+node no longer tearing down its session every duty cycle, the *contents* of an active window
+become the meaningful unit of telemetry, and nothing on the wire marked where one started or
+ended.
+
+`PktHeader` gains a `flags` byte (4 → 5 bytes, every packet type) carrying
+`PKT_FLAG_WINDOW_FIRST`/`PKT_FLAG_WINDOW_LAST`, set on `PKT_BUNDLE` only. Closing a window
+also force-flushes the partial bundle left in `PacketHandler`'s accumulator — previously
+those samples (10 of every 25 at the current `Timed` constants) sat unsent across the whole
+standby and went out mid-way through the following window. See T9/T10 below and
+`duty-cycling`'s "Active Windows on the Wire".
 
 ## Task breakdown (subagent-ready)
 
@@ -219,10 +234,21 @@ current using `feather_m0_sensor_probe`-style methodology + `util/scope_current_
 (same approach as `[[project_lora_rx_gating]]`). Record results in
 `MCU_DUTY_CYCLE_CHANGELOG.md`.
 
-**T8 — Hybrid standby (Phase 2, step 4, optional).** Only after T6 is trusted: evaluate
-letting `DutyCycleMode::Hybrid` (env line 249) call `maybeEnterTimedMcuSleep()` — see
-`MCU_DUTY_CYCLE_CHANGELOG.md` implication 4. Separate decision; write a short addendum here
-rather than implementing unprompted.
+**T8 — Hybrid standby (Phase 2, step 4, optional). DROPPED.** `Hybrid` is being deprecated,
+so letting `DutyCycleMode::Hybrid` call `maybeEnterTimedMcuSleep()` is no longer a goal. The
+mode and its env remain compilable but out of scope.
+
+**T9 — `PktHeader::flags` + window markers.** Add a `flags` byte to `PktHeader` and
+`PKT_FLAG_WINDOW_FIRST`/`PKT_FLAG_WINDOW_LAST`; thread an optional `flags` argument through
+every encoder; teach `PacketHandler` `beginWindow()`/`flushWindow()`; drive both from
+`SmartFiresNodeApp::updateWindowMarkers()` off the `ActiveSampling` phase edges. Mirror the
+header change in `edge/edge-receiver`'s `packet.py`, `uart_receiver.py`, `sniffer_service.py`
+and add `pkt_flags`/`window_first`/`window_last` CSV columns.
+
+**T10 — drain TX queue before standby.** `maybeEnterTimedMcuSleep()` waits for
+`TdmaRadioService::queuedCount() == 0` (cap `SensingConfig::DutyCycle::kMaxTxDrainBeforeStandbyMs`,
+5 s) before entering standby, so the window-flush bundle actually gets its TDMA slot instead
+of being parked in the queue for the whole sleep.
 
 ## Power consumption impact
 
@@ -301,6 +327,40 @@ show up clearly.
   clock origin and the comparison would be garbage.
 - **Next:** user compiles + runs native tests, flashes `_timed`, then T5 bake
   (≥100 wakes, gate |err_ms| < 10 ms).
+
+## Execution log (2026-08-17) — Phase 2
+
+- **T6 done.** `maybeEnterTimedMcuSleep()` no longer calls `_tdmaClock.reset()` /
+  `_syncActive = false` after standby, so the session survives the sleep and the recurring
+  unslotted `AWAKEN` → `TIME_SYNC` handshake is gone. Cold boot and genuine lost/stale sync
+  are untouched — `update()`'s `hasFreshSync` check still drives the AWAKEN retry loop.
+  `_forceRadioAwake` / `setDutySleep(false)` are kept as planned.
+  - **One thing the plan didn't anticipate:** `_forceRadioAwake` was only ever cleared inside
+    the `hasFreshSync && !_syncActive` branch — i.e. by the very resync T6 deletes. Left as
+    written, the radio would have stayed force-awake forever after the first standby, quietly
+    cancelling `[[project_lora_rx_gating]]`. It is now cleared when the duty controller leaves
+    its sleeping phase (`!_duty.sleeping()`), which is where the override stops being needed.
+  - Instrumentation repointed as the plan specified, but it could not stay on the
+    sync-acquired edge — that edge no longer fires. `TdmaClock` gained `syncLocalMs()`, and
+    `logWakePhaseErrorOnNextSync()` fires `wake_phase_err` when that timestamp moves, i.e. on
+    the next naturally received `TIME_SYNC`. Same log line, now with `guard_ms` alongside.
+- **T9 done.** `PktHeader` is 5 bytes; `PKT_FLAG_WINDOW_FIRST`/`PKT_FLAG_WINDOW_LAST` set on
+  bundles only. `flushWindow()` handles the case where a completed bundle hasn't been taken
+  yet by stamping `WINDOW_LAST` into the existing frame **and recomputing its crc8** rather
+  than overwriting the buffer. Seven native tests added to `test/test_packet_handler/`.
+- **T10 done.** `kMaxTxDrainBeforeStandbyMs = 5000` in `SensingConfig::DutyCycle`.
+- **Also fixed:** `test/test_rtc_ticks/test_main.cpp`'s native `main()` called Arduino's
+  `delay(2000)`, which does not exist on the `native` platform — that suite could not build,
+  so `pio test -e native` failed as a whole. Removed. (`test/test_config` still fails to
+  compile for the separate reason tracked in `[[duty-cycle-test-factory-fix]]`.)
+- **Wire compatibility:** the header change is a hard break. Nodes, the base, and the Jetson
+  package must be updated together — a mixed set will CRC-fail every packet. The legacy
+  9-byte `AWAKEN` decode still works (it is parsed against the old 4-byte header) but only
+  makes an old node's handshake visible, not its telemetry.
+- **Next:** user compiles, runs `pio test -e native`, flashes base + node, reinstalls the edge
+  package, then bakes: confirm `wake_phase_err` stays inside the guard band with sync genuinely
+  preserved, confirm nodes hit their slots on the sniffer, and confirm every window shows a
+  `window_first` and (where samples don't land on a bundle boundary) a `window_last` in the CSV.
 
 ## Open questions
 

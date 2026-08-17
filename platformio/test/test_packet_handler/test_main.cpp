@@ -12,7 +12,7 @@
 
 // Bundles in these tests use maxDeltas=2 (ref + 2 deltas = 3 pushes per bundle)
 // to keep scenarios short. Wire layout under test:
-//   [PktHeader:4][FullStatePayload:20][n_deltas:1][DeltaPayload x n:12][crc8:1]
+//   [PktHeader:5][FullStatePayload:20][n_deltas:1][DeltaPayload x n:12][crc8:1]
 
 namespace {
 
@@ -68,6 +68,28 @@ DecodedBundle pushBundle(PacketHandler &ph, const SensorSnapshot *snaps, size_t 
   TEST_ASSERT_TRUE(ph.bundleReady());
   TEST_ASSERT_GREATER_THAN_UINT8(0, ph.takeBundle(buf, sizeof(buf)));
   return decodeBundle(buf);
+}
+
+// Takes the ready bundle and returns its PktHeader::flags byte, checking the
+// frame's CRC still covers the header (flushWindow() may have edited it in
+// place after encoding).
+uint8_t takeBundleFlags(PacketHandler &ph) {
+  uint8_t buf[BinaryPacket::kMaxBundleLoRaSize] = {};
+  const uint8_t len = ph.takeBundle(buf, sizeof(buf));
+  TEST_ASSERT_GREATER_THAN_UINT8(0, len);
+  TEST_ASSERT_EQUAL_UINT8(buf[len - 1], BinaryPacket::crc8(buf, len - 1));
+
+  BinaryPacket::PktHeader hdr = {};
+  memcpy(&hdr, buf, sizeof(hdr));
+  return hdr.flags;
+}
+
+// Pushes `n` identical samples, taking any bundle that completes.
+void pushSamples(PacketHandler &ph, uint32_t startMs, size_t n) {
+  for (size_t i = 0; i < n; ++i) {
+    ph.push(makeSnap(startMs + 1000u * static_cast<uint32_t>(i),
+                     PacketHandler::SHT31_FLAG, 25.0f, 45.0f));
+  }
 }
 
 constexpr uint16_t kAllFlags =
@@ -237,6 +259,107 @@ void test_valid_readings_encode_unchanged(void) {
   TEST_ASSERT_EQUAL_INT8(-3, b.deltas[1].temp_delta_deci_c);
 }
 
+// -----------------------------------------------------------------------------
+// Timed duty-cycle window markers (PktHeader::flags)
+// -----------------------------------------------------------------------------
+
+void test_window_first_marks_only_the_first_bundle_of_the_window(void) {
+  PacketHandler ph(PacketHandler::Config::make(2, kMaxDeltas));
+
+  ph.beginWindow();
+
+  pushSamples(ph, 1000, 3);  // ref + 2 deltas completes bundle 1
+  TEST_ASSERT_TRUE(ph.bundleReady());
+  TEST_ASSERT_EQUAL_UINT8(BinaryPacket::PKT_FLAG_WINDOW_FIRST, takeBundleFlags(ph));
+
+  pushSamples(ph, 5000, 3);  // bundle 2 of the same window
+  TEST_ASSERT_TRUE(ph.bundleReady());
+  TEST_ASSERT_EQUAL_UINT8(0, takeBundleFlags(ph));
+}
+
+void test_flush_window_emits_partial_bundle_marked_last(void) {
+  PacketHandler ph(PacketHandler::Config::make(2, kMaxDeltas));
+
+  ph.beginWindow();
+  pushSamples(ph, 1000, 3);
+  TEST_ASSERT_EQUAL_UINT8(BinaryPacket::PKT_FLAG_WINDOW_FIRST, takeBundleFlags(ph));
+
+  // Two samples accumulated — short of a full bundle, so without the flush they
+  // would sit in the accumulator across the MCU standby.
+  pushSamples(ph, 5000, 2);
+  TEST_ASSERT_FALSE(ph.bundleReady());
+
+  TEST_ASSERT_TRUE(ph.flushWindow());
+  TEST_ASSERT_TRUE(ph.bundleReady());
+  TEST_ASSERT_EQUAL_UINT8(BinaryPacket::PKT_FLAG_WINDOW_LAST, takeBundleFlags(ph));
+}
+
+void test_single_bundle_window_carries_both_markers(void) {
+  PacketHandler ph(PacketHandler::Config::make(2, kMaxDeltas));
+
+  ph.beginWindow();
+  pushSamples(ph, 1000, 2);  // ref + 1 delta — no bundle yet
+
+  TEST_ASSERT_TRUE(ph.flushWindow());
+  TEST_ASSERT_EQUAL_UINT8(
+      BinaryPacket::PKT_FLAG_WINDOW_FIRST | BinaryPacket::PKT_FLAG_WINDOW_LAST,
+      takeBundleFlags(ph));
+}
+
+void test_flush_stamps_a_completed_but_untaken_bundle_in_place(void) {
+  PacketHandler ph(PacketHandler::Config::make(2, kMaxDeltas));
+
+  ph.beginWindow();
+  pushSamples(ph, 1000, 3);  // bundle completed, deliberately not taken
+  TEST_ASSERT_TRUE(ph.bundleReady());
+
+  TEST_ASSERT_TRUE(ph.flushWindow());
+
+  // Marked in place rather than overwritten — takeBundleFlags() also asserts the
+  // CRC was recomputed, since a stale CRC would be dropped by the base.
+  TEST_ASSERT_EQUAL_UINT8(
+      BinaryPacket::PKT_FLAG_WINDOW_FIRST | BinaryPacket::PKT_FLAG_WINDOW_LAST,
+      takeBundleFlags(ph));
+}
+
+void test_flush_with_nothing_accumulated_emits_no_bundle(void) {
+  PacketHandler ph(PacketHandler::Config::make(2, kMaxDeltas));
+
+  ph.beginWindow();
+  pushSamples(ph, 1000, 3);
+  TEST_ASSERT_EQUAL_UINT8(BinaryPacket::PKT_FLAG_WINDOW_FIRST, takeBundleFlags(ph));
+
+  // The window's samples landed exactly on a bundle boundary.
+  TEST_ASSERT_FALSE(ph.flushWindow());
+  TEST_ASSERT_FALSE(ph.bundleReady());
+}
+
+void test_window_first_survives_until_a_bundle_actually_carries_it(void) {
+  PacketHandler ph(PacketHandler::Config::make(2, kMaxDeltas));
+
+  ph.beginWindow();
+
+  // Nothing pushed yet, so the marker is still pending; the next window opening
+  // must not double-count it into a second bundle.
+  TEST_ASSERT_FALSE(ph.flushWindow());
+
+  pushSamples(ph, 1000, 3);
+  TEST_ASSERT_EQUAL_UINT8(BinaryPacket::PKT_FLAG_WINDOW_FIRST, takeBundleFlags(ph));
+
+  pushSamples(ph, 5000, 3);
+  TEST_ASSERT_EQUAL_UINT8(0, takeBundleFlags(ph));
+}
+
+void test_reset_clears_pending_window_marker(void) {
+  PacketHandler ph(PacketHandler::Config::make(2, kMaxDeltas));
+
+  ph.beginWindow();
+  ph.reset();
+
+  pushSamples(ph, 1000, 3);
+  TEST_ASSERT_EQUAL_UINT8(0, takeBundleFlags(ph));
+}
+
 void runPacketHandlerTests(void) {
   UNITY_BEGIN();
 
@@ -247,6 +370,14 @@ void runPacketHandlerTests(void) {
   RUN_TEST(test_sensor_flags_on_wire_preserve_invalidity);
   RUN_TEST(test_reset_clears_last_good);
   RUN_TEST(test_valid_readings_encode_unchanged);
+
+  RUN_TEST(test_window_first_marks_only_the_first_bundle_of_the_window);
+  RUN_TEST(test_flush_window_emits_partial_bundle_marked_last);
+  RUN_TEST(test_single_bundle_window_carries_both_markers);
+  RUN_TEST(test_flush_stamps_a_completed_but_untaken_bundle_in_place);
+  RUN_TEST(test_flush_with_nothing_accumulated_emits_no_bundle);
+  RUN_TEST(test_window_first_survives_until_a_bundle_actually_carries_it);
+  RUN_TEST(test_reset_clears_pending_window_marker);
 
   UNITY_END();
 }

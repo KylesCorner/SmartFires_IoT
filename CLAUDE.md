@@ -21,14 +21,14 @@ Wildfire IoT sensor network. Remote drone nodes collect environmental data (temp
     runs: SmartFiresNodeApp → PacketHandler → TdmaRadioService → RadioHeadTdmaDriver
     |
     | LoRa 915 MHz (RadioHead RHReliableDatagram, 13 dBm)
-    |   Node → Base: AWAKEN payload (11 bytes: uid_hash + reset_cause + hang_zone, on boot until TIME_SYNC received)
-    |                BUNDLE payload (≤194 bytes, app-layer ACK-paced retry, TDMA-gated)
-    |                STATUS payload (25 bytes, GPS + battery + DMP heading + link stats, every 15 min)
-    |                CMD_ACK (11 bytes, acknowledges CALIBRATE/RESET commands)
-    |   Base → Node: TIME_SYNC broadcast (13 bytes, fire-and-forget, RH_BROADCAST_ADDRESS)
-    |                ACK_SUMMARY (9 bytes, base-generated app-layer reliability bitmap)
-    |                CMD_CALIBRATE (7 bytes, forwarded from Jetson)
-    |                CMD_RESET (7 bytes, forwarded from Jetson)
+    |   Node → Base: AWAKEN payload (12 bytes: uid_hash + reset_cause + hang_zone, on boot until TIME_SYNC received)
+    |                BUNDLE payload (≤195 bytes, app-layer ACK-paced retry, TDMA-gated)
+    |                STATUS payload (26 bytes, GPS + battery + DMP heading + link stats, every 15 min)
+    |                CMD_ACK (12 bytes, acknowledges CALIBRATE/RESET commands)
+    |   Base → Node: TIME_SYNC broadcast (14 bytes, fire-and-forget, RH_BROADCAST_ADDRESS)
+    |                ACK_SUMMARY (10 bytes, base-generated app-layer reliability bitmap)
+    |                CMD_CALIBRATE (8 bytes, forwarded from Jetson)
+    |                CMD_RESET (8 bytes, forwarded from Jetson)
     v
 [Adafruit Feather M0 RFM95 — base station]  ← SmartFiresBaseApp, fully ported
     Receives telemetry, auto-ACKs, relays to Jetson over USB.
@@ -36,8 +36,8 @@ Wildfire IoT sensor network. Remote drone nodes collect environmental data (temp
     Reads TIME_SYNC + command frames from the Jetson USB link, routes/broadcasts over LoRa.
     |
     | USB CDC, 115200 baud (Serial — native USB, binary frames — bidirectional)
-    |   Feather → Jetson: base UART frames with RSSI (variable length, ≤198 bytes)
-    |   Jetson → Feather: TIME_SYNC (16 bytes), CMD_CALIBRATE/RESET (11 bytes)
+    |   Feather → Jetson: base UART frames with RSSI (variable length, ≤200 bytes)
+    |   Jetson → Feather: TIME_SYNC (17 bytes), CMD_CALIBRATE/RESET (12 bytes)
     |   (ACK_SUMMARY is generated locally by the base itself, not sent by the Jetson)
     v
 [Jetson Orin Nano]
@@ -248,8 +248,8 @@ SmartFiresNodeApp::update()
     buildSnapshot()        ← calls sensor.fillSnapshot() + battery reading;
                               timestamps via TdmaClock::sessionNowMs()
     packetHandler.push(snapshot)
-    if statusPacketReady() → enqueueTelemetry(STATUS payload, 25 bytes)
-    if bundleReady()       → enqueueTelemetry(BUNDLE payload, ≤194 bytes)
+    if statusPacketReady() → enqueueTelemetry(STATUS payload, 26 bytes)
+    if bundleReady()       → enqueueTelemetry(BUNDLE payload, ≤195 bytes)
 
 PacketHandler
   push(SensorSnapshot):
@@ -278,7 +278,7 @@ ISensor::fillSnapshot(SensorSnapshot&)    float units (tempC, windMps, …)
         ↓
 PacketHandler::quantize()                 fixed-point integers (FullStatePayload)
         ↓
-BinaryPacket::encodeBundlePayload()       raw LoRa bytes (≤194 bytes)
+BinaryPacket::encodeBundlePayload()       raw LoRa bytes (≤195 bytes)
         ↓
 TdmaTxQueue::enqueue()                    8-entry ring buffer, drop-oldest
         ↓
@@ -293,10 +293,10 @@ RadioHeadTdmaDriver::send()               non-blocking LoRa TX for fresh telemet
 ### LoRa payloads — node → base
 
 ```
-AWAKEN:  [PktHeader: 4][AwakenPayload: 6][crc8: 1]                                    = 11 bytes
-BUNDLE:  [PktHeader: 4][FullStatePayload: 20][n_deltas: 1][DeltaPayload×n: n×12][crc8] ≤ 194 bytes
-STATUS:  [PktHeader: 4][StatusPayload: 20][crc8: 1]                                    = 25 bytes
-CMD_ACK: [PktHeader: 4][CmdAckPayload: 6][crc8: 1]                                    = 11 bytes
+AWAKEN:  [PktHeader: 5][AwakenPayload: 6][crc8: 1]                                    = 12 bytes
+BUNDLE:  [PktHeader: 5][FullStatePayload: 20][n_deltas: 1][DeltaPayload×n: n×12][crc8] ≤ 195 bytes
+STATUS:  [PktHeader: 5][StatusPayload: 20][crc8: 1]                                    = 26 bytes
+CMD_ACK: [PktHeader: 5][CmdAckPayload: 6][crc8: 1]                                    = 12 bytes
 ```
 
 RadioHead `RHReliableDatagram` handles LoRa framing and addressing.
@@ -308,10 +308,10 @@ via a non-blocking hand-rolled ACK — RadioHead's own automatic ACK path blocks
 no-timeout wait for the radio's TX-done interrupt, which can hang the board forever
 on a missed interrupt; see `documentation/Current_Architecture/PACKET_RELIABILITY.md`.
 
-### LoRa TIME_SYNC broadcast — base → all nodes (13 bytes)
+### LoRa TIME_SYNC broadcast — base → all nodes (14 bytes)
 
 ```
-[PktHeader: 4][TimeSyncPayload: 8][crc8: 1]
+[PktHeader: 5][TimeSyncPayload: 8][crc8: 1]
 ```
 
 Sent to `RH_BROADCAST_ADDRESS (0xFF)` — fire-and-forget. Nodes receive it between TX
@@ -321,18 +321,18 @@ slots and call `TdmaClock::applySync(sessionMs)`.
 
 ```
 [0xAA][0x55][len: u8][rssi: i8][LoRa payload][crc8]
-  AWAKEN: len=12  → total frame 16 bytes
-  STATUS: len=26  → total frame 30 bytes
-  BUNDLE: len≤195 → total frame ≤199 bytes
+  AWAKEN: len=13  → total frame 17 bytes
+  STATUS: len=27  → total frame 31 bytes
+  BUNDLE: len≤196 → total frame ≤200 bytes
 ```
 
-### UART TIME_SYNC frame — Jetson → base (16 bytes)
+### UART TIME_SYNC frame — Jetson → base (17 bytes)
 
 ```
-[0xAA][0x55][len=12][PktHeader(PKT_TIME_SYNC): 4][TimeSyncPayload: 8][crc8]
+[0xAA][0x55][len=13][PktHeader(PKT_TIME_SYNC): 5][TimeSyncPayload: 8][crc8]
 ```
 
-### PktHeader (4 bytes, packed)
+### PktHeader (5 bytes, packed)
 
 | Field | Type | Notes |
 |---|---|---|
@@ -340,22 +340,33 @@ slots and call `TdmaClock::applySync(sessionMs)`.
 | `pkt_type` | `uint8_t` | see packet type table below |
 | `node_id` | `uint8_t` | compile-time `NODE_ID`; `0` for broadcast/command frames |
 | `seq` | `uint8_t` | rolling 0–255 |
+| `flags` | `uint8_t` | `PKT_FLAG_WINDOW_FIRST=0x01` · `PKT_FLAG_WINDOW_LAST=0x02`; set on `PKT_BUNDLE` only, `0` on every other type |
+
+**Window markers.** In `Timed` duty-cycle mode the node bounds each active
+window on the wire: the first bundle encoded after the window opens carries
+`WINDOW_FIRST`, and closing the window force-flushes the partial bundle still in
+the accumulator (which previously sat unsent across the whole MCU standby)
+marked `WINDOW_LAST`. A window producing one bundle sets both bits on it; a
+window whose samples land exactly on a bundle boundary has nothing to flush, so
+no packet carries `WINDOW_LAST` and the next `WINDOW_FIRST` implies the close.
+The Jetson surfaces these as the `pkt_flags`/`window_first`/`window_last` CSV
+columns.
 
 ### Packet Types
 
 | Value | Name | Direction | Size (LoRa payload) | Notes |
 |---|---|---|---|---|
-| `0x01` | PKT_FULL_STATE | Node→Jetson | 25 bytes | Reserved — handled in decode dispatch, never encoded/sent by current firmware |
+| `0x01` | PKT_FULL_STATE | Node→Jetson | 26 bytes | Reserved — handled in decode dispatch, never encoded/sent by current firmware |
 | `0x02` | PKT_HEARTBEAT | — | — | Reserved, unused |
-| `0x03` | PKT_TIME_SYNC | Base→Nodes | 13 bytes | Broadcast, fire-and-forget |
-| `0x04` | PKT_BUNDLE | Node→Jetson | ≤194 bytes | 15 samples (ref + 14 deltas) |
-| `0x05` | PKT_STATUS | Node→Jetson | 25 bytes | GPS + battery + DMP heading + link stats, every 15 min |
-| `0x06` | PKT_AWAKEN | Node→Base | 11 bytes | Boot handshake; uid_hash + reset_cause + hang_zone (reset diagnostics). Legacy 9-byte uid_hash-only frame still decoded |
-| `0x07` | PKT_ACK_SUMMARY | Base→Node | 9 bytes | Base-generated app-layer reliability bitmap (not relayed from Jetson) |
-| `0x10` | PKT_CMD_CALIBRATE | Jetson→Node | 7 bytes | Forwarded by base; node just logs + ACKs (DMP self-calibrates regardless) |
-| `0x11` | PKT_CMD_RESET | Jetson→Node | 7 bytes | Forwarded by base; node logs + ACKs but does not yet actually reset |
+| `0x03` | PKT_TIME_SYNC | Base→Nodes | 14 bytes | Broadcast, fire-and-forget |
+| `0x04` | PKT_BUNDLE | Node→Jetson | ≤195 bytes | 15 samples (ref + 14 deltas) |
+| `0x05` | PKT_STATUS | Node→Jetson | 26 bytes | GPS + battery + DMP heading + link stats, every 15 min |
+| `0x06` | PKT_AWAKEN | Node→Base | 12 bytes | Boot handshake; uid_hash + reset_cause + hang_zone (reset diagnostics). Legacy 9-byte uid_hash-only frame still decoded |
+| `0x07` | PKT_ACK_SUMMARY | Base→Node | 10 bytes | Base-generated app-layer reliability bitmap (not relayed from Jetson) |
+| `0x10` | PKT_CMD_CALIBRATE | Jetson→Node | 8 bytes | Forwarded by base; node just logs + ACKs (DMP self-calibrates regardless) |
+| `0x11` | PKT_CMD_RESET | Jetson→Node | 8 bytes | Forwarded by base; node logs + ACKs but does not yet actually reset |
 | `0x12` | PKT_CALIBRATION_DATA | — | — | Reserved, unused — no encode/decode functions exist |
-| `0x13` | PKT_CMD_ACK | Node→Jetson | 11 bytes | Acknowledge CALIBRATE or RESET; relayed through base |
+| `0x13` | PKT_CMD_ACK | Node→Jetson | 12 bytes | Acknowledge CALIBRATE or RESET; relayed through base |
 | `0x14` | PKT_DEBUG_LOG | Base→Jetson | variable | USB/UART only, never sent over LoRa; carries `@SFDBG` text lines (`FramedDebugLogSink`) |
 
 Types `0x10`/`0x11`/`0x13` (CMD_CALIBRATE/CMD_RESET/CMD_ACK) are **implemented end-to-end**:
@@ -624,7 +635,7 @@ Base station link (USB, not UART — see `UART_JETSON_BRIDGE.md`):
 ## Key Design Decisions
 
 - **Single-board node:** Feather M0 owns both sensing and LoRa. No separate ESP32. Simplifies firmware, eliminates UART bridge between boards.
-- **Binary not text:** text CSV was ~90 bytes/packet; binary bundle ≤194 bytes carries 15 samples. Effective per-sample cost ~13 bytes vs ~90 bytes.
+- **Binary not text:** text CSV was ~90 bytes/packet; binary bundle ≤195 bytes carries 15 samples. Effective per-sample cost ~13 bytes vs ~90 bytes.
 - **Fixed-point integers on the wire:** no floats — deterministic size, no locale/printf issues on MCUs. `SensorSnapshot` uses floats internally; `PacketHandler::quantize()` converts.
 - **SensorSnapshot as internal currency:** sensors write float readings into `SensorSnapshot` via `ISensor::fillSnapshot()`. Battery data is also written into the snapshot by `SmartFiresNodeApp`. `PacketHandler` owns all quantization and encoding — sensors never touch wire format.
 - **AWAKEN boot handshake:** node withholds sensing until it receives a TIME_SYNC from the base. This ensures `session_time` in every bundle is valid from the first sample. Node re-broadcasts AWAKEN every 5 s until synced.

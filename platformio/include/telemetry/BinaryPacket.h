@@ -8,19 +8,20 @@
 // Binary wire format for SmartFires telemetry.
 //
 // LoRa payloads — node -> base:
-//   AWAKEN:     [PktHeader:4][AwakenPayload:6][crc8:1]                                    =  11 bytes
-//              (legacy pre-diagnostics AwakenPayload was 4 bytes / 9-byte frame; decodeAwaken accepts both)
-//   BUNDLE:     [PktHeader:4][FullStatePayload:20][n_deltas:1][DeltaPayload×n][crc8:1]  ≤ 194 bytes
-//   STATUS:     [PktHeader:4][StatusPayload:20][crc8:1]                                 =  25 bytes
-//   CMD_ACK:    [PktHeader:4][CmdAckPayload:6][crc8:1]                                  =  11 bytes
+//   AWAKEN:     [PktHeader:5][AwakenPayload:6][crc8:1]                                    =  12 bytes
+//              (legacy pre-flags frame used a 4-byte header + 4-byte payload = 9 bytes;
+//               decodeAwaken still accepts it — see decodeAwaken's comment for the caveat)
+//   BUNDLE:     [PktHeader:5][FullStatePayload:20][n_deltas:1][DeltaPayload×n][crc8:1]  ≤ 195 bytes
+//   STATUS:     [PktHeader:5][StatusPayload:20][crc8:1]                                 =  26 bytes
+//   CMD_ACK:    [PktHeader:5][CmdAckPayload:6][crc8:1]                                  =  12 bytes
 //
 // LoRa TIME_SYNC — base -> node or all nodes:
-//   TIME_SYNC:  [PktHeader:4][TimeSyncPayload:8][crc8:1]                                =  13 bytes
+//   TIME_SYNC:  [PktHeader:5][TimeSyncPayload:8][crc8:1]                                =  14 bytes
 //
 // CRC-8/MAXIM (polynomial 0x31) covers all preceding bytes in the LoRa payload.
 //
-// UART TIME_SYNC frame — Jetson -> base (16 bytes):
-//   [0xAA][0x55][len=12][PktHeader(PKT_TIME_SYNC):4][TimeSyncPayload:8][crc8]
+// UART TIME_SYNC frame — Jetson -> base (17 bytes):
+//   [0xAA][0x55][len=13][PktHeader(PKT_TIME_SYNC):5][TimeSyncPayload:8][crc8]
 //
 // UART base frame — base -> Jetson (variable):
 //   [0xAA][0x55][len:u8][rssi:i8][LoRa payload][crc8]
@@ -60,7 +61,18 @@ struct __attribute__((packed)) PktHeader {
     uint8_t pkt_type;
     uint8_t node_id;
     uint8_t seq;
+    uint8_t flags;
 };
+
+// PktHeader::flags — per-packet bits, present on every packet type.
+//
+// WINDOW_FIRST/WINDOW_LAST bound one Timed duty-cycle active window. They are
+// set only on PKT_BUNDLE (the sample stream); STATUS and the command/handshake
+// types carry flags=0. A window that produces exactly one bundle sets both bits
+// on it. Together they let the receiver group bundles into windows and tell a
+// complete window from one truncated by packet loss.
+static constexpr uint8_t PKT_FLAG_WINDOW_FIRST = 0x01;
+static constexpr uint8_t PKT_FLAG_WINDOW_LAST  = 0x02;
 
 struct __attribute__((packed)) AwakenPayload {
     uint32_t uid_hash;
@@ -152,7 +164,7 @@ static constexpr uint8_t DELTA_FLAG_PM2_5_CLAMPED    = 0x10;
 static constexpr uint8_t DELTA_FLAG_PM4_CLAMPED      = 0x20;
 static constexpr uint8_t DELTA_FLAG_PM10_CLAMPED     = 0x40;
 
-static_assert(sizeof(PktHeader)           ==  4, "PktHeader must be 4 bytes");
+static_assert(sizeof(PktHeader)           ==  5, "PktHeader must be 5 bytes");
 static_assert(sizeof(AwakenPayload)       ==  6, "AwakenPayload must be 6 bytes");
 static_assert(sizeof(FullStatePayload)    == 20, "FullStatePayload must be 20 bytes");
 static_assert(sizeof(StatusPayload)       == 20, "StatusPayload must be 20 bytes");
@@ -167,30 +179,31 @@ static constexpr uint8_t kBundleMaxDeltas = 14;
 
 // LoRa payload sizes (no UART framing). Each includes a trailing CRC-8 byte.
 static constexpr size_t kAwakenLoRaSize =
-    sizeof(PktHeader) + sizeof(AwakenPayload) + 1;                      //  11
-// Legacy pre-diagnostics AWAKEN frame (uid_hash-only, 4-byte payload). Kept so
-// decodeAwaken() can accept nodes flashed before the reset_cause/hang_zone fields
-// were added, without a length-failure flood during a mixed-firmware rollout.
+    sizeof(PktHeader) + sizeof(AwakenPayload) + 1;                      //  12
+// Legacy AWAKEN frame: 4-byte header (no flags byte) + uid_hash-only 4-byte
+// payload. Predates both the reset_cause/hang_zone fields and PktHeader::flags,
+// so it is decoded against its own header size, not sizeof(PktHeader).
+static constexpr size_t kLegacyHeaderSize      = 4;
 static constexpr size_t kAwakenPayloadLegacyLen = 4;
 static constexpr size_t kAwakenLoRaSizeLegacy =
-    sizeof(PktHeader) + kAwakenPayloadLegacyLen + 1;                    //   9
+    kLegacyHeaderSize + kAwakenPayloadLegacyLen + 1;                    //   9
 static constexpr size_t kStatusLoRaSize =
-    sizeof(PktHeader) + sizeof(StatusPayload) + 1;                      //  25
+    sizeof(PktHeader) + sizeof(StatusPayload) + 1;                      //  26
 static constexpr size_t kTimeSyncLoRaSize =
-    sizeof(PktHeader) + sizeof(TimeSyncPayload) + 1;                    //  13
+    sizeof(PktHeader) + sizeof(TimeSyncPayload) + 1;                    //  14
 static constexpr size_t kAckSummaryLoRaSize =
-    sizeof(PktHeader) + sizeof(AckSummaryPayload) + 1;                  //   9
+    sizeof(PktHeader) + sizeof(AckSummaryPayload) + 1;                  //  10
 static constexpr size_t kCmdCalibrateLoRaSize =
-    sizeof(PktHeader) + sizeof(CmdCalibratePayload) + 1;                //   7
+    sizeof(PktHeader) + sizeof(CmdCalibratePayload) + 1;                //   8
 static constexpr size_t kCmdResetLoRaSize =
-    sizeof(PktHeader) + sizeof(CmdResetPayload) + 1;                    //   7
+    sizeof(PktHeader) + sizeof(CmdResetPayload) + 1;                    //   8
 static constexpr size_t kCmdAckLoRaSize =
-    sizeof(PktHeader) + sizeof(CmdAckPayload) + 1;                      //  11
+    sizeof(PktHeader) + sizeof(CmdAckPayload) + 1;                      //  12
 static constexpr size_t kFullStateLoRaSize =
-    sizeof(PktHeader) + sizeof(FullStatePayload) + 1;                   //  25
+    sizeof(PktHeader) + sizeof(FullStatePayload) + 1;                   //  26
 static constexpr size_t kMaxBundleLoRaSize =
     sizeof(PktHeader) + sizeof(FullStatePayload) + 1 +
-    kBundleMaxDeltas * sizeof(DeltaPayload) + 1;                        // 194
+    kBundleMaxDeltas * sizeof(DeltaPayload) + 1;                        // 195
 
 // ---------- CRC-8/MAXIM (polynomial 0x31) ----------
 
@@ -211,7 +224,8 @@ inline uint8_t crc8(const uint8_t* data, size_t len) {
 inline uint8_t encodeAwakenPayload(
     uint8_t node_id, uint8_t seq,
     const AwakenPayload& awaken,
-    uint8_t* buf, size_t buf_size)
+    uint8_t* buf, size_t buf_size,
+    uint8_t flags = 0)
 {
     if (buf_size < kAwakenLoRaSize) return 0;
     PktHeader hdr;
@@ -219,6 +233,7 @@ inline uint8_t encodeAwakenPayload(
     hdr.pkt_type = PKT_AWAKEN;
     hdr.node_id  = node_id;
     hdr.seq      = seq;
+    hdr.flags    = flags;
     memcpy(buf, &hdr, sizeof(PktHeader));
     memcpy(buf + sizeof(PktHeader), &awaken, sizeof(AwakenPayload));
     buf[sizeof(PktHeader) + sizeof(AwakenPayload)] =
@@ -231,7 +246,8 @@ inline uint8_t encodeAwakenPayload(
 inline uint8_t encodeStatusPayload(
     uint8_t node_id, uint8_t seq,
     const StatusPayload& sp,
-    uint8_t* buf, size_t buf_size)
+    uint8_t* buf, size_t buf_size,
+    uint8_t flags = 0)
 {
     if (buf_size < kStatusLoRaSize) return 0;
     PktHeader hdr;
@@ -239,6 +255,7 @@ inline uint8_t encodeStatusPayload(
     hdr.pkt_type = PKT_STATUS;
     hdr.node_id  = node_id;
     hdr.seq      = seq;
+    hdr.flags    = flags;
     memcpy(buf,                    &hdr, sizeof(PktHeader));
     memcpy(buf + sizeof(PktHeader), &sp,  sizeof(StatusPayload));
     buf[sizeof(PktHeader) + sizeof(StatusPayload)] = crc8(buf, sizeof(PktHeader) + sizeof(StatusPayload));
@@ -250,7 +267,8 @@ inline uint8_t encodeStatusPayload(
 inline uint8_t encodeTimeSyncPayload(
     uint8_t node_id, uint8_t seq,
     const TimeSyncPayload& ts,
-    uint8_t* buf, size_t buf_size)
+    uint8_t* buf, size_t buf_size,
+    uint8_t flags = 0)
 {
     if (buf_size < kTimeSyncLoRaSize) return 0;
     PktHeader hdr;
@@ -258,6 +276,7 @@ inline uint8_t encodeTimeSyncPayload(
     hdr.pkt_type = PKT_TIME_SYNC;
     hdr.node_id  = node_id;
     hdr.seq      = seq;
+    hdr.flags    = flags;
     memcpy(buf,                    &hdr, sizeof(PktHeader));
     memcpy(buf + sizeof(PktHeader), &ts,  sizeof(TimeSyncPayload));
     buf[sizeof(PktHeader) + sizeof(TimeSyncPayload)] = crc8(buf, sizeof(PktHeader) + sizeof(TimeSyncPayload));
@@ -267,15 +286,17 @@ inline uint8_t encodeTimeSyncPayload(
 inline uint8_t encodeTimeSyncPayload(
     uint8_t seq,
     const TimeSyncPayload& ts,
-    uint8_t* buf, size_t buf_size)
+    uint8_t* buf, size_t buf_size,
+    uint8_t flags = 0)
 {
-    return encodeTimeSyncPayload(0, seq, ts, buf, buf_size);
+    return encodeTimeSyncPayload(0, seq, ts, buf, buf_size, flags);
 }
 
 inline uint8_t encodeAckSummaryPayload(
     uint8_t seq,
     const AckSummaryPayload& as,
-    uint8_t* buf, size_t buf_size)
+    uint8_t* buf, size_t buf_size,
+    uint8_t flags = 0)
 {
     if (buf_size < kAckSummaryLoRaSize) return 0;
     PktHeader hdr;
@@ -283,6 +304,7 @@ inline uint8_t encodeAckSummaryPayload(
     hdr.pkt_type = PKT_ACK_SUMMARY;
     hdr.node_id  = 0;
     hdr.seq      = seq;
+    hdr.flags    = flags;
     memcpy(buf,                    &hdr, sizeof(PktHeader));
     memcpy(buf + sizeof(PktHeader), &as, sizeof(AckSummaryPayload));
     buf[sizeof(PktHeader) + sizeof(AckSummaryPayload)] = crc8(buf, sizeof(PktHeader) + sizeof(AckSummaryPayload));
@@ -292,7 +314,8 @@ inline uint8_t encodeAckSummaryPayload(
 inline uint8_t encodeCmdCalibratePayload(
     uint8_t seq,
     const CmdCalibratePayload& cmd,
-    uint8_t* buf, size_t buf_size)
+    uint8_t* buf, size_t buf_size,
+    uint8_t flags = 0)
 {
     if (buf_size < kCmdCalibrateLoRaSize) return 0;
     PktHeader hdr;
@@ -300,6 +323,7 @@ inline uint8_t encodeCmdCalibratePayload(
     hdr.pkt_type = PKT_CMD_CALIBRATE;
     hdr.node_id  = 0;
     hdr.seq      = seq;
+    hdr.flags    = flags;
     memcpy(buf,                    &hdr, sizeof(PktHeader));
     memcpy(buf + sizeof(PktHeader), &cmd, sizeof(CmdCalibratePayload));
     buf[sizeof(PktHeader) + sizeof(CmdCalibratePayload)] =
@@ -310,7 +334,8 @@ inline uint8_t encodeCmdCalibratePayload(
 inline uint8_t encodeCmdResetPayload(
     uint8_t seq,
     const CmdResetPayload& cmd,
-    uint8_t* buf, size_t buf_size)
+    uint8_t* buf, size_t buf_size,
+    uint8_t flags = 0)
 {
     if (buf_size < kCmdResetLoRaSize) return 0;
     PktHeader hdr;
@@ -318,6 +343,7 @@ inline uint8_t encodeCmdResetPayload(
     hdr.pkt_type = PKT_CMD_RESET;
     hdr.node_id  = 0;
     hdr.seq      = seq;
+    hdr.flags    = flags;
     memcpy(buf,                    &hdr, sizeof(PktHeader));
     memcpy(buf + sizeof(PktHeader), &cmd, sizeof(CmdResetPayload));
     buf[sizeof(PktHeader) + sizeof(CmdResetPayload)] =
@@ -328,7 +354,8 @@ inline uint8_t encodeCmdResetPayload(
 inline uint8_t encodeCmdAckPayload(
     uint8_t node_id, uint8_t seq,
     const CmdAckPayload& ack,
-    uint8_t* buf, size_t buf_size)
+    uint8_t* buf, size_t buf_size,
+    uint8_t flags = 0)
 {
     if (buf_size < kCmdAckLoRaSize) return 0;
     PktHeader hdr;
@@ -336,6 +363,7 @@ inline uint8_t encodeCmdAckPayload(
     hdr.pkt_type = PKT_CMD_ACK;
     hdr.node_id  = node_id;
     hdr.seq      = seq;
+    hdr.flags    = flags;
     memcpy(buf,                    &hdr, sizeof(PktHeader));
     memcpy(buf + sizeof(PktHeader), &ack, sizeof(CmdAckPayload));
     buf[sizeof(PktHeader) + sizeof(CmdAckPayload)] =
@@ -352,7 +380,8 @@ inline uint8_t encodeBundlePayload(
     uint8_t node_id, uint8_t seq,
     const FullStatePayload& ref,
     const DeltaPayload* deltas, uint8_t n_deltas,
-    uint8_t* buf, size_t buf_size)
+    uint8_t* buf, size_t buf_size,
+    uint8_t flags = 0)
 {
     if (n_deltas > kBundleMaxDeltas) return 0;
 
@@ -365,6 +394,7 @@ inline uint8_t encodeBundlePayload(
     hdr.pkt_type = PKT_BUNDLE;
     hdr.node_id  = node_id;
     hdr.seq      = seq;
+    hdr.flags    = flags;
 
     size_t off = 0;
     memcpy(buf + off, &hdr, sizeof(PktHeader));        off += sizeof(PktHeader);
@@ -384,7 +414,8 @@ inline uint8_t encodeBundlePayload(
 inline size_t encodeTimeSyncFrame(
     uint8_t node_id, uint8_t seq,
     const TimeSyncPayload& ts,
-    uint8_t* buf, size_t buf_size)
+    uint8_t* buf, size_t buf_size,
+    uint8_t flags = 0)
 {
     static constexpr size_t kDataLen  = sizeof(PktHeader) + sizeof(TimeSyncPayload);
     static constexpr size_t kFrameLen = 2 + 1 + kDataLen + 1;
@@ -400,6 +431,7 @@ inline size_t encodeTimeSyncFrame(
     hdr.pkt_type = PKT_TIME_SYNC;
     hdr.node_id  = node_id;
     hdr.seq      = seq;
+    hdr.flags    = flags;
 
     memcpy(buf + 3,                     &hdr, sizeof(PktHeader));
     memcpy(buf + 3 + sizeof(PktHeader), &ts,  sizeof(TimeSyncPayload));
@@ -470,28 +502,40 @@ inline bool decodeStatus(
     return hdr_out.magic == PKT_MAGIC && hdr_out.pkt_type == PKT_STATUS;
 }
 
-// Length-adaptive: accepts both the current 11-byte frame (6-byte payload with
-// reset_cause/hang_zone) and the legacy 9-byte frame (4-byte uid_hash-only
-// payload). On a legacy frame the new fields default to 0 (ZONE_UNKNOWN /
-// reset_cause=0), so a base flashed with this build decodes a not-yet-updated
-// node without a CRC/length failure. `len` is the exact received LoRa payload
-// length, so it is 9 or 11 in practice; the CRC is validated over whichever
-// frame length we actually consume.
+// Length-adaptive: accepts both the current 12-byte frame (5-byte header,
+// 6-byte payload with reset_cause/hang_zone) and the legacy 9-byte frame
+// (4-byte header without the flags byte, 4-byte uid_hash-only payload). The
+// two layouts are told apart by length, and each is CRC-checked over its own
+// frame length. Missing fields default to 0 (flags=0 / reset_cause=0 /
+// hang_zone=ZONE_UNKNOWN).
+//
+// Caveat: a node old enough to send the legacy frame also encodes BUNDLE and
+// STATUS with the 4-byte header, which this build cannot decode. Accepting its
+// AWAKEN only keeps the handshake and node-assignment logs readable — it does
+// not make a pre-flags node usable. Flash nodes, base, and the Jetson together.
 inline bool decodeAwaken(
     const uint8_t* raw, size_t len,
     PktHeader& hdr_out, AwakenPayload& awaken_out)
 {
+    size_t header_len;
     size_t payload_len;
-    if (len >= kAwakenLoRaSize)              payload_len = sizeof(AwakenPayload); // 6
-    else if (len >= kAwakenLoRaSizeLegacy)   payload_len = kAwakenPayloadLegacyLen; // 4
-    else                                     return false;
+    if (len >= kAwakenLoRaSize) {
+        header_len  = sizeof(PktHeader);
+        payload_len = sizeof(AwakenPayload);      // 5 + 6 + 1 = 12
+    } else if (len >= kAwakenLoRaSizeLegacy) {
+        header_len  = kLegacyHeaderSize;
+        payload_len = kAwakenPayloadLegacyLen;    // 4 + 4 + 1 =  9
+    } else {
+        return false;
+    }
 
-    const size_t frame_len = sizeof(PktHeader) + payload_len + 1;
+    const size_t frame_len = header_len + payload_len + 1;
     if (crc8(raw, frame_len - 1) != raw[frame_len - 1]) return false;
 
-    awaken_out = AwakenPayload{}; // zero-init so legacy frames leave new fields at 0
-    memcpy(&hdr_out, raw, sizeof(PktHeader));
-    memcpy(&awaken_out, raw + sizeof(PktHeader), payload_len);
+    hdr_out    = PktHeader{};     // zero-init so a legacy frame reports flags=0
+    awaken_out = AwakenPayload{}; // ... and reset_cause/hang_zone = 0
+    memcpy(&hdr_out, raw, header_len);
+    memcpy(&awaken_out, raw + header_len, payload_len);
     return hdr_out.magic == PKT_MAGIC && hdr_out.pkt_type == PKT_AWAKEN;
 }
 

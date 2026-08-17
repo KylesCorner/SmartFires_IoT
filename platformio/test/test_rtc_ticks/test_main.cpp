@@ -69,7 +69,6 @@ void test_hour_sleep_tick_target() {
 }
 
 int main() {
-  delay(2000);
   UNITY_BEGIN();
 
   RUN_TEST(test_zero_ms_is_zero_ticks);

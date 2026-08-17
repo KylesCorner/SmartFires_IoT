@@ -62,6 +62,21 @@ public:
     bool    bundleReady() const;
     uint8_t takeBundle(uint8_t *buf, size_t bufSize);
 
+    // --- Timed duty-cycle windows (PktHeader::flags) ---
+    //
+    // beginWindow() marks the next bundle to be encoded as the first of a new
+    // active window. flushWindow() closes the window: it force-encodes whatever
+    // partial bundle has accumulated (which would otherwise sit unsent across
+    // the MCU standby) and marks it as the window's last. Returns true if a
+    // bundle is now ready to take.
+    //
+    // A window short enough to produce a single bundle gets both bits on it.
+    // A window whose samples happened to land exactly on a bundle boundary has
+    // nothing left to flush, so no packet carries WINDOW_LAST — a receiver
+    // should treat the next WINDOW_FIRST as an implicit window close.
+    void beginWindow();
+    bool flushWindow();
+
     // --- STATUS (GPS + battery, interval from Config::statusIntervalMs) ---
     bool    statusPacketReady() const;
     uint8_t takeStatusPacket(uint8_t *buf, size_t bufSize);
@@ -86,6 +101,9 @@ private:
     uint8_t _deltaCount  = 0;
     bool    _hasRef      = false;
     bool    _bundleReady = false;
+    // PktHeader::flags bits to stamp on the next bundle encode, cleared once
+    // one actually reaches a frame.
+    uint8_t _pendingBundleFlags = 0;
     uint8_t _bundleBuf[BinaryPacket::kMaxBundleLoRaSize] = {};
     uint8_t _bundleLen   = 0;
 
@@ -119,5 +137,6 @@ private:
         const BinaryPacket::FullStatePayload &sample);
 
     void resetBundleState();
+    bool encodeAccumulatedBundle(uint8_t extraFlags);
     void tryEncodeStatus(const SensorSnapshot &snap);
 };

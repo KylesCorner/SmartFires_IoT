@@ -3,7 +3,7 @@ name: bandwidth-scaling
 description: Airtime math and node-count scaling table for the current TDMA/bundle scheme.
 category: architecture
 status: current
-last_verified: 2026-06-25
+last_verified: 2026-08-17
 source_refs:
   - platformio/include/telemetry/BinaryPacket.h
   - platformio/include/config/NetworkConfig.h
@@ -21,12 +21,12 @@ This document summarizes sensing, bundle production, TDMA service capacity, and 
 
 - Sample rate: `4 Hz`
 - Bundle composition: `1 reference + 14 deltas = 15 samples`
-- Bundle payload (`PKT_BUNDLE`): `194 bytes` max (`BinaryPacket::kMaxBundleLoRaSize` — `PktHeader(4) + FullStatePayload(20) + n_deltas(1) + 14×DeltaPayload(12) + crc8(1)`)
+- Bundle payload (`PKT_BUNDLE`): `195 bytes` max (`BinaryPacket::kMaxBundleLoRaSize` — `PktHeader(5) + FullStatePayload(20) + n_deltas(1) + 14×DeltaPayload(12) + crc8(1)`)
 - TDMA slot width: `900 ms`
 - TDMA guard: `20 ms` on each edge
 - Usable slot window: `860 ms`
 - Multi-send budget in node radio service: up to `3 sends/slot` (`kMaxSendsPerUpdate` in `TdmaRadioService::drainTxQueue()` — a hard iteration cap applied uniformly to fresh queue items and retransmits, not specific to `PKT_BUNDLE`; layered on top of, not a substitute for, the per-send time-budget check, conservative `340 ms` budget each for bundle-class payloads)
-- ACK summary payload (`PKT_ACK_SUMMARY`): `9 bytes` on LoRa (`PktHeader + AckSummaryPayload + crc8`)
+- ACK summary payload (`PKT_ACK_SUMMARY`): `10 bytes` on LoRa (`PktHeader + AckSummaryPayload + crc8`)
 - ACK summary cadence (modeling assumption, not a configured base-side rate):
   `1 summary per node every 4 seconds` (`0.25 Hz`). The base does **not** emit
   `ACK_SUMMARY` on a fixed timer — actual emission is dirty-flag-driven (a
@@ -44,8 +44,13 @@ This document summarizes sensing, bundle production, TDMA service capacity, and 
 Using SF7/BW125/CR 4/5 with RadioHead's 4-byte over-the-air header added on top
 of each LoRa payload:
 
-- Bundle airtime (194-byte LoRa payload + 4-byte RadioHead header = 198 bytes on air): `317.696 ms`
-- ACK summary airtime (9-byte LoRa payload + 4-byte RadioHead header = 13 bytes on air): `46.336 ms`
+- Bundle airtime (195-byte LoRa payload + 4-byte RadioHead header = 199 bytes on air): `317.696 ms`
+- ACK summary airtime (10-byte LoRa payload + 4-byte RadioHead header = 14 bytes on air): `46.336 ms`
+
+Both figures are unchanged by the `PktHeader` flags byte that grew each payload
+by one. LoRa airtime is quantized to whole symbols, and at SF7/CR 4/5 one symbol
+group carries 28 payload bits — the extra 8 bits fall inside the existing
+`ceil()`, so neither packet crosses into another symbol group.
 
 ## Core Formulas
 

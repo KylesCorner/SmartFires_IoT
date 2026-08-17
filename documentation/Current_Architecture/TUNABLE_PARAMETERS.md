@@ -3,7 +3,7 @@ name: tunable-parameters
 description: Every tunable constant in the system — TDMA, sensing/duty-cycle, power, Jetson.
 category: architecture
 status: current
-last_verified: 2026-06-26
+last_verified: 2026-08-17
 source_refs:
   - platformio/include/config/NetworkConfig.h
   - platformio/include/config/SensingConfig.h
@@ -85,46 +85,83 @@ automatically.
 
 **Source (firmware):** `platformio/include/config/SensingConfig.h` — `SensingConfig::DutyCycle` namespace
 
-Two named constant sets exist in `SensingConfig::DutyCycle`. There are no
-`dutyCycleCfgContinuous()` / `dutyCycleCfg()` factory functions — the only
-runtime factory is `DutyCycleConfig::make(...)` (`include/power/DutyCycleController.h`).
-`main.cpp` wires it up exclusively from a third, derived `kActive*` set, which
-`SensingConfig.h` resolves to either `kThreshold*` or `kContinuous*` at
-compile time based on the `SMARTFIRES_DUTY_CYCLE_CONTINUOUS` build flag
-(set per-environment in `platformio.ini`):
+Four named constant sets exist in `SensingConfig::DutyCycle`, one per controller
+mode. There are no `dutyCycleCfgContinuous()` / `dutyCycleCfg()` factory
+functions — the only runtime factory is `DutyCycleConfig::make(...)`
+(`include/power/DutyCycleController.h`). `main.cpp` wires it up exclusively from
+a derived `kActive*` set, which `SensingConfig.h` resolves from the
+`SMARTFIRES_DUTY_CYCLE_MODE` build flag (set per-environment in
+`platformio.ini`). An unrecognised value is a `#error`, not a silent default.
 
-| `SMARTFIRES_DUTY_CYCLE_CONTINUOUS` | Active set | Environment |
-|---|---|---|
-| `1` (default if unset) | `kContinuous*` (`enabled = false`) | `feather_m0_lora_node_debug` |
-| `0` | `kThreshold*` (`enabled = true`) | `feather_m0_lora_node` |
+| `SMARTFIRES_DUTY_CYCLE_MODE` | `DutyCycleMode` | Active set | Environment |
+|---|---|---|---|
+| `0` | `Continuous` | `kContinuous*` (`enabled = false`) | — |
+| `1` (default if unset) | `SensorTriggered` | `kSensorTriggered*` | `feather_m0_lora_node` |
+| `2` | `Timed` | `kTimed*` | `feather_m0_lora_node_debug`, `feather_m0_lora_node_timed` |
+| `3` | `Hybrid` | `kHybrid*` | `feather_m0_lora_node_hybrid` — deprecated |
 
-### Threshold constant set (real node build — `enabled = true`)
-
-| Constant | Value | Meaning |
-|---|---|---|
-| `kThresholdEnabled` | true | Duty-cycle gate is active — full `IdleSleeping`/`WarmingUp`/`ActiveSampling`/`CooldownSleeping` cycle runs |
-| `kThresholdMinSleepMs` | 3 000 ms | Minimum idle sleep before wake |
-| `kThresholdMaxWakeMs` | 1 000 ms | Max additional wake delay |
-| `kThresholdActiveSampleMs` | 30 000 ms | Duration of the `ActiveSampling` window |
-| `kThresholdSamplePeriodMs` | 750 ms | Sample cadence within `ActiveSampling` (carries a `//TEMP` marker in source, not yet retuned) |
-| `kThresholdWarmupMs` | 10 000 ms | Sensor stabilization delay after wake |
-| `kThresholdTempDeltaThresholdC` | 1.0 °C | Temperature delta to trigger early wake |
-| `kThresholdHumidityDeltaThresholdPct` | 5.0 %RH | Humidity delta to trigger early wake |
-| `kThresholdFailOnSampleError` | false | Sensor errors do not halt the node |
-
-### Continuous constant set (debug build — `enabled = false`)
+### Cross-mode constants
 
 | Constant | Value | Meaning |
 |---|---|---|
-| `kContinuousEnabled` | false | Duty-cycle gate is disabled — sensors run back-to-back at `samplePeriodMs` |
+| `kMinMcuStandbyMs` | 250 ms | Shortest remaining sleep worth entering MCU standby for; below this the enter/exit overhead isn't worth it |
+| `kMaxTxDrainBeforeStandbyMs` | 5 000 ms | How long the node stays awake at the end of an active window waiting for the TX queue to drain before entering standby anyway (≈ one TDMA frame plus slack) |
+
+### Sensor-triggered constant set (real node build)
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `kSensorTriggeredMode` | `SensorTriggered` | Wakes only on a threshold crossing — no scheduled timer wakeup |
+| `kSensorTriggeredMinSleepMs` | 3 000 ms | Minimum idle sleep before a trigger may wake |
+| `kSensorTriggeredMaxWakeMs` | 1 000 ms | Max additional wake delay |
+| `kSensorTriggeredActiveSampleMs` | 30 000 ms | Duration of the `ActiveSampling` window |
+| `kSensorTriggeredSamplePeriodMs` | 750 ms | Sample cadence within `ActiveSampling` |
+| `kSensorTriggeredWarmupMs` | 10 000 ms | Sensor stabilization delay after wake |
+| `kSensorTriggeredTimedSleepMs` | 0 ms | Ignored in this mode |
+| `kSensorTriggeredTempDeltaThresholdC` | 1.0 °C | Temperature delta to trigger early wake |
+| `kSensorTriggeredHumidityDeltaThresholdPct` | 5.0 %RH | Humidity delta to trigger early wake |
+| `kSensorTriggeredFailOnSampleError` | false | Sensor errors do not halt the node |
+
+### Timed constant set (scheduled wake — the only mode that enters MCU standby)
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `kTimedMode` | `Timed` | Fixed sleep/active cycle; trigger thresholds ignored |
+| `kTimedTimedSleepMs` | 35 000 ms | Sleep between active windows — the MCU standby duration |
+| `kTimedActiveSampleMs` | 25 000 ms | Duration of the `ActiveSampling` window |
+| `kTimedSamplePeriodMs` | 1 000 ms | Sample cadence within `ActiveSampling` |
+| `kTimedWarmupMs` | 10 000 ms | Sensor stabilization delay after each wake |
+| `kTimedMinSleepMs` | 0 ms | `CooldownSleeping` hands straight over to `IdleSleeping` |
+| `kTimedMaxWakeMs` | 1 000 ms | Max additional wake delay |
+| `kTimedTempDeltaThresholdC` / `kTimedHumidityDeltaThresholdPct` | 0.0 | Ignored in this mode |
+| `kTimedFailOnSampleError` | false | Sensor errors do not halt the node |
+
+At these values one window produces 25 samples — one full 15-sample bundle plus a
+10-sample partial that is force-flushed at window close (see
+[DUTY_CYCLING.md](DUTY_CYCLING.md#active-windows-on-the-wire-timed-mode)).
+
+### Continuous constant set (duty-cycle gate disabled)
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `kContinuousMode` | `Continuous` | Duty-cycle gate is disabled — sensors run back-to-back at `samplePeriodMs` |
 | `kContinuousMinSleepMs` | 0 ms | Not used in continuous mode |
 | `kContinuousMaxWakeMs` | 0 ms | Not used in continuous mode |
 | `kContinuousActiveSampleMs` | 0 ms | Not used in continuous mode |
 | `kContinuousSamplePeriodMs` | 750 ms | Master loop cadence — how often the sensor-service tick fires |
 | `kContinuousWarmupMs` | 10 000 ms | One-time warmup delay at boot before first sample |
+| `kContinuousTimedSleepMs` | 0 ms | Not used in continuous mode |
 | `kContinuousTempDeltaThresholdC` | 0.0 °C | Not used in continuous mode |
 | `kContinuousHumidityDeltaThresholdPct` | 0.0 %RH | Not used in continuous mode |
 | `kContinuousFailOnSampleError` | false | Sensor errors do not halt the node |
+
+### Hybrid constant set (deprecated)
+
+Wakes on either a threshold crossing after `kHybridMinSleepMs` (3 000 ms) or
+`kHybridTimedSleepMs` (5 min), whichever comes first; `kHybridActiveSampleMs`
+30 000 ms, `kHybridSamplePeriodMs` 750 ms, `kHybridWarmupMs` 10 000 ms. Retained
+so the `feather_m0_lora_node_hybrid` env still compiles, but not a target for
+further work — `Hybrid` never enters MCU standby.
 
 ---
 
