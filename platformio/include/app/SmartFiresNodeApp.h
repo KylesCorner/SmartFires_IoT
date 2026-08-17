@@ -86,6 +86,15 @@ private:
     bool _forceRadioAwake = false;
     bool _mcuSleptThisCycle = false;
 
+    // Phase 1 instrumentation (rtc-subsecond-sleep): offset of the
+    // pre-sleep session clock relative to the local sleep-compensated
+    // clock (sessionNowMs() - millis()). Projecting it forward at
+    // resync time isolates RTC sleep error from the awake gap spent
+    // waiting for the fresh TIME_SYNC. Compared against the new sync
+    // to measure real-world error vs guardMs.
+    uint32_t _predictedSessionOffsetMs = 0;
+    bool _predictedValid = false;
+
     void sendAwakenHandshake();
     SensorSnapshot buildSnapshot() const;
     void handleIncomingCommands();

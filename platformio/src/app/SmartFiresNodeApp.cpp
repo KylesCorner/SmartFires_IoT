@@ -5,6 +5,7 @@
 #include "app/SmartFiresNodeApp.h"
 
 #include "calibration/CalibrationDebug.h"
+#include "config/SensingConfig.h"
 #include "logging/DebugLogger.h"
 #include "platform/ResetDiagnostics.h"
 
@@ -156,6 +157,9 @@ void SmartFiresNodeApp::update() {
 
   if (_tdmaClock.consumeSessionChanged()) {
     _packetHandler.reset();
+    // A new session id means a new session-clock origin — any pending
+    // wake_phase_err prediction is against the old origin, so drop it.
+    _predictedValid = false;
     LOG_INFO("app", "session_changed bundle_reset=1 seq_reset=1");
   }
 
@@ -187,6 +191,25 @@ void SmartFiresNodeApp::update() {
     _syncActive = true;
     _awakenOnlyNotified = false;
     _packetHandler.resetStatusTimer();
+
+    // Phase 1 instrumentation (rtc-subsecond-sleep): compare what the
+    // sleep-compensated clock predicted the session time would be at
+    // this instant against what the fresh sync actually says.
+    if (_predictedValid) {
+      _predictedValid = false;
+
+      const uint32_t actualMs = _tdmaClock.sessionNowMs();
+      const uint32_t predictedMs =
+          _predictedSessionOffsetMs + _clock.millis();
+      const int32_t errMs =
+          static_cast<int32_t>(actualMs - predictedMs);
+
+      LOG_INFO("sleep",
+               "wake_phase_err predicted_ms=%lu actual_ms=%lu err_ms=%ld",
+               static_cast<unsigned long>(predictedMs),
+               static_cast<unsigned long>(actualMs),
+               static_cast<long>(errMs));
+    }
 
     LOG_INFO("tdma",
              "time_sync_acquired session_ms=%lu current_slot=%u my_slot=%u",
@@ -556,12 +579,13 @@ bool SmartFiresNodeApp::maybeEnterTimedMcuSleep() {
   const uint32_t remainingMs =
       _duty.timedSleepRemainingMs();
 
-  // RTCZero uses whole-second alarms. Leave the fractional
-  // remainder for the normal controller loop.
-  const uint32_t standbyMs =
-      (remainingMs / 1000UL) * 1000UL;
+  // RTC MODE0 alarms have ~1 ms resolution, so the full remainder can
+  // go to standby — only skip when it's too short to be worth the
+  // enter/exit overhead.
+  const uint32_t standbyMs = remainingMs;
 
-  if (standbyMs < 1000UL) {
+  if (standbyMs <
+      SensingConfig::DutyCycle::kMinMcuStandbyMs) {
     return false;
   }
 
@@ -580,6 +604,17 @@ bool SmartFiresNodeApp::maybeEnterTimedMcuSleep() {
       _mcuSleep.sleepFor(standbyMs);
 
   _mcuSleptThisCycle = true;
+
+  // Phase 1 instrumentation: sessionNowMs() already includes the
+  // sleep compensation just applied by sleepFor(). Store its offset
+  // from the local clock so the prediction can be projected forward
+  // to whenever the fresh TIME_SYNC lands (wake_phase_err log in
+  // update()) without the awake gap polluting the error.
+  if (_syncActive && _tdmaClock.hasSync()) {
+    _predictedSessionOffsetMs =
+        _tdmaClock.sessionNowMs() - _clock.millis();
+    _predictedValid = true;
+  }
 
   // TDMA session timing is no longer trustworthy after a
   // multi-minute blackout. Require a new TIME_SYNC.

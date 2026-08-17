@@ -72,6 +72,10 @@ namespace SensingConfig {
 // ---------------------------------------------------------------------------
 namespace DutyCycle {
 
+// Shortest remaining sleep worth entering MCU standby for (RTC MODE0 gives
+// ~1 ms alarm resolution; below this the enter/exit overhead isn't worth it).
+constexpr uint32_t kMinMcuStandbyMs = 250;
+
 // ---------------------------------------------------------------------------
 // Continuous profile
 // ---------------------------------------------------------------------------
