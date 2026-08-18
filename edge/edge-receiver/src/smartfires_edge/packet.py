@@ -44,8 +44,15 @@ HEADER_SIZE = struct.calcsize(HEADER_FMT)   # 5
 
 # PktHeader.flags bits (BinaryPacket.h PKT_FLAG_*). WINDOW_FIRST/WINDOW_LAST
 # bound one Timed duty-cycle active window and are set only on PKT_BUNDLE.
+# RETX marks an app-layer retransmission: the same samples were already sent
+# once and this copy is a replay because no ACK_SUMMARY covered them. Rows
+# carrying it are duplicates of earlier rows (same node_id + seq), not new
+# observations — deduplicate on (node_id, seq) before computing sample rates.
+# A RETX bundle also keeps whatever window bits the original had, so window
+# grouping must ignore markers on RETX rows.
 PKT_FLAG_WINDOW_FIRST = 0x01
 PKT_FLAG_WINDOW_LAST  = 0x02
+PKT_FLAG_RETX         = 0x04
 
 # Legacy pre-flags header (4 bytes, no flags byte). Only still recognised on
 # AWAKEN — see decode_awaken().
@@ -260,8 +267,11 @@ def _full_state_fields(
         # PktHeader.flags of the bundle this sample arrived in — every row
         # expanded from one bundle repeats its window markers.
         "pkt_flags": pkt_flags,
+        # Window markers are only meaningful on a first transmission; a RETX
+        # bundle replays the flags the original carried.
         "window_first": 1 if pkt_flags & PKT_FLAG_WINDOW_FIRST else 0,
         "window_last": 1 if pkt_flags & PKT_FLAG_WINDOW_LAST else 0,
+        "retx": 1 if pkt_flags & PKT_FLAG_RETX else 0,
     }
 
 

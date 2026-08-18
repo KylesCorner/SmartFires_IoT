@@ -706,6 +706,14 @@ bool SmartFiresNodeApp::maybeEnterTimedMcuSleep() {
 
   _mcuSleptThisCycle = true;
 
+  // Standby is not time the base was given to answer — the radio was off, so an
+  // ACK_SUMMARY sent during it could not have been heard. Exclude it from the
+  // pending window's retry/expiry math so the window's unacked bundles (always
+  // including the WINDOW_LAST one, whose ack can only arrive in a slot 0 that
+  // falls after this sleep begins) survive to be retransmitted during the next
+  // warmup instead of being dropped as max_age.
+  _radio.notifyMcuStandby(elapsedMs);
+
   // The RTC MODE0 clock carries the session forward across standby to ~1 ms
   // (rtc-subsecond-sleep Phase 1), well inside the 20 ms guard band, so the
   // session survives the sleep — no reset(), no unslotted AWAKEN handshake,

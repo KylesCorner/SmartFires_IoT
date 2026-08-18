@@ -349,18 +349,74 @@ show up clearly.
   yet by stamping `WINDOW_LAST` into the existing frame **and recomputing its crc8** rather
   than overwriting the buffer. Seven native tests added to `test/test_packet_handler/`.
 - **T10 done.** `kMaxTxDrainBeforeStandbyMs = 5000` in `SensingConfig::DutyCycle`.
-- **Also fixed:** `test/test_rtc_ticks/test_main.cpp`'s native `main()` called Arduino's
-  `delay(2000)`, which does not exist on the `native` platform — that suite could not build,
-  so `pio test -e native` failed as a whole. Removed. (`test/test_config` still fails to
-  compile for the separate reason tracked in `[[duty-cycle-test-factory-fix]]`.)
+- **Also fixed:** `test/test_rtc_ticks/test_main.cpp`'s native `main()` called `delay(2000)`
+  without ever including `<Arduino.h>`. The repo *does* ship a native shim
+  (`test/support/Arduino.h`, on the include path via `-Itest/support`) that defines `delay`
+  as a no-op — the other suites pick it up transitively through `FakeClock.h` — but this
+  suite includes only `Samd21RtcTicks.h`, so `delay` was undeclared and the suite could not
+  build, failing `pio test -e native` as a whole. Removed. (`test/test_config` still fails
+  to compile for the separate reason tracked in `[[duty-cycle-test-factory-fix]]`.)
 - **Wire compatibility:** the header change is a hard break. Nodes, the base, and the Jetson
   package must be updated together — a mixed set will CRC-fail every packet. The legacy
   9-byte `AWAKEN` decode still works (it is parsed against the old 4-byte header) but only
   makes an old node's handshake visible, not its telemetry.
+
+### T11 (added 2026-08-17) — surviving the standby, both sides of the ack loop
+
+Raised by the user after T6/T9 landed: *what happens to samples and packets that haven't
+been sent when the node sleeps, and the base needs to stop sending ACK_SUMMARY to a node
+that has gone down.* Investigated, then implemented as designed option (b) — defer the
+acknowledgement rather than drop it, so the window-close bundle stays recoverable.
+
+- **Nothing is lost to memory.** SAMD21 standby retains SRAM; `Samd21RtcSleep::sleepFor()`
+  calls `_rtc.standbyMode()`, not a reset. `TdmaTxQueue`, `PacketHandler`'s accumulator and
+  `TdmaRadioService::_pending[]` are all file-scope globals in `main.cpp` and come back
+  byte-identical. No ring-buffer persistence is needed. (`flushTelemetryBuffers()` is the
+  only thing that would destroy the queue and it is only reachable from `cmd_reset_soft`.)
+- **What *was* being lost, deterministically:** pending-window entries age against
+  `sessionNowMs()`, which after T6 now runs through standby. `kTimedSleepMs` (35 s) exceeds
+  `kReliabilityMaxAgeMs` (30 s), so every sent-but-unacked bundle was discarded as
+  `max_age` on the first post-wake drain, with no retransmit — not a race, it fired every
+  cycle. It landed hardest on the `WINDOW_LAST` bundle, whose ack can only be sent in a
+  slot 0 that falls after standby has already begun, making it structurally unackable.
+  Fixed by `TdmaRadioService::notifyMcuStandby(elapsedMs)`, which slides
+  `firstSentMs`/`lastSentMs` (and `_lastAckSummarySessionMs`, which
+  `requireAckSummaryBeforeFirstRetry` compares against them) forward by the measured sleep.
+  Entries then become eligible one `retryWaitMs` (8 s) into the wake — inside `warmupMs`
+  (10 s), when no fresh telemetry is competing for the node's slot.
+- **New wire bit `PKT_FLAG_RETX = 0x04`.** `pickRetransmitCandidate()` ORs it into the
+  outgoing *copy* and recomputes the crc8; the stored payload is untouched so repeated
+  attempts are byte-identical. Needed because a replayed `WINDOW_LAST` means the opposite
+  of a fresh one — the node is awake and re-asking. Also flags replayed rows to the Jetson
+  (`retx` CSV column; they duplicate an earlier `node_id`+`seq`, they are not new samples).
+- **Base defers, does not drop.** `AckTracker` gained `asleep` (set on a fresh, non-`RETX`
+  `WINDOW_LAST`; cleared by any later frame), `forceResend` (a `RETX` frame is proof the
+  last ack never landed, so it bypasses the `unchangedFromLastSent` suppression for one
+  send) and `lastHeard*`. `sendPendingAckSummary()` skips gated trackers **with `dirty`
+  left set**, so the ack goes out on the first slot 0 after the node is heard again.
+  Motivation beyond tidiness: `sendAckSummary()` uses blocking `sendToWait()`
+  (≈1 s, longer than the base's own 900 ms slot 0), so the base was spending ~3 slot-0
+  windows per node per duty cycle blocked against a switched-off radio, delaying
+  `TIME_SYNC` and commands for everyone else. `kAckSummaryNodeSilenceMs`
+  (2 frame periods) covers a `WINDOW_LAST` that was itself lost.
+- **Tests:** new `test/test_tdma_radio_service/` with `FakeTdmaRadioDriver` — 4 cases
+  covering the without-notify loss, the with-notify survival, the `RETX` stamp (flags +
+  recomputed crc8 + preserved window bits) and byte-identical repeat attempts. Required
+  adding `radio/TdmaRadioService.cpp` and `radio/TdmaTxQueue.cpp` to the `native` env's
+  `build_src_filter`; they were not previously compiled for tests at all.
+- **Known gap, not fixed:** queued `CMD_CALIBRATE`/`CMD_RESET` use the same blocking send
+  to the same deaf node, and `kMaxPendingCommandSendAttempts` (3, ≈11 s) expires well
+  inside a 35 s standby, so operator commands to a sleeping `Timed` node are dropped rather
+  than deferred. Gating them needs a deferral deadline so a dead node can't hold a command
+  slot forever — separate design.
+
 - **Next:** user compiles, runs `pio test -e native`, flashes base + node, reinstalls the edge
   package, then bakes: confirm `wake_phase_err` stays inside the guard band with sync genuinely
   preserved, confirm nodes hit their slots on the sniffer, and confirm every window shows a
   `window_first` and (where samples don't land on a bundle boundary) a `window_last` in the CSV.
+  For T11 specifically: expect `pending_sleep_shift` on each wake, at most one `retx` bundle
+  per window during warmup, `ack_summary_defer` on the base while a node is down, and
+  `drop_pending reason=max_age` to stop appearing on every cycle.
 
 ## Open questions
 

@@ -21,6 +21,7 @@ from smartfires_edge.live_state import LiveState
 from smartfires_edge.packet import (
     HEADER_FMT,
     HEADER_SIZE,
+    PKT_FLAG_RETX,
     PKT_FLAG_WINDOW_FIRST,
     PKT_FLAG_WINDOW_LAST,
     PKT_ACK_SUMMARY,
@@ -189,6 +190,11 @@ def _decode_rx_event(
             extra["window_first"] = True
         if hdr_flags & PKT_FLAG_WINDOW_LAST:
             extra["window_last"] = True
+        # A replay of a bundle the base never acked. It repeats the original's
+        # window markers, so surface it alongside them — an apparent second
+        # WINDOW_LAST inside one window is this, not a protocol fault.
+        if hdr_flags & PKT_FLAG_RETX:
+            extra["retx"] = True
     elif pkt_type == PKT_ACK_SUMMARY:
         # Header node_id stays 0 (broadcast convention) — these are base
         # station transmissions, so they land in the dedicated base lane.

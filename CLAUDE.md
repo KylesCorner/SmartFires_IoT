@@ -340,7 +340,7 @@ slots and call `TdmaClock::applySync(sessionMs)`.
 | `pkt_type` | `uint8_t` | see packet type table below |
 | `node_id` | `uint8_t` | compile-time `NODE_ID`; `0` for broadcast/command frames |
 | `seq` | `uint8_t` | rolling 0–255 |
-| `flags` | `uint8_t` | `PKT_FLAG_WINDOW_FIRST=0x01` · `PKT_FLAG_WINDOW_LAST=0x02`; set on `PKT_BUNDLE` only, `0` on every other type |
+| `flags` | `uint8_t` | `PKT_FLAG_WINDOW_FIRST=0x01` · `PKT_FLAG_WINDOW_LAST=0x02` · `PKT_FLAG_RETX=0x04`; set on telemetry types only, `0` on command/handshake frames |
 
 **Window markers.** In `Timed` duty-cycle mode the node bounds each active
 window on the wire: the first bundle encoded after the window opens carries
@@ -351,6 +351,18 @@ window whose samples land exactly on a bundle boundary has nothing to flush, so
 no packet carries `WINDOW_LAST` and the next `WINDOW_FIRST` implies the close.
 The Jetson surfaces these as the `pkt_flags`/`window_first`/`window_last` CSV
 columns.
+
+**Retransmit marker.** `PKT_FLAG_RETX` is stamped by
+`TdmaRadioService::pickRetransmitCandidate()` into the *outgoing copy* of a
+pending-window entry (crc8 recomputed; the stored payload is left untouched so
+repeated attempts are byte-identical). A `RETX` frame repeats whatever window
+bits the original carried, so **window markers on a `RETX` frame must be
+ignored** — a replayed `WINDOW_LAST` means the node is awake and re-asking, not
+that it is about to sleep. The base uses exactly that distinction to decide when
+to defer `ACK_SUMMARY` across a node's standby; the Jetson surfaces it as the
+`retx` CSV column, and rows carrying it are duplicates of earlier rows (same
+`node_id` + `seq`), not new observations. See
+`documentation/Current_Architecture/PACKET_RELIABILITY.md`.
 
 ### Packet Types
 

@@ -71,8 +71,16 @@ struct __attribute__((packed)) PktHeader {
 // types carry flags=0. A window that produces exactly one bundle sets both bits
 // on it. Together they let the receiver group bundles into windows and tell a
 // complete window from one truncated by packet loss.
+// RETX marks an app-layer retransmission of a telemetry frame the node already
+// put on the air (TdmaRadioService::pickRetransmitCandidate stamps it into the
+// outgoing copy and recomputes the crc8; the stored pending entry is untouched).
+// It is what lets the base read the window bits correctly: a replayed
+// WINDOW_LAST is evidence the node is *awake* and asking again, the opposite of
+// a fresh one. It also tells the base its previous ACK_SUMMARY never landed, and
+// gives the Jetson a way to tell replayed samples from first-transmission ones.
 static constexpr uint8_t PKT_FLAG_WINDOW_FIRST = 0x01;
 static constexpr uint8_t PKT_FLAG_WINDOW_LAST  = 0x02;
+static constexpr uint8_t PKT_FLAG_RETX         = 0x04;
 
 struct __attribute__((packed)) AwakenPayload {
     uint32_t uid_hash;

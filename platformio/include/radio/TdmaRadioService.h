@@ -65,6 +65,17 @@ public:
 
   void setDutySleep(bool requested);
 
+  // Called by the app right after the MCU returns from standby, with the
+  // measured sleep duration. Every pending-window timestamp is in session-clock
+  // terms, and the session clock now runs through standby (rtc-subsecond-sleep
+  // Phase 2) — so without this the sleep counts as elapsed retry time and every
+  // unacked entry is discarded as `max_age` on the first post-wake drain
+  // (kTimedSleepMs 35 s > kReliabilityMaxAgeMs 30 s, so it is not a race). The
+  // node cannot hear an ACK_SUMMARY with its radio off, so that interval is not
+  // time the base was given to answer; sliding the timestamps forward excludes
+  // it and leaves the entries retransmittable in the next active window.
+  void notifyMcuStandby(uint32_t sleptMs);
+
 private:
 
   bool _dutySleepRequested = false;

@@ -1,11 +1,12 @@
 ---
 name: packet-reliability
-description: StrictLinkAck vs AppLayerAckSummary reliability modes, retry gating, ACK_SUMMARY, and the waitPacketSent() hang risk.
+description: StrictLinkAck vs AppLayerAckSummary reliability modes, retry gating, ACK_SUMMARY, duty-cycled-node ack deferral, and the waitPacketSent() hang risk.
 category: architecture
 status: current
-last_verified: 2026-07-13
+last_verified: 2026-08-17
 source_refs:
   - platformio/include/config/NetworkConfig.h
+  - platformio/include/config/BaseConfig.h
   - platformio/include/radio/TdmaConfig.h
   - platformio/include/radio/ITdmaRadioDriver.h
   - platformio/src/radio/TdmaRadioService.cpp
@@ -16,6 +17,7 @@ related_docs:
   - tunable-parameters
   - radio-rx-gating
   - watchdog-timer
+  - duty-cycling
 ---
 
 # Packet Reliability
@@ -251,7 +253,7 @@ re-sends the oldest unacknowledged entry from this window.
 | `kMaxReliabilityWindow` | 8 | Hard cap in firmware |
 | `reliabilityWindowDepth` | 8 | Effective window size (configurable) |
 | `reliabilityMaxAttempts` | 3 | Pending entry dropped after this many retransmits |
-| `reliabilityMaxAgeMs` | 30 000 ms | Pending entry dropped after 30 s regardless of attempts |
+| `reliabilityMaxAgeMs` | 30 000 ms | Pending entry dropped after 30 s regardless of attempts — MCU standby is excluded from this age, see [Duty-Cycled Nodes](#duty-cycled-nodes-timed-mode) |
 | `reliabilityMinRetryGapMs` | 2 000 ms | Minimum gap between retransmits of the same seq |
 | `reliabilityFreshTrafficHoldoffMs` | 2 000 ms | Retransmits are suppressed for 2 s after a fresh send |
 
@@ -323,6 +325,81 @@ Sequence number comparison uses 8-bit modulo arithmetic:
 
 - If `(ack_base_seq − seq) < 128`: seq is at or before base → acknowledged.
 - If `1 ≤ (seq − ack_base_seq) ≤ 16`: check the corresponding mask bit.
+
+## Duty-Cycled Nodes (Timed mode)
+
+A `Timed` node spends most of each duty cycle in SAMD21 standby with the SX1276
+asleep. Both sides of the reliability loop have to account for that, because for
+`kTimedSleepMs` (35 s) out of every cycle the node simply cannot hear anything —
+and the packet most affected is the window-close bundle, whose `ACK_SUMMARY`
+can only be sent in a slot 0 that falls *after* the node has already gone down.
+
+Nothing is lost to memory across standby: SRAM is retained, so `TdmaTxQueue`,
+`PacketHandler`'s accumulator, and the pending window all survive byte-identical.
+The problems are all timing ones.
+
+### Node side — standby does not count as retry time
+
+`SmartFiresNodeApp::maybeEnterTimedMcuSleep()` calls
+`TdmaRadioService::notifyMcuStandby(elapsedMs)` on wake, which slides every
+pending entry's `firstSentMs`/`lastSentMs` (and `_lastAckSummarySessionMs`)
+forward by the measured sleep.
+
+Without it, the sleep counts as elapsed retry time: pending timestamps are in
+session-clock terms, the session clock runs through standby (see
+[RTC_SUBSECOND_SLEEP](../Pending_Plans/RTC_SUBSECOND_SLEEP.md) Phase 2), and
+`kTimedSleepMs` (35 s) exceeds `reliabilityMaxAgeMs` (30 s) — so **every**
+unacked entry would be discarded as `max_age` on the first post-wake drain, with
+no retransmit. Not a race; it would fire on every cycle.
+
+With the shift, those entries become eligible again one `retryWaitMs` (8 s) into
+the wake. That lands inside `warmupMs` (10 s), when there is no fresh telemetry
+competing for the node's slot, so the replay is effectively free.
+
+### Retransmissions are marked on the wire
+
+`pickRetransmitCandidate()` ORs `PKT_FLAG_RETX` into the *outgoing copy*'s
+`PktHeader::flags` and recomputes the trailing `crc8`. The stored pending payload
+is deliberately left untouched, so repeated attempts are byte-identical.
+
+The bit exists because the base cannot otherwise read the window markers
+correctly: a replayed `PKT_FLAG_WINDOW_LAST` means "this node is awake and asking
+again", the exact opposite of a fresh one. It also tells the base its previous
+`ACK_SUMMARY` never landed, and gives the Jetson a way to separate replayed
+samples from first-transmission ones (`retx` CSV column).
+
+### Base side — deferring ACK_SUMMARY across the sleep
+
+Each `AckTracker` carries an `asleep` flag, set when a **fresh** (non-`RETX`)
+`WINDOW_LAST` arrives and cleared by any subsequent frame from that node.
+`sendPendingAckSummary()` skips `asleep` trackers **while leaving `dirty` set**,
+so the acknowledgement is *deferred*, not dropped: it goes out on the first slot 0
+after the node is heard from again, merged with whatever that packet added to the
+mask.
+
+This matters for more than tidiness. `sendAckSummary()` uses the blocking
+`sendToWait()` (`kLinkRetries` × `kLinkAckTimeoutMs` ≈ 1 s), which is longer than
+the base's own 900 ms slot 0. Without the gate the base spends roughly three
+consecutive slot-0 windows blocked against a node that cannot answer, delaying
+`TIME_SYNC` and queued commands for every *other* node, before
+`kMaxAckSummarySendAttempts` finally trips `retryHeld`.
+
+Two supporting rules:
+
+| Rule | Why |
+|---|---|
+| A `RETX` frame sets `forceResend`, bypassing the `unchangedFromLastSent` suppression for one send | The node re-asking is proof it never got the ack. Taking the "nothing changed" shortcut would clear `dirty` and leave the node retrying into silence until `reliabilityMaxAttempts`. |
+| Silence beyond `kAckSummaryNodeSilenceMs` (2 frame periods) gates the same way | Fallback for a `WINDOW_LAST` that was itself lost, so `asleep` never got set. A node with nothing new to say never has `dirty` set, so this can only gate a node that really stopped responding. |
+
+`resetAckTracker()` clears `asleep` — a rebooting node is awake and about to
+`AWAKEN`, and must never stay gated on a marker from before the reset.
+
+**Not covered:** queued `CMD_CALIBRATE`/`CMD_RESET` use the same blocking send
+against the same deaf node, and `kMaxPendingCommandSendAttempts` (3, one per base
+window ≈ 11 s) expires well inside a 35 s standby — so operator commands aimed at
+a sleeping `Timed` node are dropped rather than deferred. Gating them needs a
+deferral deadline so a genuinely dead node can't hold a command slot forever;
+that design is not yet done.
 
 ## Reliability Boundary
 

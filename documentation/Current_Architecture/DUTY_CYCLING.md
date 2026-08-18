@@ -200,6 +200,25 @@ sleep to apply would make the queue impossible to empty and guarantee the drain
 burned its full budget every cycle. `SmartFiresNodeApp::radioMustStayAwakeToDrain()`
 suppresses radio duty-sleep for exactly that interval.
 
+### What survives the standby
+
+SAMD21 standby retains SRAM — it is not a reset — so `TdmaTxQueue`,
+`PacketHandler`'s accumulator, and `TdmaRadioService`'s pending window all come
+back byte-identical. Nothing needs to be persisted or pre-flushed for memory
+reasons; the drain gate above exists only so the window-close bundle isn't
+*delayed* by a whole sleep, not because it would be lost.
+
+What does not survive on its own is the acknowledgement loop, since the radio is
+off for the entire sleep. That is handled in two places, both documented in
+[PACKET_RELIABILITY.md](PACKET_RELIABILITY.md#duty-cycled-nodes-timed-mode):
+
+- `TdmaRadioService::notifyMcuStandby()` excludes the sleep from the pending
+  window's age, so unacked bundles survive to be retransmitted (stamped
+  `PKT_FLAG_RETX`) during the next `WarmingUp` phase, when the node's slot is
+  otherwise idle.
+- The base defers `ACK_SUMMARY` for a node that just sent a fresh `WINDOW_LAST`
+  rather than blocking on `sendToWait()` against a radio that is switched off.
+
 ## Relationship to TDMA
 
 `DutyCycleController` has no knowledge of TDMA timing. It fires

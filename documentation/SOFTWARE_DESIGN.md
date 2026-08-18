@@ -290,7 +290,11 @@ The current protocol is binary and fixed-size where practical.
 Every packet begins with a 5-byte `PktHeader` (`magic`, `pkt_type`, `node_id`,
 `seq`, `flags`). The `flags` byte carries `PKT_FLAG_WINDOW_FIRST`/
 `PKT_FLAG_WINDOW_LAST`, which bound one `Timed` duty-cycle active window and are
-set on `BUNDLE` only — see `duty-cycling` and `CLAUDE.md`'s wire protocol tables.
+set on `BUNDLE` only, plus `PKT_FLAG_RETX`, stamped onto app-layer
+retransmissions of any telemetry frame. Window markers on a `RETX` frame are a
+replay of the original's and must be ignored — the base relies on that
+distinction to decide when to defer `ACK_SUMMARY` across a node's MCU standby.
+See `duty-cycling`, `packet-reliability`, and `CLAUDE.md`'s wire protocol tables.
 
 Node to base packets:
 

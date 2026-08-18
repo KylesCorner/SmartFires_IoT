@@ -9,6 +9,7 @@
 #include "telemetry/BinaryPacket.h"
 
 #include <Arduino.h>
+#include <stddef.h>
 #include <string.h>
 
 namespace {
@@ -1229,6 +1230,16 @@ bool TdmaRadioService::pickRetransmitCandidate(uint8_t *payloadOut,
 
   memcpy(payloadOut, e.payload, e.len);
 
+  // Mark the copy, never the stored entry — a retransmit that fails to reach the
+  // air must leave the pending payload byte-identical for the next attempt, and
+  // the base reads this bit to tell a replayed WINDOW_LAST (node awake, still
+  // waiting on an ack) from a fresh one (node about to enter standby).
+  if (e.len > sizeof(BinaryPacket::PktHeader)) {
+    payloadOut[offsetof(BinaryPacket::PktHeader, flags)] |=
+        BinaryPacket::PKT_FLAG_RETX;
+    payloadOut[e.len - 1] = BinaryPacket::crc8(payloadOut, e.len - 1);
+  }
+
   lenOut = e.len;
   seqOut = e.seq;
   pendingIndexOut = static_cast<uint8_t>(bestIndex);
@@ -1503,4 +1514,44 @@ void TdmaRadioService::setDutySleep(
   // available()/send()/sendToWait() call rearms it. Clearing
   // this flag prevents stale software state after wake.
   _radioAsleep = false;
+}
+
+void TdmaRadioService::notifyMcuStandby(uint32_t sleptMs) {
+  if (!_cfg.enableAppReliability || sleptMs == 0) {
+    return;
+  }
+
+  const uint8_t windowDepth =
+      (_cfg.reliabilityWindowDepth > kMaxReliabilityWindow)
+          ? kMaxReliabilityWindow
+          : _cfg.reliabilityWindowDepth;
+
+  uint8_t shifted = 0;
+
+  for (uint8_t i = 0; i < windowDepth; ++i) {
+    PendingEntry &e = _pending[i];
+
+    if (!e.inUse) {
+      continue;
+    }
+
+    e.firstSentMs += sleptMs;
+    e.lastSentMs += sleptMs;
+    shifted++;
+  }
+
+  // requireAckSummaryBeforeFirstRetry compares _lastAckSummarySessionMs against
+  // firstSentMs, so it has to move with them or every entry would look like it
+  // predates the last ACK_SUMMARY and stall behind the retryWaitMaxMs fallback.
+  if (_hasReceivedAckSummary) {
+    _lastAckSummarySessionMs += sleptMs;
+  }
+
+  if (shifted > 0) {
+    LOG_INFO("radio",
+             "pending_sleep_shift slept_ms=%lu entries=%u max_age_ms=%lu",
+             static_cast<unsigned long>(sleptMs),
+             static_cast<unsigned int>(shifted),
+             static_cast<unsigned long>(_cfg.reliabilityMaxAgeMs));
+  }
 }

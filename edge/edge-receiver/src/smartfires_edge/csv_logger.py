@@ -36,6 +36,7 @@ CSV_COLUMNS = [
     "pkt_flags",
     "window_first",
     "window_last",
+    "retx",
     "reset_cause",
     "reset_cause_names",
     "hang_zone",

@@ -38,6 +38,21 @@ constexpr uint32_t kAckSummaryMinIntervalMs = 25;
 // new telemetry arrives from that node or it re-AWAKENs.
 constexpr uint8_t kMaxAckSummarySendAttempts = 3;
 
+// Fallback for a Timed node whose PKT_FLAG_WINDOW_LAST frame was itself lost,
+// so the base never learned it was entering standby. Silence longer than this
+// gates ACK_SUMMARY the same way the explicit marker does — the tracker keeps
+// `dirty`, so the ack is still deferred rather than dropped.
+//
+// Two frame periods. One frame is the natural spacing between the base's own
+// slot-0 windows, so this permits a first attempt (the ack may simply have been
+// lost, which is worth one retry) and gates the rest, instead of spending three
+// ~1 s blocking sendToWait() calls on a node that cannot answer. A node with
+// nothing new to say never has `dirty` set, so this can only ever gate a node
+// that really did stop responding.
+constexpr uint32_t kAckSummaryNodeSilenceMs =
+    2u * static_cast<uint32_t>(NetworkConfig::kNumSlots) *
+    NetworkConfig::kSlotWidthMs;
+
 // Bounded retry for a queued CMD_CALIBRATE/CMD_RESET before giving up on a
 // node that isn't link-acking it. Each attempt is one sendToWait() call from
 // sendPendingCommand(), which already contains RHReliableDatagram's own

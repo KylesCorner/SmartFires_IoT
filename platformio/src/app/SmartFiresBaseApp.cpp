@@ -410,11 +410,12 @@ void SmartFiresBaseApp::processIncomingLoRa() {
     }
 
     if (validHeader && isTelemetryPacketType(hdr.pkt_type)) {
-      const bool ackTracked = handleTelemetryAckSummary(hdr.node_id, hdr.seq);
-      LOG_INFO("base", "ack_track node=%u seq=%u pkt=%s tracked=%u",
+      const bool ackTracked =
+          handleTelemetryAckSummary(hdr.node_id, hdr.seq, hdr.flags);
+      LOG_INFO("base", "ack_track node=%u seq=%u pkt=%s flags=0x%02X tracked=%u",
                static_cast<unsigned int>(hdr.node_id),
                static_cast<unsigned int>(hdr.seq), pktTypeName(hdr.pkt_type),
-               ackTracked ? 1 : 0);
+               static_cast<unsigned int>(hdr.flags), ackTracked ? 1 : 0);
     }
 
     uint8_t frame[2 + 1 + 1 + 255 + 1] = {};
@@ -496,13 +497,36 @@ SmartFiresBaseApp::NodeAssignment *SmartFiresBaseApp::findOrCreateNodeAssignment
   return freeAssignment;
 }
 
-bool SmartFiresBaseApp::handleTelemetryAckSummary(uint8_t nodeId, uint8_t seq) {
+bool SmartFiresBaseApp::handleTelemetryAckSummary(uint8_t nodeId, uint8_t seq,
+                                                  uint8_t flags) {
   AckTracker *tracker = findOrCreateAckTracker(nodeId);
   if (!tracker) {
     LOG_WARN("base", "ack_summary_skip node=%u reason=no_tracker_slot",
              static_cast<unsigned int>(nodeId));
     return false;
   }
+
+  const bool isRetx = (flags & BinaryPacket::PKT_FLAG_RETX) != 0;
+  const bool windowLast = (flags & BinaryPacket::PKT_FLAG_WINDOW_LAST) != 0;
+
+  tracker->lastHeardValid = true;
+  tracker->lastHeardMs = _clock.millis();
+
+  if (isRetx) {
+    tracker->forceResend = true;
+  }
+
+  // Any frame at all proves the node's radio is on right now, so the default is
+  // awake. Only a *fresh* window close means standby is imminent — a replayed
+  // one is last window's frame coming back because its ack went missing, and
+  // treating that as "asleep" would suppress the very ack it is asking for.
+  const bool asleep = windowLast && !isRetx;
+  if (asleep != tracker->asleep) {
+    LOG_INFO("base", "ack_node_%s node=%u seq=%u flags=0x%02X",
+             asleep ? "asleep" : "awake", static_cast<unsigned int>(nodeId),
+             static_cast<unsigned int>(seq), static_cast<unsigned int>(flags));
+  }
+  tracker->asleep = asleep;
 
   updateTelemetryReceiptWindow(*tracker, seq);
   recordTelemetrySequence(*tracker, seq);
@@ -554,6 +578,10 @@ SmartFiresBaseApp::AckTracker *SmartFiresBaseApp::findOrCreateAckTracker(
   freeTracker->dirtyTriggerSeq = 0;
   freeTracker->failedSendAttempts = 0;
   freeTracker->retryHeld = false;
+  freeTracker->asleep = false;
+  freeTracker->lastHeardValid = false;
+  freeTracker->lastHeardMs = 0;
+  freeTracker->forceResend = false;
   freeTracker->lastSentInitialized = false;
   freeTracker->lastSentAckBaseSeq = 0;
   freeTracker->lastSentAckMask = 0;
@@ -585,6 +613,12 @@ void SmartFiresBaseApp::resetAckTracker(uint8_t nodeId, const char *reason) {
     tracker.dirtyTriggerSeq = 0;
     tracker.failedSendAttempts = 0;
     tracker.retryHeld = false;
+    // A rebooting node is awake and about to AWAKEN — never leave it gated as
+    // asleep on the strength of a window marker from before the reset.
+    tracker.asleep = false;
+    tracker.lastHeardValid = false;
+    tracker.lastHeardMs = 0;
+    tracker.forceResend = false;
     tracker.lastSentInitialized = false;
     tracker.lastSentAckBaseSeq = 0;
     tracker.lastSentAckMask = 0;
@@ -787,8 +821,29 @@ bool SmartFiresBaseApp::sendPendingAckSummary(uint32_t slotIndex) {
       continue;
     }
 
+    // Deferral, not suppression: `dirty` is deliberately left set, so this ack
+    // — merged with anything the node's next packet adds to the mask — goes out
+    // on the first slot 0 after the node is heard from again.
+    const bool silent =
+        tracker.lastHeardValid &&
+        (now - tracker.lastHeardMs) >= BaseConfig::kAckSummaryNodeSilenceMs;
+
+    if (tracker.asleep || silent) {
+      LOG_DEBUG("base",
+                "ack_summary_defer node=%u ack_base=%u mask=0x%04X reason=%s",
+                static_cast<unsigned int>(tracker.nodeId),
+                static_cast<unsigned int>(tracker.ackBaseSeq),
+                static_cast<unsigned int>(tracker.ackMask),
+                tracker.asleep ? "window_last" : "node_silent");
+      continue;
+    }
+
+    // A RETX frame is the node telling us it never got the last ack, so the
+    // "nothing changed since we last sent" shortcut is provably wrong here —
+    // taking it would clear `dirty` and leave the node retrying into silence
+    // until its pending entry hits reliabilityMaxAttempts.
     const bool unchangedFromLastSent =
-        tracker.lastSentInitialized &&
+        tracker.lastSentInitialized && !tracker.forceResend &&
         tracker.lastSentAckBaseSeq == tracker.ackBaseSeq &&
         tracker.lastSentAckMask == tracker.ackMask;
 
@@ -830,6 +885,7 @@ bool SmartFiresBaseApp::sendPendingAckSummary(uint32_t slotIndex) {
     }
 
     tracker.failedSendAttempts = 0;
+    tracker.forceResend = false;
     tracker.lastSentInitialized = true;
     tracker.lastSentAckBaseSeq = tracker.ackBaseSeq;
     tracker.lastSentAckMask = tracker.ackMask;
