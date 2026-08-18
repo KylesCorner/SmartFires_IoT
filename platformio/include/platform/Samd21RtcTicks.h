@@ -1,11 +1,23 @@
+// ---
+// description: Pure ms↔tick conversion and wraparound-safe delta math for the SAMD21 RTC MODE0 counter, kept hardware-free so it stays testable on the native env.
+// role: implementation
+// ---
 #pragma once
 
 #include <stdint.h>
 
-// Pure tick math for the SAMD21 RTC in MODE0 (COUNT32) clocked at
-// 1024 Hz — RTCZero's GCLK gen 2 setup (XOSC32K / 32) with the MODE0
-// prescaler at DIV1. One tick ≈ 0.977 ms. No hardware dependencies so
-// the math is testable on the native env.
+// Pure tick math for the SAMD21 RTC in MODE0 (COUNT32) counting at
+// 1024 Hz — XOSC32K feeding GCLK gen 2 undivided, with the MODE0
+// prescaler at DIV32 (see Samd21Rtc.h for why the divide lives in the
+// prescaler rather than the generator). One tick ≈ 0.977 ms. No
+// hardware dependencies so the math is testable on the native env.
+//
+// The counter is the node's live timebase, not just its sleep timer, so
+// ticksToMs() is now applied to a raw free-running count as well as to
+// deltas. Over a raw count that means the millisecond value restarts at
+// 0 every 2^32 ticks — at 4,194,303,999 ms rather than at 2^32 ms — so
+// an unsigned ms subtraction straddling that boundary is wrong. See the
+// wraparound note on Samd21RtcClock.
 namespace Samd21RtcTicks {
 
 constexpr uint32_t kTicksPerSecond = 1024UL;

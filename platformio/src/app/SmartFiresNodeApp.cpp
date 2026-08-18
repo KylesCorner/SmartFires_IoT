@@ -720,10 +720,11 @@ bool SmartFiresNodeApp::maybeEnterTimedMcuSleep() {
   // no waiting on a fresh TIME_SYNC before telemetry can resume. Cold boot and
   // genuine lost/stale sync still fall back to AWAKEN via update().
   //
-  // Instrumentation: sessionNowMs() already includes the compensation
-  // sleepFor() just applied. Storing its offset from the local clock lets the
-  // next naturally received TIME_SYNC be compared against it (wake_phase_err
-  // in update()) without the awake gap polluting the error.
+  // Instrumentation: the local clock is that same RTC counter, so it simply
+  // never stopped over the standby — sessionNowMs() is already current with
+  // nothing to correct. Storing its offset from the local clock lets the next
+  // naturally received TIME_SYNC be compared against it (wake_phase_err in
+  // update()) without the awake gap polluting the error.
   if (_syncActive && _tdmaClock.hasSync()) {
     _predictedSessionOffsetMs =
         _tdmaClock.sessionNowMs() - _clock.millis();
@@ -731,9 +732,9 @@ bool SmartFiresNodeApp::maybeEnterTimedMcuSleep() {
     _predictedValid = true;
   }
 
-  // The duty controller is still technically in a sleeping phase until it sees
-  // compensated time. Override phase-based radio sleep so the radio is
-  // listening again before the node's next slot.
+  // The duty controller is still technically in a sleeping phase until it next
+  // reads the clock and sees how far it advanced. Override phase-based radio
+  // sleep so the radio is listening again before the node's next slot.
   _forceRadioAwake = true;
   _radio.setDutySleep(false);
 

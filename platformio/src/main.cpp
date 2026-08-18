@@ -77,6 +77,8 @@ void loop() {
 #include "config/SystemHealthConfig.h"
 #include "platform/ResetDiagnostics.h"
 #include "platform/Samd21RamMonitor.h"
+#include "platform/Samd21Rtc.h"
+#include "platform/Samd21RtcClock.h"
 #include "platform/Samd21RtcSleep.h"
 
 #include "app/SmartFiresNodeApp.h"
@@ -86,7 +88,6 @@ void loop() {
 #include "config/SensingConfig.h"
 #include "interfaces/ISensor.h"
 #include "platform/ArduinoAnalogReader.h"
-#include "platform/ArduinoClock.h"
 #include "platform/RadioHeadTdmaDriver.h"
 
 #include "power/BatteryMonitor.h"
@@ -156,8 +157,12 @@ void logSensorFloorVsCadence(const char *sensorName, uint32_t minSamplePeriodMs)
 // -----------------------------------------------------------------------------
 // Platform
 // -----------------------------------------------------------------------------
-ArduinoClock clock;
-Samd21RtcSleep mcuSleep(clock);
+// One free-running RTC counter is the node's whole timebase: the clock every
+// consumer reads and the timer standby is measured against are the same
+// register, so standby leaves no gap for anyone to patch up afterwards.
+Samd21Rtc rtc;
+Samd21RtcClock clock(rtc);
+Samd21RtcSleep mcuSleep(rtc);
 ArduinoAnalogReader analog;
 
 Samd21RamMonitor::Config ramMonitorCfg =
@@ -375,6 +380,12 @@ void setup() {
 
   gLog.setMinLevel(LogLevel::Debug);
 
+  // Start the RTC counter before anything reads the clock — it backs every
+  // IClock::millis() call from here on, not just the standby timer, so nothing
+  // downstream (sensors, duty cycle, TDMA) can be constructed against a
+  // stopped counter.
+  rtc.begin();
+
   LOG_WARN("boot", "reset_cause=0x%02X wdt=%u hang_zone=%u boot_count=%u",
            resetCause, (resetCause & PM_RCAUSE_WDT) ? 1 : 0,
            static_cast<unsigned int>(ResetDiagnostics::hangZone()),
@@ -393,7 +404,6 @@ void setup() {
 
   Wire.begin();
   analog.begin();
-  mcuSleep.begin();
 
   gRamMonitor.checkpoint("setup", "after_wire");
   Watchdog.reset();

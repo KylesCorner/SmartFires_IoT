@@ -2,7 +2,7 @@
 name: gps-disciplined-clock
 description: Plan to give each node a continuously-running SAMD21 RTC COUNT32 timebase (replacing Arduino core millis() plus sleep-compensation), then periodically discipline that counter's tick rate using the PA1010D GPS's 1 Hz PPS edge. Two independent steps — Step 1 has no GPS dependency at all.
 category: plan-pending
-status: draft
+status: in-progress — Step 1 (timebase unification) implemented 2026-08-18, awaiting user compile/flash + bake. Step 2 (GPS PPS discipline) not started.
 related_docs:
   - rtc-subsecond-sleep
   - tdma-protocol
@@ -112,6 +112,69 @@ its own elapsed-time bookkeeping.
   refactor from the TDMA protocol's point of view. Any deviation means the unification isn't
   actually equivalent and needs to be understood before Step 2 builds on top of it.
 
+### Implementation record (2026-08-18) — coded, not yet compiled or flashed
+
+Landed as written in intent, with one structural change and one hardware finding that the
+plan hadn't anticipated. Nothing here is validated on hardware yet.
+
+**Structure — a new `Samd21Rtc`, rather than `ArduinoClock` reading `COUNT` directly.** The
+plan's literal shape ("`ArduinoClock` stops wrapping `::millis()`") doesn't survive contact
+with the other two build roles: `feather_m0_lora_base` and the `POWER_TEST` envs also
+construct an `ArduinoClock`, and neither ever calls `Samd21RtcSleep::begin()`, so an
+unconditional `COUNT` read would have frozen the base station's clock at zero. Instead:
+
+- `platform/Samd21Rtc.{h,cpp}` (new) — sole owner of the RTC peripheral: `begin()`,
+  `count()`, `armCompare()`/`disarmCompare()`, `standby()`. The RTC hardware setup moved
+  here out of `Samd21RtcSleep::begin()`, which no longer exists.
+- `platform/Samd21RtcClock.{h,cpp}` (new) — `IClock` over `Samd21Rtc::count()`. This is what
+  the node builds construct now.
+- `Samd21RtcSleep` takes a `Samd21Rtc &` instead of an `ArduinoClock &`, and reads the shared
+  counter for its own elapsed-time bookkeeping. It still *returns* elapsed ms, since
+  `_radio.notifyMcuStandby()` needs it to exclude radio-off time from retry math — but
+  nothing corrects the clock with it any more.
+- `ArduinoClock` loses `compensateForSleep()`/`_sleepOffsetMs` entirely and is now a plain
+  `::millis()` passthrough, kept for the base and power-test builds that never sleep.
+- `main.cpp`'s node role constructs `Samd21Rtc rtc; Samd21RtcClock clock(rtc);
+  Samd21RtcSleep mcuSleep(rtc);`, and `rtc.begin()` moved to the top of `setup()` (right
+  after logger init, replacing `mcuSleep.begin()` further down) — the counter now backs every
+  `IClock::millis()` call, not just the standby timer, so it has to be live before anything
+  downstream is touched.
+
+**Hardware finding — the RTC needed its own GCLK generator, and the reason is a latent
+watchdog hazard.** A synchronized `COUNT` read costs a handful of *GCLK_RTC* cycles. RTCZero
+runs GCLK_RTC at 1024 Hz (XOSC32K/32 into the generator, RTC prescaler at DIV1), which makes
+each read block for multiple milliseconds. That's invisible today, because `readCount()` is
+only called a few times per duty cycle around sleep — but as the live timebase it would be
+called tens of times per loop iteration and would have wrecked loop timing. The fix is to move
+the /32 out of the generator and into the RTC prescaler (GCLK_RTC at the full 32.768 kHz,
+`PRESCALER_DIV32`), which leaves the tick rate at 1024 Hz — so `Samd21RtcTicks`' math and its
+existing tests are untouched — while cutting a read to ~150 µs.
+
+The trap: **`Adafruit_SleepyDog` and `RTCZero` both claim GCLK generator 2.** SleepyDog's
+`_initialize_wdt()` sets it to OSCULP32K/32 and routes the WDT to it; RTCZero's
+`configureClock()` later re-sources the same generator to XOSC32K/32 and routes the RTC to it.
+They coexist today purely because both happen to want 1024 Hz. Retuning generator 2 to
+32.768 kHz would have made **every watchdog timeout 32× shorter** — `kSteadyStateTimeoutMs`
+firing in ~a quarter of its intended window, i.e. a node in a reboot loop, on a fleet that is
+already being watched for WDT reboots. So `Samd21Rtc::begin()` instead stands up **generator 4**
+(free — the core uses 0/1/3, SleepyDog uses 2) at XOSC32K undivided with `RUNSTDBY` set, and
+repoints only the RTC's peripheral channel at it. Generator 2 is left exactly as it is today,
+so watchdog behavior is unchanged.
+
+**Known limitation carried forward, deliberately.** `millis()` is
+`ticksToMs(count)` over a raw free-running counter, so the millisecond value restarts at 0
+every 2^32 ticks — at 4,194,304,000 ms rather than at 2^32 ms. Unlike `::millis()`, whose wrap
+the unsigned `now - then` subtraction absorbs correctly, one such subtraction straddling this
+boundary is wrong by ~28 h. This is the wraparound the plan called "no worse than today" — it
+is in fact slightly worse in kind, though at a comparable ~48.5-day timescale, far outside
+current field uptime. Fixing it means giving the clock mutable accumulator state that
+`millis()` must be polled often enough to keep current, which was judged not worth the risk for
+Step 1. `test_rtc_ticks` now pins the exact error so it can't be rediscovered as a mystery.
+
+**Verification status.** Native tick-math assertions were checked by compiling
+`Samd21RtcTicks.h` standalone with `g++` (all pass). `pio test -e native`, `pio run`, and any
+flashing are the user's to run — see the repo's agent guardrails.
+
 ---
 
 ## Step 2 — GPS PPS rate discipline (depends on Step 1)
@@ -202,6 +265,13 @@ Recommended order:
 2. This plan's Step 1 (timebase unification) — no GPS, no wire changes, low risk, independently
    baked.
 3. This plan's Step 2 (GPS PPS discipline) — builds on Step 1, its own bake/verification pass.
+
+**Status against that order:** Step 1 is now coded (see its implementation record) while
+`[[rtc-subsecond-sleep]]` Phase 2 is still unflashed, so the recommended order is only intact
+if Phase 2 is flashed and baked *first* and Step 1 is held back for a separate flash cycle.
+Flashing both together is exactly the stacked-unvalidated-change case this section warns
+about — and Step 1's GCLK re-routing raises the stakes, since a clock-domain mistake and a
+wire-format break would present with overlapping symptoms.
 
 ---
 

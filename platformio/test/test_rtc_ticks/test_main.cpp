@@ -68,6 +68,48 @@ void test_hour_sleep_tick_target() {
   TEST_ASSERT_EQUAL_UINT32(3600000UL, ticksToMs(3686400UL));
 }
 
+// The counter is the live timebase now (gps-disciplined-clock Step 1), so
+// ticksToMs() gets applied to raw free-running counts, not just to deltas.
+// Samd21RtcClock has no native fake to drive — the read is a register access —
+// so what's covered here is the tick-domain contract that clock relies on.
+
+void test_free_running_count_to_ms() {
+  // What Samd21RtcClock::millis() returns for a given counter value.
+  TEST_ASSERT_EQUAL_UINT32(0, ticksToMs(0));
+  TEST_ASSERT_EQUAL_UINT32(1000, ticksToMs(1024));
+
+  // Top of the counter: the ms value peaks below 2^32-1, which is the whole
+  // reason the wrap needs its own note.
+  TEST_ASSERT_EQUAL_UINT32(4194303999UL, ticksToMs(0xFFFFFFFFUL));
+}
+
+void test_ms_delta_is_exact_when_taken_in_the_tick_domain() {
+  // Subtracting in ticks first and converting once is wraparound-safe, which
+  // is why sleepFor() measures standby that way.
+  const uint32_t before = 0xFFFFFF00UL;
+  // Cast is load-bearing on the 64-bit native host: the wrap is the point.
+  const uint32_t after = static_cast<uint32_t>(before + 2048UL);
+  TEST_ASSERT_EQUAL_UINT32(2000, ticksToMs(tickDelta(before, after)));
+}
+
+void test_ms_delta_across_the_wrap_is_the_known_limitation() {
+  // Consumers instead do `clock.millis() - earlier`, which subtracts in the ms
+  // domain. That stays exact everywhere except across the counter wrap, where
+  // the ms sequence restarts at 4,194,304,000 rather than at 2^32 — this test
+  // pins the size of the resulting error so it can't be rediscovered as a
+  // mystery. Accepted at ~48.5 days of unbroken uptime; see Samd21RtcClock.h.
+  const uint32_t beforeTicks = 0xFFFFFF00UL;
+  const uint32_t afterTicks = static_cast<uint32_t>(beforeTicks + 2048UL);
+
+  const uint32_t msDelta = ticksToMs(afterTicks) - ticksToMs(beforeTicks);
+
+  // True elapsed is 2000 ms; the subtraction instead reports ~28 h, over by
+  // exactly the gap between the u32 wrap and the ms period
+  // (2^32 - 4,194,304,000 = 100,663,296 ms).
+  TEST_ASSERT_EQUAL_UINT32(100665296UL, msDelta);
+  TEST_ASSERT_EQUAL_UINT32(100663296UL, msDelta - 2000UL);
+}
+
 int main() {
   UNITY_BEGIN();
 
@@ -78,6 +120,9 @@ int main() {
   RUN_TEST(test_tick_delta_simple);
   RUN_TEST(test_tick_delta_wraparound);
   RUN_TEST(test_hour_sleep_tick_target);
+  RUN_TEST(test_free_running_count_to_ms);
+  RUN_TEST(test_ms_delta_is_exact_when_taken_in_the_tick_domain);
+  RUN_TEST(test_ms_delta_across_the_wrap_is_the_known_limitation);
 
   UNITY_END();
   return 0;

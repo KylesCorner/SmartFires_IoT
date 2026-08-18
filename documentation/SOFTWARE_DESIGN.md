@@ -133,7 +133,10 @@ The node firmware is assembled in `platformio/src/main.cpp`.
 
 At startup, the program constructs:
 
-- platform abstractions such as `ArduinoClock` and `ArduinoAnalogReader`
+- platform abstractions such as `ArduinoAnalogReader` and the timebase — `Samd21Rtc` plus the
+  `Samd21RtcClock` (`IClock`) and `Samd21RtcSleep` (`IMcuSleep`) that share its free-running
+  counter. The base station and power-test builds, which never enter standby, use the plain
+  `ArduinoClock` (`::millis()`) instead.
 - concrete sensor drivers such as `AdafruitSht31Driver` and `AdafruitGpsDriver`
 - sensor wrappers implementing `ISensor`
 - `BatteryMonitor`
