@@ -12,26 +12,33 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PLATFORMIO_DIR="$REPO_ROOT/platformio"
 EDGE_DIR="$REPO_ROOT/edge/edge-receiver"
 
+# Existing SmartFires Python virtual environment
 VENV="${SMARTFIRES_VENV:-$HOME/.smartfires_venv}"
 PYTHON="$VENV/bin/python"
 SMARTFIRES_EDGE="$VENV/bin/smartfires-edge"
 
+# systemd
 SERVICE="smartfires-edge.service"
 
+# Stable udev device names
 BASE_PORT="/dev/smartfires-base"
 SNIFFER_PORT="/dev/smartfires-sniffer"
 
+# PlatformIO environments
 BASE_ENV="feather_m0_lora_base"
 SNIFFER_ENV="feather_m0_lora_sniffer"
 
+# Git
 GIT_REMOTE="origin"
-GIT_BRANCH="master"
+GIT_BRANCH="${SMARTFIRES_BRANCH:-master}"
 
 PORT_WAIT_TIMEOUT=30
 
+COMMAND=""
+
 
 # ============================================================
-# Logging / errors
+# Logging
 # ============================================================
 
 log()
@@ -54,7 +61,7 @@ warn()
 
 die()
 {
-    printf '\033[1;31m[ERROR]\033[0m %s\n' "$*" >&2
+    printf '\n\033[1;31m[ERROR]\033[0m %s\n' "$*" >&2
     exit 1
 }
 
@@ -62,14 +69,14 @@ die()
 on_error()
 {
     local exit_code=$?
-    local line_number=$1
+    local line_number="$1"
 
     printf '\n\033[1;31m[SmartFires ERROR]\033[0m '
     printf 'Command failed at line %s (exit code %s).\n' \
         "$line_number" "$exit_code"
 
     printf '\nThe SmartFires service may currently be stopped.\n'
-    printf 'Check with:\n'
+    printf 'Check it with:\n'
     printf '  sudo systemctl status %s\n\n' "$SERVICE"
 
     exit "$exit_code"
@@ -82,6 +89,15 @@ trap 'on_error $LINENO' ERR
 # ============================================================
 # Dependency checks
 # ============================================================
+
+require_command()
+{
+    local cmd="$1"
+
+    command -v "$cmd" >/dev/null 2>&1 ||
+        die "Required command not found: $cmd"
+}
+
 
 find_pio()
 {
@@ -99,15 +115,6 @@ find_pio()
 }
 
 
-require_command()
-{
-    local cmd="$1"
-
-    command -v "$cmd" >/dev/null 2>&1 ||
-        die "Required command not found: $cmd"
-}
-
-
 require_pio()
 {
     find_pio
@@ -121,15 +128,13 @@ require_venv()
 {
     [[ -x "$PYTHON" ]] ||
         die "SmartFires virtual environment not found: $VENV"
-
-    success "Virtual environment: $VENV"
 }
 
 
 require_repo()
 {
     [[ -d "$REPO_ROOT/.git" ]] ||
-        die "Could not find Git repository at $REPO_ROOT"
+        die "Could not find Git repository at: $REPO_ROOT"
 }
 
 
@@ -168,21 +173,47 @@ check_git_tree()
         git -C "$REPO_ROOT" status --short
         echo
 
-        die "Repository contains uncommitted changes. Refusing to update."
+        die "Repository contains uncommitted changes. Refusing to switch/update branches."
     fi
+}
+
+
+remote_branch_exists()
+{
+    git -C "$REPO_ROOT" ls-remote \
+        --exit-code \
+        --heads \
+        "$GIT_REMOTE" \
+        "$GIT_BRANCH" \
+        >/dev/null 2>&1
+}
+
+
+local_branch_exists()
+{
+    git -C "$REPO_ROOT" show-ref \
+        --verify \
+        --quiet \
+        "refs/heads/$GIT_BRANCH"
 }
 
 
 sync_repo()
 {
-    log "Checking Git repository..."
+    log "Preparing Git branch: $GIT_BRANCH"
 
     require_repo
     check_git_tree
 
-    log "Fetching $GIT_REMOTE/$GIT_BRANCH..."
+    log "Checking $GIT_REMOTE/$GIT_BRANCH..."
 
-    git -C "$REPO_ROOT" fetch "$GIT_REMOTE" "$GIT_BRANCH"
+    if ! remote_branch_exists; then
+        die "GitHub branch does not exist: $GIT_REMOTE/$GIT_BRANCH"
+    fi
+
+    log "Fetching from GitHub..."
+
+    git -C "$REPO_ROOT" fetch "$GIT_REMOTE"
 
     local current_branch
 
@@ -191,23 +222,35 @@ sync_repo()
     )"
 
     if [[ "$current_branch" != "$GIT_BRANCH" ]]; then
-        log "Switching from $current_branch to $GIT_BRANCH..."
 
-        git -C "$REPO_ROOT" checkout "$GIT_BRANCH"
+        if local_branch_exists; then
+
+            log "Switching to local branch: $GIT_BRANCH"
+
+            git -C "$REPO_ROOT" checkout "$GIT_BRANCH"
+
+        else
+
+            log "Creating local branch from $GIT_REMOTE/$GIT_BRANCH..."
+
+            git -C "$REPO_ROOT" checkout \
+                -b "$GIT_BRANCH" \
+                --track "$GIT_REMOTE/$GIT_BRANCH"
+        fi
     fi
 
-    log "Updating local $GIT_BRANCH..."
+    log "Updating $GIT_BRANCH..."
 
     git -C "$REPO_ROOT" pull \
         --ff-only \
         "$GIT_REMOTE" \
         "$GIT_BRANCH"
 
-    success "Repository updated."
+    success "Repository updated successfully."
 
     echo
     git -C "$REPO_ROOT" --no-pager log -1 \
-        --format='Commit: %h%nDate:   %cd%nTitle:  %s' \
+        --format='Branch: %D%nCommit: %h%nDate:   %cd%nTitle:  %s' \
         --date=iso
 }
 
@@ -221,7 +264,7 @@ install_edge()
     require_venv
 
     [[ -f "$EDGE_DIR/pyproject.toml" ]] ||
-        die "Could not find smartfires-edge package at $EDGE_DIR"
+        die "Could not find smartfires-edge package: $EDGE_DIR"
 
     log "Installing smartfires-edge into:"
     echo "  $VENV"
@@ -259,16 +302,18 @@ service_exists()
 stop_service()
 {
     if ! service_exists; then
-        warn "$SERVICE is not currently installed."
+        warn "$SERVICE is not installed."
         return
     fi
 
     if systemctl is-active --quiet "$SERVICE"; then
+
         log "Stopping $SERVICE..."
 
         sudo systemctl stop "$SERVICE"
 
         success "$SERVICE stopped."
+
     else
         log "$SERVICE is already stopped."
     fi
@@ -281,7 +326,7 @@ start_service()
         die "$SERVICE is not installed."
     fi
 
-    log "Reloading systemd..."
+    log "Reloading systemd configuration..."
 
     sudo systemctl daemon-reload
 
@@ -291,9 +336,12 @@ start_service()
 
     sleep 2
 
-    if sudo systemctl is-active --quiet "$SERVICE"; then
+    if systemctl is-active --quiet "$SERVICE"; then
+
         success "$SERVICE is running."
+
     else
+
         echo
         sudo systemctl status "$SERVICE" \
             --no-pager \
@@ -305,7 +353,7 @@ start_service()
 
 
 # ============================================================
-# Serial device helpers
+# Serial devices
 # ============================================================
 
 wait_for_port()
@@ -335,19 +383,17 @@ show_devices()
     echo "Serial devices:"
 
     if [[ -e "$BASE_PORT" ]]; then
-        printf '  %-30s %s\n' "$BASE_PORT" "[OK]"
-        ls -l "$BASE_PORT"
+        printf '  %-30s [OK]\n' "$BASE_PORT"
+        printf '    -> %s\n' "$(readlink -f "$BASE_PORT")"
     else
-        printf '  %-30s %s\n' "$BASE_PORT" "[MISSING]"
+        printf '  %-30s [MISSING]\n' "$BASE_PORT"
     fi
 
-    echo
-
     if [[ -e "$SNIFFER_PORT" ]]; then
-        printf '  %-30s %s\n' "$SNIFFER_PORT" "[OK]"
-        ls -l "$SNIFFER_PORT"
+        printf '  %-30s [OK]\n' "$SNIFFER_PORT"
+        printf '    -> %s\n' "$(readlink -f "$SNIFFER_PORT")"
     else
-        printf '  %-30s %s\n' "$SNIFFER_PORT" "[MISSING]"
+        printf '  %-30s [MISSING]\n' "$SNIFFER_PORT"
     fi
 }
 
@@ -366,7 +412,9 @@ flash_device()
     require_port "$port"
 
     log "Flashing SmartFires $name..."
+
     echo
+    echo "  Branch:      $GIT_BRANCH"
     echo "  Environment: $env"
     echo "  Port:        $port"
     echo "  PlatformIO:  $PIO"
@@ -381,7 +429,7 @@ flash_device()
     success "$name firmware upload completed."
 
     #
-    # Feather M0 disappears briefly while resetting.
+    # Feather M0 resets/re-enumerates after programming.
     #
     sleep 2
 
@@ -410,23 +458,25 @@ flash_sniffer()
 
 
 # ============================================================
-# High-level operations
+# High-level commands
 # ============================================================
+
+sync_command()
+{
+    preflight
+    sync_repo
+}
+
 
 update_edge()
 {
     preflight
 
-    log "Beginning SmartFires edge update..."
+    log "Beginning SmartFires edge update."
 
     stop_service
 
     sync_repo
-
-    #
-    # Important:
-    # EDGE_DIR may contain newly-pulled code after sync_repo().
-    #
     install_edge
 
     start_service
@@ -439,8 +489,11 @@ flash_base_command()
 {
     preflight
 
+    log "Beginning SmartFires base station update."
+
     stop_service
 
+    sync_repo
     flash_base
 
     start_service
@@ -453,8 +506,11 @@ flash_sniffer_command()
 {
     preflight
 
+    log "Beginning SmartFires sniffer update."
+
     stop_service
 
+    sync_repo
     flash_sniffer
 
     start_service
@@ -467,9 +523,11 @@ flash_gateway()
 {
     preflight
 
-    log "Beginning SmartFires gateway firmware update..."
+    log "Beginning SmartFires gateway firmware update."
 
     stop_service
+
+    sync_repo
 
     flash_base
     flash_sniffer
@@ -484,36 +542,38 @@ deploy()
 {
     preflight
 
-    log "=========================================="
-    log " SmartFires Full Deployment"
-    log "=========================================="
+    echo
+    echo "=========================================="
+    echo " SmartFires Full Deployment"
+    echo "=========================================="
+    echo
+    echo " Branch: $GIT_BRANCH"
 
     stop_service
 
     #
-    # Get newest source first.
+    # Pull requested branch.
     #
     sync_repo
 
     #
-    # Install newest Jetson Python application.
+    # Install Jetson-side Python package.
     #
     install_edge
 
     #
-    # Flash both USB-connected LoRa boards.
+    # Program both LoRa boards.
     #
     flash_base
     flash_sniffer
 
     #
-    # Bring edge system back online.
+    # Bring SmartFires back online.
     #
     start_service
 
-    success "=========================================="
-    success " SmartFires deployment complete"
-    success "=========================================="
+    echo
+    success "SmartFires deployment complete."
 
     status
 }
@@ -534,18 +594,28 @@ status()
 
     echo
     echo "Repository:"
-    echo "  $REPO_ROOT"
+    echo "  Path: $REPO_ROOT"
+
+    local current_branch
+
+    current_branch="$(
+        git -C "$REPO_ROOT" branch --show-current
+    )"
+
+    echo "  Current branch:  $current_branch"
+    echo "  Selected branch: $GIT_BRANCH"
 
     git -C "$REPO_ROOT" --no-pager log -1 \
-        --format='  Branch:  %D%n  Commit:  %h%n  Date:    %cd%n  Title:   %s' \
+        --format='  Commit: %h%n  Date:   %cd%n  Title:  %s' \
         --date=iso
 
     echo
     echo "Python environment:"
-    echo "  Venv:    $VENV"
-    echo "  Python:  $("$PYTHON" --version 2>&1)"
+    echo "  Venv:   $VENV"
+    echo "  Python: $("$PYTHON" --version 2>&1)"
 
     if "$PYTHON" -m pip show smartfires-edge >/dev/null 2>&1; then
+
         local version
 
         version="$(
@@ -553,9 +623,11 @@ status()
                 awk '/^Version:/ {print $2}'
         )"
 
-        echo "  Edge:    $version"
+        echo "  smartfires-edge: $version"
+
     else
-        echo "  Edge:    NOT INSTALLED"
+
+        echo "  smartfires-edge: NOT INSTALLED"
     fi
 
     show_devices
@@ -564,10 +636,15 @@ status()
     echo "systemd:"
 
     if ! service_exists; then
+
         echo "  $SERVICE: NOT INSTALLED"
+
     elif systemctl is-active --quiet "$SERVICE"; then
+
         echo "  $SERVICE: ACTIVE"
+
     else
+
         echo "  $SERVICE: INACTIVE"
     fi
 
@@ -587,54 +664,103 @@ SmartFires Build / Deployment Manager
 
 Usage:
 
-    $(basename "$0") <command>
+    $(basename "$0") [options] <command>
+
+
+Options:
+
+    -b, --branch <branch>
+
+        GitHub branch to use.
+
+        Default:
+            master
+
+        Examples:
+
+            $(basename "$0") deploy
+
+            $(basename "$0") --branch master deploy
+
+            $(basename "$0") --branch gps-power deploy
+
+            $(basename "$0") -b development flash-base
 
 
 Commands:
 
     status
-        Show Git, Python, serial device, and systemd status.
+
+        Show:
+          - Git status
+          - current branch
+          - selected branch
+          - Python environment
+          - smartfires-edge version
+          - base/sniffer devices
+          - systemd status
+
 
     sync
-        Pull the newest origin/master.
-        Refuses to continue if the repo has uncommitted changes.
+
+        Pull the selected GitHub branch.
+
 
     update-edge
-        Stop smartfires-edge.service.
-        Pull origin/master.
-        Reinstall smartfires-edge into ~/.smartfires_venv.
-        Restart and verify the service.
+
+        Stop smartfires-edge.service
+        Pull selected GitHub branch
+        Reinstall smartfires-edge
+        Restart service
+
 
     flash-base
-        Stop the edge service.
-        Flash /dev/smartfires-base.
-        Restart the edge service.
+
+        Stop service
+        Pull selected GitHub branch
+        Flash /dev/smartfires-base
+        Restart service
+
 
     flash-sniffer
-        Stop the edge service.
-        Flash /dev/smartfires-sniffer.
-        Restart the edge service.
+
+        Stop service
+        Pull selected GitHub branch
+        Flash /dev/smartfires-sniffer
+        Restart service
+
 
     flash-gateway
-        Stop the edge service.
-        Flash both base and sniffer.
-        Restart the edge service.
+
+        Stop service
+        Pull selected GitHub branch
+        Flash base
+        Flash sniffer
+        Restart service
+
 
     deploy
+
         Full SmartFires deployment:
 
             stop service
-            ↓
-            pull origin/master
-            ↓
+                |
+                v
+            pull selected branch
+                |
+                v
             reinstall smartfires-edge
-            ↓
+                |
+                v
             flash base
-            ↓
+                |
+                v
             flash sniffer
-            ↓
+                |
+                v
             restart service
-            ↓
+                |
+                v
             verify
 
 
@@ -642,34 +768,100 @@ Environment variables:
 
     SMARTFIRES_VENV
 
-        Override the SmartFires Python virtual environment.
+        Override the Python virtual environment.
 
         Default:
-
             \$HOME/.smartfires_venv
 
-        Example:
 
-            SMARTFIRES_VENV=/opt/smartfires/venv \\
-                $(basename "$0") deploy
+    SMARTFIRES_BRANCH
+
+        Override the default Git branch.
+
+        Default:
+            master
 
 EOF
 }
 
 
 # ============================================================
+# Argument parsing
+# ============================================================
+
+while [[ $# -gt 0 ]]; do
+
+    case "$1" in
+
+        -b|--branch)
+
+            [[ $# -ge 2 ]] ||
+                die "$1 requires a branch name."
+
+            GIT_BRANCH="$2"
+
+            shift 2
+            ;;
+
+
+        --branch=*)
+
+            GIT_BRANCH="${1#*=}"
+
+            [[ -n "$GIT_BRANCH" ]] ||
+                die "--branch requires a branch name."
+
+            shift
+            ;;
+
+
+        -h|--help)
+
+            usage
+            exit 0
+            ;;
+
+
+        status|sync|update-edge|flash-base|flash-sniffer|flash-gateway|deploy)
+
+            if [[ -n "$COMMAND" ]]; then
+                die "Only one command may be specified."
+            fi
+
+            COMMAND="$1"
+
+            shift
+            ;;
+
+
+        *)
+
+            usage
+            die "Unknown argument: $1"
+            ;;
+    esac
+
+done
+
+
+# ============================================================
 # Main
 # ============================================================
 
-case "${1:-}" in
+if [[ -z "$COMMAND" ]]; then
+    usage
+    exit 0
+fi
+
+
+case "$COMMAND" in
 
     status)
         status
         ;;
 
     sync)
-        preflight
-        sync_repo
+        sync_command
         ;;
 
     update-edge)
@@ -690,15 +882,6 @@ case "${1:-}" in
 
     deploy)
         deploy
-        ;;
-
-    help|-h|--help|"")
-        usage
-        ;;
-
-    *)
-        usage
-        die "Unknown command: $1"
         ;;
 
 esac
