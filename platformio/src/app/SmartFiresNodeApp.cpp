@@ -44,6 +44,8 @@ const char *pktTypeName(uint8_t pktType) {
     return "CMD_CALIBRATE";
   case BinaryPacket::PKT_CMD_RESET:
     return "CMD_RESET";
+  case BinaryPacket::PKT_CMD_SET_TX_POWER:
+    return "CMD_SET_TX_POWER";
   case BinaryPacket::PKT_CMD_ACK:
     return "CMD_ACK";
   default:
@@ -209,6 +211,20 @@ void SmartFiresNodeApp::update() {
     _awakenOnlyNotified = false;
 
     LOG_WARN("tdma", "time_sync_lost_or_stale resuming_awaken_retry=1");
+
+    // The base is unreachable, so any TX power it commanded can no longer be
+    // revoked by it — and a CMD_SET_TX_POWER could not reach us either, since
+    // it rides the same downlink, in the same slot-0 window, from the same
+    // transmitter as the TIME_SYNC we just stopped hearing.
+    //
+    // That shared fate is exactly why this is the *only* node-side trigger.
+    // Reverting on missed ACK_SUMMARY instead would fire constantly on things
+    // that are not link failures at all — the base deliberately defers acks
+    // across Timed standby, rate-limits them, and gives up on them after
+    // kMaxAckSummarySendAttempts. TIME_SYNC is unconditional every
+    // kPeriodicTimeSyncMs whether or not there is anything to say, so its
+    // absence carries strictly more signal with strictly less noise.
+    revertTxPowerToBaseline("sync_stale");
   }
 
   // Hold off sensing until the base station has provided the session clock.
@@ -283,6 +299,11 @@ void SmartFiresNodeApp::update() {
 
     // Must precede push() so the STATUS encoder sees current counters.
     _packetHandler.setLinkStats(_radio.retransmitCount(), _radio.failedSendCount());
+    // Read from the radio every cycle rather than cached at apply time, so a
+    // STATUS can never report a power the radio isn't actually using.
+    _packetHandler.setTxPowerState(
+        _radio.txPowerDbm(),
+        _txPowerMode == BinaryPacket::TX_POWER_MODE_STATIC);
     const bool bundleReadyFromPush = _packetHandler.push(snap);
 
     LOG_INFO("app",
@@ -499,10 +520,89 @@ void SmartFiresNodeApp::handleIncomingCommands() {
       continue;
     }
 
+    if (hdr.pkt_type == BinaryPacket::PKT_CMD_SET_TX_POWER) {
+      BinaryPacket::PktHeader ignored = {};
+      BinaryPacket::CmdSetTxPowerPayload txp = {};
+
+      if (!BinaryPacket::decodeCmdSetTxPower(cmd.data, cmd.len, ignored, txp)) {
+        LOG_WARN("calib", "cmd_set_tx_power_decode_failed len=%u",
+                 static_cast<unsigned int>(cmd.len));
+        continue;
+      }
+
+      if (txp.node_id != _cfg.nodeId) {
+        LOG_WARN("calib",
+                 "cmd_set_tx_power_skip target_node=%u local_node=%u seq=%u",
+                 static_cast<unsigned int>(txp.node_id),
+                 static_cast<unsigned int>(_cfg.nodeId),
+                 static_cast<unsigned int>(hdr.seq));
+        continue;
+      }
+
+      // The base decides the target; the node only applies and reports. The
+      // clamp inside setTxPower() is the one thing the node does insist on —
+      // see NetworkConfig::kMinTxPowerDbm for why obeying blindly is not safe.
+      const int8_t before = _radio.txPowerDbm();
+      const uint8_t modeBefore = _txPowerMode;
+      const int8_t applied = _radio.setTxPower(txp.tx_power_dbm);
+      _txPowerMode = (txp.mode == BinaryPacket::TX_POWER_MODE_STATIC)
+                         ? BinaryPacket::TX_POWER_MODE_STATIC
+                         : BinaryPacket::TX_POWER_MODE_DYNAMIC;
+      _packetHandler.setTxPowerState(
+          applied, _txPowerMode == BinaryPacket::TX_POWER_MODE_STATIC);
+
+      LOG_INFO("calib",
+               "cmd_set_tx_power_apply seq=%u requested_dbm=%d applied_dbm=%d "
+               "previous_dbm=%d clamped=%u mode=%s previous_mode=%s",
+               static_cast<unsigned int>(hdr.seq),
+               static_cast<int>(txp.tx_power_dbm), static_cast<int>(applied),
+               static_cast<int>(before),
+               (applied != txp.tx_power_dbm) ? 1u : 0u,
+               _txPowerMode == BinaryPacket::TX_POWER_MODE_STATIC ? "STATIC"
+                                                                 : "DYNAMIC",
+               modeBefore == BinaryPacket::TX_POWER_MODE_STATIC ? "STATIC"
+                                                                : "DYNAMIC");
+
+      // Acked unconditionally, including when the request was clamped: the ack
+      // says "command received and acted on", and the base learns the value
+      // that actually landed from StatusPayload::tx_power_dbm, which is the
+      // authority either way. A clamped request is not a failure — it is the
+      // node correctly refusing an out-of-range level.
+      sendCmdAck(BinaryPacket::PKT_CMD_SET_TX_POWER, kCalStatusSuccess);
+      continue;
+    }
+
     LOG_DEBUG("calib", "cmd_ignore type=0x%02X seq=%u",
               static_cast<unsigned int>(hdr.pkt_type),
               static_cast<unsigned int>(hdr.seq));
   }
+}
+
+void SmartFiresNodeApp::revertTxPowerToBaseline(const char *reason) {
+  const int8_t before = _radio.txPowerDbm();
+  const uint8_t modeBefore = _txPowerMode;
+
+  if (before == NetworkConfig::kMaxTxPowerDbm &&
+      modeBefore == BinaryPacket::TX_POWER_MODE_DYNAMIC) {
+    return;  // already there — don't log a no-op on every stale-sync tick
+  }
+
+  const int8_t applied = _radio.setTxPower(NetworkConfig::kMaxTxPowerDbm);
+  // The operator's STATIC pin is discarded along with the base's level. It is
+  // an override for bench and range work, not a safety state, and it is exactly
+  // as stale as anything else we were told before contact was lost. Keeping one
+  // fallback rule matters more than preserving an experiment's fidelity — the
+  // operator can re-pin it once the node is reachable again.
+  _txPowerMode = BinaryPacket::TX_POWER_MODE_DYNAMIC;
+  _packetHandler.setTxPowerState(applied, false);
+
+  LOG_WARN("radio",
+           "tx_power_revert_baseline reason=%s previous_dbm=%d applied_dbm=%d "
+           "previous_mode=%s",
+           reason ? reason : "unknown", static_cast<int>(before),
+           static_cast<int>(applied),
+           modeBefore == BinaryPacket::TX_POWER_MODE_STATIC ? "STATIC"
+                                                            : "DYNAMIC");
 }
 
 bool SmartFiresNodeApp::sendCmdAck(uint8_t cmdType, uint8_t status) {

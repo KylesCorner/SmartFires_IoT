@@ -49,7 +49,7 @@ these — check status tables within each doc for what's done vs. open.
 |---|---|
 | [RESET_SYSTEM.md](Pending_Plans/RESET_SYSTEM.md) | Jetson/base/node reset coordination and time-sync recovery |
 | [JETSON_SENSOR_EXPANSION.md](Pending_Plans/JETSON_SENSOR_EXPANSION.md) | Adding temp/humidity, BMV080, GPS, and ICM-20948 IMU sensors directly to the Jetson via I2C |
-| [DYNAMIC_TX_POWER.md](Pending_Plans/DYNAMIC_TX_POWER.md) | Base-station-driven per-node TX power adjustment using RSSI/retry telemetry; dynamic SF deferred |
+| [DYNAMIC_TX_POWER.md](Pending_Plans/DYNAMIC_TX_POWER.md) | Base-owned per-node TX power control loop (SNR margin + retry inhibitor), DYNAMIC/STATIC operator override, both link-failure fail-safes; dynamic SF deferred. **Implemented, unflashed; constants untuned** |
 | [RESET_REASON_DIAGNOSTICS.md](Pending_Plans/RESET_REASON_DIAGNOSTICS.md) | Reporting node reset cause + hang-zone breadcrumb through AWAKEN to attribute watchdog reboots (I2C stall vs RadioHead hang) |
 | [MCU_DUTY_CYCLE_CHANGELOG.md](Pending_Plans/MCU_DUTY_CYCLE_CHANGELOG.md) | Changelog/review of `feature/mcu-duty-cycle` (SAMD21 RTC standby, Timed/Hybrid modes) — every RTC wake forces a full TDMA resync + fresh AWAKEN handshake |
 | [RTC_SUBSECOND_SLEEP.md](Pending_Plans/RTC_SUBSECOND_SLEEP.md) | Plan to replace RTCZero's whole-second calendar alarm with SAMD21 RTC COUNT32 mode (~1 ms resolution) so a node can resume TDMA sync across MCU standby instead of resyncing every wake |

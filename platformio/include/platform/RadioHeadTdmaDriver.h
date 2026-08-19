@@ -48,6 +48,8 @@ public:
   bool send(const uint8_t *data, uint8_t len, uint8_t to) override;
   bool sendToWait(const uint8_t *data, uint8_t len, uint8_t to) override;
   bool setLocalAddress(uint8_t address) override;
+  bool setTxPower(int8_t dbm) override;
+  int8_t txPowerDbm() const override;
   bool available() override;
   bool sleep() override;
   bool receive(ReceivedPacket &out, bool autoAck = true) override;

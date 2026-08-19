@@ -9,6 +9,7 @@
 #include "radio/ITdmaRadioDriver.h"
 #include "radio/TdmaClock.h"
 #include "radio/TdmaConfig.h"
+#include "radio/TxPowerController.h"
 #include "telemetry/BinaryPacket.h"
 
 #include <stddef.h>
@@ -73,10 +74,17 @@ private:
   // CMD_CALIBRATE/CMD_RESET forwards from the Jetson are deferred the same
   // way — encoded immediately (so the original UART payload doesn't need to
   // be retained) but only transmitted once the base's window opens.
-  static constexpr size_t kPendingCommandPayloadSize =
+  // Max over every command type that can be queued here — CALIBRATE, RESET,
+  // and SET_TX_POWER (all 8 bytes today, but written as a max so adding a
+  // larger command type can't silently truncate one).
+  static constexpr size_t kCalibrateOrResetLoRaSize =
       BinaryPacket::kCmdCalibrateLoRaSize > BinaryPacket::kCmdResetLoRaSize
           ? BinaryPacket::kCmdCalibrateLoRaSize
           : BinaryPacket::kCmdResetLoRaSize;
+  static constexpr size_t kPendingCommandPayloadSize =
+      kCalibrateOrResetLoRaSize > BinaryPacket::kCmdSetTxPowerLoRaSize
+          ? kCalibrateOrResetLoRaSize
+          : BinaryPacket::kCmdSetTxPowerLoRaSize;
 
   struct PendingCommand {
     bool inUse = false;
@@ -185,6 +193,11 @@ private:
   // anything over the radio.
   TdmaClock _baseTdmaClock;
 
+  // Per-node dynamic TX power decisions. Pure logic, deliberately owning no
+  // radio and no clock — this class feeds it observations and transmits the
+  // decisions it hands back. See radio/TxPowerController.h.
+  TxPowerController _txPower;
+
   UartRxState _uartRx;
   bool _initialized = false;
 
@@ -261,6 +274,12 @@ private:
   bool sendPendingCommand();
   bool sendPendingAckSummary(uint32_t slotIndex);
   bool enqueuePendingCommand(uint8_t targetNodeId, const uint8_t *payload, uint8_t len);
+
+  // Encodes and queues one TxPowerController decision, then reports the
+  // outcome back to the controller. A failed enqueue must leave the controller
+  // un-armed so the decision simply re-arms next interval — see
+  // TxPowerController::onCommandFailed().
+  bool sendTxPowerDecision(const TxPowerController::Decision &decision);
 
   bool pushJetsonUartByte(uint8_t b, uint8_t *payloadOut, uint8_t &lenOut);
   void resetJetsonUartRx();

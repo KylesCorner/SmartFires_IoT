@@ -29,6 +29,11 @@ PKT_CALIBRATION_DATA = 0x12
 PKT_CMD_ACK = 0x13
 # Base -> Jetson only, never sent over LoRa — see BinaryPacket.h's PKT_DEBUG_LOG.
 PKT_DEBUG_LOG = 0x14
+# Base -> one node. The base station owns the dynamic TX power decision; the
+# Jetson only encodes these for manual/bench use and passively decodes them for
+# monitoring. It is not a participant in the control loop — see
+# documentation/Pending_Plans/DYNAMIC_TX_POWER.md.
+PKT_CMD_SET_TX_POWER = 0x15
 
 # sensor_flags bits (SensorSnapshot.h / CLAUDE.md): which sensors had a valid
 # reading this sample. When a bit is clear the corresponding fields carry a
@@ -110,16 +115,26 @@ def reset_cause_names(reset_cause):
 
 # StatusPayload: lat_e7(i32) lon_e7(i32) battery_mv(u16) battery_pct(u8) flags(u8)
 #                heading_deg_x10(u16) heading_accuracy(u16)
-#                retx_total(u16) fail_total(u16)
-STATUS_PAYLOAD_FMT  = "<iiHBBHHHH"
-STATUS_PAYLOAD_SIZE = struct.calcsize(STATUS_PAYLOAD_FMT)  # 20
+#                retx_total(u16) fail_total(u16) tx_power_dbm(i8)
+STATUS_PAYLOAD_FMT  = "<iiHBBHHHHb"
+STATUS_PAYLOAD_SIZE = struct.calcsize(STATUS_PAYLOAD_FMT)  # 21
 STATUS_GPS_VALID  = 0x01
 STATUS_BATT_VALID = 0x02
 STATUS_IMU_VALID  = 0x04
+# Not a validity flag — the node's TX power control mode. Set means an operator
+# pinned the level (TX_POWER_MODE_STATIC); clear means the base's loop owns it.
+STATUS_TX_POWER_STATIC = 0x08
 
-# Legacy format before link-stats extension (pre-v2 firmware).
+# Older STATUS layouts, each parsed against its own length. New fields are only
+# ever appended to StatusPayload, so a shorter frame is a strict prefix of a
+# longer one and the absent fields decode as None.
+#
+#   v2: before tx_power_dbm (dynamic-tx-power)      → 26 bytes on air
+#   v1: before retx_total/fail_total (link stats)   → 22 bytes on air
+_V2_STATUS_PAYLOAD_FMT   = "<iiHBBHHHH"
+_V2_STATUS_LORA_SIZE     = HEADER_SIZE + struct.calcsize(_V2_STATUS_PAYLOAD_FMT) + 1  # 26
 _LEGACY_STATUS_PAYLOAD_FMT  = "<iiHBBHH"
-_LEGACY_STATUS_LORA_SIZE    = HEADER_SIZE + struct.calcsize(_LEGACY_STATUS_PAYLOAD_FMT) + 1  # 21
+_LEGACY_STATUS_LORA_SIZE    = HEADER_SIZE + struct.calcsize(_LEGACY_STATUS_PAYLOAD_FMT) + 1  # 22
 
 # CmdCalibratePayload: node_id(u8) duration_s(u8)
 CMD_CALIBRATE_PAYLOAD_FMT = "<BB"
@@ -128,6 +143,18 @@ CMD_CALIBRATE_PAYLOAD_SIZE = struct.calcsize(CMD_CALIBRATE_PAYLOAD_FMT)  # 2
 # CmdResetPayload: node_id(u8) reset_type(u8)
 CMD_RESET_PAYLOAD_FMT = "<BB"
 CMD_RESET_PAYLOAD_SIZE = struct.calcsize(CMD_RESET_PAYLOAD_FMT)  # 2
+
+# CmdSetTxPowerPayload: node_id(u8) tx_power_dbm(i8) mode(u8)
+CMD_SET_TX_POWER_PAYLOAD_FMT = "<BbB"
+CMD_SET_TX_POWER_PAYLOAD_SIZE = struct.calcsize(CMD_SET_TX_POWER_PAYLOAD_FMT)  # 3
+
+# Per-node TX power control mode (BinaryPacket.h TX_POWER_MODE_*).
+#   DYNAMIC — the base station's control loop owns this node's power.
+#   STATIC  — an operator pinned the level; the loop leaves it alone.
+# STATIC is an override, not a safety state: a node that loses contact with the
+# base for syncStaleMs reverts to DYNAMIC at baseline like everything else.
+TX_POWER_MODE_DYNAMIC = 0x00
+TX_POWER_MODE_STATIC = 0x01
 
 # CmdAckPayload: cmd_type(u8) uid_hash(u32) status(u8)
 CMD_ACK_PAYLOAD_FMT = "<BIB"
@@ -164,6 +191,7 @@ AWAKEN_LORA_SIZE      = LEGACY_HEADER_SIZE + AWAKEN_PAYLOAD_SIZE + 1  # 9 (legac
 AWAKEN_LORA_SIZE_V2   = HEADER_SIZE + AWAKEN_PAYLOAD_SIZE_V2 + 1      # 12 (current)
 CMD_CALIBRATE_LORA_SIZE = HEADER_SIZE + CMD_CALIBRATE_PAYLOAD_SIZE + 1
 CMD_RESET_LORA_SIZE   = HEADER_SIZE + CMD_RESET_PAYLOAD_SIZE + 1
+CMD_SET_TX_POWER_LORA_SIZE = HEADER_SIZE + CMD_SET_TX_POWER_PAYLOAD_SIZE + 1  # 9
 CMD_ACK_LORA_SIZE     = HEADER_SIZE + CMD_ACK_PAYLOAD_SIZE + 1
 
 BASE_FRAME_MIN_DATA_LEN = 5
@@ -240,6 +268,65 @@ def encode_cmd_reset_frame(node_id: int, reset_type: int = 0, seq: int = 0) -> b
     data_len = len(lora_payload)  # CMD_RESET_LORA_SIZE = 7
     frame_crc = crc8(bytes([data_len]) + lora_payload)
     return bytes([FRAME_M0, FRAME_M1, data_len]) + lora_payload + bytes([frame_crc])
+
+
+def encode_cmd_set_tx_power_frame(
+    node_id: int,
+    tx_power_dbm: int,
+    mode: int = TX_POWER_MODE_DYNAMIC,
+    seq: int = 0,
+) -> bytes:
+    """Encode a CMD_SET_TX_POWER UART frame for base-station forwarding.
+
+    The base station is the decision-maker for dynamic TX power
+    (documentation/Pending_Plans/DYNAMIC_TX_POWER.md). This frame is the
+    operator override on top of that: sending mode=STATIC pins a node at a
+    level and takes it out of the loop, mode=DYNAMIC hands it back.
+
+    tx_power_dbm is always ABSOLUTE, never a delta. The dashboard's
+    increase/decrease buttons resolve to an absolute value client-side from the
+    node's last reported StatusPayload.tx_power_dbm, so a stale reading can only
+    ever produce a slightly-off absolute target — never a runaway. Do not add a
+    relative variant; see CmdSetTxPowerPayload in BinaryPacket.h.
+
+    tx_power_dbm is a *request* — the node clamps it to its own safe range
+    (NetworkConfig::kMinTxPowerDbm..kMaxTxPowerDbm) before applying. Read
+    StatusPayload.tx_power_dbm back to see what actually landed.
+    """
+    hdr = struct.pack(HEADER_FMT, PKT_MAGIC, PKT_CMD_SET_TX_POWER, 0, seq & 0xFF, 0)
+    cmd = struct.pack(
+        CMD_SET_TX_POWER_PAYLOAD_FMT, node_id & 0xFF, tx_power_dbm, mode & 0xFF
+    )
+    lora_payload_no_crc = hdr + cmd
+    lora_crc = crc8(lora_payload_no_crc)
+    lora_payload = lora_payload_no_crc + bytes([lora_crc])
+    data_len = len(lora_payload)  # CMD_SET_TX_POWER_LORA_SIZE = 9
+    frame_crc = crc8(bytes([data_len]) + lora_payload)
+    return bytes([FRAME_M0, FRAME_M1, data_len]) + lora_payload + bytes([frame_crc])
+
+
+def decode_cmd_set_tx_power(raw_lora_payload: bytes) -> Optional[dict]:
+    """Passively decode a CMD_SET_TX_POWER frame (sniffer/monitoring)."""
+    if len(raw_lora_payload) < CMD_SET_TX_POWER_LORA_SIZE:
+        return None
+    frame = raw_lora_payload[:CMD_SET_TX_POWER_LORA_SIZE]
+    if crc8(frame[:-1]) != frame[-1]:
+        return None
+
+    magic, pkt_type, hdr_node_id, seq, _hdr_flags = struct.unpack_from(HEADER_FMT, frame, 0)
+    if magic != PKT_MAGIC or pkt_type != PKT_CMD_SET_TX_POWER:
+        return None
+
+    node_id, tx_power_dbm, mode = struct.unpack_from(
+        CMD_SET_TX_POWER_PAYLOAD_FMT, frame, HEADER_SIZE)
+    return {
+        "hdr_node_id": hdr_node_id,
+        "seq": seq,
+        "node_id": node_id,
+        "tx_power_dbm": tx_power_dbm,
+        "mode": mode,
+        "mode_name": "STATIC" if mode == TX_POWER_MODE_STATIC else "DYNAMIC",
+    }
 
 
 def _full_state_fields(
@@ -322,8 +409,11 @@ def decode_gps(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Optional[
 def decode_status(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Optional[dict]:
     """Decode a raw LoRa STATUS payload into GPS + battery + link-stats fields.
 
-    Supports both the legacy 21-byte format (retx_total/fail_total absent → None)
-    and the current 25-byte format.
+    Length-adaptive across three firmware generations: the current 27-byte
+    format, the 26-byte one before tx_power_dbm, and the legacy 22-byte one
+    before retx_total/fail_total. Fields a given generation doesn't carry come
+    back as None rather than a fabricated default, so a caller can tell
+    "firmware too old to report this" from a real value.
     """
     n = len(raw_lora_payload)
     if n < _LEGACY_STATUS_LORA_SIZE:
@@ -335,9 +425,13 @@ def decode_status(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Option
     if magic != PKT_MAGIC or pkt_type != PKT_STATUS:
         return None
 
+    tx_power_dbm = None
     if n >= STATUS_LORA_SIZE:
-        lat_e7, lon_e7, battery_mv, battery_pct, flags, heading_deg_x10, heading_accuracy, retx_total, fail_total = \
+        lat_e7, lon_e7, battery_mv, battery_pct, flags, heading_deg_x10, heading_accuracy, retx_total, fail_total, tx_power_dbm = \
             struct.unpack_from(STATUS_PAYLOAD_FMT, raw_lora_payload, HEADER_SIZE)
+    elif n >= _V2_STATUS_LORA_SIZE:
+        lat_e7, lon_e7, battery_mv, battery_pct, flags, heading_deg_x10, heading_accuracy, retx_total, fail_total = \
+            struct.unpack_from(_V2_STATUS_PAYLOAD_FMT, raw_lora_payload, HEADER_SIZE)
     else:
         lat_e7, lon_e7, battery_mv, battery_pct, flags, heading_deg_x10, heading_accuracy = \
             struct.unpack_from(_LEGACY_STATUS_PAYLOAD_FMT, raw_lora_payload, HEADER_SIZE)
@@ -347,6 +441,11 @@ def decode_status(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Option
     gps_valid  = (flags & STATUS_GPS_VALID)  != 0
     batt_valid = (flags & STATUS_BATT_VALID) != 0
     imu_valid  = (flags & STATUS_IMU_VALID)  != 0
+    # None (not False) on firmware too old to report a mode at all, so a caller
+    # can tell "not supported" from "dynamic".
+    tx_power_static = (
+        ((flags & STATUS_TX_POWER_STATIC) != 0) if tx_power_dbm is not None else None
+    )
 
     return {
         "node_id": node_id,
@@ -364,6 +463,14 @@ def decode_status(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Option
         "heading_accuracy": heading_accuracy if imu_valid else "",
         "retx_total": retx_total,
         "fail_total": fail_total,
+        # The node's own applied radio TX power, not the base's record of what
+        # it last commanded — see StatusPayload::tx_power_dbm in BinaryPacket.h.
+        # None on firmware predating dynamic-tx-power.
+        "tx_power_dbm": tx_power_dbm,
+        "tx_power_static": tx_power_static,
+        "tx_power_mode": (
+            None if tx_power_static is None else ("STATIC" if tx_power_static else "DYNAMIC")
+        ),
     }
 
 

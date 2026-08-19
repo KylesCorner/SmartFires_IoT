@@ -32,6 +32,17 @@ CSV_COLUMNS = [
     "jetson_wind_dir_deg",
     "retx_total",
     "fail_total",
+    # Node's applied radio TX power in dBm, from StatusPayload.tx_power_dbm.
+    # STATUS rows only; empty on every other packet type and on firmware
+    # predating dynamic-tx-power. This is what the node confirms it is actually
+    # transmitting at, not what the base last commanded — the two can disagree
+    # when a CMD_SET_TX_POWER was clamped or its CMD_ACK was lost.
+    "tx_power_dbm",
+    # "DYNAMIC" (the base's control loop owns this node's power) or "STATIC" (an
+    # operator pinned it). STATUS rows only. Recoverable from the raw `flags`
+    # column too, but named here so a range test can be filtered without
+    # decoding bitmasks after the fact.
+    "tx_power_mode",
     "delta_flags",
     "pkt_flags",
     # Timed duty-cycle window bookkeeping, derived from the PKT_WINDOW_BEGIN /

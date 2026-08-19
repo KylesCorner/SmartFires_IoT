@@ -39,7 +39,9 @@ automatically.
 | `kSyncStaleMs` | 1 320 000 ms (22 min) | Node transmits unconditionally after this long without a TIME_SYNC |
 | `kBaseAddr` | 0x01 | RadioHead address of the base station |
 | `kRadioFrequencyMhz` | 915.0 MHz | LoRa carrier frequency |
-| `kRadioTxPowerDbm` | 13 dBm | RadioHead TX power |
+| `kRadioTxPowerDbm` | 13 dBm | Boot/baseline RadioHead TX power. Under dynamic TX power this is the **ceiling**, not the operating point — the loop only ever walks a node below it and back to it, never above |
+| `kMinTxPowerDbm` | 5 dBm | Floor a node clamps a commanded level to. Bottom of RadioHead's PA_BOOST range (`setTxPower(..., useRFO=false)` silently clamps under 5), so a lower value would be a lie about what the radio is doing |
+| `kMaxTxPowerDbm` | = `kRadioTxPowerDbm` | Ceiling a node clamps to. The node clamps even though the base decides — a CRC-valid but corrupt frame, or a base on mismatched firmware, must not be able to drive the radio out of range |
 | `kLinkRetries` | 3 | RadioHead `RHReliableDatagram` retransmit attempts per send |
 | `kLinkAckTimeoutMs` | 250 ms | Per-attempt link-layer ACK timeout |
 | `kQueueDepth` | 8 | `TdmaTxQueue` capacity (drop-oldest when full) |
@@ -312,3 +314,22 @@ forwarded to `AdafruitGpsDriver::begin()`.
 |---|---|---|
 | `CLI_CMD_ACK_TIMEOUT_S` | 5.0 s | Warn if no CMD_ACK received within this window |
 | `CLI_CALIBRATION_DURATION_S` | 60 s | Duration sent in CMD_CALIBRATE frame |
+
+### Dynamic TX power (`config/BaseConfig.h`)
+
+The base station's per-node TX power control loop (`radio/TxPowerController.h`). **Every
+value here is a starting point with a rationale, not a bench-characterized number** — the
+loop's own `tx_power_decision` debug log is the instrument for tuning them. See
+[dynamic-tx-power](../Pending_Plans/DYNAMIC_TX_POWER.md).
+
+| Parameter | Value | Purpose |
+|---|---|---|
+| `kMaxTxPowerTrackedNodes` | = `kMaxAckTrackedNodes` (16) | Per-node controller table size; tied to the ack table so the two cannot disagree about how many nodes the base follows |
+| `kSnrDemodFloorDbX10` | -75 (-7.5 dB) | SX1276 demodulation floor at SF7 — the reference link margin is measured against. **SF-dependent**: must change if the spreading factor ever becomes configurable |
+| `kTargetSnrMarginDbX10` | 100 (10.0 dB) | Margin above the demod floor the loop aims to hold. A single target rather than a floor/headroom threshold pair, which could be set into an oscillation |
+| `kTxPowerStepDbm` | 2 dB | Step size for a power *reduction*. Increases are not stepped — recovery is one jump to `kMaxTxPowerDbm` |
+| `kSnrDeadBandDbX10` | 30 (3.0 dB) | Extra margin required before stepping down, so a step-down cannot land under target and immediately re-trigger a step-up. `static_assert`-ed to exceed one step |
+| `kTxPowerMinDecisionIntervalMs` | 60 000 ms | Minimum time between decisions per node. This — not STATUS arrival — paces the loop, so behaviour is identical across the 1 s / 15 s / 15 min `SMARTFIRES_STATUS_INTERVAL_MS` build envs, and the retx/fail delta window always matches the decision window |
+| `kCmdAckTimeoutMs` | 120 000 ms | Wait for the `CMD_ACK` confirming a change before re-arming. **Must exceed `kTimedCyclePeriodMs` (75 s)** — a command queued while a node is in standby cannot be delivered until its next `WINDOW_BEGIN`, so a frame-period-sized value would time out on every merely-sleeping node |
+| `kTxPowerSilenceTimeoutMs` | 300 000 ms (5 min) | Silence after which a node's power is treated as unknown and it is probed back to baseline (the uplink-dead case). `static_assert`-ed to outlast `kCmdAckTimeoutMs` |
+| `kMaxTxPowerSilenceProbes` | 3 | Bound on best-effort baseline probes into silence before giving up; refilled whenever the node is heard from again |

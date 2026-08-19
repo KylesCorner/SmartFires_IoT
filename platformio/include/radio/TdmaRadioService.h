@@ -52,6 +52,18 @@ public:
   uint8_t nodeId() const;
   uint8_t numSlots() const;
 
+  // Radio TX power passthrough, for the base-commanded dynamic TX power path
+  // (PKT_CMD_SET_TX_POWER — see documentation/Pending_Plans/DYNAMIC_TX_POWER.md).
+  // The service holds no opinion and keeps no copy: setTxPower() clamps to
+  // NetworkConfig::kMinTxPowerDbm..kMaxTxPowerDbm and hands the result to the
+  // driver, and txPowerDbm() reads straight back out of the driver, so the
+  // value reported in STATUS can never drift from the value in the radio.
+  //
+  // Returns the power actually applied, which may be a clamped version of what
+  // was asked for; the caller compares it against its request to detect that.
+  int8_t setTxPower(int8_t dbm);
+  int8_t txPowerDbm() const;
+
   TdmaRadioState state() const;
   TdmaRadioError error() const;
 

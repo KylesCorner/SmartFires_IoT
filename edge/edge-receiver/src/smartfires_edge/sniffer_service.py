@@ -28,6 +28,7 @@ from smartfires_edge.packet import (
     PKT_CMD_ACK,
     PKT_CMD_CALIBRATE,
     PKT_CMD_RESET,
+    PKT_CMD_SET_TX_POWER,
     PKT_FULL_STATE,
     PKT_GPS,
     PKT_MAGIC,
@@ -41,6 +42,7 @@ from smartfires_edge.packet import (
     decode_cmd_ack,
     decode_cmd_calibrate,
     decode_cmd_reset,
+    decode_cmd_set_tx_power,
     decode_full_state,
     decode_status,
     decode_window_marker,
@@ -60,7 +62,12 @@ GUARD_MS = 20
 # stays excluded: it's the anchor itself, so its own jitter relative to
 # itself is degenerate.
 _VIRTUAL_BASE_NODE_ID = 1
-_BASE_SLOTTED_TYPES = {PKT_ACK_SUMMARY, PKT_CMD_CALIBRATE, PKT_CMD_RESET}
+_BASE_SLOTTED_TYPES = {
+    PKT_ACK_SUMMARY,
+    PKT_CMD_CALIBRATE,
+    PKT_CMD_RESET,
+    PKT_CMD_SET_TX_POWER,
+}
 
 # RadioHead link-layer header flags (RHReliableDatagram) — not part of the
 # SmartFires wire protocol. See RadioHeadTdmaDriver.cpp's setHeaderFlags()
@@ -86,6 +93,7 @@ def _pkt_type_name(pkt_type: int) -> str:
         PKT_ACK_SUMMARY: "ACK_SUMMARY",
         PKT_CMD_CALIBRATE: "CMD_CALIBRATE",
         PKT_CMD_RESET: "CMD_RESET",
+        PKT_CMD_SET_TX_POWER: "CMD_SET_TX_POWER",
         PKT_CMD_ACK: "CMD_ACK",
         PKT_WINDOW_BEGIN: "WINDOW_BEGIN",
         PKT_WINDOW_END: "WINDOW_END",
@@ -225,6 +233,11 @@ def _decode_rx_event(
         dec = decode_cmd_reset(raw)
         if dec is not None:
             extra["target_node_id"] = dec["node_id"]
+    elif pkt_type == PKT_CMD_SET_TX_POWER:
+        dec = decode_cmd_set_tx_power(raw)
+        if dec is not None:
+            extra["target_node_id"] = dec["node_id"]
+            extra["tx_power_dbm"] = dec["tx_power_dbm"]
     elif pkt_type == PKT_CMD_ACK:
         decode_cmd_ack(raw, rssi)
 

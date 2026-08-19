@@ -34,6 +34,8 @@ const char *pktTypeName(uint8_t pktType) {
       return "CMD_CALIBRATE";
     case BinaryPacket::PKT_CMD_RESET:
       return "CMD_RESET";
+    case BinaryPacket::PKT_CMD_SET_TX_POWER:
+      return "CMD_SET_TX_POWER";
     case BinaryPacket::PKT_CMD_ACK:
       return "CMD_ACK";
     default:
@@ -202,6 +204,17 @@ void SmartFiresBaseApp::update() {
 
   processIncomingLoRa();
   processIncomingJetsonUart();
+
+  // Time-driven half of the TX power loop: expiring commands whose CMD_ACK
+  // never came, and probing nodes that have gone silent. Runs before
+  // maybeSendInBaseWindow() so anything it queues can go out in this same
+  // window rather than waiting a full frame period. It returns at most one
+  // decision per tick, so it can never flood the shared command queue.
+  const TxPowerController::Decision timed = _txPower.update(_clock.millis());
+  if (timed.action == TxPowerController::Action::SetPower) {
+    sendTxPowerDecision(timed);
+  }
+
   maybeSendInBaseWindow();
   maybeLogHealth();
 }
@@ -288,12 +301,23 @@ void SmartFiresBaseApp::processIncomingLoRa() {
       _cmdAckRxCount++;
     }
 
-    LOG_INFO("base", "rx_lora from=%u type=%s seq=%u node=%u len=%u rssi=%d",
+    // Margin sampling for the TX power loop. Fed from every frame type, not
+    // just STATUS: SNR is a property of the reception, and BUNDLEs vastly
+    // outnumber STATUS packets, so restricting it to STATUS would average over
+    // a handful of samples per decision instead of dozens. node_id 0 is skipped
+    // because that is an unassigned node's AWAKEN — onAwaken() handles those.
+    if (validHeader && hdr.node_id != 0 &&
+        hdr.pkt_type != BinaryPacket::PKT_AWAKEN) {
+      _txPower.onPacketReceived(hdr.node_id, pkt.snr, _clock.millis());
+    }
+
+    LOG_INFO("base", "rx_lora from=%u type=%s seq=%u node=%u len=%u rssi=%d snr=%d",
          static_cast<unsigned int>(pkt.from),
          validHeader ? pktTypeName(hdr.pkt_type) : "RAW",
          static_cast<unsigned int>(validHeader ? hdr.seq : 0),
          static_cast<unsigned int>(validHeader ? hdr.node_id : pkt.from),
-         static_cast<unsigned int>(pkt.len), static_cast<int>(pkt.rssi));
+         static_cast<unsigned int>(pkt.len), static_cast<int>(pkt.rssi),
+         static_cast<int>(pkt.snr));
 
     if (validHeader && hdr.pkt_type == BinaryPacket::PKT_AWAKEN) {
       BinaryPacket::AwakenPayload awaken = {};
@@ -332,6 +356,14 @@ void SmartFiresBaseApp::processIncomingLoRa() {
         assignment->pendingTriggerSeq = hdr.seq;
         syncQueued = true;
         resetAckTracker(assignment->nodeId, "awaken");
+        // Same reason the ack tracker is reset here and does not fall out of
+        // findOrCreateNodeAssignment() for free: for a known uid_hash that
+        // function *reuses* the record, so per-node state survives the node's
+        // reboot unless something explicitly clears it. For TX power the stale
+        // state is worse than useless — the node is back at the baseline in
+        // DYNAMIC mode with its retx/fail counters restarted from zero, so a
+        // carried-over baseline would produce a hugely negative delta.
+        _txPower.onAwaken(assignment->nodeId, _clock.millis());
       }
       LOG_INFO("base", "awaken_local_time_sync_queued count=%lu result=%s",
                static_cast<unsigned long>(_awakenRxCount),
@@ -400,6 +432,19 @@ void SmartFiresBaseApp::processIncomingLoRa() {
                      : 0.0,
                  static_cast<unsigned int>(battValid ? status.battery_mv : 0),
                  static_cast<unsigned int>(battValid ? status.battery_pct : 0));
+
+        // STATUS is the trigger to *consider* a TX power decision. Whether one
+        // is actually made is paced by the controller's own clock, so this
+        // behaves the same on a build sending STATUS every second as on one
+        // sending it every 15 minutes.
+        const TxPowerController::Decision decision = _txPower.onStatus(
+            statusHdr.node_id, status.retx_total, status.fail_total,
+            status.tx_power_dbm,
+            (status.flags & BinaryPacket::STATUS_TX_POWER_STATIC) != 0u,
+            _clock.millis());
+        if (decision.action == TxPowerController::Action::SetPower) {
+          sendTxPowerDecision(decision);
+        }
       }
     } else if (validHeader && hdr.pkt_type == BinaryPacket::PKT_CMD_ACK) {
       BinaryPacket::PktHeader ackHdr = {};
@@ -408,6 +453,15 @@ void SmartFiresBaseApp::processIncomingLoRa() {
       if (BinaryPacket::decodeCmdAck(pkt.data, pkt.len, ackHdr, ack)) {
         CalibrationDebug::logCmdAckSummary(ack, ackHdr.node_id, ackHdr.seq,
                                            "calib");
+        // Gated on cmd_type: CALIBRATE and RESET acks share this frame type,
+        // and letting one of those clear the TX power in-flight gate would
+        // confirm a change the node never actually made.
+        if (ack.cmd_type == BinaryPacket::PKT_CMD_SET_TX_POWER) {
+          _txPower.onCmdAck(ackHdr.node_id, _clock.millis());
+          LOG_INFO("base", "tx_power_cmd_ack_confirmed node=%u applied_dbm=%d",
+                   static_cast<unsigned int>(ackHdr.node_id),
+                   static_cast<int>(_txPower.currentDbm(ackHdr.node_id)));
+        }
       } else {
         LOG_WARN("calib", "cmd_ack_decode_failed node=%u seq=%u len=%u",
                  static_cast<unsigned int>(hdr.node_id),
@@ -1208,10 +1262,117 @@ bool SmartFiresBaseApp::handleJetsonCommandPayload(const uint8_t *payload, uint8
     return queued;
   }
 
+  if (hdr.pkt_type == BinaryPacket::PKT_CMD_SET_TX_POWER) {
+    BinaryPacket::PktHeader cmdHdr = {};
+    BinaryPacket::CmdSetTxPowerPayload cmd = {};
+
+    // No legacy no-CRC fallback here, unlike CALIBRATE/RESET above: this
+    // command type is new, so there is no older Jetson build whose frames omit
+    // the CRC. Requiring it keeps a corrupted frame from being relayed as a
+    // power change.
+    if (!BinaryPacket::decodeCmdSetTxPower(payload, len, cmdHdr, cmd)) {
+      LOG_WARN("base",
+               "uart_cmd_reject type=CMD_SET_TX_POWER reason=decode_failed len=%u",
+               static_cast<unsigned int>(len));
+      return false;
+    }
+
+    // node_id 0 is "the base itself" for CMD_RESET, but the base's own TX
+    // power is a separate static config decision, not something to be changed
+    // at runtime — see DYNAMIC_TX_POWER.md's "Base station TX power ceiling".
+    if (cmd.node_id == 0) {
+      LOG_WARN("base",
+               "uart_cmd_reject type=CMD_SET_TX_POWER reason=base_self_not_supported seq=%u",
+               static_cast<unsigned int>(cmdHdr.seq));
+      return false;
+    }
+
+    uint8_t loraPayload[BinaryPacket::kCmdSetTxPowerLoRaSize] = {};
+    const uint8_t loraLen = BinaryPacket::encodeCmdSetTxPowerPayload(
+        cmdHdr.seq, cmd, loraPayload, sizeof(loraPayload));
+    if (loraLen == 0) {
+      LOG_ERROR("base", "tx_cmd_set_tx_power_encode_failed seq=%u node=%u",
+                static_cast<unsigned int>(cmdHdr.seq),
+                static_cast<unsigned int>(cmd.node_id));
+      return false;
+    }
+
+    // Record the operator's mode locally as the command is relayed. Done even
+    // if the send below fails: a node the base wrongly believes is STATIC is
+    // merely left alone, which is safe, whereas one wrongly believed DYNAMIC
+    // would be stepped against the operator's explicit instruction.
+    _txPower.setMode(cmd.node_id, cmd.mode);
+
+    // Deferred to the base's reserved TDMA window rather than sent
+    // immediately — see maybeSendInBaseWindow()/sendPendingCommand(). Shares
+    // the queue with the control loop's own sends, so a QUEUE_FULL here is the
+    // same condition the loop treats as "no change issued".
+    const bool queued = enqueuePendingCommand(cmd.node_id, loraPayload, loraLen);
+    LOG_INFO("base",
+             "tx_cmd_set_tx_power_queue seq=%u node=%u tx_power_dbm=%d mode=%s source=operator lora_len=%u result=%s",
+             static_cast<unsigned int>(cmdHdr.seq),
+             static_cast<unsigned int>(cmd.node_id),
+             static_cast<int>(cmd.tx_power_dbm),
+             cmd.mode == BinaryPacket::TX_POWER_MODE_STATIC ? "STATIC" : "DYNAMIC",
+             static_cast<unsigned int>(loraLen), queued ? "QUEUED" : "QUEUE_FULL");
+    return queued;
+  }
+
   LOG_WARN("base", "uart_cmd_unsupported type=%s code=0x%02X",
            pktTypeName(hdr.pkt_type), static_cast<unsigned int>(hdr.pkt_type));
 
   return false;
+}
+
+bool SmartFiresBaseApp::sendTxPowerDecision(
+    const TxPowerController::Decision &decision) {
+  if (decision.action != TxPowerController::Action::SetPower) {
+    return false;
+  }
+
+  BinaryPacket::CmdSetTxPowerPayload cmd = {};
+  cmd.node_id = decision.nodeId;
+  cmd.tx_power_dbm = decision.targetDbm;
+  // The loop only ever commands nodes it is allowed to manage, so the mode it
+  // sends is always DYNAMIC — it must not silently un-pin a node, and a STATIC
+  // node never produces a decision in the first place.
+  cmd.mode = BinaryPacket::TX_POWER_MODE_DYNAMIC;
+
+  uint8_t loraPayload[BinaryPacket::kCmdSetTxPowerLoRaSize] = {};
+  const uint8_t loraLen = BinaryPacket::encodeCmdSetTxPowerPayload(
+      _timeSyncSeq, cmd, loraPayload, sizeof(loraPayload));
+  if (loraLen == 0) {
+    LOG_ERROR("base", "tx_power_decision_encode_failed node=%u target_dbm=%d",
+              static_cast<unsigned int>(decision.nodeId),
+              static_cast<int>(decision.targetDbm));
+    _txPower.onCommandFailed(decision.nodeId);
+    return false;
+  }
+
+  const bool queued =
+      enqueuePendingCommand(decision.nodeId, loraPayload, loraLen);
+
+  LOG_INFO("base",
+           "tx_power_decision node=%u target_dbm=%d current_dbm=%d reason=%s "
+           "margin_db=%d.%d source=loop result=%s",
+           static_cast<unsigned int>(decision.nodeId),
+           static_cast<int>(decision.targetDbm),
+           static_cast<int>(_txPower.currentDbm(decision.nodeId)),
+           TxPowerController::reasonName(decision.reason),
+           static_cast<int>(decision.marginDbX10 / 10),
+           static_cast<int>(decision.marginDbX10 < 0 ? -(decision.marginDbX10 % 10)
+                                                     : decision.marginDbX10 % 10),
+           queued ? "QUEUED" : "QUEUE_FULL");
+
+  if (queued) {
+    _txPower.onCommandSent(decision.nodeId, decision.targetDbm, _clock.millis());
+  } else {
+    // Queue full — the decision is simply dropped and re-arms next interval.
+    // Arming the in-flight gate here would stall this node's decisions for a
+    // whole ack timeout waiting on a command that was never sent.
+    _txPower.onCommandFailed(decision.nodeId);
+  }
+  return queued;
 }
 
 bool SmartFiresBaseApp::pushJetsonUartByte(uint8_t b,

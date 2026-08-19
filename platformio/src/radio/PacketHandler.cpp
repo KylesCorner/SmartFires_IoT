@@ -203,6 +203,11 @@ void PacketHandler::setLinkStats(uint32_t retxTotal, uint32_t failTotal) {
     _failTotal = failTotal;
 }
 
+void PacketHandler::setTxPowerState(int8_t dbm, bool isStatic) {
+    _txPowerDbm = dbm;
+    _txPowerStatic = isStatic;
+}
+
 // --- full reset ---
 
 void PacketHandler::reset() {
@@ -267,6 +272,11 @@ void PacketHandler::tryEncodeStatus(const SensorSnapshot &snap) {
         ? static_cast<uint16_t>(0xFFFFu)
         : static_cast<uint16_t>(_failTotal);
 
+    sp.tx_power_dbm = _txPowerDbm;
+    if (_txPowerStatic) {
+        flags |= BinaryPacket::STATUS_TX_POWER_STATIC;
+    }
+
     sp.flags = flags;
 
     _statusLen   = BinaryPacket::encodeStatusPayload(
@@ -278,13 +288,15 @@ void PacketHandler::tryEncodeStatus(const SensorSnapshot &snap) {
         _statusEverSent  = true;
 
         LOG_INFO("packet",
-                 "status_encoded len=%u node=%u flags=0x%02X session_ms=%lu retx=%u fail=%u",
+                 "status_encoded len=%u node=%u flags=0x%02X session_ms=%lu retx=%u fail=%u tx_power_dbm=%d tx_power_static=%u",
                  static_cast<unsigned int>(_statusLen),
                  static_cast<unsigned int>(_cfg.nodeId),
                  static_cast<unsigned int>(sp.flags),
                  static_cast<unsigned long>(snap.sessionTimeMs),
                  static_cast<unsigned int>(sp.retx_total),
-                 static_cast<unsigned int>(sp.fail_total));
+                 static_cast<unsigned int>(sp.fail_total),
+                 static_cast<int>(sp.tx_power_dbm),
+                 _txPowerStatic ? 1u : 0u);
         if ((sp.flags & BinaryPacket::STATUS_IMU_VALID) != 0u) {
             LOG_DEBUG("packet",
                       "status_imu_payload node=%u heading_deg=%.1f accuracy_deg=%.2f",

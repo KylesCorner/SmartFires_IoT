@@ -110,6 +110,27 @@ constexpr uint8_t kRadioRstPin = 4;
 constexpr float kRadioFrequencyMhz = 915.0f;
 constexpr int8_t kRadioTxPowerDbm = 13;
 
+// Bounds a node clamps an incoming PKT_CMD_SET_TX_POWER to before applying it.
+// The base station is the decision-maker for dynamic TX power
+// (documentation/Pending_Plans/DYNAMIC_TX_POWER.md), but "the base decides" is
+// not the same as "the node obeys anything" — a corrupted-but-CRC-valid frame,
+// or a base running mismatched firmware, must not be able to push the radio
+// somewhere the hardware cannot go.
+//
+// Ceiling is kRadioTxPowerDbm, deliberately *not* the SX1276's +23 dBm maximum:
+// this feature only ever walks a node down from the known-working, field-
+// validated baseline and back up to it. Raising the baseline itself is a manual
+// change, not something a control loop gets to do.
+//
+// Floor is +5 dBm, the bottom of RadioHead's PA_BOOST range — begin() calls
+// setTxPower(..., useRFO=false), and RH_RF95 silently clamps anything under 5
+// on that path, so a lower value here would just be a lie about what the radio
+// is doing.
+constexpr int8_t kMinTxPowerDbm = 5;
+constexpr int8_t kMaxTxPowerDbm = kRadioTxPowerDbm;
+static_assert(kMinTxPowerDbm <= kMaxTxPowerDbm,
+              "TX power floor must not exceed the baseline ceiling");
+
 // Link-layer retry count / ACK timeout. Single source for two fields that
 // used to be set independently and could drift: TdmaConfig::maxRetries /
 // TdmaConfig::ackTimeoutMs (app-level TDMA config) and

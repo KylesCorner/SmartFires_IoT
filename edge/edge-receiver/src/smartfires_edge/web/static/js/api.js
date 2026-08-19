@@ -64,6 +64,25 @@ const Api = {
       })
     ).json();
   },
+  // action: "set" | "increase" | "decrease" | "dynamic" | "static".
+  // increase/decrease are resolved to an absolute dBm server-side from the
+  // node's last reported power — the wire protocol has no relative form.
+  async setTxPower(nodeId, action, txPowerDbm) {
+    const body = { node_id: nodeId, action };
+    if (txPowerDbm !== undefined && txPowerDbm !== null) {
+      body.tx_power_dbm = txPowerDbm;
+    }
+    const res = await fetch("/api/tx_power", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({}));
+      throw new Error(detail.detail || `HTTP ${res.status}`);
+    }
+    return res.json();
+  },
   async serverTime() {
     return (await fetch("/api/server_time")).json();
   },

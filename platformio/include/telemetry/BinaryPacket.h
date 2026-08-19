@@ -12,13 +12,17 @@
 //              (legacy pre-flags frame used a 4-byte header + 4-byte payload = 9 bytes;
 //               decodeAwaken still accepts it — see decodeAwaken's comment for the caveat)
 //   BUNDLE:     [PktHeader:5][FullStatePayload:20][n_deltas:1][DeltaPayload×n][crc8:1]  ≤ 195 bytes
-//   STATUS:     [PktHeader:5][StatusPayload:20][crc8:1]                                 =  26 bytes
+//   STATUS:     [PktHeader:5][StatusPayload:21][crc8:1]                                 =  27 bytes
 //   CMD_ACK:    [PktHeader:5][CmdAckPayload:6][crc8:1]                                  =  12 bytes
 //   WINDOW_BEGIN/WINDOW_END:
 //               [PktHeader:5][WindowMarkerPayload:11][crc8:1]                           =  17 bytes
 //
 // LoRa TIME_SYNC — base -> node or all nodes:
 //   TIME_SYNC:  [PktHeader:5][TimeSyncPayload:8][crc8:1]                                =  14 bytes
+//
+// LoRa CMD_SET_TX_POWER — base -> one node:
+//   CMD_SET_TX_POWER:
+//               [PktHeader:5][CmdSetTxPowerPayload:3][crc8:1]                           =   9 bytes
 //
 // CRC-8/MAXIM (polynomial 0x31) covers all preceding bytes in the LoRa payload.
 //
@@ -62,6 +66,12 @@ enum PktType : uint8_t {
     // no embedded crc8, since the outer UART/USB frame's crc8 already covers
     // it end-to-end on this single hop.
     PKT_DEBUG_LOG        = 0x14,
+    // Base -> one node. The base station is the sole authority on node TX
+    // power (see documentation/Pending_Plans/DYNAMIC_TX_POWER.md): the node
+    // never decides its own level, it only applies what it is told, clamps it
+    // to the locally-known-safe range, and reports the applied value back in
+    // StatusPayload::tx_power_dbm. Acked with the existing PKT_CMD_ACK.
+    PKT_CMD_SET_TX_POWER = 0x15,
 };
 
 struct __attribute__((packed)) PktHeader {
@@ -144,6 +154,12 @@ struct __attribute__((packed)) FullStatePayload {
 static constexpr uint8_t STATUS_GPS_VALID  = 0x01;
 static constexpr uint8_t STATUS_BATT_VALID = 0x02;
 static constexpr uint8_t STATUS_IMU_VALID  = 0x04;
+// Set when the node's TX power is pinned by an operator (TX_POWER_MODE_STATIC);
+// clear means the base's control loop owns it. Rides in the existing flags byte
+// rather than costing StatusPayload another byte — unlike the three bits above
+// it is a mode, not a validity flag, but the byte had room and a 1-byte frame
+// growth to carry one bit is not worth it.
+static constexpr uint8_t STATUS_TX_POWER_STATIC = 0x08;
 
 struct __attribute__((packed)) StatusPayload {
     int32_t  lat_e7;            // degrees × 1e7  (valid if STATUS_GPS_VALID)
@@ -155,6 +171,16 @@ struct __attribute__((packed)) StatusPayload {
     uint16_t heading_accuracy;  // Q12 raw; divide by 4096 for degrees
     uint16_t retx_total;        // lifetime retransmit count, saturated at 65535
     uint16_t fail_total;        // lifetime send-failure count, saturated at 65535
+    // TX power the node has actually applied to its radio, in dBm. Always
+    // populated (no validity flag): the node knows this unconditionally, it is
+    // not a sensor reading that can fail.
+    //
+    // Deliberately sourced from the node rather than from the base's own record
+    // of what it last commanded — a CMD_SET_TX_POWER whose CMD_ACK was lost, or
+    // one that arrived and was clamped, leaves the two disagreeing, and this
+    // field is the side that reflects what is actually on the air. Signed so a
+    // future radio with a negative-dBm range needs no format change.
+    int8_t   tx_power_dbm;
 };
 
 struct __attribute__((packed)) CmdCalibratePayload {
@@ -165,6 +191,43 @@ struct __attribute__((packed)) CmdCalibratePayload {
 struct __attribute__((packed)) CmdResetPayload {
     uint8_t node_id;
     uint8_t reset_type;
+};
+
+// Per-node TX power control mode.
+//
+// DYNAMIC: the base's control loop owns this node's power and may step it.
+// STATIC:  an operator has pinned the level; the base's loop leaves it alone.
+//
+// The mode is enforced on the base (it is the only thing that decides) but is
+// also held and reported by the node, so the dashboard shows what the node is
+// really in rather than what the base believes it commanded — same ground-truth
+// argument as StatusPayload::tx_power_dbm.
+//
+// STATIC is an operator override, not a safety state: a node that loses contact
+// reverts to DYNAMIC at baseline along with everything else (see
+// TdmaClock::syncStale handling in SmartFiresNodeApp). There is exactly one
+// fallback rule, and pinning a level does not exempt a node from it.
+static constexpr uint8_t TX_POWER_MODE_DYNAMIC = 0x00;
+static constexpr uint8_t TX_POWER_MODE_STATIC  = 0x01;
+
+// Carried by PKT_CMD_SET_TX_POWER. node_id is redundant with PktHeader::node_id
+// exactly as it is on CmdCalibratePayload/CmdResetPayload — the header field is
+// 0 on base-originated command frames, so the target lives in the payload.
+//
+// No seq field: PktHeader::seq already sequences these, the same as it does for
+// CALIBRATE/RESET, and a second copy could only ever disagree with it.
+//
+// tx_power_dbm is always ABSOLUTE, never a delta — deliberately. The base does
+// not need to know a node's current level to command it safely, only to decide
+// whether to command at all, so any desync (base reboot, lost CMD_ACK, a node
+// reset the base never saw) is always recoverable by sending an absolute
+// baseline. A relative "step by N" variant would break that: a base that
+// rebooted believing a node was at 13 dBm when it was really at 7 would issue
+// "step down" and drive it up. Do not add one.
+struct __attribute__((packed)) CmdSetTxPowerPayload {
+    uint8_t node_id;
+    int8_t  tx_power_dbm;   // requested power; the node clamps before applying
+    uint8_t mode;           // TX_POWER_MODE_DYNAMIC | TX_POWER_MODE_STATIC
 };
 
 struct __attribute__((packed)) CmdAckPayload {
@@ -214,12 +277,13 @@ static_assert(sizeof(PktHeader)           ==  5, "PktHeader must be 5 bytes");
 static_assert(sizeof(AwakenPayload)       ==  6, "AwakenPayload must be 6 bytes");
 static_assert(sizeof(WindowMarkerPayload) == 11, "WindowMarkerPayload must be 11 bytes");
 static_assert(sizeof(FullStatePayload)    == 20, "FullStatePayload must be 20 bytes");
-static_assert(sizeof(StatusPayload)       == 20, "StatusPayload must be 20 bytes");
+static_assert(sizeof(StatusPayload)       == 21, "StatusPayload must be 21 bytes");
 static_assert(sizeof(TimeSyncPayload)     ==  8, "TimeSyncPayload must be 8 bytes");
 static_assert(sizeof(AckSummaryPayload)   ==  4, "AckSummaryPayload must be 4 bytes");
 static_assert(sizeof(DeltaPayload)        == 12, "DeltaPayload must be 12 bytes");
 static_assert(sizeof(CmdCalibratePayload) ==  2, "CmdCalibratePayload must be 2 bytes");
 static_assert(sizeof(CmdResetPayload)     ==  2, "CmdResetPayload must be 2 bytes");
+static_assert(sizeof(CmdSetTxPowerPayload) == 3, "CmdSetTxPowerPayload must be 3 bytes");
 static_assert(sizeof(CmdAckPayload)       ==  6, "CmdAckPayload must be 6 bytes");
 
 static constexpr uint8_t kBundleMaxDeltas = 14;
@@ -235,7 +299,7 @@ static constexpr size_t kAwakenPayloadLegacyLen = 4;
 static constexpr size_t kAwakenLoRaSizeLegacy =
     kLegacyHeaderSize + kAwakenPayloadLegacyLen + 1;                    //   9
 static constexpr size_t kStatusLoRaSize =
-    sizeof(PktHeader) + sizeof(StatusPayload) + 1;                      //  26
+    sizeof(PktHeader) + sizeof(StatusPayload) + 1;                      //  27
 static constexpr size_t kWindowMarkerLoRaSize =
     sizeof(PktHeader) + sizeof(WindowMarkerPayload) + 1;                //  17
 static constexpr size_t kTimeSyncLoRaSize =
@@ -246,6 +310,8 @@ static constexpr size_t kCmdCalibrateLoRaSize =
     sizeof(PktHeader) + sizeof(CmdCalibratePayload) + 1;                //   8
 static constexpr size_t kCmdResetLoRaSize =
     sizeof(PktHeader) + sizeof(CmdResetPayload) + 1;                    //   8
+static constexpr size_t kCmdSetTxPowerLoRaSize =
+    sizeof(PktHeader) + sizeof(CmdSetTxPowerPayload) + 1;               //   9
 static constexpr size_t kCmdAckLoRaSize =
     sizeof(PktHeader) + sizeof(CmdAckPayload) + 1;                      //  12
 static constexpr size_t kFullStateLoRaSize =
@@ -290,7 +356,7 @@ inline uint8_t encodeAwakenPayload(
     return static_cast<uint8_t>(kAwakenLoRaSize);
 }
 
-// ---------- encode: raw LoRa STATUS payload (25 bytes) ----------
+// ---------- encode: raw LoRa STATUS payload (27 bytes) ----------
 
 inline uint8_t encodeStatusPayload(
     uint8_t node_id, uint8_t seq,
@@ -427,6 +493,29 @@ inline uint8_t encodeCmdResetPayload(
     buf[sizeof(PktHeader) + sizeof(CmdResetPayload)] =
         crc8(buf, sizeof(PktHeader) + sizeof(CmdResetPayload));
     return static_cast<uint8_t>(kCmdResetLoRaSize);
+}
+
+// node_id lives in the payload, not the header — same convention as
+// encodeCmdCalibratePayload/encodeCmdResetPayload above, which also leave
+// hdr.node_id at 0 on base-originated commands.
+inline uint8_t encodeCmdSetTxPowerPayload(
+    uint8_t seq,
+    const CmdSetTxPowerPayload& cmd,
+    uint8_t* buf, size_t buf_size,
+    uint8_t flags = 0)
+{
+    if (buf_size < kCmdSetTxPowerLoRaSize) return 0;
+    PktHeader hdr;
+    hdr.magic    = PKT_MAGIC;
+    hdr.pkt_type = PKT_CMD_SET_TX_POWER;
+    hdr.node_id  = 0;
+    hdr.seq      = seq;
+    hdr.flags    = flags;
+    memcpy(buf,                    &hdr, sizeof(PktHeader));
+    memcpy(buf + sizeof(PktHeader), &cmd, sizeof(CmdSetTxPowerPayload));
+    buf[sizeof(PktHeader) + sizeof(CmdSetTxPowerPayload)] =
+        crc8(buf, sizeof(PktHeader) + sizeof(CmdSetTxPowerPayload));
+    return static_cast<uint8_t>(kCmdSetTxPowerLoRaSize);
 }
 
 inline uint8_t encodeCmdAckPayload(
@@ -674,6 +763,17 @@ inline bool decodeCmdReset(
     memcpy(&hdr_out, raw, sizeof(PktHeader));
     memcpy(&cmd_out, raw + sizeof(PktHeader), sizeof(CmdResetPayload));
     return hdr_out.magic == PKT_MAGIC && hdr_out.pkt_type == PKT_CMD_RESET;
+}
+
+inline bool decodeCmdSetTxPower(
+    const uint8_t* raw, size_t len,
+    PktHeader& hdr_out, CmdSetTxPowerPayload& cmd_out)
+{
+    if (len < kCmdSetTxPowerLoRaSize) return false;
+    if (crc8(raw, len - 1) != raw[len - 1]) return false;
+    memcpy(&hdr_out, raw, sizeof(PktHeader));
+    memcpy(&cmd_out, raw + sizeof(PktHeader), sizeof(CmdSetTxPowerPayload));
+    return hdr_out.magic == PKT_MAGIC && hdr_out.pkt_type == PKT_CMD_SET_TX_POWER;
 }
 
 inline bool decodeCmdAck(

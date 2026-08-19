@@ -24,7 +24,9 @@ from smartfires_edge.packet import (
     PKT_STATUS,
     PKT_WINDOW_BEGIN,
     PKT_WINDOW_END,
+    TX_POWER_MODE_STATIC,
     encode_cmd_reset_frame,
+    encode_cmd_set_tx_power_frame,
     encode_time_sync_frame,
 )
 from smartfires_edge.packet_loss import PacketLossTracker
@@ -109,6 +111,45 @@ def _send_time_sync(
     return True
 
 
+def _send_cmd_set_tx_power(
+    ser,
+    write_lock: threading.Lock,
+    cmd_seq_state: dict,
+    node_id: int,
+    tx_power_dbm: int,
+    mode: int,
+    log_fn=None,
+) -> None:
+    """Send a CMD_SET_TX_POWER frame for the base to relay to one node.
+
+    The value is absolute. The dashboard's increase/decrease buttons resolve to
+    an absolute target client-side from the node's last reported power, so a
+    stale reading can only produce a slightly-wrong level, never a runaway —
+    see encode_cmd_set_tx_power_frame().
+    """
+    with write_lock:
+        seq = int(cmd_seq_state.setdefault("next_seq", 0)) & 0xFF
+        frame = encode_cmd_set_tx_power_frame(
+            node_id=node_id, tx_power_dbm=tx_power_dbm, mode=mode, seq=seq
+        )
+        try:
+            ser.write(frame)
+        except Exception as exc:  # noqa: BLE001 - surfaced to the operator, not fatal
+            if log_fn is not None:
+                log_fn(f"[CMD] set_tx_power node={node_id} FAILED: {exc}", node_id, kind="cmd")
+            return
+        cmd_seq_state["next_seq"] = (seq + 1) & 0xFF
+
+    if log_fn is not None:
+        mode_name = "STATIC" if mode == TX_POWER_MODE_STATIC else "DYNAMIC"
+        log_fn(
+            f"[CMD] set_tx_power node={node_id} tx_power_dbm={tx_power_dbm} "
+            f"mode={mode_name} seq={seq}",
+            node_id,
+            kind="cmd",
+        )
+
+
 def _send_cmd_reset(
     ser: serial.Serial,
     write_lock: threading.Lock,
@@ -160,6 +201,7 @@ def run_receive(
     live_state: LiveState | None = None,
     log_fn: Callable[[str, int | None], None] | None = None,
     reset_event: threading.Event | None = None,
+    tx_power_queue: "queue.Queue[dict] | None" = None,
     node_reset_queue: "queue.Queue[int] | None" = None,
 ) -> int:
     """Run the UART ingest loop.
@@ -172,6 +214,10 @@ def run_receive(
         log_fn: Optional log callback ``(msg, node_id)`` injected by ``web`` subcommand
                 to stream log lines to the browser. Defaults to plain ``print``.
         reset_event: Optional threading.Event set by the web API to trigger a new session.
+        tx_power_queue: Optional queue of TX power commands from the web API. Each item is
+                        {node_id, tx_power_dbm, mode} and is relayed verbatim — the API
+                        layer, not this loop, resolves increase/decrease into an absolute
+                        level from the node's last reported power.
         node_reset_queue: Optional queue of node_ids, populated by the web API's
                            per-node "Reset" button. Drained once per loop tick —
                            each entry triggers a hard CMD_RESET to that node.
@@ -515,6 +561,13 @@ def run_receive(
                             "jetson_wind_dir_deg": "",
                             "retx_total": status.get("retx_total") if status.get("retx_total") is not None else "",
                             "fail_total": status.get("fail_total") if status.get("fail_total") is not None else "",
+                            # Node's applied radio TX power. Empty on firmware
+                            # predating dynamic-tx-power. Reaches the JSONL
+                            # status stream, the log line, and the CSV; the
+                            # web dashboard's node-list column is a separate
+                            # step (DYNAMIC_TX_POWER.md checklist item 10).
+                            "tx_power_dbm": status.get("tx_power_dbm") if status.get("tx_power_dbm") is not None else "",
+                            "tx_power_mode": status.get("tx_power_mode") or "",
                         }
                         _append_jsonl(status_path, status_row)
                         logger.write_row(status_row)
@@ -528,7 +581,9 @@ def run_receive(
                             f"rssi={status_row['rssi']} "
                             f"heading={status_row['heading_true_deg']} "
                             f"location_corrected_heading={status_row['location_corrected_heading']} "
-                            f"retx_total={status_row['retx_total']} fail_total={status_row['fail_total']}",
+                            f"retx_total={status_row['retx_total']} fail_total={status_row['fail_total']} "
+                            f"tx_power_dbm={status_row['tx_power_dbm']} "
+                            f"tx_power_mode={status_row['tx_power_mode']}",
                             int(status_row["node_id"]) if status_row["node_id"] is not None else None,
                             kind="status",
                         )
@@ -624,6 +679,22 @@ def run_receive(
                             _send_cmd_reset(
                                 ser, write_lock, cmd_seq_state,
                                 node_id=target_node_id, reset_type=0x01, log_fn=log_fn,
+                            )
+
+                    # Drain TX power commands queued by the web API's per-node
+                    # dynamic/static and power-level controls.
+                    if tx_power_queue is not None:
+                        while True:
+                            try:
+                                cmd = tx_power_queue.get_nowait()
+                            except queue.Empty:
+                                break
+                            _send_cmd_set_tx_power(
+                                ser, write_lock, cmd_seq_state,
+                                node_id=int(cmd["node_id"]),
+                                tx_power_dbm=int(cmd["tx_power_dbm"]),
+                                mode=int(cmd["mode"]),
+                                log_fn=log_fn,
                             )
 
                     # Check for new-session request from the web API

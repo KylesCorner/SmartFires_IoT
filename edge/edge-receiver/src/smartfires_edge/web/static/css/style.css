@@ -851,3 +851,55 @@ table th {
 #sniffer-activity-table tr.sniffer-row-warn td {
   color: #e8743a;
 }
+
+/* Per-node TX power controls (map-history link-quality table).
+   Deliberately styled as neutral/blue rather than reusing .reset-node-btn's red:
+   a power nudge is reversible and low-stakes, while Reset reboots the node. The
+   two sit in adjacent cells, so they must not look equally destructive. */
+.tx-power-controls {
+  white-space: nowrap;
+}
+
+.tx-btn {
+  background: #1e2c3a;
+  color: #b8d4e8;
+  border: 1px solid #3a5a7a;
+  border-radius: 4px;
+  padding: 0.15rem 0.4rem;
+  margin-right: 0.15rem;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.75rem;
+}
+
+.tx-btn:hover:not(:disabled) {
+  background: #3a5a7a;
+  color: #fff;
+}
+
+.tx-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.tx-mode {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+  vertical-align: middle;
+}
+
+/* Static is the exceptional state — an operator has taken this node out of the
+   control loop — so it is the one that gets a colour. */
+.tx-mode-static {
+  background: #4a3a1a;
+  color: #e8c88a;
+  border: 1px solid #8b6a2a;
+}
+
+.tx-mode-dynamic {
+  background: #24313d;
+  color: #7a8a99;
+  border: 1px solid #3a4a5a;
+}

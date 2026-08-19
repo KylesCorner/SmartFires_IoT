@@ -23,13 +23,14 @@ Wildfire IoT sensor network. Remote drone nodes collect environmental data (temp
     | LoRa 915 MHz (RadioHead RHReliableDatagram, 13 dBm)
     |   Node → Base: AWAKEN payload (12 bytes: uid_hash + reset_cause + hang_zone, on boot until TIME_SYNC received)
     |                BUNDLE payload (≤195 bytes, app-layer ACK-paced retry, TDMA-gated)
-    |                STATUS payload (26 bytes, GPS + battery + DMP heading + link stats, every 15 min)
+    |                STATUS payload (27 bytes, GPS + battery + DMP heading + link stats + TX power, every 15 min)
     |                CMD_ACK (12 bytes, acknowledges CALIBRATE/RESET commands)
     |                WINDOW_BEGIN / WINDOW_END (17 bytes, Timed duty-cycle window edges)
     |   Base → Node: TIME_SYNC broadcast (14 bytes, fire-and-forget, RH_BROADCAST_ADDRESS)
     |                ACK_SUMMARY (10 bytes, base-generated app-layer reliability bitmap)
     |                CMD_CALIBRATE (8 bytes, forwarded from Jetson)
     |                CMD_RESET (8 bytes, forwarded from Jetson)
+    |                CMD_SET_TX_POWER (9 bytes, base-authored; node applies + ACKs)
     v
 [Adafruit Feather M0 RFM95 — base station]  ← SmartFiresBaseApp, fully ported
     Receives telemetry, auto-ACKs, relays to Jetson over USB.
@@ -248,7 +249,7 @@ SmartFiresNodeApp::update()
     buildSnapshot()        ← calls sensor.fillSnapshot() + battery reading;
                               timestamps via TdmaClock::sessionNowMs()
     packetHandler.push(snapshot)
-    if statusPacketReady() → enqueueTelemetry(STATUS payload, 26 bytes)
+    if statusPacketReady() → enqueueTelemetry(STATUS payload, 27 bytes)
     if bundleReady()       → enqueueTelemetry(BUNDLE payload, ≤195 bytes)
 
 PacketHandler
@@ -295,7 +296,7 @@ RadioHeadTdmaDriver::send()               non-blocking LoRa TX for fresh telemet
 ```
 AWAKEN:  [PktHeader: 5][AwakenPayload: 6][crc8: 1]                                    = 12 bytes
 BUNDLE:  [PktHeader: 5][FullStatePayload: 20][n_deltas: 1][DeltaPayload×n: n×12][crc8] ≤ 195 bytes
-STATUS:  [PktHeader: 5][StatusPayload: 20][crc8: 1]                                    = 26 bytes
+STATUS:  [PktHeader: 5][StatusPayload: 21][crc8: 1]                                    = 27 bytes
 CMD_ACK: [PktHeader: 5][CmdAckPayload: 6][crc8: 1]                                    = 12 bytes
 WINDOW_BEGIN / WINDOW_END:
          [PktHeader: 5][WindowMarkerPayload: 11][crc8: 1]                              = 17 bytes
@@ -333,7 +334,7 @@ slots and call `TdmaClock::applySync(sessionMs)`.
 ```
 [0xAA][0x55][len: u8][rssi: i8][LoRa payload][crc8]
   AWAKEN: len=13  → total frame 17 bytes
-  STATUS: len=27  → total frame 31 bytes
+  STATUS: len=28  → total frame 32 bytes
   BUNDLE: len≤196 → total frame ≤200 bytes
 ```
 
@@ -385,7 +386,7 @@ meaning inverts on a replay. See
 | `0x02` | PKT_HEARTBEAT | — | — | Reserved, unused |
 | `0x03` | PKT_TIME_SYNC | Base→Nodes | 14 bytes | Broadcast, fire-and-forget |
 | `0x04` | PKT_BUNDLE | Node→Jetson | ≤195 bytes | 15 samples (ref + 14 deltas) |
-| `0x05` | PKT_STATUS | Node→Jetson | 26 bytes | GPS + battery + DMP heading + link stats, every 15 min |
+| `0x05` | PKT_STATUS | Node→Jetson | 27 bytes | GPS + battery + DMP heading + link stats + applied TX power, every 15 min |
 | `0x06` | PKT_AWAKEN | Node→Base | 12 bytes | Boot handshake; uid_hash + reset_cause + hang_zone (reset diagnostics). Legacy 9-byte uid_hash-only frame still decoded |
 | `0x07` | PKT_ACK_SUMMARY | Base→Node | 10 bytes | Base-generated app-layer reliability bitmap (not relayed from Jetson) |
 | `0x08` | PKT_WINDOW_BEGIN | Node→Base | 17 bytes | Timed wake edge; releases the base's deferred ACK_SUMMARY. No `seq` |
@@ -395,6 +396,7 @@ meaning inverts on a replay. See
 | `0x12` | PKT_CALIBRATION_DATA | — | — | Reserved, unused — no encode/decode functions exist |
 | `0x13` | PKT_CMD_ACK | Node→Jetson | 12 bytes | Acknowledge CALIBRATE or RESET; relayed through base |
 | `0x14` | PKT_DEBUG_LOG | Base→Jetson | variable | USB/UART only, never sent over LoRa; carries `@SFDBG` text lines (`FramedDebugLogSink`) |
+| `0x15` | PKT_CMD_SET_TX_POWER | Base→Node | 9 bytes | Sets one node's radio TX power **and** its DYNAMIC/STATIC mode. Base station is the sole decision-maker; node clamps to `[kMinTxPowerDbm, kMaxTxPowerDbm]`, applies, and ACKs. Value is always **absolute, never a delta** |
 
 Types `0x10`/`0x11`/`0x13` (CMD_CALIBRATE/CMD_RESET/CMD_ACK) are **implemented end-to-end**:
 `SmartFiresNodeApp.cpp` and `CalibrationDebug.cpp` handle them on the node, `SmartFiresBaseApp.cpp`
@@ -415,9 +417,9 @@ relays Jetson-originated commands and node ACKs, and `edge-receiver`'s `packet.p
 | `pm4_0_ug10` | `uint16_t` | µg/m³ × 10 |
 | `pm10_ug10` | `uint16_t` | µg/m³ × 10 |
 
-### StatusPayload (20 bytes) — sent every 15 min via PKT_STATUS
+### StatusPayload (21 bytes) — sent every 15 min via PKT_STATUS
 
-flags bits: STATUS_GPS_VALID=0x01 · STATUS_BATT_VALID=0x02 · STATUS_IMU_VALID=0x04
+flags bits: STATUS_GPS_VALID=0x01 · STATUS_BATT_VALID=0x02 · STATUS_IMU_VALID=0x04 · STATUS_TX_POWER_STATIC=0x08
 
 | Field | Type | Encoding |
 |---|---|---|
@@ -425,14 +427,22 @@ flags bits: STATUS_GPS_VALID=0x01 · STATUS_BATT_VALID=0x02 · STATUS_IMU_VALID=
 | `lon_e7` | `int32_t` | degrees × 1e7 (valid if STATUS_GPS_VALID) |
 | `battery_mv` | `uint16_t` | millivolts (valid if STATUS_BATT_VALID) |
 | `battery_pct` | `uint8_t` | 0–100 (valid if STATUS_BATT_VALID) |
-| `flags` | `uint8_t` | GPS_VALID=0x01 · BATT_VALID=0x02 · IMU_VALID=0x04 |
+| `flags` | `uint8_t` | GPS_VALID=0x01 · BATT_VALID=0x02 · IMU_VALID=0x04 · TX_POWER_STATIC=0x08 (mode, not a validity bit) |
 | `heading_deg_x10` | `uint16_t` | heading × 10, 0–3590 (valid if STATUS_IMU_VALID) |
 | `heading_accuracy` | `uint16_t` | Q12 raw; divide by 4096 for degrees |
 | `retx_total` | `uint16_t` | lifetime LoRa retransmit count, saturated at 65535 |
 | `fail_total` | `uint16_t` | lifetime LoRa send-failure count, saturated at 65535 |
+| `tx_power_dbm` | `int8_t` | radio TX power the node has actually applied, dBm. Always populated (no validity flag) |
 
 `retx_total`/`fail_total` are lifetime totals from node boot (never reset), fed by
 `TdmaRadioService::retransmitCount()`/`failedSendCount()` via `PacketHandler::setLinkStats()`.
+
+`tx_power_dbm` is read straight off the radio (`TdmaRadioService::txPowerDbm()` →
+`PacketHandler::setTxPowerState()`) on every sensing cycle, so it reports what the node is
+*actually* transmitting at — not what the base last commanded. The two disagree whenever a
+`CMD_SET_TX_POWER` was clamped node-side or its `CMD_ACK` was lost, and this field is the
+authority. `STATUS_TX_POWER_STATIC` rides the same frame to say whether an operator has
+pinned that level. See `documentation/Pending_Plans/DYNAMIC_TX_POWER.md`.
 The Jetson computes per-interval deltas by differencing consecutive STATUS packets — this
 lets retry-density be correlated with GPS position with no separate packet type or join.
 
@@ -581,6 +591,7 @@ SmartFiresNodeApp::update() — sensing begins
 | Sensor fillSnapshot() (Wind, GPS, SPS30, IMU) | **Done** | All four sensors implement `fillSnapshot()` |
 | CMD_CALIBRATE/CMD_RESET/CMD_ACK | **Round-trip done; node action is log-only** | Wire protocol + ACK is implemented node↔base↔Jetson; node-side handling only logs + ACKs — DMP free-runs calibration already, and CMD_RESET does not yet actually reset the board (`reset_type` is decoded but unused) |
 | Heading/calibration system | **Done** | DMP self-calibration on boot; heading carried in every STATUS packet |
+| Dynamic TX power | **Code done; unflashed, constants untuned** | Base-owned control loop (`TxPowerController`, 23 native tests) + `PKT_CMD_SET_TX_POWER` + `StatusPayload.tx_power_dbm`/`STATUS_TX_POWER_STATIC` + per-node DYNAMIC/STATIC dashboard controls. Thresholds in `BaseConfig.h` are starting values, not bench-characterized — see `documentation/Pending_Plans/DYNAMIC_TX_POWER.md` |
 
 Full details and design notes in `documentation/Completed_Plans/BINARY_PACKET_PIPELINE.md`.
 Sizing and scaling math tables are in `documentation/Current_Architecture/BANDWIDTH_SCALING.md`.
@@ -682,4 +693,29 @@ Base station link (USB, not UART — see `UART_JETSON_BRIDGE.md`):
   `kTimedCyclePeriodMs` (75 s) is the authority and the standby is its remainder, measured from
   the wake so warmup jitter, overrun and the post-close TX drain all come out of the sleep rather
   than stretching the cycle.
+- **Dynamic TX power is base-owned, and every failure mode has exactly one owner.** The
+  base station runs the whole control loop (`radio/TxPowerController.h`); a node never
+  judges link quality, it only applies absolute levels it is told and reports what it
+  applied. The split follows which side still has a working link: **downlink dead** → the
+  node self-reverts to baseline on `TdmaClock` stale sync (it can no longer be commanded,
+  and `CMD_SET_TX_POWER` rides the same downlink as the `TIME_SYNC` it stopped hearing);
+  **uplink dead** → the base probes it back to baseline over the still-working downlink
+  (bounded by `kMaxTxPowerSilenceProbes`); **neither dead** → the control loop decides.
+  Missed `ACK_SUMMARY` is deliberately *not* a node-side trigger — it fires on normal Timed
+  standby deferral and ack rate limiting, and carries no information stale sync doesn't.
+- **TX power commands are absolute, never relative.** The base never needs to know a node's
+  current level to command it *safely*, only to decide whether to command at all — so any
+  desync (base reboot, lost `CMD_ACK`, an unseen node reset) is always recoverable by
+  sending an absolute baseline. The dashboard's ±  buttons resolve to an absolute dBm
+  server-side. A relative form would let a base that rebooted believing a node was at
+  13 dBm issue "step down" and drive a 7 dBm node *up*.
+- **Down slowly, up in one jump.** A step too high costs a sliver of battery; a step too low
+  costs telemetry plus the retries to recover it, which burn more energy than the step ever
+  saved. So step-down is one `kTxPowerStepDbm` per decision interval, while recovery goes
+  straight to the baseline ceiling.
+- **The loop is paced by its own clock, not by STATUS arrival.** `SMARTFIRES_STATUS_INTERVAL_MS`
+  ranges over three orders of magnitude across build envs (1 s debug / 15 s node / 15 min
+  default), so a STATUS-gated loop would run at wildly different rates with one set of
+  thresholds. `kTxPowerMinDecisionIntervalMs` fixes the decision cadence and the retx/fail
+  delta window regardless of how many STATUS packets land inside it.
 - **Rx power gating (`AppLayerAckSummary` mode only):** nodes sleep the radio outside the base's slot 0, since that's the only slot the base ever transmits in and node telemetry is fire-and-forget. `TdmaClock::baseRxWindowOpen()` mirrors `myTurn()`'s pre-sync/stale-sync fallback. A dedicated `rxWakeAheadMs` (not a `guardMs` bump) opens the window slightly before slot 0 to absorb main-loop jitter from blocking sensor reads, not just crystal drift — added after field testing showed nodes missing the start of slot 0 without it. See "Rx power gating" above and `documentation/Pending_Plans/RADIO_RX_GATING.md`.

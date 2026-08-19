@@ -23,9 +23,13 @@ optimization/range levers available on the current radio stack.
 
 ## Current radio configuration (baseline for everything below)
 
-- **TX power:** fixed `13 dBm` (`NetworkConfig::kRadioTxPowerDbm`,
-  `RadioHeadTdmaDriver.cpp:41`). No dynamic adjustment — see
-  [dynamic-tx-power](../Pending_Plans/DYNAMIC_TX_POWER.md).
+- **TX power:** boots at `13 dBm` on both roles (`NetworkConfig::kRadioTxPowerDbm`,
+  applied in `RadioHeadTdmaDriver::begin()`), and is now adjusted per node at runtime by a
+  base-station control loop (`TxPowerController`) that walks a well-linked node down toward
+  `kMinTxPowerDbm` and jumps it back to baseline on low SNR margin. `13 dBm` is therefore
+  the *ceiling*, not the operating point. Operators can pin a node with
+  `TX_POWER_MODE_STATIC` from the dashboard. Coded but unflashed, and the thresholds are
+  untuned — see [dynamic-tx-power](../Pending_Plans/DYNAMIC_TX_POWER.md).
 - **Spreading factor / bandwidth:** never explicitly set. `RadioHeadTdmaDriver::begin()`
   calls `setFrequency()` and `setTxPower()` but never `setModemConfig()`, so every node
   runs on RadioHead's `RH_RF95` default, `Bw125Cr45Sf128` (SF7, 125 kHz BW, 4/5 coding
@@ -106,9 +110,11 @@ Roughly ranked by effort vs. payoff:
 - **Make the modem config explicit.** Add an explicit `setModemConfig()` call in
   `RadioHeadTdmaDriver::begin()` and a named SF/BW/CR constant in `NetworkConfig.h`
   next to `kRadioTxPowerDbm`, instead of relying on RadioHead's implicit default.
-- **Wire up dynamic TX power.** The base already has the signal it needs — per-frame
-  RSSI and the lifetime `retx_total`/`fail_total` counters in every `STATUS` packet —
-  and isn't using either to adjust anything. See
+- **~~Wire up dynamic TX power.~~ Done** (`TxPowerController`), though it turned out per-frame
+  **SNR**, not RSSI, is the signal the loop actually needs: LoRa demodulates below the noise
+  floor, so RSSI alone cannot express link margin. `retx_total`/`fail_total` are used only to
+  inhibit a step-down, never to trigger a step-up — under `AppLayerAckSummary` a retry
+  indicts the *downlink*, which more node TX power cannot fix. See
   [dynamic-tx-power](../Pending_Plans/DYNAMIC_TX_POWER.md).
 - **13 dBm leaves real headroom unused.** `setTxPower(13, false)` already targets the
   PA_BOOST pin (correct for RFM95), which supports up to 20 dBm through RadioHead, and US

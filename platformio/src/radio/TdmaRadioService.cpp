@@ -58,6 +58,8 @@ const char *pktTypeName(uint8_t pktType) {
     return "CMD_CALIBRATE";
   case BinaryPacket::PKT_CMD_RESET:
     return "CMD_RESET";
+  case BinaryPacket::PKT_CMD_SET_TX_POWER:
+    return "CMD_SET_TX_POWER";
   case BinaryPacket::PKT_CALIBRATION_DATA:
     return "CALIBRATION_DATA";
   case BinaryPacket::PKT_CMD_ACK:
@@ -393,6 +395,26 @@ void TdmaRadioService::flushTelemetryBuffers(const char *reason) {
 uint8_t TdmaRadioService::nodeId() const { return _cfg.nodeId; }
 
 uint8_t TdmaRadioService::numSlots() const { return _cfg.numSlots; }
+
+int8_t TdmaRadioService::setTxPower(int8_t dbm) {
+  int8_t clamped = dbm;
+  if (clamped < NetworkConfig::kMinTxPowerDbm) {
+    clamped = NetworkConfig::kMinTxPowerDbm;
+  } else if (clamped > NetworkConfig::kMaxTxPowerDbm) {
+    clamped = NetworkConfig::kMaxTxPowerDbm;
+  }
+
+  if (!_driver.setTxPower(clamped)) {
+    LOG_WARN("radio", "tx_power_set_failed requested=%d clamped=%d current=%d",
+             static_cast<int>(dbm), static_cast<int>(clamped),
+             static_cast<int>(_driver.txPowerDbm()));
+    return _driver.txPowerDbm();
+  }
+
+  return _driver.txPowerDbm();
+}
+
+int8_t TdmaRadioService::txPowerDbm() const { return _driver.txPowerDbm(); }
 
 TdmaRadioState TdmaRadioService::state() const { return _state; }
 
@@ -866,7 +888,8 @@ void TdmaRadioService::checkIncomingTimeSync() {
 
     if (decodeHeader(packet.data, packet.len, hdr) &&
         (hdr.pkt_type == BinaryPacket::PKT_CMD_CALIBRATE ||
-         hdr.pkt_type == BinaryPacket::PKT_CMD_RESET)) {
+         hdr.pkt_type == BinaryPacket::PKT_CMD_RESET ||
+         hdr.pkt_type == BinaryPacket::PKT_CMD_SET_TX_POWER)) {
       // Always unicast (never broadcast). SmartFiresBaseApp::
       // sendPendingCommand() blocks on this via sendToWait(); without it,
       // the base gives up after BaseConfig::kMaxPendingCommandSendAttempts

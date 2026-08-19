@@ -14,6 +14,8 @@ const char *cmdTypeName(uint8_t cmdType) {
     return "CMD_CALIBRATE";
   case BinaryPacket::PKT_CMD_RESET:
     return "CMD_RESET";
+  case BinaryPacket::PKT_CMD_SET_TX_POWER:
+    return "CMD_SET_TX_POWER";
   default:
     return "UNKNOWN_CMD";
   }

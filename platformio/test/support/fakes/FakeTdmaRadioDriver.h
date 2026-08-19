@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "config/NetworkConfig.h"
 #include "radio/ITdmaRadioDriver.h"
 
 // Records every frame handed to send()/sendToWait() so a test can inspect the
@@ -23,10 +24,16 @@ public:
   bool beginResult = true;
   bool sendResult = true;
   bool healthyResult = true;
+  bool setTxPowerResult = true;
 
   SentFrame sent[kMaxSent] = {};
   uint8_t sentCount = 0;
   uint8_t sleepCount = 0;
+
+  // Mirrors RadioHeadTdmaDriver's baseline default so a test that never
+  // commands a power still reads back the same value real firmware would.
+  int8_t txPower = NetworkConfig::kRadioTxPowerDbm;
+  uint8_t setTxPowerCount = 0;
 
   bool begin() override { return beginResult; }
 
@@ -41,6 +48,14 @@ public:
   }
 
   bool setLocalAddress(uint8_t) override { return true; }
+
+  bool setTxPower(int8_t dbm) override {
+    txPower = dbm;
+    setTxPowerCount++;
+    return setTxPowerResult;
+  }
+
+  int8_t txPowerDbm() const override { return txPower; }
 
   bool available() override { return false; }
 

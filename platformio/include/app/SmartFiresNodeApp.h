@@ -83,6 +83,13 @@ private:
     uint8_t  _awakenSeq        = 0;
     uint8_t _cmdSeq = 0;
 
+    // TX power control mode, per BinaryPacket::TX_POWER_MODE_*. The base is the
+    // decision-maker; this only records which mode an operator put the node in
+    // so it can be reported in STATUS and so the stale-sync revert can log what
+    // it discarded. Defaults to DYNAMIC on every boot — nothing persists it,
+    // deliberately (see revertTxPowerToBaseline).
+    uint8_t _txPowerMode = BinaryPacket::TX_POWER_MODE_DYNAMIC;
+
     bool _forceRadioAwake = false;
     bool _mcuSleptThisCycle = false;
 
@@ -114,6 +121,16 @@ private:
     SensorSnapshot buildSnapshot() const;
     void handleIncomingCommands();
     bool sendCmdAck(uint8_t cmdType, uint8_t status);
+
+    // Discards any base- or operator-commanded TX power state and returns the
+    // radio to the static baseline in DYNAMIC mode.
+    //
+    // This is the node's entire share of TX power authority: it never judges
+    // link quality and never picks a level, it only drops an instruction it can
+    // no longer trust. Because the baseline is the *ceiling* in this design,
+    // the revert is always a step up or a no-op — monotonic, terminal, and
+    // impossible to oscillate. See documentation/Pending_Plans/DYNAMIC_TX_POWER.md.
+    void revertTxPowerToBaseline(const char *reason);
     bool maybeEnterTimedMcuSleep();
     bool radioMustStayAwakeToDrain() const;
     bool enqueueTelemetryPayload(const uint8_t *buf, uint8_t len);

@@ -14,10 +14,20 @@ from pydantic import BaseModel
 
 from smartfires_edge.base_station_store import BaseStationStore
 from smartfires_edge.live_state import LiveState
+from smartfires_edge.packet import TX_POWER_MODE_DYNAMIC, TX_POWER_MODE_STATIC
 from smartfires_edge.telemetry_cache import METRIC_KEYS, SessionTelemetryCache
 from smartfires_edge.tile_cache import TileCache
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+# Mirrors NetworkConfig::kMinTxPowerDbm / kMaxTxPowerDbm. Clamping here is a
+# UI convenience so the operator sees a sensible value echoed back — the node
+# clamps again on receipt regardless, and the node's clamp is the real one.
+TX_POWER_MIN_DBM = 5
+TX_POWER_MAX_DBM = 13
+# Mirrors BaseConfig::kTxPowerStepDbm, so a dashboard nudge moves by the same
+# increment the base's own control loop uses.
+TX_POWER_STEP_DBM = 2
 # Legacy manual tile directory — used as the default cache when no tile_cache_dir
 # is supplied (preserves backward-compat with pre-loaded tile pyramids).
 _LEGACY_TILES_DIR = Path(__file__).parent / "tiles"
@@ -36,6 +46,21 @@ class NodeResetPayload(BaseModel):
     node_id: int
 
 
+class TxPowerPayload(BaseModel):
+    node_id: int
+    # "set" | "increase" | "decrease" | "dynamic" | "static"
+    #
+    # increase/decrease are resolved to an ABSOLUTE dBm here, server-side, from
+    # the node's last reported StatusPayload.tx_power_dbm — the wire protocol
+    # has no relative form on purpose. A stale reading can only make the
+    # resulting absolute target slightly wrong, never send a node walking; a
+    # relative command applied against a desynced base could. See
+    # CmdSetTxPowerPayload in BinaryPacket.h.
+    action: str
+    # Required for action="set"; ignored otherwise.
+    tx_power_dbm: Optional[int] = None
+
+
 def _check_online() -> bool:
     """Return True if internet is reachable (TCP connect to Cloudflare DNS)."""
     try:
@@ -52,6 +77,7 @@ def create_app(
     base_station_store: Optional[BaseStationStore] = None,
     reset_event: Optional[threading.Event] = None,
     node_reset_queue: "Optional[queue.Queue[int]]" = None,
+    tx_power_queue: "Optional[queue.Queue[dict]]" = None,
     tile_cache_dir: Optional[Path] = None,
     sniffer_enabled: bool = False,
 ) -> FastAPI:
@@ -250,6 +276,63 @@ def create_app(
             raise HTTPException(status_code=501, detail="Node reset not available")
         node_reset_queue.put(payload.node_id)
         return {"status": "reset_requested", "node_id": payload.node_id}
+
+    @app.post("/api/tx_power")
+    def set_tx_power(payload: TxPowerPayload) -> dict:
+        if tx_power_queue is None:
+            raise HTTPException(status_code=501, detail="TX power control not available")
+
+        nodes = live_state.nodes_snapshot()
+        node = nodes.get(payload.node_id)
+        if node is None:
+            raise HTTPException(status_code=404, detail=f"Unknown node {payload.node_id}")
+
+        current = node.get("tx_power_dbm")
+        action = (payload.action or "").lower()
+
+        if action in ("dynamic", "static"):
+            mode = TX_POWER_MODE_STATIC if action == "static" else TX_POWER_MODE_DYNAMIC
+            # Mode changes carry a power too — the frame has one field for it and
+            # the node applies both. Re-send the level the node is already on so
+            # switching modes never doubles as an unrequested power change. If the
+            # node has not reported one yet, fall back to the baseline ceiling,
+            # which is the value it boots at anyway.
+            target = current if isinstance(current, int) else TX_POWER_MAX_DBM
+        elif action in ("set", "increase", "decrease"):
+            mode = TX_POWER_MODE_STATIC
+            if action == "set":
+                if payload.tx_power_dbm is None:
+                    raise HTTPException(status_code=400, detail="tx_power_dbm required for action=set")
+                target = int(payload.tx_power_dbm)
+            else:
+                if not isinstance(current, int):
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            f"Node {payload.node_id} has not reported a TX power yet; "
+                            "use action=set to command an absolute level"
+                        ),
+                    )
+                delta = TX_POWER_STEP_DBM if action == "increase" else -TX_POWER_STEP_DBM
+                target = current + delta
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown action {payload.action!r}")
+
+        target = max(TX_POWER_MIN_DBM, min(TX_POWER_MAX_DBM, int(target)))
+
+        tx_power_queue.put(
+            {"node_id": payload.node_id, "tx_power_dbm": target, "mode": mode}
+        )
+        return {
+            "status": "queued",
+            "node_id": payload.node_id,
+            "action": action,
+            "tx_power_dbm": target,
+            "mode": "STATIC" if mode == TX_POWER_MODE_STATIC else "DYNAMIC",
+            # What the target was computed from, so the UI can show the operator
+            # that a nudge was based on a possibly-stale reported value.
+            "previous_tx_power_dbm": current,
+        }
 
     @app.websocket("/ws/log")
     async def websocket_log(ws: WebSocket) -> None:

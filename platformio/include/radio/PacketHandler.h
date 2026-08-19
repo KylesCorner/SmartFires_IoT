@@ -4,6 +4,7 @@
 // ---
 #pragma once
 
+#include "config/NetworkConfig.h"
 #include "telemetry/BinaryPacket.h"
 #include "telemetry/SensorSnapshot.h"
 
@@ -94,6 +95,18 @@ public:
     void setBundleEncodingEnabled(bool enabled);
     void setLinkStats(uint32_t retxTotal, uint32_t failTotal);
 
+    // Radio TX power state to report in the next STATUS. Pushed in by
+    // SmartFiresNodeApp (from TdmaRadioService::txPowerDbm() and its own mode
+    // flag) rather than pulled, so the handler keeps no radio dependency —
+    // same shape as setLinkStats() above. See StatusPayload::tx_power_dbm for
+    // why this is sourced from the node's own radio and not from the base's
+    // record of what it commanded.
+    //
+    // Both values travel together because they are read together: reporting a
+    // level without the mode that produced it leaves the dashboard unable to
+    // tell an operator-pinned 7 dBm from one the control loop chose.
+    void setTxPowerState(int8_t dbm, bool isStatic);
+
     // Full reset (new node session / reboot).
     void reset();
 
@@ -120,6 +133,8 @@ private:
     bool     _bundleEncodingEnabled = true;
     uint32_t _retxTotal  = 0;
     uint32_t _failTotal  = 0;
+    int8_t   _txPowerDbm = NetworkConfig::kRadioTxPowerDbm;
+    bool     _txPowerStatic = false;
 
     // Last-good values substituted when a sensor's validity flag is clear, so
     // SensorSnapshot's -1.0f placeholders never reach the wire (they alias real

@@ -50,6 +50,26 @@ bool RadioHeadTdmaDriver::begin() {
   return true;
 }
 
+bool RadioHeadTdmaDriver::setTxPower(int8_t dbm) {
+  if (!_healthy) {
+    return false;
+  }
+
+  // Written back into _cfg, not just pushed at the radio, so begin()'s
+  // unconditional re-apply above cannot silently revert a commanded level on a
+  // radio reinit. A real MCU reboot rebuilds Config from NetworkConfig and so
+  // still lands on the static baseline — the intended fail-safe.
+  _cfg.txPowerDbm = dbm;
+
+  // useRFO=false selects PA_BOOST, matching begin(). The two must agree: the
+  // same dBm number means different hardware settings on the RFO pin, and the
+  // module's antenna is wired to PA_BOOST.
+  _rf95.setTxPower(dbm, false);
+  return true;
+}
+
+int8_t RadioHeadTdmaDriver::txPowerDbm() const { return _cfg.txPowerDbm; }
+
 bool RadioHeadTdmaDriver::send(const uint8_t *data,
                                uint8_t len,
                                uint8_t to) {
@@ -152,6 +172,9 @@ bool RadioHeadTdmaDriver::receive(ReceivedPacket &out, bool autoAck) {
   out.id = id;
   out.len = len;
   out.rssi = static_cast<int8_t>(_rf95.lastRssi());
+  // RH_RF95::lastSNR() already returns whole dB (it divides the raw register
+  // value by 4 internally), so no scaling here.
+  out.snr = static_cast<int8_t>(_rf95.lastSNR());
 
   return true;
 }

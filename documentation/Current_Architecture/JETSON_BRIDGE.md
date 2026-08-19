@@ -83,7 +83,7 @@ Wraps a received LoRa payload with RSSI metadata.
 | Packet type | LoRa payload | `len` | Total frame |
 |---|---|---:|---:|
 | `AWAKEN` | 12 bytes | 13 | 17 bytes |
-| `STATUS` | 26 bytes | 27 | 31 bytes |
+| `STATUS` | 27 bytes | 28 | 32 bytes |
 | `BUNDLE` | ≤195 bytes | ≤196 | ≤200 bytes |
 | `CMD_ACK` | 12 bytes | 13 | 17 bytes |
 
