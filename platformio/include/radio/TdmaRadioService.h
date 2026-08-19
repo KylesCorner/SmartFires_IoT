@@ -76,6 +76,16 @@ public:
   // it and leaves the entries retransmittable in the next active window.
   void notifyMcuStandby(uint32_t sleptMs);
 
+  // Frame periods of retry hold applied once a PKT_WINDOW_BEGIN reaches the air.
+  // The base defers a sleeping node's ACK_SUMMARY and releases it on the first
+  // slot 0 after WINDOW_BEGIN, so the ack is at most one frame period behind the
+  // marker; two frames leaves margin and matches the base's own
+  // kAckSummaryNodeSilenceMs. Without the hold, an entry whose retry gate had
+  // already opened would retransmit a full bundle in the same warmup the ack is
+  // already on its way through — which is precisely the duplicate the window
+  // markers exist to remove.
+  static constexpr uint32_t kAckRoundTripFrames = 2;
+
 private:
 
   bool _dutySleepRequested = false;
@@ -128,6 +138,12 @@ private:
   bool _radioAsleep = false;
 
   void drainTxQueue();
+  // Slides every pending entry's timestamps forward, delaying retry eligibility
+  // by that much. Shared by notifyMcuStandby() (excluding radio-off time from
+  // the retry clock) and the post-WINDOW_BEGIN hold (waiting out the ack the
+  // base is about to release).
+  void shiftPendingTimestamps(uint32_t shiftMs, const char *reason);
+  void holdPendingRetriesForAckRoundTrip();
   void updateRxPower();
   void checkIncomingTimeSync();
   void rememberPendingCommand(const ITdmaRadioDriver::ReceivedPacket &packet);

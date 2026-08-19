@@ -260,104 +260,93 @@ void test_valid_readings_encode_unchanged(void) {
 }
 
 // -----------------------------------------------------------------------------
-// Timed duty-cycle window markers (PktHeader::flags)
+// Timed duty-cycle windows
 // -----------------------------------------------------------------------------
+//
+// Window edges live on their own PKT_WINDOW_BEGIN/PKT_WINDOW_END frames now, so
+// PacketHandler's remaining window duty is just reporting whether the
+// accumulator is mid-bundle (which holds the active window open to the next
+// bundle boundary) and force-encoding a runt if that hold ever gives up.
 
-void test_window_first_marks_only_the_first_bundle_of_the_window(void) {
+void test_bundles_carry_no_window_flags(void) {
   PacketHandler ph(PacketHandler::Config::make(2, kMaxDeltas));
-
-  ph.beginWindow();
 
   pushSamples(ph, 1000, 3);  // ref + 2 deltas completes bundle 1
   TEST_ASSERT_TRUE(ph.bundleReady());
-  TEST_ASSERT_EQUAL_UINT8(BinaryPacket::PKT_FLAG_WINDOW_FIRST, takeBundleFlags(ph));
+  TEST_ASSERT_EQUAL_UINT8(0, takeBundleFlags(ph));
 
-  pushSamples(ph, 5000, 3);  // bundle 2 of the same window
+  pushSamples(ph, 5000, 3);
   TEST_ASSERT_TRUE(ph.bundleReady());
   TEST_ASSERT_EQUAL_UINT8(0, takeBundleFlags(ph));
 }
 
-void test_flush_window_emits_partial_bundle_marked_last(void) {
+void test_has_partial_bundle_tracks_the_accumulator(void) {
   PacketHandler ph(PacketHandler::Config::make(2, kMaxDeltas));
 
-  ph.beginWindow();
-  pushSamples(ph, 1000, 3);
-  TEST_ASSERT_EQUAL_UINT8(BinaryPacket::PKT_FLAG_WINDOW_FIRST, takeBundleFlags(ph));
+  // Nothing pushed: the window is free to close on activeSampleMs.
+  TEST_ASSERT_FALSE(ph.hasPartialBundle());
 
-  // Two samples accumulated — short of a full bundle, so without the flush they
-  // would sit in the accumulator across the MCU standby.
-  pushSamples(ph, 5000, 2);
+  pushSamples(ph, 1000, 1);  // reference only — mid-bundle
+  TEST_ASSERT_TRUE(ph.hasPartialBundle());
+
+  pushSamples(ph, 2000, 1);  // still short of a full bundle
+  TEST_ASSERT_TRUE(ph.hasPartialBundle());
+
+  pushSamples(ph, 3000, 1);  // completes the bundle
+  TEST_ASSERT_TRUE(ph.bundleReady());
+
+  // A completed-but-untaken bundle leaves the accumulator empty, so the window
+  // may close even though a frame is still waiting to be taken — that frame is
+  // whole and goes out ahead of the WINDOW_END marker.
+  TEST_ASSERT_FALSE(ph.hasPartialBundle());
+}
+
+void test_flush_is_a_noop_on_a_bundle_boundary(void) {
+  PacketHandler ph(PacketHandler::Config::make(2, kMaxDeltas));
+
+  pushSamples(ph, 1000, 3);
+  TEST_ASSERT_EQUAL_UINT8(0, takeBundleFlags(ph));
+
+  // The normal case: a whole number of bundles, so there is nothing to flush.
+  TEST_ASSERT_FALSE(ph.flushWindow());
+  TEST_ASSERT_FALSE(ph.bundleReady());
+}
+
+void test_flush_force_encodes_a_runt_when_the_hold_gave_up(void) {
+  PacketHandler ph(PacketHandler::Config::make(2, kMaxDeltas));
+
+  // Only reachable when the duty controller hit its overrun cap waiting for the
+  // accumulator to fill. The samples must not be discarded.
+  pushSamples(ph, 1000, 2);
+  TEST_ASSERT_TRUE(ph.hasPartialBundle());
   TEST_ASSERT_FALSE(ph.bundleReady());
 
   TEST_ASSERT_TRUE(ph.flushWindow());
   TEST_ASSERT_TRUE(ph.bundleReady());
-  TEST_ASSERT_EQUAL_UINT8(BinaryPacket::PKT_FLAG_WINDOW_LAST, takeBundleFlags(ph));
+  TEST_ASSERT_EQUAL_UINT8(0, takeBundleFlags(ph));
+  TEST_ASSERT_FALSE(ph.hasPartialBundle());
 }
 
-void test_single_bundle_window_carries_both_markers(void) {
+void test_flush_keeps_a_completed_untaken_bundle_intact(void) {
   PacketHandler ph(PacketHandler::Config::make(2, kMaxDeltas));
 
-  ph.beginWindow();
-  pushSamples(ph, 1000, 2);  // ref + 1 delta — no bundle yet
-
-  TEST_ASSERT_TRUE(ph.flushWindow());
-  TEST_ASSERT_EQUAL_UINT8(
-      BinaryPacket::PKT_FLAG_WINDOW_FIRST | BinaryPacket::PKT_FLAG_WINDOW_LAST,
-      takeBundleFlags(ph));
-}
-
-void test_flush_stamps_a_completed_but_untaken_bundle_in_place(void) {
-  PacketHandler ph(PacketHandler::Config::make(2, kMaxDeltas));
-
-  ph.beginWindow();
   pushSamples(ph, 1000, 3);  // bundle completed, deliberately not taken
   TEST_ASSERT_TRUE(ph.bundleReady());
 
+  // Must not encode over _bundleBuf and lose the frame.
   TEST_ASSERT_TRUE(ph.flushWindow());
-
-  // Marked in place rather than overwritten — takeBundleFlags() also asserts the
-  // CRC was recomputed, since a stale CRC would be dropped by the base.
-  TEST_ASSERT_EQUAL_UINT8(
-      BinaryPacket::PKT_FLAG_WINDOW_FIRST | BinaryPacket::PKT_FLAG_WINDOW_LAST,
-      takeBundleFlags(ph));
-}
-
-void test_flush_with_nothing_accumulated_emits_no_bundle(void) {
-  PacketHandler ph(PacketHandler::Config::make(2, kMaxDeltas));
-
-  ph.beginWindow();
-  pushSamples(ph, 1000, 3);
-  TEST_ASSERT_EQUAL_UINT8(BinaryPacket::PKT_FLAG_WINDOW_FIRST, takeBundleFlags(ph));
-
-  // The window's samples landed exactly on a bundle boundary.
-  TEST_ASSERT_FALSE(ph.flushWindow());
-  TEST_ASSERT_FALSE(ph.bundleReady());
-}
-
-void test_window_first_survives_until_a_bundle_actually_carries_it(void) {
-  PacketHandler ph(PacketHandler::Config::make(2, kMaxDeltas));
-
-  ph.beginWindow();
-
-  // Nothing pushed yet, so the marker is still pending; the next window opening
-  // must not double-count it into a second bundle.
-  TEST_ASSERT_FALSE(ph.flushWindow());
-
-  pushSamples(ph, 1000, 3);
-  TEST_ASSERT_EQUAL_UINT8(BinaryPacket::PKT_FLAG_WINDOW_FIRST, takeBundleFlags(ph));
-
-  pushSamples(ph, 5000, 3);
   TEST_ASSERT_EQUAL_UINT8(0, takeBundleFlags(ph));
 }
 
-void test_reset_clears_pending_window_marker(void) {
+void test_reset_clears_a_partial_bundle(void) {
   PacketHandler ph(PacketHandler::Config::make(2, kMaxDeltas));
 
-  ph.beginWindow();
+  pushSamples(ph, 1000, 2);
+  TEST_ASSERT_TRUE(ph.hasPartialBundle());
+
   ph.reset();
-
-  pushSamples(ph, 1000, 3);
-  TEST_ASSERT_EQUAL_UINT8(0, takeBundleFlags(ph));
+  TEST_ASSERT_FALSE(ph.hasPartialBundle());
+  TEST_ASSERT_FALSE(ph.flushWindow());
 }
 
 void runPacketHandlerTests(void) {
@@ -371,13 +360,12 @@ void runPacketHandlerTests(void) {
   RUN_TEST(test_reset_clears_last_good);
   RUN_TEST(test_valid_readings_encode_unchanged);
 
-  RUN_TEST(test_window_first_marks_only_the_first_bundle_of_the_window);
-  RUN_TEST(test_flush_window_emits_partial_bundle_marked_last);
-  RUN_TEST(test_single_bundle_window_carries_both_markers);
-  RUN_TEST(test_flush_stamps_a_completed_but_untaken_bundle_in_place);
-  RUN_TEST(test_flush_with_nothing_accumulated_emits_no_bundle);
-  RUN_TEST(test_window_first_survives_until_a_bundle_actually_carries_it);
-  RUN_TEST(test_reset_clears_pending_window_marker);
+  RUN_TEST(test_bundles_carry_no_window_flags);
+  RUN_TEST(test_has_partial_bundle_tracks_the_accumulator);
+  RUN_TEST(test_flush_is_a_noop_on_a_bundle_boundary);
+  RUN_TEST(test_flush_force_encodes_a_runt_when_the_hold_gave_up);
+  RUN_TEST(test_flush_keeps_a_completed_untaken_bundle_intact);
+  RUN_TEST(test_reset_clears_a_partial_bundle);
 
   UNITY_END();
 }

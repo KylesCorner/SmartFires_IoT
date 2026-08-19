@@ -51,6 +51,23 @@ bool TdmaTxQueue::dequeue(uint8_t *payload, uint8_t &lenOut) {
   return true;
 }
 
+bool TdmaTxQueue::peekPacketType(uint8_t &pktTypeOut) const {
+  if (_count == 0 ||
+      _entries[_head].len < sizeof(BinaryPacket::PktHeader)) {
+    return false;
+  }
+
+  BinaryPacket::PktHeader hdr;
+  memcpy(&hdr, _entries[_head].payload, sizeof(hdr));
+
+  if (hdr.magic != BinaryPacket::PKT_MAGIC) {
+    return false;
+  }
+
+  pktTypeOut = hdr.pkt_type;
+  return true;
+}
+
 void TdmaTxQueue::clear() {
   _head = 0;
   _tail = 0;

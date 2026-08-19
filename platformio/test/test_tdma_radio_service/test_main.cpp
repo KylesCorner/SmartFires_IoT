@@ -45,19 +45,31 @@ static TdmaConfig makeConfig() {
   return cfg;
 }
 
-// One bundle carrying the window-close marker — the frame whose ack can only
-// ever arrive in a slot 0 that falls after standby has already begun, and so the
-// exact frame this whole mechanism exists to keep alive.
-static uint8_t makeWindowLastBundle(uint8_t nodeId, uint8_t seq, uint8_t *buf,
-                                    size_t bufSize) {
+// The window's last bundle — sent in the final slot before standby, so its ack
+// can only arrive in a slot 0 that falls after the radio is already off. That
+// makes it the frame this whole mechanism exists to keep alive across the sleep.
+static uint8_t makeFinalWindowBundle(uint8_t nodeId, uint8_t seq, uint8_t *buf,
+                                     size_t bufSize) {
   BinaryPacket::FullStatePayload ref = {};
   ref.session_time = 1000;
   ref.sensor_flags = 0x02;
   ref.temp_cdegc = 2100;
 
   return BinaryPacket::encodeBundlePayload(
-      nodeId, seq, ref, nullptr, 0, buf, bufSize,
-      BinaryPacket::PKT_FLAG_WINDOW_LAST);
+      nodeId, seq, ref, nullptr, 0, buf, bufSize, /*flags=*/0);
+}
+
+// PKT_WINDOW_BEGIN, the frame the node sends on waking. Deliberately built the
+// same way the node app builds it: seq 0, its own window_id, no telemetry seq to
+// burn.
+static uint8_t makeWindowBegin(uint8_t nodeId, uint16_t windowId, uint8_t *buf,
+                               size_t bufSize) {
+  BinaryPacket::WindowMarkerPayload marker = {};
+  marker.session_time_ms = 12000;
+  marker.window_id = windowId;
+
+  return BinaryPacket::encodeWindowMarkerPayload(
+      BinaryPacket::PKT_WINDOW_BEGIN, nodeId, marker, buf, bufSize);
 }
 
 // Walks the fake clock forward to a comfortable position inside this node's own
@@ -89,11 +101,11 @@ struct Rig {
     svc.begin();
   }
 
-  // Enqueues the window-close bundle and gets it on the air, leaving exactly one
-  // sent-but-unacked entry in the pending window.
-  void sendWindowLastBundle() {
+  // Enqueues the window's final bundle and gets it on the air, leaving exactly
+  // one sent-but-unacked entry in the pending window.
+  void sendFinalWindowBundle() {
     uint8_t buf[BinaryPacket::kMaxBundleLoRaSize] = {};
-    const uint8_t len = makeWindowLastBundle(cfg.nodeId, /*seq=*/7, buf, sizeof(buf));
+    const uint8_t len = makeFinalWindowBundle(cfg.nodeId, /*seq=*/7, buf, sizeof(buf));
     TEST_ASSERT_TRUE(len > 0);
     TEST_ASSERT_TRUE(svc.enqueueTelemetry(buf, len));
 
@@ -104,11 +116,22 @@ struct Rig {
     TEST_ASSERT_EQUAL_UINT8(0, svc.queuedCount());
     driver.clearSent();
   }
+
+  // Enqueues PKT_WINDOW_BEGIN and gets it on the air.
+  void sendWindowBegin() {
+    uint8_t buf[BinaryPacket::kWindowMarkerLoRaSize] = {};
+    const uint8_t len = makeWindowBegin(cfg.nodeId, /*windowId=*/3, buf, sizeof(buf));
+    TEST_ASSERT_TRUE(len > 0);
+    TEST_ASSERT_TRUE(svc.enqueueTelemetry(buf, len));
+
+    advanceIntoOwnSlot(clock, tdma);
+    svc.update();
+  }
 };
 
 void test_pending_entry_is_lost_across_standby_without_notify() {
   Rig rig;
-  rig.sendWindowLastBundle();
+  rig.sendFinalWindowBundle();
 
   // Standby with no notifyMcuStandby(): the session clock ran through the sleep
   // (rtc-subsecond-sleep Phase 2), so the entry now looks 35 s old against a
@@ -127,7 +150,7 @@ void test_pending_entry_is_lost_across_standby_without_notify() {
 
 void test_notify_mcu_standby_keeps_pending_entry_retransmittable() {
   Rig rig;
-  rig.sendWindowLastBundle();
+  rig.sendFinalWindowBundle();
 
   rig.clock.advance(kStandbyMs);
   rig.svc.notifyMcuStandby(kStandbyMs);
@@ -142,9 +165,9 @@ void test_notify_mcu_standby_keeps_pending_entry_retransmittable() {
   TEST_ASSERT_EQUAL_UINT32(1, rig.svc.retransmitCount());
 }
 
-void test_retransmit_is_stamped_retx_and_keeps_window_marker() {
+void test_retransmit_is_stamped_retx() {
   Rig rig;
-  rig.sendWindowLastBundle();
+  rig.sendFinalWindowBundle();
 
   rig.clock.advance(kStandbyMs);
   rig.svc.notifyMcuStandby(kStandbyMs);
@@ -162,10 +185,11 @@ void test_retransmit_is_stamped_retx_and_keeps_window_marker() {
   BinaryPacket::PktHeader hdr = {};
   memcpy(&hdr, frame->data, sizeof(hdr));
 
-  // RETX added, WINDOW_LAST preserved: the base needs both to tell "this node
-  // is awake and re-asking" from "this node is about to sleep".
+  // RETX tells the base its last ACK_SUMMARY never landed. Nothing else is
+  // stamped: the sleep/wake signal rides its own PKT_WINDOW_END/BEGIN frames, so
+  // there is no longer a window bit whose meaning inverts on a replay.
   TEST_ASSERT_TRUE((hdr.flags & BinaryPacket::PKT_FLAG_RETX) != 0);
-  TEST_ASSERT_TRUE((hdr.flags & BinaryPacket::PKT_FLAG_WINDOW_LAST) != 0);
+  TEST_ASSERT_EQUAL_UINT8(BinaryPacket::PKT_FLAG_RETX, hdr.flags);
   TEST_ASSERT_EQUAL_UINT8(7, hdr.seq);
 
   // The stamp rewrites a header byte, so the trailing crc8 must have been
@@ -177,7 +201,7 @@ void test_retransmit_is_stamped_retx_and_keeps_window_marker() {
 
 void test_repeated_retransmits_are_byte_identical() {
   Rig rig;
-  rig.sendWindowLastBundle();
+  rig.sendFinalWindowBundle();
 
   rig.clock.advance(kStandbyMs);
   rig.svc.notifyMcuStandby(kStandbyMs);
@@ -200,12 +224,65 @@ void test_repeated_retransmits_are_byte_identical() {
                                 rig.driver.sent[0].len);
 }
 
+// A marker must never take a pending slot: it is fire-and-forget, carries no
+// telemetry seq, and an entry for it could never be acked — it would just age
+// out and burn retransmissions on a frame nobody tracks.
+void test_window_marker_does_not_enter_the_pending_window() {
+  Rig rig;
+  rig.sendWindowBegin();
+
+  TEST_ASSERT_EQUAL_UINT8(1, rig.driver.sentCount);
+
+  // Nothing pending, so a full retry wait later there is nothing to resend.
+  rig.clock.advance(kRetryWaitMs * 2);
+  advanceIntoOwnSlot(rig.clock, rig.tdma);
+  rig.svc.update();
+
+  TEST_ASSERT_EQUAL_UINT8(1, rig.driver.sentCount);
+  TEST_ASSERT_EQUAL_UINT32(0, rig.svc.retransmitCount());
+}
+
+// The point of the whole design: on waking, the node says "I'm back" with a
+// 17-byte marker and then waits for the ack the base deferred, instead of
+// retransmitting a full bundle just to prompt it.
+void test_window_begin_holds_off_a_due_retransmit() {
+  Rig rig;
+  rig.sendFinalWindowBundle();
+
+  rig.clock.advance(kStandbyMs);
+  rig.svc.notifyMcuStandby(kStandbyMs);
+
+  // Retry gate is now open — without the hold this bundle would go straight back
+  // on the air in the next slot.
+  rig.clock.advance(kRetryWaitMs);
+
+  rig.sendWindowBegin();
+  const uint8_t sentAfterBegin = rig.driver.sentCount;
+
+  // One frame period on: still inside the ack round trip the hold covers.
+  rig.clock.advance(kFrameMs);
+  advanceIntoOwnSlot(rig.clock, rig.tdma);
+  rig.svc.update();
+  TEST_ASSERT_EQUAL_UINT8(sentAfterBegin, rig.driver.sentCount);
+  TEST_ASSERT_EQUAL_UINT32(0, rig.svc.retransmitCount());
+
+  // Past the hold with still no ack, the retransmission does fire — the hold
+  // delays the retry, it must not cancel it, or a lost WINDOW_BEGIN would strand
+  // the bundle permanently.
+  rig.clock.advance(kFrameMs * 2 + kRetryWaitMs);
+  advanceIntoOwnSlot(rig.clock, rig.tdma);
+  rig.svc.update();
+  TEST_ASSERT_EQUAL_UINT32(1, rig.svc.retransmitCount());
+}
+
 int main() {
   UNITY_BEGIN();
 
   RUN_TEST(test_pending_entry_is_lost_across_standby_without_notify);
   RUN_TEST(test_notify_mcu_standby_keeps_pending_entry_retransmittable);
-  RUN_TEST(test_retransmit_is_stamped_retx_and_keeps_window_marker);
+  RUN_TEST(test_retransmit_is_stamped_retx);
+  RUN_TEST(test_window_marker_does_not_enter_the_pending_window);
+  RUN_TEST(test_window_begin_holds_off_a_due_retransmit);
   RUN_TEST(test_repeated_retransmits_are_byte_identical);
 
   UNITY_END();

@@ -265,7 +265,11 @@ DutyCycleConfig dutyCfg =
             kActiveSamplePeriodMs,
         SensingConfig::DutyCycle::kActiveWarmupMs,
         SensingConfig::DutyCycle::
-            kActiveTimedSleepMs,
+            kActiveCyclePeriodMs,
+        SensingConfig::DutyCycle::
+            kActiveMinStandbyMs,
+        SensingConfig::DutyCycle::
+            kActiveActiveOverrunMaxMs,
         SensingConfig::DutyCycle::
             kActiveTempDeltaThresholdC,
         SensingConfig::DutyCycle::

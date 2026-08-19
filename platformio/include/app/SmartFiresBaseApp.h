@@ -132,22 +132,29 @@ private:
     uint8_t failedSendAttempts = 0;
     bool retryHeld = false;
 
-    // Timed-mode duty-cycle gating. A node that just sent a fresh (non-RETX)
-    // PKT_FLAG_WINDOW_LAST is about to enter MCU standby with its radio off:
-    // every ACK_SUMMARY aimed at it would be a ~1 s blocking sendToWait
-    // (kLinkRetries x kLinkAckTimeoutMs, longer than the base's own 900 ms
-    // slot 0) that cannot possibly be heard, starving TIME_SYNC and commands
-    // for other nodes. While `asleep`, the tracker keeps `dirty` set and is
-    // simply skipped, so the ack is deferred rather than lost — it goes out on
-    // the first slot 0 after the node is heard from again, merged with whatever
-    // that packet added to the mask. `lastHeard*` is the fallback for the case
-    // where the WINDOW_LAST frame itself was lost, so `asleep` never got set.
+    // Timed-mode duty-cycle gating, driven by PKT_WINDOW_END/PKT_WINDOW_BEGIN.
+    // A node that just sent WINDOW_END is about to enter MCU standby with its
+    // radio off: every ACK_SUMMARY aimed at it would be a ~1 s blocking
+    // sendToWait (kLinkRetries x kLinkAckTimeoutMs, longer than the base's own
+    // 900 ms slot 0) that cannot possibly be heard, starving TIME_SYNC and
+    // commands for other nodes. While `asleep`, the tracker keeps `dirty` set
+    // and is simply skipped, so the ack is deferred rather than lost — it goes
+    // out on the first slot 0 after WINDOW_BEGIN says the node is back, merged
+    // with whatever has since been added to the mask.
+    //
+    // Because the signal now rides its own frame rather than a flag on a
+    // retransmittable bundle, the rule is simply "END means asleep, anything
+    // else means awake" — no need to tell a fresh window close from a replayed
+    // one asserting the opposite. `lastHeard*` remains the fallback for a
+    // WINDOW_END that was itself lost, so `asleep` never got set.
     bool asleep = false;
     bool lastHeardValid = false;
     uint32_t lastHeardMs = 0;
 
-    // Set when a RETX-flagged frame arrives: proof the node never received the
-    // ack for that sequence, so this one send must bypass the
+    // Set when a RETX-flagged frame or a PKT_WINDOW_BEGIN arrives: both are
+    // proof the node never received the last ack (a RETX because it is asking
+    // again, a BEGIN because anything sent during its standby was transmitted
+    // at a switched-off radio), so this one send must bypass the
     // unchangedFromLastSent suppression that would otherwise silently drop it.
     bool forceResend = false;
 
@@ -197,6 +204,15 @@ private:
   uint32_t _lastRxMs = 0;
   uint32_t _lastPeriodicTimeSyncMs = 0;
   uint32_t _lastAckSummaryFlushMs = 0;
+
+  // Set by a PKT_WINDOW_BEGIN so the ack deferred across that node's standby
+  // goes out in the very next slot 0 rather than waiting on
+  // ackSummaryMinIntervalMs. The node is holding unacked entries whose retry
+  // gate is on a hold of only a couple of frame periods
+  // (TdmaRadioService::kAckRoundTripFrames); spending that budget on a rate
+  // limiter meant for steady-state coalescing would let the retransmission the
+  // markers exist to prevent fire anyway.
+  bool _ackSummaryFlushRequested = false;
   uint32_t _sessionId = 0;
   uint8_t _timeSyncSeq = 0;
   bool _hasJetsonTime = false;
@@ -217,6 +233,13 @@ private:
                           uint8_t triggerSeq = 0);
   NodeAssignment *findOrCreateNodeAssignment(uint32_t uidHash);
   bool handleTelemetryAckSummary(uint8_t nodeId, uint8_t seq, uint8_t flags);
+
+  // PKT_WINDOW_BEGIN / PKT_WINDOW_END. Deliberately kept off the sequence path
+  // that handleTelemetryAckSummary() runs: markers carry no telemetry seq, so
+  // recording one would put a phantom entry in the ack bitmap and the seq20
+  // receipt-window loss stats.
+  bool handleWindowMarker(uint8_t nodeId, uint8_t pktType,
+                          const BinaryPacket::WindowMarkerPayload &marker);
   AckTracker *findOrCreateAckTracker(uint8_t nodeId);
   void resetAckTracker(uint8_t nodeId, const char *reason);
   void recordTelemetrySequence(AckTracker &tracker, uint8_t seq);

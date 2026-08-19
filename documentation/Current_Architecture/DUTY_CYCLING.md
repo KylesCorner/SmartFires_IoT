@@ -108,12 +108,29 @@ Sleeps a fixed interval between active windows; trigger thresholds are ignored.
 
 | Parameter | Value | Meaning |
 |---|---|---|
-| `timedSleepMs` | 35 000 ms | Sleep between active windows — the MCU standby duration |
-| `activeSampleMs` | 25 000 ms | Duration of the `ActiveSampling` window |
+| `cyclePeriodMs` | 75 000 ms | Fixed wake-to-wake period — the standby is whatever is left of it |
+| `minStandbyMs` | 5 000 ms | Floor on the derived standby, so a badly overrunning window still sleeps |
+| `activeSampleMs` | 30 000 ms | Nominal `ActiveSampling` duration — derived, see below |
+| `activeOverrunMaxMs` | 15 000 ms | Cap on holding the window open for a partial bundle |
 | `samplePeriodMs` | 1 000 ms | Sample cadence within `ActiveSampling` |
 | `warmupMs` | 10 000 ms | Time in `WarmingUp` after each wake |
 | `minSleepMs` | 0 ms | `CooldownSleeping` hands straight over to `IdleSleeping` |
 | `failOnSampleError` | false | Whether sensor errors are fatal |
+
+10 s warmup + 30 s window + 35 s standby = 75 s. The standby is *derived*, not
+configured: `computePlannedSleepMs()` subtracts the elapsed cycle from
+`cyclePeriodMs` at window close, measuring from `_cycleStartMs` so that warmup
+jitter, window overrun and the post-close TX drain all come out of the sleep
+instead of stretching the cycle. Holding the period fixed rather than the sleep
+keeps the base's return-time prediction meaningful and cycles comparable across
+a session.
+
+`activeSampleMs` is not written by hand — it is
+`kTimedBundlesPerWindow × kSamplesPerBundle × kTimedSamplePeriodMs`
+(2 × 15 × 1 000 = 30 000), with a `static_assert` that it is a whole number of
+bundles. A bare constant silently desynchronises the moment
+`BinaryPacket::kBundleMaxDeltas` or the sample period changes, and a
+desynchronised window ends on a runt bundle every cycle.
 
 ### `kContinuous*` — duty-cycle gate disabled
 
@@ -170,28 +187,35 @@ to surface problems quickly.
 
 The controller itself has no notion of a "window" — but in `Timed` mode each
 `ActiveSampling` stretch is one, and `SmartFiresNodeApp::updateWindowMarkers()`
-watches the phase edges to mark it on the wire via `PktHeader::flags`:
+watches the phase edges to bound it on the wire with its own frames:
 
-| Edge | Call | Effect |
-|---|---|---|
-| → `ActiveSampling` | `PacketHandler::beginWindow()` | The window's first bundle is stamped `PKT_FLAG_WINDOW_FIRST` |
-| `ActiveSampling` → sleeping | `PacketHandler::flushWindow()` | The partial bundle still in the accumulator is force-encoded and stamped `PKT_FLAG_WINDOW_LAST` |
+| Edge | Effect |
+|---|---|
+| → `WarmingUp` (the wake) | `PKT_WINDOW_BEGIN` enqueued. Tells the base the radio is back, so the `ACK_SUMMARY` deferred at the last `WINDOW_END` is released — during the otherwise-silent warmup, rather than 8 s into it |
+| `ActiveSampling` → sleeping | `PKT_WINDOW_END` enqueued *behind* the window's final bundle, so the last frame before standby is one nobody has to acknowledge |
 
-The flush matters beyond labelling. A bundle is normally only encoded once
-`maxDeltas + 1` samples have accumulated, so with `kTimedActiveSampleMs = 25000`
-and `kTimedSamplePeriodMs = 1000` a window produces 25 samples: one full
-15-sample bundle, and 10 samples left in the accumulator. Without the flush
-those samples sit there across the entire standby and are only transmitted
-partway into the *next* window, timestamped from the previous one. The flush
-sends them while they are still current.
+The window always ends on a bundle boundary, so there is normally nothing to
+flush. `SmartFiresNodeApp::update()` publishes
+`PacketHandler::hasPartialBundle()` to `DutyCycleController::setActiveWindowHold()`
+*before* each `_duty.update()` — the controller decides inside `update()` whether
+this is the closing tick, so a hold published afterwards would always be one
+iteration stale and the window could close mid-bundle. Past `activeSampleMs` the
+window stays open while the hold is set, bounded by `activeOverrunMaxMs`; past
+that cap `PacketHandler::flushWindow()` force-encodes the runt rather than lose
+the samples, and `lastWindowOverran()` says so.
 
-`SmartFiresNodeApp::maybeEnterTimedMcuSleep()` therefore also holds off standby
-while `TdmaRadioService::queuedCount() > 0`, up to
+A runt is worth avoiding on two counts: it spends a fresh 20-byte `FullState`
+reference on a handful of samples, and it used to be the frame that could not be
+acked before standby. See
+[WINDOW_MARKER_PACKETS.md](../Pending_Plans/WINDOW_MARKER_PACKETS.md).
+
+`SmartFiresNodeApp::maybeEnterTimedMcuSleep()` holds off standby while
+`TdmaRadioService::queuedCount() > 0`, up to
 `SensingConfig::DutyCycle::kMaxTxDrainBeforeStandbyMs` (5 s ≈ one TDMA frame
-plus slack) — otherwise the just-flushed bundle would be parked in the queue for
-the whole sleep, exactly the problem the flush was added to solve. Time spent
-draining comes out of the sleep, not the next active window, since
-`timedSleepRemainingMs()` is re-read after the wait.
+plus slack) — otherwise the window's final bundle and its `WINDOW_END` marker
+would be parked in the queue for the whole sleep. Time spent draining comes out
+of the standby, not the next cycle, because `_plannedSleepMs` was fixed at window
+close against the cycle start.
 
 Draining also requires the radio to stay powered: the phase is already a
 sleeping one at that point, and `TdmaRadioService::update()` returns *before*
@@ -205,19 +229,25 @@ suppresses radio duty-sleep for exactly that interval.
 SAMD21 standby retains SRAM — it is not a reset — so `TdmaTxQueue`,
 `PacketHandler`'s accumulator, and `TdmaRadioService`'s pending window all come
 back byte-identical. Nothing needs to be persisted or pre-flushed for memory
-reasons; the drain gate above exists only so the window-close bundle isn't
-*delayed* by a whole sleep, not because it would be lost.
+reasons; the drain gate above exists only so the window's final bundle and its
+`WINDOW_END` marker aren't *delayed* by a whole sleep, not because they would be
+lost.
 
 What does not survive on its own is the acknowledgement loop, since the radio is
 off for the entire sleep. That is handled in two places, both documented in
 [PACKET_RELIABILITY.md](PACKET_RELIABILITY.md#duty-cycled-nodes-timed-mode):
 
 - `TdmaRadioService::notifyMcuStandby()` excludes the sleep from the pending
-  window's age, so unacked bundles survive to be retransmitted (stamped
-  `PKT_FLAG_RETX`) during the next `WarmingUp` phase, when the node's slot is
-  otherwise idle.
-- The base defers `ACK_SUMMARY` for a node that just sent a fresh `WINDOW_LAST`
-  rather than blocking on `sendToWait()` against a radio that is switched off.
+  window's age, so unacked bundles survive the sleep. They should not normally
+  need retransmitting: `PKT_WINDOW_BEGIN` releases the base's deferred ack early
+  in `WarmingUp`, and `holdPendingRetriesForAckRoundTrip()` delays the retry gate
+  by two frame periods to let that round trip complete. A `RETX` during warmup
+  now means the `WINDOW_BEGIN` itself was lost, not business as usual.
+- The base defers `ACK_SUMMARY` for a node that just sent `PKT_WINDOW_END`
+  rather than blocking on `sendToWait()` against a radio that is switched off,
+  and releases it on the first slot 0 after that node's `PKT_WINDOW_BEGIN`.
+  Because the marker frames are never retransmitted, the rule is simply "END
+  means asleep, anything else means awake".
 
 ## Relationship to TDMA
 

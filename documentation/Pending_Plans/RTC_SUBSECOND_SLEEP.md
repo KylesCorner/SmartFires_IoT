@@ -361,6 +361,14 @@ show up clearly.
   9-byte `AWAKEN` decode still works (it is parsed against the old 4-byte header) but only
   makes an old node's handshake visible, not its telemetry.
 
+> **Superseded in part (2026-08-19).** T9's `PKT_FLAG_WINDOW_FIRST`/`PKT_FLAG_WINDOW_LAST` and
+> T11's `asleep`-on-fresh-`WINDOW_LAST` rule have been replaced by dedicated
+> `PKT_WINDOW_BEGIN`/`PKT_WINDOW_END` frames — see `window-marker-packets`. The T11 bake note
+> below predicting "at most one `retx` bundle per window during warmup" was correct, and that
+> per-cycle duplicate is what the new plan removes: the replay existed only to prompt the ack
+> the base was deferring. `notifyMcuStandby()`, `PKT_FLAG_RETX` and the defer-don't-drop
+> behaviour all survive unchanged; what changed is what carries the sleep/wake signal.
+
 ### T11 (added 2026-08-17) — surviving the standby, both sides of the ack loop
 
 Raised by the user after T6/T9 landed: *what happens to samples and packets that haven't

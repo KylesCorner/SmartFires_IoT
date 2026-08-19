@@ -22,8 +22,6 @@ from smartfires_edge.packet import (
     HEADER_FMT,
     HEADER_SIZE,
     PKT_FLAG_RETX,
-    PKT_FLAG_WINDOW_FIRST,
-    PKT_FLAG_WINDOW_LAST,
     PKT_ACK_SUMMARY,
     PKT_AWAKEN,
     PKT_BUNDLE,
@@ -34,6 +32,8 @@ from smartfires_edge.packet import (
     PKT_GPS,
     PKT_MAGIC,
     PKT_STATUS,
+    PKT_WINDOW_BEGIN,
+    PKT_WINDOW_END,
     PKT_TIME_SYNC,
     decode_ack_summary,
     decode_awaken,
@@ -43,6 +43,7 @@ from smartfires_edge.packet import (
     decode_cmd_reset,
     decode_full_state,
     decode_status,
+    decode_window_marker,
     decode_time_sync,
 )
 
@@ -86,6 +87,8 @@ def _pkt_type_name(pkt_type: int) -> str:
         PKT_CMD_CALIBRATE: "CMD_CALIBRATE",
         PKT_CMD_RESET: "CMD_RESET",
         PKT_CMD_ACK: "CMD_ACK",
+        PKT_WINDOW_BEGIN: "WINDOW_BEGIN",
+        PKT_WINDOW_END: "WINDOW_END",
     }.get(pkt_type, f"0x{pkt_type:02x}")
 
 
@@ -183,18 +186,27 @@ def _decode_rx_event(
         decode_full_state(raw, rssi)
     elif pkt_type == PKT_BUNDLE:
         decode_bundle(raw, rssi)
-        # Timed duty-cycle window markers, so the sniffer view shows where each
-        # active window starts and ends rather than an undifferentiated bundle
-        # stream.
-        if hdr_flags & PKT_FLAG_WINDOW_FIRST:
-            extra["window_first"] = True
-        if hdr_flags & PKT_FLAG_WINDOW_LAST:
-            extra["window_last"] = True
-        # A replay of a bundle the base never acked. It repeats the original's
-        # window markers, so surface it alongside them — an apparent second
-        # WINDOW_LAST inside one window is this, not a protocol fault.
+        # A replay of a bundle the base never acked — the same samples as an
+        # earlier frame, not a new observation.
         if hdr_flags & PKT_FLAG_RETX:
             extra["retx"] = True
+    elif pkt_type in (PKT_WINDOW_BEGIN, PKT_WINDOW_END):
+        # Timed duty-cycle window edges, so the sniffer view shows where each
+        # active window starts and ends rather than an undifferentiated bundle
+        # stream. These are their own tiny frames now rather than flags on a
+        # bundle, so they show up as their own marks on the timeline — which is
+        # also how you can see that the last frame before a node's standby is one
+        # nobody has to acknowledge.
+        dec = decode_window_marker(raw, rssi)
+        if pkt_type == PKT_WINDOW_BEGIN:
+            extra["window_first"] = True
+        else:
+            extra["window_last"] = True
+        if dec is not None:
+            extra["window_id"] = dec.get("window_id")
+            if dec["is_end"]:
+                extra["planned_sleep_ms"] = dec.get("planned_sleep_ms")
+                extra["window_sample_count"] = dec.get("sample_count")
     elif pkt_type == PKT_ACK_SUMMARY:
         # Header node_id stays 0 (broadcast convention) — these are base
         # station transmissions, so they land in the dedicated base lane.

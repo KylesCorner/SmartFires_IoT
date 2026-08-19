@@ -353,8 +353,17 @@ unacked entry would be discarded as `max_age` on the first post-wake drain, with
 no retransmit. Not a race; it would fire on every cycle.
 
 With the shift, those entries become eligible again one `retryWaitMs` (8 s) into
-the wake. That lands inside `warmupMs` (10 s), when there is no fresh telemetry
-competing for the node's slot, so the replay is effectively free.
+the wake. In practice they should not become eligible at all: `PKT_WINDOW_BEGIN`
+goes out at the top of `WarmingUp`, and `holdPendingRetriesForAckRoundTrip()`
+slides the same timestamps a further `kAckRoundTripFrames` (2) frame periods so
+the deferred `ACK_SUMMARY` has time to arrive first. A retransmission during
+warmup now means the `WINDOW_BEGIN` was itself lost.
+
+The hold is keyed off the marker actually reaching the air, not its enqueue — it
+can wait a whole frame for the node's slot. And `drainTxQueue()` lets a queued
+`WINDOW_BEGIN` preempt a due retransmit for that slot: on the first slot after a
+wake both are ready at once, and retransmit normally wins, which would mean
+paying for the full bundle replay the marker exists to prevent.
 
 ### Retransmissions are marked on the wire
 
@@ -362,16 +371,21 @@ competing for the node's slot, so the replay is effectively free.
 `PktHeader::flags` and recomputes the trailing `crc8`. The stored pending payload
 is deliberately left untouched, so repeated attempts are byte-identical.
 
-The bit exists because the base cannot otherwise read the window markers
-correctly: a replayed `PKT_FLAG_WINDOW_LAST` means "this node is awake and asking
-again", the exact opposite of a fresh one. It also tells the base its previous
-`ACK_SUMMARY` never landed, and gives the Jetson a way to separate replayed
-samples from first-transmission ones (`retx` CSV column).
+The bit tells the base its previous `ACK_SUMMARY` never landed, so that send must
+bypass the "nothing changed since last sent" suppression. It also gives the
+Jetson a way to separate replayed samples from first-transmission ones (`retx`
+CSV column).
+
+It used to carry a second job: while the sleep signal was a flag on a
+retransmittable bundle, a replayed `WINDOW_LAST` meant the exact opposite of a
+fresh one, and `RETX` was how the base told them apart. Moving the signal onto
+`PKT_WINDOW_END` retired that inversion.
 
 ### Base side — deferring ACK_SUMMARY across the sleep
 
-Each `AckTracker` carries an `asleep` flag, set when a **fresh** (non-`RETX`)
-`WINDOW_LAST` arrives and cleared by any subsequent frame from that node.
+Each `AckTracker` carries an `asleep` flag, set by `PKT_WINDOW_END` and cleared
+by any other frame from that node. Because the marker is never retransmitted the
+rule needs no qualification: END means asleep, anything else means awake.
 `sendPendingAckSummary()` skips `asleep` trackers **while leaving `dirty` set**,
 so the acknowledgement is *deferred*, not dropped: it goes out on the first slot 0
 after the node is heard from again, merged with whatever that packet added to the
@@ -389,7 +403,8 @@ Two supporting rules:
 | Rule | Why |
 |---|---|
 | A `RETX` frame sets `forceResend`, bypassing the `unchangedFromLastSent` suppression for one send | The node re-asking is proof it never got the ack. Taking the "nothing changed" shortcut would clear `dirty` and leave the node retrying into silence until `reliabilityMaxAttempts`. |
-| Silence beyond `kAckSummaryNodeSilenceMs` (2 frame periods) gates the same way | Fallback for a `WINDOW_LAST` that was itself lost, so `asleep` never got set. A node with nothing new to say never has `dirty` set, so this can only gate a node that really stopped responding. |
+| A `PKT_WINDOW_BEGIN` sets `forceResend` too, and additionally bypasses `ackSummaryMinIntervalMs` for one flush | Anything the base transmitted during the node's standby went to a switched-off radio, so the last ack must be assumed lost whatever `lastSentAckBaseSeq`/`Mask` say. And the node's retry hold is only two frame periods long — spending it on a rate limiter meant for steady-state coalescing would let the retransmission fire anyway. |
+| Silence beyond `kAckSummaryNodeSilenceMs` (2 frame periods) gates the same way | Fallback for a `PKT_WINDOW_END` that was itself lost, so `asleep` never got set. A node with nothing new to say never has `dirty` set, so this can only gate a node that really stopped responding. |
 
 `resetAckTracker()` clears `asleep` — a rebooting node is awake and about to
 `AWAKEN`, and must never stay gated on a marker from before the reset.

@@ -22,6 +22,8 @@ from smartfires_edge.packet import (
     PKT_DEBUG_LOG,
     PKT_FULL_STATE,
     PKT_STATUS,
+    PKT_WINDOW_BEGIN,
+    PKT_WINDOW_END,
     encode_cmd_reset_frame,
     encode_time_sync_frame,
 )
@@ -29,6 +31,7 @@ from smartfires_edge.packet_loss import PacketLossTracker
 from smartfires_edge.session import SessionManager
 from smartfires_edge.session_meta import SessionMetaLogger
 from smartfires_edge.uart_receiver import iter_packets
+from smartfires_edge.window_state import WindowTracker
 
 
 def _fmt_field(value, spec: str) -> str:
@@ -177,6 +180,7 @@ def run_receive(
         log_fn = lambda msg, node_id=None, source="ingest", kind="other": print(msg)  # noqa: E731
 
     tracker = PacketLossTracker(cfg.nodes)
+    window_tracker = WindowTracker()
     if live_state is not None:
         live_state.tracker = tracker
     sync_state = {"next_seq": 0}
@@ -321,18 +325,78 @@ def run_receive(
                         # Node rebooted, so its wire seq counter restarted from 0 —
                         # reset the loss-tracking baseline before observing this
                         # packet, or the gap since the old session's last seq gets
-                        # miscounted as missing.
+                        # miscounted as missing. The window counter restarted with
+                        # it, and a node that rebooted mid-sleep never sent the END
+                        # for the window it was in.
                         tracker.reset_node(int(hdr_node))
+                        window_tracker.on_reboot(int(hdr_node))
 
-                    # Observe every packet (all types share the same rolling seq counter).
-                    # Done once per LoRa packet here so that STATUS/AWAKEN seqs are counted
-                    # and bundle samples don't inflate crc_valid_packets.
-                    if hdr_node is not None and hdr_seq is not None and event.get("rssi") is not None:
+                    is_window_marker = pkt_type in (PKT_WINDOW_BEGIN, PKT_WINDOW_END)
+
+                    # Observe every packet that carries a telemetry seq (they all
+                    # share one rolling counter). Done once per LoRa packet here so
+                    # that STATUS/AWAKEN seqs are counted and bundle samples don't
+                    # inflate crc_valid_packets.
+                    #
+                    # Window markers are excluded deliberately: they carry seq=0 as
+                    # a placeholder, are never retransmitted, and are identified by
+                    # window_id instead. Feeding them in would register a phantom
+                    # seq-0 packet every duty cycle and read as a huge backwards
+                    # sequence jump.
+                    if (
+                        hdr_node is not None
+                        and hdr_seq is not None
+                        and event.get("rssi") is not None
+                        and not is_window_marker
+                    ):
                         tracker.observe_packet(
                             node_id=int(hdr_node),
                             seq=int(hdr_seq),
                             rssi=int(event["rssi"]),
                         )
+
+                    marker = event.get("window_marker")
+                    if marker is not None:
+                        marker_node = int(marker["node_id"])
+                        window_id = int(marker["window_id"])
+                        is_end = bool(marker["is_end"])
+
+                        if is_end:
+                            window_tracker.on_window_end(marker_node, window_id)
+                        else:
+                            window_tracker.on_window_begin(marker_node, window_id)
+
+                        marker_row = {
+                            "timestamp": datetime.utcnow().isoformat(timespec="milliseconds"),
+                            "packet_type": "window_end" if is_end else "window_begin",
+                            "node_id": marker_node,
+                            "session_time_ms": marker["session_time_ms"],
+                            "uptime_ms": marker["session_time_ms"],
+                            "rssi": marker.get("rssi"),
+                            "pkt_flags": marker.get("pkt_flags"),
+                            "window_id": window_id,
+                            "window_first": 1 if not is_end else 0,
+                            # The END frame *is* the window's last packet, and its
+                            # timestamp is the only record of the close instant —
+                            # the final bundle's last sample is taken before it.
+                            "window_last": 1 if is_end else 0,
+                            "planned_sleep_ms": marker.get("planned_sleep_ms"),
+                            "window_sample_count": marker.get("sample_count"),
+                        }
+                        logger.write_row(marker_row)
+                        log_fn(
+                            f"[EDGE][WINDOW] node={marker_node} "
+                            f"{'end' if is_end else 'begin'} id={window_id} "
+                            f"session_ms={marker['session_time_ms']}"
+                            + (
+                                f" samples={marker['sample_count']}"
+                                f" planned_sleep_ms={marker['planned_sleep_ms']}"
+                                if is_end
+                                else ""
+                            ),
+                            marker_node,
+                        )
+                        continue
 
                     if hdr_node is not None and hdr_seq is not None and pkt_type == PKT_AWAKEN:
                         awaken = event.get("awaken") or {}
@@ -517,6 +581,11 @@ def run_receive(
                             pkt["jetson_wind_mps"] = ""
                             pkt["jetson_wind_dir_deg"] = ""
 
+                        # Attribute the sample to the duty-cycle window that is
+                        # currently open for this node (no-op in Continuous mode,
+                        # which never sends markers).
+                        window_tracker.annotate(int(pkt["node_id"]), pkt)
+
                         logger.write_row(pkt)
                         if live_state is not None:
                             live_state.record_telemetry(pkt)
@@ -586,6 +655,7 @@ def run_receive(
                         )
 
                         tracker = PacketLossTracker(cfg.nodes)
+                        window_tracker = WindowTracker()
                         if live_state is not None:
                             live_state.tracker = tracker
                             live_state.reset()

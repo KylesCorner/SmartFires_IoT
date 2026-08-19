@@ -291,13 +291,18 @@ Jetson UART command
 The current protocol is binary and fixed-size where practical.
 
 Every packet begins with a 5-byte `PktHeader` (`magic`, `pkt_type`, `node_id`,
-`seq`, `flags`). The `flags` byte carries `PKT_FLAG_WINDOW_FIRST`/
-`PKT_FLAG_WINDOW_LAST`, which bound one `Timed` duty-cycle active window and are
-set on `BUNDLE` only, plus `PKT_FLAG_RETX`, stamped onto app-layer
-retransmissions of any telemetry frame. Window markers on a `RETX` frame are a
-replay of the original's and must be ignored — the base relies on that
-distinction to decide when to defer `ACK_SUMMARY` across a node's MCU standby.
-See `duty-cycling`, `packet-reliability`, and `CLAUDE.md`'s wire protocol tables.
+`seq`, `flags`). The `flags` byte carries one live bit, `PKT_FLAG_RETX`, stamped
+onto app-layer retransmissions of any telemetry frame; `0x01`/`0x02` are reserved,
+having previously held `PKT_FLAG_WINDOW_FIRST`/`PKT_FLAG_WINDOW_LAST`.
+
+`Timed` duty-cycle active windows are bounded by their own
+`PKT_WINDOW_BEGIN`/`PKT_WINDOW_END` frames rather than by flags on the sample
+stream. The base uses them to decide when to defer `ACK_SUMMARY` across a node's
+MCU standby and when to release it. Gluing that signal onto a bundle previously
+made the window's last bundle structurally unackable — its ack could only be sent
+in a slot 0 falling after standby had begun — so it was retransmitted in full on
+every wake purely to prompt the ack. See `window-marker-packets`, `duty-cycling`,
+`packet-reliability`, and `CLAUDE.md`'s wire protocol tables.
 
 Node to base packets:
 
@@ -305,6 +310,7 @@ Node to base packets:
 - `STATUS`: GPS and battery summary
 - `BUNDLE`: one full reference sample and multiple compact deltas
 - `CMD_ACK`: acknowledges a CALIBRATE or RESET command, relayed through the base back to the Jetson
+- `WINDOW_BEGIN` / `WINDOW_END`: `Timed` duty-cycle window edges; no `seq`, never retransmitted
 
 Base to node packets:
 

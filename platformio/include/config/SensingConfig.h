@@ -28,6 +28,7 @@
 
 #include "interfaces/ISensor.h"
 #include "power/DutyCycleController.h"
+#include "telemetry/BinaryPacket.h"
 
 #include <stdint.h>
 
@@ -77,13 +78,20 @@ namespace DutyCycle {
 constexpr uint32_t kMinMcuStandbyMs = 250;
 
 // How long the node stays awake at the end of an active window waiting for the
-// TX queue to drain before entering standby anyway. The window-flush bundle is
-// enqueued at window close and needs this node's TDMA slot, which comes around
-// once per frame (NUM_SLOTS × slotWidthMs = 3.6 s at the default geometry), so
-// this covers roughly one frame plus main-loop slack. Exceeding it means the
-// base is unreachable, in which case sleeping is better than burning the
-// window's power budget waiting.
+// TX queue to drain before entering standby anyway. The window's final bundle
+// and its PKT_WINDOW_END marker are enqueued at window close and need this
+// node's TDMA slot, which comes around once per frame (NUM_SLOTS × slotWidthMs
+// = 3.6 s at the default geometry), so this covers roughly one frame plus
+// main-loop slack. Exceeding it means the base is unreachable, in which case
+// sleeping is better than burning the window's power budget waiting — the base
+// then falls back to BaseConfig::kAckSummaryNodeSilenceMs to notice the node is
+// gone without ever seeing its WINDOW_END.
 constexpr uint32_t kMaxTxDrainBeforeStandbyMs = 5000;
+
+// Samples in one full PKT_BUNDLE: the FullState reference plus its deltas.
+// PacketHandler encodes a bundle every time this many samples have accumulated.
+constexpr uint32_t kSamplesPerBundle =
+    static_cast<uint32_t>(BinaryPacket::kBundleMaxDeltas) + 1u;   // 15
 
 // ---------------------------------------------------------------------------
 // Continuous profile
@@ -102,7 +110,9 @@ constexpr uint32_t kContinuousMaxWakeMs = 0;
 constexpr uint32_t kContinuousActiveSampleMs = 0;
 constexpr uint32_t kContinuousSamplePeriodMs = 750;
 constexpr uint32_t kContinuousWarmupMs = 10000;
-constexpr uint32_t kContinuousTimedSleepMs = 0;
+constexpr uint32_t kContinuousCyclePeriodMs = 0;
+constexpr uint32_t kContinuousMinStandbyMs = 0;
+constexpr uint32_t kContinuousActiveOverrunMaxMs = 0;
 
 constexpr float kContinuousTempDeltaThresholdC = 0.0f;
 constexpr float kContinuousHumidityDeltaThresholdPct = 0.0f;
@@ -128,7 +138,9 @@ constexpr uint32_t kSensorTriggeredSamplePeriodMs = 750;
 constexpr uint32_t kSensorTriggeredWarmupMs = 10000;
 
 // Ignored in SensorTriggered mode.
-constexpr uint32_t kSensorTriggeredTimedSleepMs = 0;
+constexpr uint32_t kSensorTriggeredCyclePeriodMs = 0;
+constexpr uint32_t kSensorTriggeredMinStandbyMs = 0;
+constexpr uint32_t kSensorTriggeredActiveOverrunMaxMs = 0;
 
 constexpr float kSensorTriggeredTempDeltaThresholdC = 1.0f;
 constexpr float kSensorTriggeredHumidityDeltaThresholdPct = 5.0f;
@@ -139,8 +151,8 @@ constexpr bool kSensorTriggeredFailOnSampleError = false;
 // Timed profile
 // ---------------------------------------------------------------------------
 //
-// Sensors sample for kTimedActiveSampleMs, then sleep for
-// kTimedTimedSleepMs.
+// Sensors sample for kTimedActiveSampleMs (extended to the next whole bundle),
+// then standby for whatever is left of kTimedCyclePeriodMs.
 //
 // Trigger-sensor thresholds do not cause a wakeup in this mode.
 //
@@ -149,14 +161,67 @@ constexpr DutyCycleMode kTimedMode =
 
 constexpr uint32_t kTimedMinSleepMs = 0;
 constexpr uint32_t kTimedMaxWakeMs = 1000;
-constexpr uint32_t kTimedActiveSampleMs =
-    25000;
 constexpr uint32_t kTimedSamplePeriodMs = 1000;
 constexpr uint32_t kTimedWarmupMs = 10000;
 
-// Sleep between active windows.
-constexpr uint32_t kTimedTimedSleepMs =
-    35000;
+// Whole bundles the active window is sized to produce. The window always runs
+// to a bundle boundary — DutyCycleController holds it open past
+// kTimedActiveSampleMs until PacketHandler's accumulator completes its bundle —
+// so expressing the window as a whole number of bundles means the hold normally
+// has nothing to wait for and the overrun is zero.
+//
+// Deriving this from kSamplesPerBundle rather than writing 30000 by hand is
+// deliberate: a bare constant silently desynchronises the moment
+// BinaryPacket::kBundleMaxDeltas or kTimedSamplePeriodMs changes, and a
+// desynchronised window means every window ends on a runt bundle again.
+constexpr uint32_t kTimedBundlesPerWindow = 2;
+constexpr uint32_t kTimedActiveSampleMs =
+    kTimedBundlesPerWindow * kSamplesPerBundle * kTimedSamplePeriodMs;  // 30000
+
+// Ceiling on how far past kTimedActiveSampleMs the full-bundle hold may run.
+// Only reachable when the sample tick is being starved (a wedged sensor, a
+// blocking I2C/UART read overrunning the period); at that point PacketHandler
+// force-encodes the partial bundle rather than lose the samples. One bundle's
+// worth of samples is the natural bound — needing more than that means the tick
+// is not merely jittering.
+constexpr uint32_t kTimedActiveOverrunMaxMs =
+    kSamplesPerBundle * kTimedSamplePeriodMs;                          // 15000
+
+// Fixed wake-to-wake period. The standby is the remainder after warmup, the
+// active window (including any overrun) and the post-close TX drain have taken
+// their share, floored at kTimedMinStandbyMs. Holding the *period* fixed rather
+// than the sleep keeps the cycle length constant when the window overruns, which
+// is what makes the base's return-time prediction (WindowMarkerPayload's
+// planned_sleep_ms) meaningful and keeps cycles comparable across a session.
+//
+// 10 s warmup + 30 s window + 35 s standby. The standby matches what shipped
+// before the full-bundle hold, so the power profile in POWER_MEASURMENTS.md
+// still applies; the window grew by 5 s (25 -> 30) to reach the second bundle
+// boundary.
+constexpr uint32_t kTimedCyclePeriodMs = 75000;
+
+// Floor on the derived standby, so an active window that overruns badly cannot
+// collapse the sleep to nothing (or below kMinMcuStandbyMs, where standby stops
+// being worth entering). Stretches the period rather than skipping the sleep.
+constexpr uint32_t kTimedMinStandbyMs = 5000;
+
+// The active window must be a whole number of bundles, or the full-bundle hold
+// runs on every single window instead of never — which is the difference
+// between a zero overrun and a systematic one.
+static_assert(kTimedActiveSampleMs %
+                      (kSamplesPerBundle * kTimedSamplePeriodMs) == 0,
+              "Timed active window must be a whole number of bundles");
+
+// The nominal cycle must leave room for a real standby, otherwise every cycle
+// lands on the kTimedMinStandbyMs floor and the period silently stops being
+// fixed. Budgets the worst-case overrun too, so a held-open window still sleeps.
+static_assert(kTimedCyclePeriodMs >=
+                  kTimedWarmupMs + kTimedActiveSampleMs +
+                      kTimedActiveOverrunMaxMs + kTimedMinStandbyMs,
+              "Timed cycle period too short for warmup + window + overrun + standby");
+
+static_assert(kTimedMinStandbyMs >= kMinMcuStandbyMs,
+              "Timed standby floor must be long enough to be worth entering");
 
 // Ignored in Timed mode.
 constexpr float kTimedTempDeltaThresholdC = 0.0f;
@@ -173,7 +238,7 @@ constexpr bool kTimedFailOnSampleError = false;
 // They wake when either:
 //
 //   - The trigger sensor crosses a threshold after kHybridMinSleepMs, or
-//   - kHybridTimedSleepMs expires.
+//   - the remainder of kHybridCyclePeriodMs expires.
 //
 constexpr DutyCycleMode kHybridMode =
     DutyCycleMode::Hybrid;
@@ -184,9 +249,17 @@ constexpr uint32_t kHybridActiveSampleMs = 30000;
 constexpr uint32_t kHybridSamplePeriodMs = 750;
 constexpr uint32_t kHybridWarmupMs = 10000;
 
-// Maximum sleep interval before a scheduled wakeup.
-constexpr uint32_t kHybridTimedSleepMs =
-    5UL * 60UL * 1000UL;
+// Fixed wake-to-wake period; the scheduled wakeup fires on whatever is left of
+// it after warmup and the active window. A trigger crossing can still cut the
+// sleep short at any point after kHybridMinSleepMs.
+constexpr uint32_t kHybridCyclePeriodMs =
+    5UL * 60UL * 1000UL + kHybridWarmupMs + kHybridActiveSampleMs;
+constexpr uint32_t kHybridMinStandbyMs = 5000;
+
+// Hybrid's sample period does not divide a bundle evenly, so the full-bundle
+// hold is left off here (0 = no hold) — Timed is the duty mode the window
+// markers and the bundle-boundary window are designed around.
+constexpr uint32_t kHybridActiveOverrunMaxMs = 0;
 
 constexpr float kHybridTempDeltaThresholdC = 1.0f;
 constexpr float kHybridHumidityDeltaThresholdPct = 5.0f;
@@ -212,8 +285,12 @@ constexpr uint32_t kActiveSamplePeriodMs =
     kContinuousSamplePeriodMs;
 constexpr uint32_t kActiveWarmupMs =
     kContinuousWarmupMs;
-constexpr uint32_t kActiveTimedSleepMs =
-    kContinuousTimedSleepMs;
+constexpr uint32_t kActiveCyclePeriodMs =
+    kContinuousCyclePeriodMs;
+constexpr uint32_t kActiveMinStandbyMs =
+    kContinuousMinStandbyMs;
+constexpr uint32_t kActiveActiveOverrunMaxMs =
+    kContinuousActiveOverrunMaxMs;
 
 constexpr float kActiveTempDeltaThresholdC =
     kContinuousTempDeltaThresholdC;
@@ -239,8 +316,12 @@ constexpr uint32_t kActiveSamplePeriodMs =
     kSensorTriggeredSamplePeriodMs;
 constexpr uint32_t kActiveWarmupMs =
     kSensorTriggeredWarmupMs;
-constexpr uint32_t kActiveTimedSleepMs =
-    kSensorTriggeredTimedSleepMs;
+constexpr uint32_t kActiveCyclePeriodMs =
+    kSensorTriggeredCyclePeriodMs;
+constexpr uint32_t kActiveMinStandbyMs =
+    kSensorTriggeredMinStandbyMs;
+constexpr uint32_t kActiveActiveOverrunMaxMs =
+    kSensorTriggeredActiveOverrunMaxMs;
 
 constexpr float kActiveTempDeltaThresholdC =
     kSensorTriggeredTempDeltaThresholdC;
@@ -265,8 +346,12 @@ constexpr uint32_t kActiveSamplePeriodMs =
     kTimedSamplePeriodMs;
 constexpr uint32_t kActiveWarmupMs =
     kTimedWarmupMs;
-constexpr uint32_t kActiveTimedSleepMs =
-    kTimedTimedSleepMs;
+constexpr uint32_t kActiveCyclePeriodMs =
+    kTimedCyclePeriodMs;
+constexpr uint32_t kActiveMinStandbyMs =
+    kTimedMinStandbyMs;
+constexpr uint32_t kActiveActiveOverrunMaxMs =
+    kTimedActiveOverrunMaxMs;
 
 constexpr float kActiveTempDeltaThresholdC =
     kTimedTempDeltaThresholdC;
@@ -291,8 +376,12 @@ constexpr uint32_t kActiveSamplePeriodMs =
     kHybridSamplePeriodMs;
 constexpr uint32_t kActiveWarmupMs =
     kHybridWarmupMs;
-constexpr uint32_t kActiveTimedSleepMs =
-    kHybridTimedSleepMs;
+constexpr uint32_t kActiveCyclePeriodMs =
+    kHybridCyclePeriodMs;
+constexpr uint32_t kActiveMinStandbyMs =
+    kHybridMinStandbyMs;
+constexpr uint32_t kActiveActiveOverrunMaxMs =
+    kHybridActiveOverrunMaxMs;
 
 constexpr float kActiveTempDeltaThresholdC =
     kHybridTempDeltaThresholdC;

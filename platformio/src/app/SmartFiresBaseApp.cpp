@@ -26,6 +26,10 @@ const char *pktTypeName(uint8_t pktType) {
       return "TIME_SYNC";
     case BinaryPacket::PKT_ACK_SUMMARY:
       return "ACK_SUMMARY";
+    case BinaryPacket::PKT_WINDOW_BEGIN:
+      return "WINDOW_BEGIN";
+    case BinaryPacket::PKT_WINDOW_END:
+      return "WINDOW_END";
     case BinaryPacket::PKT_CMD_CALIBRATE:
       return "CMD_CALIBRATE";
     case BinaryPacket::PKT_CMD_RESET:
@@ -37,10 +41,18 @@ const char *pktTypeName(uint8_t pktType) {
   }
 }
 
+// Types that carry a telemetry PktHeader::seq and therefore belong in the ack
+// bitmap and the seq20 receipt-window stats. Window markers are deliberately
+// absent: they carry no seq at all.
 bool isTelemetryPacketType(uint8_t pktType) {
   return pktType == BinaryPacket::PKT_BUNDLE ||
          pktType == BinaryPacket::PKT_STATUS ||
          pktType == BinaryPacket::PKT_FULL_STATE;
+}
+
+bool isWindowMarkerPacketType(uint8_t pktType) {
+  return pktType == BinaryPacket::PKT_WINDOW_BEGIN ||
+         pktType == BinaryPacket::PKT_WINDOW_END;
 }
 
 bool decodeCmdCalibrateFromJetson(const uint8_t *payload,
@@ -416,6 +428,17 @@ void SmartFiresBaseApp::processIncomingLoRa() {
                static_cast<unsigned int>(hdr.node_id),
                static_cast<unsigned int>(hdr.seq), pktTypeName(hdr.pkt_type),
                static_cast<unsigned int>(hdr.flags), ackTracked ? 1 : 0);
+    } else if (validHeader && isWindowMarkerPacketType(hdr.pkt_type)) {
+      BinaryPacket::WindowMarkerPayload marker = {};
+
+      if (BinaryPacket::decodeWindowMarker(pkt.data, pkt.len, hdr, marker)) {
+        handleWindowMarker(hdr.node_id, hdr.pkt_type, marker);
+      } else {
+        LOG_WARN("base", "window_marker_decode_failed node=%u pkt=%s len=%u",
+                 static_cast<unsigned int>(hdr.node_id),
+                 pktTypeName(hdr.pkt_type),
+                 static_cast<unsigned int>(pkt.len));
+      }
     }
 
     uint8_t frame[2 + 1 + 1 + 255 + 1] = {};
@@ -507,7 +530,6 @@ bool SmartFiresBaseApp::handleTelemetryAckSummary(uint8_t nodeId, uint8_t seq,
   }
 
   const bool isRetx = (flags & BinaryPacket::PKT_FLAG_RETX) != 0;
-  const bool windowLast = (flags & BinaryPacket::PKT_FLAG_WINDOW_LAST) != 0;
 
   tracker->lastHeardValid = true;
   tracker->lastHeardMs = _clock.millis();
@@ -516,17 +538,14 @@ bool SmartFiresBaseApp::handleTelemetryAckSummary(uint8_t nodeId, uint8_t seq,
     tracker->forceResend = true;
   }
 
-  // Any frame at all proves the node's radio is on right now, so the default is
-  // awake. Only a *fresh* window close means standby is imminent — a replayed
-  // one is last window's frame coming back because its ack went missing, and
-  // treating that as "asleep" would suppress the very ack it is asking for.
-  const bool asleep = windowLast && !isRetx;
-  if (asleep != tracker->asleep) {
-    LOG_INFO("base", "ack_node_%s node=%u seq=%u flags=0x%02X",
-             asleep ? "asleep" : "awake", static_cast<unsigned int>(nodeId),
-             static_cast<unsigned int>(seq), static_cast<unsigned int>(flags));
+  // A telemetry frame proves the node's radio is on right now. Standby is
+  // announced separately by PKT_WINDOW_END (handleWindowMarker), so there is no
+  // longer any need to tell a fresh window close from a replayed one.
+  if (tracker->asleep) {
+    LOG_INFO("base", "ack_node_awake node=%u seq=%u reason=telemetry_rx",
+             static_cast<unsigned int>(nodeId), static_cast<unsigned int>(seq));
   }
-  tracker->asleep = asleep;
+  tracker->asleep = false;
 
   updateTelemetryReceiptWindow(*tracker, seq);
   recordTelemetrySequence(*tracker, seq);
@@ -548,6 +567,50 @@ bool SmartFiresBaseApp::handleTelemetryAckSummary(uint8_t nodeId, uint8_t seq,
             static_cast<unsigned int>(seq),
             static_cast<unsigned int>(tracker->ackBaseSeq),
             static_cast<unsigned int>(tracker->ackMask));
+  return true;
+}
+
+bool SmartFiresBaseApp::handleWindowMarker(
+    uint8_t nodeId, uint8_t pktType,
+    const BinaryPacket::WindowMarkerPayload &marker) {
+  AckTracker *tracker = findOrCreateAckTracker(nodeId);
+  if (!tracker) {
+    LOG_WARN("base", "window_marker_skip node=%u reason=no_tracker_slot",
+             static_cast<unsigned int>(nodeId));
+    return false;
+  }
+
+  const bool isEnd = (pktType == BinaryPacket::PKT_WINDOW_END);
+
+  tracker->lastHeardValid = true;
+  tracker->lastHeardMs = _clock.millis();
+  tracker->asleep = isEnd;
+
+  if (!isEnd) {
+    // The node has just come back from standby. Anything the base transmitted
+    // while it was down went to a switched-off radio, so the last ack must be
+    // assumed lost no matter what lastSentAckBaseSeq/Mask say — same reasoning
+    // as a RETX frame, reached without making the node spend a whole bundle
+    // retransmission to say so.
+    tracker->forceResend = true;
+    _ackSummaryFlushRequested = true;
+
+    // A node that came back is reachable again, whatever the state of the
+    // circuit breaker before it went to sleep.
+    tracker->failedSendAttempts = 0;
+    tracker->retryHeld = false;
+  }
+
+  LOG_INFO("base",
+           "window_marker node=%u pkt=%s window_id=%u session_ms=%lu "
+           "planned_sleep_ms=%lu samples=%u dirty=%u",
+           static_cast<unsigned int>(nodeId), pktTypeName(pktType),
+           static_cast<unsigned int>(marker.window_id),
+           static_cast<unsigned long>(marker.session_time_ms),
+           static_cast<unsigned long>(marker.planned_sleep_ms),
+           static_cast<unsigned int>(marker.sample_count),
+           tracker->dirty ? 1 : 0);
+
   return true;
 }
 
@@ -807,8 +870,15 @@ bool SmartFiresBaseApp::enqueuePendingCommand(uint8_t targetNodeId,
 
 bool SmartFiresBaseApp::sendPendingAckSummary(uint32_t slotIndex) {
   const uint32_t now = _clock.millis();
-  if (_cfg.ackSummaryMinIntervalMs > 0 &&
-      (now - _lastAckSummaryFlushMs) < _cfg.ackSummaryMinIntervalMs) {
+
+  // A WINDOW_BEGIN overrides the coalescing rate limit for one pass: the node is
+  // awake, waiting on an ack that has been deferred across its whole standby,
+  // and its retry hold is only a couple of frame periods long.
+  if (_ackSummaryFlushRequested) {
+    _ackSummaryFlushRequested = false;
+    LOG_DEBUG("base", "ack_summary_min_interval_bypassed reason=window_begin");
+  } else if (_cfg.ackSummaryMinIntervalMs > 0 &&
+             (now - _lastAckSummaryFlushMs) < _cfg.ackSummaryMinIntervalMs) {
     return false;
   }
 
@@ -834,7 +904,7 @@ bool SmartFiresBaseApp::sendPendingAckSummary(uint32_t slotIndex) {
                 static_cast<unsigned int>(tracker.nodeId),
                 static_cast<unsigned int>(tracker.ackBaseSeq),
                 static_cast<unsigned int>(tracker.ackMask),
-                tracker.asleep ? "window_last" : "node_silent");
+                tracker.asleep ? "window_end" : "node_silent");
       continue;
     }
 

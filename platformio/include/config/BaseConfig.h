@@ -38,8 +38,8 @@ constexpr uint32_t kAckSummaryMinIntervalMs = 25;
 // new telemetry arrives from that node or it re-AWAKENs.
 constexpr uint8_t kMaxAckSummarySendAttempts = 3;
 
-// Fallback for a Timed node whose PKT_FLAG_WINDOW_LAST frame was itself lost,
-// so the base never learned it was entering standby. Silence longer than this
+// Fallback for a Timed node whose PKT_WINDOW_END frame was itself lost, so the
+// base never learned it was entering standby. Silence longer than this
 // gates ACK_SUMMARY the same way the explicit marker does — the tracker keeps
 // `dirty`, so the ack is still deferred rather than dropped.
 //

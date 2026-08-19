@@ -6,6 +6,7 @@
 
 #include "config/NetworkConfig.h"
 #include "radio/TdmaConfig.h"
+#include "telemetry/BinaryPacket.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -26,6 +27,11 @@ public:
 
   bool enqueue(const uint8_t *payload, uint8_t len);
   bool dequeue(uint8_t *payload, uint8_t &lenOut);
+  // Packet type of the frame at the head of the queue, without removing it.
+  // Returns false when the queue is empty or the head is too short to hold a
+  // PktHeader. Lets the drain loop decide between the queue and a retransmit on
+  // the basis of what is actually waiting.
+  bool peekPacketType(uint8_t &pktTypeOut) const;
   void clear();
 
   bool empty() const;

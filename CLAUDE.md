@@ -25,6 +25,7 @@ Wildfire IoT sensor network. Remote drone nodes collect environmental data (temp
     |                BUNDLE payload (≤195 bytes, app-layer ACK-paced retry, TDMA-gated)
     |                STATUS payload (26 bytes, GPS + battery + DMP heading + link stats, every 15 min)
     |                CMD_ACK (12 bytes, acknowledges CALIBRATE/RESET commands)
+    |                WINDOW_BEGIN / WINDOW_END (17 bytes, Timed duty-cycle window edges)
     |   Base → Node: TIME_SYNC broadcast (14 bytes, fire-and-forget, RH_BROADCAST_ADDRESS)
     |                ACK_SUMMARY (10 bytes, base-generated app-layer reliability bitmap)
     |                CMD_CALIBRATE (8 bytes, forwarded from Jetson)
@@ -297,7 +298,18 @@ AWAKEN:  [PktHeader: 5][AwakenPayload: 6][crc8: 1]                              
 BUNDLE:  [PktHeader: 5][FullStatePayload: 20][n_deltas: 1][DeltaPayload×n: n×12][crc8] ≤ 195 bytes
 STATUS:  [PktHeader: 5][StatusPayload: 20][crc8: 1]                                    = 26 bytes
 CMD_ACK: [PktHeader: 5][CmdAckPayload: 6][crc8: 1]                                    = 12 bytes
+WINDOW_BEGIN / WINDOW_END:
+         [PktHeader: 5][WindowMarkerPayload: 11][crc8: 1]                              = 17 bytes
 ```
+
+### WindowMarkerPayload (11 bytes) — PKT_WINDOW_BEGIN / PKT_WINDOW_END
+
+| Field | Type | Encoding |
+|---|---|---|
+| `session_time_ms` | `uint32_t` | session clock at the window edge — the close instant no data frame records |
+| `planned_sleep_ms` | `uint32_t` | WINDOW_END: standby about to be entered; `0` on BEGIN |
+| `window_id` | `uint16_t` | per-node window counter, wraps at 65535. **Not** `PktHeader::seq` |
+| `sample_count` | `uint8_t` | WINDOW_END: samples in the window just closed; `0` on BEGIN |
 
 RadioHead `RHReliableDatagram` handles LoRa framing and addressing.
 Node fresh telemetry uses non-blocking `sendto()` with app-layer reliability. Both
@@ -340,28 +352,30 @@ slots and call `TdmaClock::applySync(sessionMs)`.
 | `pkt_type` | `uint8_t` | see packet type table below |
 | `node_id` | `uint8_t` | compile-time `NODE_ID`; `0` for broadcast/command frames |
 | `seq` | `uint8_t` | rolling 0–255 |
-| `flags` | `uint8_t` | `PKT_FLAG_WINDOW_FIRST=0x01` · `PKT_FLAG_WINDOW_LAST=0x02` · `PKT_FLAG_RETX=0x04`; set on telemetry types only, `0` on command/handshake frames |
+| `flags` | `uint8_t` | `PKT_FLAG_RETX=0x04`; `0x01`/`0x02` reserved (retired `WINDOW_FIRST`/`WINDOW_LAST`). Set on telemetry types only, `0` on command/handshake/marker frames |
 
-**Window markers.** In `Timed` duty-cycle mode the node bounds each active
-window on the wire: the first bundle encoded after the window opens carries
-`WINDOW_FIRST`, and closing the window force-flushes the partial bundle still in
-the accumulator (which previously sat unsent across the whole MCU standby)
-marked `WINDOW_LAST`. A window producing one bundle sets both bits on it; a
-window whose samples land exactly on a bundle boundary has nothing to flush, so
-no packet carries `WINDOW_LAST` and the next `WINDOW_FIRST` implies the close.
-The Jetson surfaces these as the `pkt_flags`/`window_first`/`window_last` CSV
-columns.
+**Window markers.** In `Timed` duty-cycle mode the node bounds each active window
+with its own frames — `PKT_WINDOW_BEGIN` on the wake edge (top of warmup) and
+`PKT_WINDOW_END` enqueued behind the window's final bundle — rather than
+flagging the bundles at the edges. `BEGIN` tells the base the radio is back so
+the `ACK_SUMMARY` deferred at `END` is released; `END` tells it standby is
+imminent so it stops transmitting at a switched-off radio. The pair replaces the
+`WINDOW_FIRST`/`WINDOW_LAST` bits, whose `WINDOW_LAST` bundle was structurally
+unackable (its ack could only be sent in a slot 0 falling after standby began)
+and so was retransmitted in full on every wake purely to prompt the ack. Markers
+never enter the reliability window, are never retransmitted, and **never consume
+a `seq`** — `window_id` is their own counter. See
+`documentation/Pending_Plans/WINDOW_MARKER_PACKETS.md`.
 
 **Retransmit marker.** `PKT_FLAG_RETX` is stamped by
 `TdmaRadioService::pickRetransmitCandidate()` into the *outgoing copy* of a
 pending-window entry (crc8 recomputed; the stored payload is left untouched so
-repeated attempts are byte-identical). A `RETX` frame repeats whatever window
-bits the original carried, so **window markers on a `RETX` frame must be
-ignored** — a replayed `WINDOW_LAST` means the node is awake and re-asking, not
-that it is about to sleep. The base uses exactly that distinction to decide when
-to defer `ACK_SUMMARY` across a node's standby; the Jetson surfaces it as the
-`retx` CSV column, and rows carrying it are duplicates of earlier rows (same
-`node_id` + `seq`), not new observations. See
+repeated attempts are byte-identical). It tells the base its last `ACK_SUMMARY`
+never landed, so that send bypasses the "unchanged since last sent" suppression.
+The Jetson surfaces it as the `retx` CSV column, and rows carrying it are
+duplicates of earlier rows (same `node_id` + `seq`), not new observations. With
+the sleep/wake signal now on its own frames there is no longer a window bit whose
+meaning inverts on a replay. See
 `documentation/Current_Architecture/PACKET_RELIABILITY.md`.
 
 ### Packet Types
@@ -375,6 +389,8 @@ to defer `ACK_SUMMARY` across a node's standby; the Jetson surfaces it as the
 | `0x05` | PKT_STATUS | Node→Jetson | 26 bytes | GPS + battery + DMP heading + link stats, every 15 min |
 | `0x06` | PKT_AWAKEN | Node→Base | 12 bytes | Boot handshake; uid_hash + reset_cause + hang_zone (reset diagnostics). Legacy 9-byte uid_hash-only frame still decoded |
 | `0x07` | PKT_ACK_SUMMARY | Base→Node | 10 bytes | Base-generated app-layer reliability bitmap (not relayed from Jetson) |
+| `0x08` | PKT_WINDOW_BEGIN | Node→Base | 17 bytes | Timed wake edge; releases the base's deferred ACK_SUMMARY. No `seq` |
+| `0x09` | PKT_WINDOW_END | Node→Base | 17 bytes | Timed window close; base defers ACK_SUMMARY until the next BEGIN. Carries `planned_sleep_ms` + `sample_count`. No `seq` |
 | `0x10` | PKT_CMD_CALIBRATE | Jetson→Node | 8 bytes | Forwarded by base; node just logs + ACKs (DMP self-calibrates regardless) |
 | `0x11` | PKT_CMD_RESET | Jetson→Node | 8 bytes | Forwarded by base; node logs + ACKs but does not yet actually reset |
 | `0x12` | PKT_CALIBRATION_DATA | — | — | Reserved, unused — no encode/decode functions exist |
@@ -658,4 +674,13 @@ Base station link (USB, not UART — see `UART_JETSON_BRIDGE.md`):
 - **Drop-oldest queue:** `TdmaTxQueue` (8 entries) always holds the freshest data. No blocking between sensing and TX.
 - **Stale-sync fallback:** if no TIME_SYNC for 22 min (2× the 10-min broadcast interval), `TdmaClock::myTurn()` returns true unconditionally — node transmits immediately rather than going silent.
 - **TIME_SYNC driven by Jetson NTP, not GPS.** GPS PPS sync deferred; current crystal drift between synced nodes is within the 20 ms guard band.
+- **Timed window runs to a whole bundle, on a fixed period.** `DutyCycleController` holds the
+  active window open past `activeSampleMs` while `PacketHandler::hasPartialBundle()` is true, so
+  every bundle on the air carries a full 15 samples and no runt is ever encoded.
+  `kTimedActiveSampleMs` is derived as `bundles × samplesPerBundle × samplePeriod` (2 × 15 × 1 s
+  = 30 s) with a `static_assert`, not written by hand — a bare constant desynchronises the moment
+  `kBundleMaxDeltas` or the sample period changes. Because the window end is now data-dependent,
+  `kTimedCyclePeriodMs` (75 s) is the authority and the standby is its remainder, measured from
+  the wake so warmup jitter, overrun and the post-close TX drain all come out of the sleep rather
+  than stretching the cycle.
 - **Rx power gating (`AppLayerAckSummary` mode only):** nodes sleep the radio outside the base's slot 0, since that's the only slot the base ever transmits in and node telemetry is fire-and-forget. `TdmaClock::baseRxWindowOpen()` mirrors `myTurn()`'s pre-sync/stale-sync fallback. A dedicated `rxWakeAheadMs` (not a `guardMs` bump) opens the window slightly before slot 0 to absorb main-loop jitter from blocking sensor reads, not just crystal drift — added after field testing showed nodes missing the start of slot 0 without it. See "Rx power gating" above and `documentation/Pending_Plans/RADIO_RX_GATING.md`.

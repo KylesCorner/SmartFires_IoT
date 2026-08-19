@@ -53,6 +53,7 @@ these — check status tables within each doc for what's done vs. open.
 | [RESET_REASON_DIAGNOSTICS.md](Pending_Plans/RESET_REASON_DIAGNOSTICS.md) | Reporting node reset cause + hang-zone breadcrumb through AWAKEN to attribute watchdog reboots (I2C stall vs RadioHead hang) |
 | [MCU_DUTY_CYCLE_CHANGELOG.md](Pending_Plans/MCU_DUTY_CYCLE_CHANGELOG.md) | Changelog/review of `feature/mcu-duty-cycle` (SAMD21 RTC standby, Timed/Hybrid modes) — every RTC wake forces a full TDMA resync + fresh AWAKEN handshake |
 | [RTC_SUBSECOND_SLEEP.md](Pending_Plans/RTC_SUBSECOND_SLEEP.md) | Plan to replace RTCZero's whole-second calendar alarm with SAMD21 RTC COUNT32 mode (~1 ms resolution) so a node can resume TDMA sync across MCU standby instead of resyncing every wake |
+| [WINDOW_MARKER_PACKETS.md](Pending_Plans/WINDOW_MARKER_PACKETS.md) | Replaces the WINDOW_FIRST/WINDOW_LAST header flags with dedicated PKT_WINDOW_BEGIN/PKT_WINDOW_END frames and runs the Timed window to a whole bundle on a fixed period, removing the per-cycle retransmission of each window's last bundle |
 | [GPS_DISCIPLINED_CLOCK.md](Pending_Plans/GPS_DISCIPLINED_CLOCK.md) | Plan to run each node's clock continuously off RTC COUNT32 (Step 1, no GPS) and periodically discipline its tick rate with the GPS 1 Hz PPS edge (Step 2, depends on Step 1) |
 
 ## Completed Plans

@@ -78,7 +78,7 @@ automatically.
 | `kMaxAckTrackedNodes` | 16 | Upper bound for ACK-summary bitmap tracking table |
 | `kAckSummaryMinIntervalMs` | 25 ms | Minimum spacing between ACK_SUMMARY flushes |
 | `kMaxAckSummarySendAttempts` | 3 | Consecutive `sendAckSummary()` failures before a tracker is held; cleared by new telemetry or re-AWAKEN |
-| `kAckSummaryNodeSilenceMs` | = 2 × `kNumSlots` × `kSlotWidthMs` (7 200 ms at defaults) | Silence after which ACK_SUMMARY is deferred for that node — fallback for a `WINDOW_LAST` marker that was itself lost. See [PACKET_RELIABILITY.md](PACKET_RELIABILITY.md#duty-cycled-nodes-timed-mode) |
+| `kAckSummaryNodeSilenceMs` | = 2 × `kNumSlots` × `kSlotWidthMs` (7 200 ms at defaults) | Silence after which ACK_SUMMARY is deferred for that node — fallback for a `PKT_WINDOW_END` frame that was itself lost. See [PACKET_RELIABILITY.md](PACKET_RELIABILITY.md#duty-cycled-nodes-timed-mode) |
 | `kMaxPendingCommandSendAttempts` | 3 | Base-window attempts for a queued CMD_CALIBRATE/CMD_RESET before giving up (≈ 11 s — shorter than a Timed node's standby, see the reliability doc's "Not covered" note) |
 | `kPeriodicTimeSyncMs` | 50 000 ms | Base firmware fallback TIME_SYNC interval (Jetson normally sends every 600 s) |
 | `kHealthLogPeriodMs` | 5 000 ms | Periodic health-log print interval in base firmware |
@@ -131,8 +131,11 @@ a derived `kActive*` set, which `SensingConfig.h` resolves from the
 | Constant | Value | Meaning |
 |---|---|---|
 | `kTimedMode` | `Timed` | Fixed sleep/active cycle; trigger thresholds ignored |
-| `kTimedTimedSleepMs` | 35 000 ms | Sleep between active windows — the MCU standby duration |
-| `kTimedActiveSampleMs` | 25 000 ms | Duration of the `ActiveSampling` window |
+| `kTimedCyclePeriodMs` | 75 000 ms | Fixed wake-to-wake period. The standby is its remainder after warmup, the active window and the post-close TX drain — so an overrun shortens the sleep rather than stretching the cycle |
+| `kTimedMinStandbyMs` | 5 000 ms | Floor on the derived standby |
+| `kTimedBundlesPerWindow` | 2 | Whole bundles the active window is sized to produce |
+| `kTimedActiveSampleMs` | 30 000 ms | `ActiveSampling` duration — **derived** as `kTimedBundlesPerWindow × kSamplesPerBundle × kTimedSamplePeriodMs`, `static_assert`ed to be a whole number of bundles. Do not hand-edit |
+| `kTimedActiveOverrunMaxMs` | 15 000 ms | Cap on holding the window open past `kTimedActiveSampleMs` for a partial bundle |
 | `kTimedSamplePeriodMs` | 1 000 ms | Sample cadence within `ActiveSampling` |
 | `kTimedWarmupMs` | 10 000 ms | Sensor stabilization delay after each wake |
 | `kTimedMinSleepMs` | 0 ms | `CooldownSleeping` hands straight over to `IdleSleeping` |

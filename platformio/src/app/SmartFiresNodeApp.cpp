@@ -36,6 +36,10 @@ const char *pktTypeName(uint8_t pktType) {
     return "TIME_SYNC";
   case BinaryPacket::PKT_ACK_SUMMARY:
     return "ACK_SUMMARY";
+  case BinaryPacket::PKT_WINDOW_BEGIN:
+    return "WINDOW_BEGIN";
+  case BinaryPacket::PKT_WINDOW_END:
+    return "WINDOW_END";
   case BinaryPacket::PKT_CMD_CALIBRATE:
     return "CMD_CALIBRATE";
   case BinaryPacket::PKT_CMD_RESET:
@@ -229,6 +233,15 @@ void SmartFiresNodeApp::update() {
 
     return;
   }
+
+  // Set before the tick, never after: the controller decides inside update()
+  // whether this is the tick that closes the window, so a hold published
+  // afterwards would always be one iteration stale and the window could close
+  // mid-bundle. Sizing the window as a whole number of bundles means this is
+  // normally already false when activeSampleMs expires and the hold costs
+  // nothing; it earns its keep when a starved sample tick has shifted the
+  // accumulator off the boundary.
+  _duty.setActiveWindowHold(_packetHandler.hasPartialBundle());
 
   _duty.update();
   updateWindowMarkers();
@@ -571,11 +584,21 @@ bool SmartFiresNodeApp::takeAndEnqueueBundle() {
   return enqueueTelemetryPayload(buf, len);
 }
 
-// Stamps PktHeader::flags so the receiver can bound each Timed active window.
-// Entering ActiveSampling opens a window (WINDOW_FIRST on its first bundle);
-// leaving it closes the window, which force-encodes the partial bundle that
-// would otherwise sit in the accumulator across the whole MCU standby and
-// marks it WINDOW_LAST.
+// Bounds each Timed duty cycle on the wire with PKT_WINDOW_BEGIN/PKT_WINDOW_END.
+//
+// BEGIN goes out on the wake edge (entering WarmingUp), not when sampling
+// starts: its main job is telling the base this node's radio is back, so the
+// ACK_SUMMARY deferred at the last WINDOW_END is released. Sending it at the top
+// of warmup spends the otherwise-silent warmup on that round trip instead of
+// starting the clock 10 s later. Warmup produces no samples, so every bundle
+// between BEGIN(n) and END(n) still belongs unambiguously to window n.
+//
+// END goes out on the close edge, enqueued behind the window's final bundle, so
+// the last thing the node puts on the air before standby is a frame nobody has
+// to acknowledge. That is the whole point of the pair: the retired WINDOW_LAST
+// flag rode on a bundle whose ack could only be sent in a slot 0 falling after
+// standby began, so that bundle was retransmitted in full on the next wake for
+// no reason but to prompt the ack.
 void SmartFiresNodeApp::updateWindowMarkers() {
   const DutyCyclePhase phase = _duty.phase();
 
@@ -586,8 +609,13 @@ void SmartFiresNodeApp::updateWindowMarkers() {
   const DutyCyclePhase previous = _lastDutyPhase;
   _lastDutyPhase = phase;
 
-  if (phase == DutyCyclePhase::ActiveSampling) {
-    _packetHandler.beginWindow();
+  if (_duty.mode() != DutyCycleMode::Timed) {
+    return;
+  }
+
+  if (phase == DutyCyclePhase::WarmingUp) {
+    _windowId++;
+    sendWindowMarker(BinaryPacket::PKT_WINDOW_BEGIN, 0, 0);
     return;
   }
 
@@ -595,17 +623,54 @@ void SmartFiresNodeApp::updateWindowMarkers() {
     return;
   }
 
-  if (!_packetHandler.flushWindow()) {
-    return;
+  // Only reachable when the duty controller gave up waiting for the accumulator
+  // to reach a bundle boundary (overrun cap). Normally the window is a whole
+  // number of bundles and there is nothing left behind.
+  if (_packetHandler.flushWindow()) {
+    if (_cfg.enableTelemetryTx) {
+      LOG_WARN("app", "window_flush_partial_bundle overran=1");
+      takeAndEnqueueBundle();
+    } else {
+      LOG_INFO("app", "window_flush_tx_disabled bundle_dropped=1");
+    }
   }
 
-  if (!_cfg.enableTelemetryTx) {
-    LOG_INFO("app", "window_flush_tx_disabled bundle_dropped=1");
-    return;
+  sendWindowMarker(BinaryPacket::PKT_WINDOW_END, _duty.plannedSleepMs(),
+                   _duty.lastWindowSampleCount());
+}
+
+// Window markers never enter the reliability window and never consume a
+// telemetry seq — TdmaRadioService::isTelemetryPacketForNode() allowlists
+// BUNDLE/STATUS/FULL_STATE, so they are queued, sent once, and forgotten.
+bool SmartFiresNodeApp::sendWindowMarker(uint8_t pktType,
+                                         uint32_t plannedSleepMs,
+                                         uint16_t sampleCount) {
+  BinaryPacket::WindowMarkerPayload marker = {};
+  marker.session_time_ms = _tdmaClock.sessionNowMs();
+  marker.planned_sleep_ms = plannedSleepMs;
+  marker.window_id = _windowId;
+  marker.sample_count = (sampleCount > 0xFFu)
+                            ? 0xFFu
+                            : static_cast<uint8_t>(sampleCount);
+
+  uint8_t buf[BinaryPacket::kWindowMarkerLoRaSize];
+  const uint8_t len = BinaryPacket::encodeWindowMarkerPayload(
+      pktType, _cfg.nodeId, marker, buf, sizeof(buf));
+
+  if (len == 0) {
+    LOG_WARN("app", "window_marker_encode_failed pkt=%s", pktTypeName(pktType));
+    return false;
   }
 
-  LOG_INFO("app", "window_flush bundle_ready=1");
-  takeAndEnqueueBundle();
+  LOG_INFO("app",
+           "window_marker pkt=%s window_id=%u session_ms=%lu "
+           "planned_sleep_ms=%lu samples=%u",
+           pktTypeName(pktType), static_cast<unsigned int>(_windowId),
+           static_cast<unsigned long>(marker.session_time_ms),
+           static_cast<unsigned long>(plannedSleepMs),
+           static_cast<unsigned int>(marker.sample_count));
+
+  return enqueueTelemetryPayload(buf, len);
 }
 
 // rtc-subsecond-sleep instrumentation. Phase 1 compared the sleep-compensated

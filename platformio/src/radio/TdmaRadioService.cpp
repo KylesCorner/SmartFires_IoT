@@ -50,6 +50,10 @@ const char *pktTypeName(uint8_t pktType) {
     return "TIME_SYNC";
   case BinaryPacket::PKT_ACK_SUMMARY:
     return "ACK_SUMMARY";
+  case BinaryPacket::PKT_WINDOW_BEGIN:
+    return "WINDOW_BEGIN";
+  case BinaryPacket::PKT_WINDOW_END:
+    return "WINDOW_END";
   case BinaryPacket::PKT_CMD_CALIBRATE:
     return "CMD_CALIBRATE";
   case BinaryPacket::PKT_CMD_RESET:
@@ -452,8 +456,19 @@ void TdmaRadioService::drainTxQueue() {
     uint8_t pendingIndex = 0;
     uint8_t retrySeq = 0;
 
-    const bool allowRetxThisSlot =
-        useAppReliability && (_lastRetxAttemptSlotIndex != slotIndex);
+    // A PKT_WINDOW_BEGIN waiting at the head of the queue jumps ahead of the
+    // retransmit that would otherwise take this slot. On the first slot after a
+    // wake both are ready at once, and retransmit normally wins — but the whole
+    // reason the marker exists is to make that retransmit unnecessary, by
+    // telling the base to release the ack it deferred at WINDOW_END. Sending it
+    // second would mean paying for the full bundle replay first, every cycle.
+    uint8_t queueHeadType = 0;
+    const bool windowBeginQueued =
+        _queue.peekPacketType(queueHeadType) &&
+        queueHeadType == BinaryPacket::PKT_WINDOW_BEGIN;
+
+    const bool allowRetxThisSlot = useAppReliability && !windowBeginQueued &&
+                                   (_lastRetxAttemptSlotIndex != slotIndex);
 
     bool selectedPacket = false;
 
@@ -601,6 +616,16 @@ void TdmaRadioService::drainTxQueue() {
 
     if (ok) {
       _sentCount++;
+
+      // Timed only: the marker is on the air, so the base is about to release
+      // the ack it deferred at WINDOW_END. Hold off retransmitting into that
+      // round trip. Deliberately keyed off the actual send rather than the
+      // enqueue — the marker can wait a whole frame for this node's slot, and
+      // starting the hold early would spend most of it before the base has even
+      // heard the node is awake.
+      if (hdr.pkt_type == BinaryPacket::PKT_WINDOW_BEGIN) {
+        holdPendingRetriesForAckRoundTrip();
+      }
 
       if (useAppReliability) {
         if (fromQueue) {
@@ -1516,8 +1541,9 @@ void TdmaRadioService::setDutySleep(
   _radioAsleep = false;
 }
 
-void TdmaRadioService::notifyMcuStandby(uint32_t sleptMs) {
-  if (!_cfg.enableAppReliability || sleptMs == 0) {
+void TdmaRadioService::shiftPendingTimestamps(uint32_t shiftMs,
+                                              const char *reason) {
+  if (!_cfg.enableAppReliability || shiftMs == 0) {
     return;
   }
 
@@ -1535,8 +1561,8 @@ void TdmaRadioService::notifyMcuStandby(uint32_t sleptMs) {
       continue;
     }
 
-    e.firstSentMs += sleptMs;
-    e.lastSentMs += sleptMs;
+    e.firstSentMs += shiftMs;
+    e.lastSentMs += shiftMs;
     shifted++;
   }
 
@@ -1544,14 +1570,29 @@ void TdmaRadioService::notifyMcuStandby(uint32_t sleptMs) {
   // firstSentMs, so it has to move with them or every entry would look like it
   // predates the last ACK_SUMMARY and stall behind the retryWaitMaxMs fallback.
   if (_hasReceivedAckSummary) {
-    _lastAckSummarySessionMs += sleptMs;
+    _lastAckSummarySessionMs += shiftMs;
   }
 
   if (shifted > 0) {
     LOG_INFO("radio",
-             "pending_sleep_shift slept_ms=%lu entries=%u max_age_ms=%lu",
-             static_cast<unsigned long>(sleptMs),
+             "pending_shift reason=%s shift_ms=%lu entries=%u max_age_ms=%lu",
+             reason, static_cast<unsigned long>(shiftMs),
              static_cast<unsigned int>(shifted),
              static_cast<unsigned long>(_cfg.reliabilityMaxAgeMs));
   }
+}
+
+void TdmaRadioService::notifyMcuStandby(uint32_t sleptMs) {
+  shiftPendingTimestamps(sleptMs, "mcu_standby");
+}
+
+// Called once a PKT_WINDOW_BEGIN has physically gone out. The base has been
+// sitting on this node's ACK_SUMMARY since its WINDOW_END and releases it on the
+// first slot 0 after hearing the marker, so anything still pending is about to
+// be acked without being asked twice.
+void TdmaRadioService::holdPendingRetriesForAckRoundTrip() {
+  const uint32_t framePeriodMs =
+      static_cast<uint32_t>(_cfg.numSlots) * _cfg.slotWidthMs;
+
+  shiftPendingTimestamps(framePeriodMs * kAckRoundTripFrames, "window_begin");
 }

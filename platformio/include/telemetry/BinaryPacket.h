@@ -14,6 +14,8 @@
 //   BUNDLE:     [PktHeader:5][FullStatePayload:20][n_deltas:1][DeltaPayload×n][crc8:1]  ≤ 195 bytes
 //   STATUS:     [PktHeader:5][StatusPayload:20][crc8:1]                                 =  26 bytes
 //   CMD_ACK:    [PktHeader:5][CmdAckPayload:6][crc8:1]                                  =  12 bytes
+//   WINDOW_BEGIN/WINDOW_END:
+//               [PktHeader:5][WindowMarkerPayload:11][crc8:1]                           =  17 bytes
 //
 // LoRa TIME_SYNC — base -> node or all nodes:
 //   TIME_SYNC:  [PktHeader:5][TimeSyncPayload:8][crc8:1]                                =  14 bytes
@@ -45,6 +47,12 @@ enum PktType : uint8_t {
     PKT_STATUS     = 0x05,  // GPS + battery, sent every 15 min
     PKT_AWAKEN     = 0x06,  // boot handshake — node broadcasts before sensing starts
     PKT_ACK_SUMMARY = 0x07, // base -> node app-layer reliability summary
+    // Timed duty-cycle active-window edges. Sent by the node instead of marking
+    // a data frame, so the "I am about to sleep" signal is carried by something
+    // that is never retransmitted and never awaits an ack — see
+    // WindowMarkerPayload below.
+    PKT_WINDOW_BEGIN = 0x08,
+    PKT_WINDOW_END   = 0x09,
     PKT_CMD_CALIBRATE    = 0x10,
     PKT_CMD_RESET        = 0x11,
     PKT_CALIBRATION_DATA = 0x12,
@@ -66,27 +74,57 @@ struct __attribute__((packed)) PktHeader {
 
 // PktHeader::flags — per-packet bits, present on every packet type.
 //
-// WINDOW_FIRST/WINDOW_LAST bound one Timed duty-cycle active window. They are
-// set only on PKT_BUNDLE (the sample stream); STATUS and the command/handshake
-// types carry flags=0. A window that produces exactly one bundle sets both bits
-// on it. Together they let the receiver group bundles into windows and tell a
-// complete window from one truncated by packet loss.
 // RETX marks an app-layer retransmission of a telemetry frame the node already
 // put on the air (TdmaRadioService::pickRetransmitCandidate stamps it into the
 // outgoing copy and recomputes the crc8; the stored pending entry is untouched).
-// It is what lets the base read the window bits correctly: a replayed
-// WINDOW_LAST is evidence the node is *awake* and asking again, the opposite of
-// a fresh one. It also tells the base its previous ACK_SUMMARY never landed, and
-// gives the Jetson a way to tell replayed samples from first-transmission ones.
-static constexpr uint8_t PKT_FLAG_WINDOW_FIRST = 0x01;
-static constexpr uint8_t PKT_FLAG_WINDOW_LAST  = 0x02;
-static constexpr uint8_t PKT_FLAG_RETX         = 0x04;
+// It tells the base its previous ACK_SUMMARY never landed, and gives the Jetson
+// a way to tell replayed samples from first-transmission ones.
+//
+// 0x01/0x02 were PKT_FLAG_WINDOW_FIRST/PKT_FLAG_WINDOW_LAST, which bounded a
+// Timed active window by marking the bundles at its edges. They are retired in
+// favour of the PKT_WINDOW_BEGIN/PKT_WINDOW_END frames: gluing "I am about to
+// sleep" onto a retransmittable data frame meant a replayed WINDOW_LAST asserted
+// the opposite of a fresh one, and it made the last bundle of every window
+// structurally unackable — its ack could only be sent in a slot 0 falling after
+// standby had begun, so it was re-sent in full on the next wake purely to prompt
+// the ack. The bit values stay reserved so a stale node's frames can never be
+// misread as carrying some later meaning.
+static constexpr uint8_t PKT_FLAG_RETX          = 0x04;
+static constexpr uint8_t PKT_FLAG_RESERVED_0x01 = 0x01;  // was WINDOW_FIRST
+static constexpr uint8_t PKT_FLAG_RESERVED_0x02 = 0x02;  // was WINDOW_LAST
 
 struct __attribute__((packed)) AwakenPayload {
     uint32_t uid_hash;
     uint8_t  reset_cause;   // raw PM->RCAUSE.reg from this boot (WDT/BOD/POR/...)
     uint8_t  hang_zone;     // HangZone breadcrumb (platform/ResetDiagnostics.h);
                             // 0 = ZONE_UNKNOWN when not a WDT reset or breadcrumb invalid
+};
+
+// Carried by PKT_WINDOW_BEGIN and PKT_WINDOW_END — the Timed duty-cycle active
+// window's edges.
+//
+// These frames are deliberately outside the reliability system: they are never
+// entered into TdmaRadioService's pending window (isTelemetryPacketForNode()
+// allowlists BUNDLE/STATUS/FULL_STATE), never retransmitted, and never consume a
+// PktHeader::seq — seq is the ack bitmap's index, and a fire-and-forget frame
+// burning one would leave a hole the node can never fill, stalling ackBaseSeq for
+// 16 sequences and inflating the Jetson's loss stats. window_id is their own
+// counter instead.
+//
+// Losing one degrades gracefully: a lost WINDOW_END costs the base some slot-0
+// airtime acking a node that is already asleep, and a lost WINDOW_BEGIN costs one
+// retransmission to prompt the deferred ack — which is exactly what the retired
+// WINDOW_LAST flag did on *every* window.
+//
+// session_time_ms is the window edge's own instant, which no other frame carries:
+// the last bundle's final sample is taken before the window closes, not at the
+// close. Timestamping the markers lets the receiver attribute bundles to windows
+// by time rather than by arrival order, which survives loss and reordering.
+struct __attribute__((packed)) WindowMarkerPayload {
+    uint32_t session_time_ms;   // session clock at the window edge
+    uint32_t planned_sleep_ms;  // WINDOW_END: standby about to be entered; 0 on BEGIN
+    uint16_t window_id;         // per-node window counter, wraps at 65535
+    uint8_t  sample_count;      // WINDOW_END: samples in the window just closed; 0 on BEGIN
 };
 
 struct __attribute__((packed)) FullStatePayload {
@@ -174,6 +212,7 @@ static constexpr uint8_t DELTA_FLAG_PM10_CLAMPED     = 0x40;
 
 static_assert(sizeof(PktHeader)           ==  5, "PktHeader must be 5 bytes");
 static_assert(sizeof(AwakenPayload)       ==  6, "AwakenPayload must be 6 bytes");
+static_assert(sizeof(WindowMarkerPayload) == 11, "WindowMarkerPayload must be 11 bytes");
 static_assert(sizeof(FullStatePayload)    == 20, "FullStatePayload must be 20 bytes");
 static_assert(sizeof(StatusPayload)       == 20, "StatusPayload must be 20 bytes");
 static_assert(sizeof(TimeSyncPayload)     ==  8, "TimeSyncPayload must be 8 bytes");
@@ -197,6 +236,8 @@ static constexpr size_t kAwakenLoRaSizeLegacy =
     kLegacyHeaderSize + kAwakenPayloadLegacyLen + 1;                    //   9
 static constexpr size_t kStatusLoRaSize =
     sizeof(PktHeader) + sizeof(StatusPayload) + 1;                      //  26
+static constexpr size_t kWindowMarkerLoRaSize =
+    sizeof(PktHeader) + sizeof(WindowMarkerPayload) + 1;                //  17
 static constexpr size_t kTimeSyncLoRaSize =
     sizeof(PktHeader) + sizeof(TimeSyncPayload) + 1;                    //  14
 static constexpr size_t kAckSummaryLoRaSize =
@@ -268,6 +309,35 @@ inline uint8_t encodeStatusPayload(
     memcpy(buf + sizeof(PktHeader), &sp,  sizeof(StatusPayload));
     buf[sizeof(PktHeader) + sizeof(StatusPayload)] = crc8(buf, sizeof(PktHeader) + sizeof(StatusPayload));
     return static_cast<uint8_t>(kStatusLoRaSize);
+}
+
+// ---------- encode: raw LoRa WINDOW_BEGIN / WINDOW_END payload (17 bytes) ----------
+//
+// pktType must be PKT_WINDOW_BEGIN or PKT_WINDOW_END. seq is fixed at 0: these
+// frames are outside the ack bitmap and must never advance the telemetry
+// sequence (see WindowMarkerPayload). window_id is the sequence that identifies
+// them.
+
+inline uint8_t encodeWindowMarkerPayload(
+    uint8_t pkt_type, uint8_t node_id,
+    const WindowMarkerPayload& marker,
+    uint8_t* buf, size_t buf_size,
+    uint8_t flags = 0)
+{
+    if (buf_size < kWindowMarkerLoRaSize) return 0;
+    if (pkt_type != PKT_WINDOW_BEGIN && pkt_type != PKT_WINDOW_END) return 0;
+
+    PktHeader hdr;
+    hdr.magic    = PKT_MAGIC;
+    hdr.pkt_type = pkt_type;
+    hdr.node_id  = node_id;
+    hdr.seq      = 0;
+    hdr.flags    = flags;
+    memcpy(buf,                    &hdr,    sizeof(PktHeader));
+    memcpy(buf + sizeof(PktHeader), &marker, sizeof(WindowMarkerPayload));
+    buf[sizeof(PktHeader) + sizeof(WindowMarkerPayload)] =
+        crc8(buf, sizeof(PktHeader) + sizeof(WindowMarkerPayload));
+    return static_cast<uint8_t>(kWindowMarkerLoRaSize);
 }
 
 // ---------- encode: raw LoRa TIME_SYNC payload (12 bytes, base -> nodes broadcast) ----------
@@ -545,6 +615,21 @@ inline bool decodeAwaken(
     memcpy(&hdr_out, raw, header_len);
     memcpy(&awaken_out, raw + header_len, payload_len);
     return hdr_out.magic == PKT_MAGIC && hdr_out.pkt_type == PKT_AWAKEN;
+}
+
+// Accepts either marker type; the caller reads hdr_out.pkt_type to tell a window
+// open from a window close.
+inline bool decodeWindowMarker(
+    const uint8_t* raw, size_t len,
+    PktHeader& hdr_out, WindowMarkerPayload& marker_out)
+{
+    if (len < kWindowMarkerLoRaSize) return false;
+    if (crc8(raw, kWindowMarkerLoRaSize - 1) != raw[kWindowMarkerLoRaSize - 1]) return false;
+    memcpy(&hdr_out,    raw,                    sizeof(PktHeader));
+    memcpy(&marker_out, raw + sizeof(PktHeader), sizeof(WindowMarkerPayload));
+    return hdr_out.magic == PKT_MAGIC &&
+           (hdr_out.pkt_type == PKT_WINDOW_BEGIN ||
+            hdr_out.pkt_type == PKT_WINDOW_END);
 }
 
 inline bool decodeTimeSync(

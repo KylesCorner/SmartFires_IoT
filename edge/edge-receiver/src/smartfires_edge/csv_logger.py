@@ -34,8 +34,19 @@ CSV_COLUMNS = [
     "fail_total",
     "delta_flags",
     "pkt_flags",
+    # Timed duty-cycle window bookkeeping, derived from the PKT_WINDOW_BEGIN /
+    # PKT_WINDOW_END frames (see window_state.py). window_id is the reliable one
+    # to group on: it is stamped on every row of a window and survives a lost
+    # marker, whereas window_first only marks the first row after a BEGIN and
+    # window_last only ever appears on the window_end row itself — the true close
+    # instant, which no data row can represent because the last bundle's final
+    # sample is taken before the window ends. Empty in Continuous mode, which has
+    # no windows.
+    "window_id",
     "window_first",
     "window_last",
+    "planned_sleep_ms",
+    "window_sample_count",
     "retx",
     "reset_cause",
     "reset_cause_names",

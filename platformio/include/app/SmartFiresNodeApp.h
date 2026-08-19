@@ -91,9 +91,14 @@ private:
     uint32_t _txDrainDeadlineMs = 0;
     bool     _txDrainDeadlineValid = false;
 
-    // Duty phase as of the last update(), for detecting the active-window
-    // open/close edges that drive PktHeader WINDOW_FIRST/WINDOW_LAST.
+    // Duty phase as of the last update(), for detecting the wake and
+    // window-close edges that emit PKT_WINDOW_BEGIN/PKT_WINDOW_END.
     DutyCyclePhase _lastDutyPhase = DutyCyclePhase::NotStarted;
+
+    // Identifies one duty cycle across its BEGIN/END pair. Its own counter, not
+    // PktHeader::seq — markers are fire-and-forget, and a seq they burn but
+    // never retransmit would leave a hole the base's ack bitmap can never fill.
+    uint16_t _windowId = 0;
 
     // rtc-subsecond-sleep instrumentation: offset of the pre-sleep session
     // clock relative to the local sleep-compensated clock
@@ -114,5 +119,7 @@ private:
     bool enqueueTelemetryPayload(const uint8_t *buf, uint8_t len);
     bool takeAndEnqueueBundle();
     void updateWindowMarkers();
+    bool sendWindowMarker(uint8_t pktType, uint32_t plannedSleepMs,
+                          uint16_t sampleCount);
     void logWakePhaseErrorOnNextSync();
 };

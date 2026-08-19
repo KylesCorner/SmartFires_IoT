@@ -197,6 +197,17 @@ void DutyCycleController::transitionTo(
       phaseName(next),
       static_cast<unsigned long>(elapsed));
 
+  // Leaving a sleeping phase starts a new wake-to-wake cycle. WarmingUp is the
+  // only way back into the awake half of the cycle, from either sleeping phase
+  // or from begin(), so it is the one place the period clock restarts.
+  if (next == DutyCyclePhase::WarmingUp) {
+    _cycleStartMs = now;
+    _activeSampleCount = 0;
+
+    LOG_DEBUG("duty", "cycle_start cycle_period_ms=%lu",
+              static_cast<unsigned long>(_cfg.cyclePeriodMs));
+  }
+
   if (next == DutyCyclePhase::ActiveSampling) {
     _freshSampleReady = false;
 
@@ -211,20 +222,64 @@ void DutyCycleController::transitionTo(
 
   if (next == DutyCyclePhase::CooldownSleeping) {
     // This timestamp covers both CooldownSleeping and
-    // IdleSleeping. The five-minute interval starts when the
+    // IdleSleeping. The sleep interval starts when the
     // active window ends.
     _sleepStartMs = now;
     _triggerLatched = false;
+    _plannedSleepMs = computePlannedSleepMs();
 
     LOG_DEBUG(
         "duty",
-        "sleep_cycle_enter timed_sleep_ms=%lu "
-        "min_sleep_ms=%lu",
-        static_cast<unsigned long>(
-            _cfg.timedSleepMs),
+        "sleep_cycle_enter planned_sleep_ms=%lu cycle_period_ms=%lu "
+        "cycle_elapsed_ms=%lu min_sleep_ms=%lu",
+        static_cast<unsigned long>(_plannedSleepMs),
+        static_cast<unsigned long>(_cfg.cyclePeriodMs),
+        static_cast<unsigned long>(now - _cycleStartMs),
         static_cast<unsigned long>(
             _cfg.minSleepMs));
   }
+}
+
+// Fixed wake-to-wake period: the standby is whatever remains of cyclePeriodMs
+// once this cycle's warmup and active window (including any full-bundle
+// overrun) have been spent. Measuring against _cycleStartMs rather than
+// subtracting nominal warmup/window figures means real jitter is absorbed by
+// the sleep, so the cycle length itself stays put.
+uint32_t DutyCycleController::computePlannedSleepMs() const {
+  if (_cfg.cyclePeriodMs == 0) {
+    return 0;
+  }
+
+  const uint32_t cycleElapsedMs = _clock.millis() - _cycleStartMs;
+  const uint32_t remainingMs = (_cfg.cyclePeriodMs > cycleElapsedMs)
+                                   ? (_cfg.cyclePeriodMs - cycleElapsedMs)
+                                   : 0;
+
+  if (remainingMs < _cfg.minStandbyMs) {
+    LOG_WARN("duty",
+             "cycle_overrun cycle_elapsed_ms=%lu cycle_period_ms=%lu "
+             "sleep_floored_to_ms=%lu",
+             static_cast<unsigned long>(cycleElapsedMs),
+             static_cast<unsigned long>(_cfg.cyclePeriodMs),
+             static_cast<unsigned long>(_cfg.minStandbyMs));
+    return _cfg.minStandbyMs;
+  }
+
+  return remainingMs;
+}
+
+void DutyCycleController::setActiveWindowHold(bool hold) {
+  _activeWindowHold = hold;
+}
+
+uint32_t DutyCycleController::plannedSleepMs() const { return _plannedSleepMs; }
+
+uint16_t DutyCycleController::lastWindowSampleCount() const {
+  return _lastWindowSampleCount;
+}
+
+bool DutyCycleController::lastWindowOverran() const {
+  return _lastWindowOverran;
 }
 
 // void DutyCycleController::transitionTo(DutyCyclePhase next) {
@@ -339,7 +394,76 @@ void DutyCycleController::updateWakingSensors() {
   }
 }
 
+// The active window closes on activeSampleMs, except that a partial bundle in
+// the caller's accumulator (setActiveWindowHold) holds it open to the next
+// bundle boundary — bounded by activeOverrunMaxMs so a starved sample tick
+// cannot hold the window open indefinitely.
+bool DutyCycleController::activeWindowShouldClose() const {
+  const uint32_t elapsedMs = phaseElapsedMs();
+
+  if (elapsedMs < _cfg.activeSampleMs) {
+    return false;
+  }
+
+  if (!_activeWindowHold || _cfg.activeOverrunMaxMs == 0) {
+    return true;
+  }
+
+  return elapsedMs >= _cfg.activeSampleMs + _cfg.activeOverrunMaxMs;
+}
+
 void DutyCycleController::updateSampling() {
+  // Tested before the sample tick, not after it. The old order took a full
+  // reading of every sensor and then threw it away in the same call, because
+  // transitionTo(CooldownSleeping) clears _freshSampleReady before the app ever
+  // gets to consume it — so a tick landing on the closing boundary (which, with
+  // activeSampleMs an exact multiple of samplePeriodMs, is every single window)
+  // was a sensor read paid for and discarded.
+  if (_cfg.enabled && activeWindowShouldClose()) {
+    const uint32_t elapsedMs = phaseElapsedMs();
+
+    _lastWindowSampleCount = _activeSampleCount;
+    _lastWindowOverran = _activeWindowHold;
+
+    LOG_INFO("duty",
+             "active_window_complete elapsed_ms=%lu active_sample_ms=%lu "
+             "samples=%u overrun_ms=%lu held_open=%u",
+             static_cast<unsigned long>(elapsedMs),
+             static_cast<unsigned long>(_cfg.activeSampleMs),
+             static_cast<unsigned int>(_activeSampleCount),
+             static_cast<unsigned long>(elapsedMs > _cfg.activeSampleMs
+                                            ? elapsedMs - _cfg.activeSampleMs
+                                            : 0),
+             _activeWindowHold ? 1 : 0);
+
+    if (_lastWindowOverran) {
+      // Closed with the hold still asserted: the accumulator never completed
+      // its bundle inside the overrun budget, so the caller will have to
+      // force-encode a partial one.
+      LOG_WARN("duty",
+               "active_window_overrun_cap samples=%u overrun_max_ms=%lu",
+               static_cast<unsigned int>(_activeSampleCount),
+               static_cast<unsigned long>(_cfg.activeOverrunMaxMs));
+    }
+
+    if (!sleepDutyCycledSensors()) {
+      LOG_WARN("duty", "sleep_duty_cycled_sensors_partial_failure");
+    }
+
+    const auto &r = _triggerSensor.triggerReading();
+    if (r.valid) {
+      _baselineTempC = r.tempC;
+      _baselineHumidityPct = r.humidityPct;
+
+      LOG_INFO("trigger", "baseline_updated temp_c=%.2f humidity_pct=%.2f",
+               _baselineTempC, _baselineHumidityPct);
+    }
+
+    _freshSampleReady = false;
+    transitionTo(DutyCyclePhase::CooldownSleeping);
+    return;
+  }
+
   if (_clock.millis() - _lastSampleMs >= _cfg.samplePeriodMs) {
     _lastSampleMs = _clock.millis();
 
@@ -397,37 +521,16 @@ void DutyCycleController::updateSampling() {
 
     if (sampledAny) {
       _freshSampleReady = true;
-      LOG_DEBUG("duty", "fresh_sample_ready=1");
+
+      if (_activeSampleCount < 0xFFFFu) {
+        _activeSampleCount++;
+      }
+
+      LOG_DEBUG("duty", "fresh_sample_ready=1 window_samples=%u",
+                static_cast<unsigned int>(_activeSampleCount));
     } else {
       LOG_WARN("duty", "sample_tick_no_sensor_sampled");
     }
-  }
-
-  if (!_cfg.enabled) {
-    return;
-  }
-
-  if (phaseElapsedMs() >= _cfg.activeSampleMs) {
-    LOG_INFO("duty",
-             "active_window_complete elapsed_ms=%lu active_sample_ms=%lu",
-             static_cast<unsigned long>(phaseElapsedMs()),
-             static_cast<unsigned long>(_cfg.activeSampleMs));
-
-    if (!sleepDutyCycledSensors()) {
-      LOG_WARN("duty", "sleep_duty_cycled_sensors_partial_failure");
-    }
-
-    const auto &r = _triggerSensor.triggerReading();
-    if (r.valid) {
-      _baselineTempC = r.tempC;
-      _baselineHumidityPct = r.humidityPct;
-
-      LOG_INFO("trigger", "baseline_updated temp_c=%.2f humidity_pct=%.2f",
-               _baselineTempC, _baselineHumidityPct);
-    }
-
-    _freshSampleReady = false;
-    transitionTo(DutyCyclePhase::CooldownSleeping);
   }
 }
 bool DutyCycleController::beginSensors() {
@@ -740,8 +843,8 @@ bool DutyCycleController::wakeFromSleepIfNeeded() {
 
   const bool timerDue =
       timedWakeEnabled() &&
-      _cfg.timedSleepMs > 0 &&
-      elapsed >= _cfg.timedSleepMs;
+      _plannedSleepMs > 0 &&
+      elapsed >= _plannedSleepMs;
 
   if (!triggerDue && !timerDue) {
     return false;
@@ -803,9 +906,13 @@ DutyCycleController::timedSleepRemainingMs() const {
 
   const uint32_t elapsedMs = sleepElapsedMs();
 
-  if (elapsedMs >= _cfg.timedSleepMs) {
+  // _plannedSleepMs was fixed at window close by the cycle-period arithmetic, so
+  // time the node spends awake after the close (waiting for its TDMA slot to
+  // carry the last bundle and PKT_WINDOW_END) comes out of the standby and the
+  // wake-to-wake period holds.
+  if (elapsedMs >= _plannedSleepMs) {
     return 0;
   }
 
-  return _cfg.timedSleepMs - elapsedMs;
+  return _plannedSleepMs - elapsedMs;
 }

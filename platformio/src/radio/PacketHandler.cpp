@@ -89,65 +89,56 @@ bool PacketHandler::push(const SensorSnapshot &snap) {
         return false;
     }
 
-    return encodeAccumulatedBundle(0);
+    return encodeAccumulatedBundle();
 }
 
 // --- Timed duty-cycle windows ---
 
-void PacketHandler::beginWindow() {
-    _pendingBundleFlags |= BinaryPacket::PKT_FLAG_WINDOW_FIRST;
-
-    LOG_DEBUG("packet", "window_begin pending_flags=0x%02X",
-              static_cast<unsigned int>(_pendingBundleFlags));
+bool PacketHandler::hasPartialBundle() const {
+    // A completed-but-untaken bundle is not partial — the accumulator behind it
+    // is empty, so the window is free to close.
+    return _bundleEncodingEnabled && _hasRef;
 }
 
 bool PacketHandler::flushWindow() {
     // A bundle that completed but hasn't been taken yet owns _bundleBuf, so
-    // encoding over it would lose it. Stamp WINDOW_LAST onto that frame in
-    // place instead.
+    // encoding over it would lose it. Nothing to do either way: it is already a
+    // complete frame.
     if (_bundleReady) {
-        _bundleBuf[offsetof(BinaryPacket::PktHeader, flags)] |=
-            BinaryPacket::PKT_FLAG_WINDOW_LAST;
-        _bundleBuf[_bundleLen - 1] =
-            BinaryPacket::crc8(_bundleBuf, _bundleLen - 1);
-
-        LOG_DEBUG("packet", "window_flush stamped_ready_bundle=1");
+        LOG_DEBUG("packet", "window_flush_noop reason=bundle_already_ready");
         return true;
     }
 
     if (!_bundleEncodingEnabled || !_hasRef) {
-        // Nothing accumulated since the last bundle — this window's samples all
-        // went out already, just without a WINDOW_LAST marker on the final one.
         LOG_DEBUG("packet", "window_flush_empty delta_count=%u",
                   static_cast<unsigned int>(_deltaCount));
         return false;
     }
 
-    return encodeAccumulatedBundle(BinaryPacket::PKT_FLAG_WINDOW_LAST);
+    // Reached only when the duty controller's active-window hold gave up on
+    // waiting for the bundle to fill (overrun cap). Encode the runt rather than
+    // discard the samples.
+    LOG_WARN("packet", "window_flush_partial delta_count=%u max_deltas=%u",
+             static_cast<unsigned int>(_deltaCount),
+             static_cast<unsigned int>(_cfg.maxDeltas));
+
+    return encodeAccumulatedBundle();
 }
 
-bool PacketHandler::encodeAccumulatedBundle(uint8_t extraFlags) {
-    const uint8_t flags =
-        static_cast<uint8_t>(_pendingBundleFlags | extraFlags);
-
+bool PacketHandler::encodeAccumulatedBundle() {
     _bundleLen = BinaryPacket::encodeBundlePayload(
         _cfg.nodeId, _seq++,
         _ref, _deltas, _deltaCount,
-        _bundleBuf, sizeof(_bundleBuf), flags);
+        _bundleBuf, sizeof(_bundleBuf), 0);
 
     _bundleReady = (_bundleLen > 0);
     _hasRef      = false;
     _deltaCount  = 0;
 
     if (_bundleReady) {
-        // Only consumed once it actually reached a frame — a failed encode must
-        // not swallow the WINDOW_FIRST marker for this window.
-        _pendingBundleFlags = 0;
-
-        LOG_INFO("packet", "bundle_encoded len=%u node=%u flags=0x%02X",
+        LOG_INFO("packet", "bundle_encoded len=%u node=%u",
                  static_cast<unsigned int>(_bundleLen),
-                 static_cast<unsigned int>(_cfg.nodeId),
-                 static_cast<unsigned int>(flags));
+                 static_cast<unsigned int>(_cfg.nodeId));
     } else {
         LOG_WARN("packet", "bundle_encode_failed node=%u",
                  static_cast<unsigned int>(_cfg.nodeId));
@@ -235,7 +226,6 @@ void PacketHandler::resetBundleState() {
     _deltaCount  = 0;
     _bundleReady = false;
     _bundleLen   = 0;
-    _pendingBundleFlags = 0;
     memset(&_ref, 0, sizeof(_ref));
     memset(&_prevSample, 0, sizeof(_prevSample));
     memset(_deltas, 0, sizeof(_deltas));

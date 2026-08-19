@@ -62,19 +62,26 @@ public:
     bool    bundleReady() const;
     uint8_t takeBundle(uint8_t *buf, size_t bufSize);
 
-    // --- Timed duty-cycle windows (PktHeader::flags) ---
+    // --- Timed duty-cycle windows ---
     //
-    // beginWindow() marks the next bundle to be encoded as the first of a new
-    // active window. flushWindow() closes the window: it force-encodes whatever
-    // partial bundle has accumulated (which would otherwise sit unsent across
-    // the MCU standby) and marks it as the window's last. Returns true if a
-    // bundle is now ready to take.
+    // Window edges are announced on the wire by PKT_WINDOW_BEGIN/PKT_WINDOW_END
+    // (SmartFiresNodeApp owns those), not by flags on the sample stream, so the
+    // handler's only remaining window duty is to say whether the accumulator is
+    // mid-bundle.
     //
-    // A window short enough to produce a single bundle gets both bits on it.
-    // A window whose samples happened to land exactly on a bundle boundary has
-    // nothing left to flush, so no packet carries WINDOW_LAST — a receiver
-    // should treat the next WINDOW_FIRST as an implicit window close.
-    void beginWindow();
+    // hasPartialBundle() drives DutyCycleController's active-window hold: the
+    // window runs past activeSampleMs until this goes false, so every bundle on
+    // the air carries a full maxDeltas+1 samples and no runt is ever encoded. A
+    // runt spends a fresh 20-byte FullState reference on a handful of samples,
+    // and — before the hold existed — was also the frame that could not be acked
+    // before standby.
+    //
+    // flushWindow() is the escape hatch for when the hold hits its overrun cap
+    // (a wedged sensor starving the sample tick). It force-encodes whatever has
+    // accumulated so those samples are not lost, and returns true if a bundle is
+    // now ready to take. In normal operation the hold means nothing is
+    // accumulated at window close and this returns false.
+    bool hasPartialBundle() const;
     bool flushWindow();
 
     // --- STATUS (GPS + battery, interval from Config::statusIntervalMs) ---
@@ -101,9 +108,6 @@ private:
     uint8_t _deltaCount  = 0;
     bool    _hasRef      = false;
     bool    _bundleReady = false;
-    // PktHeader::flags bits to stamp on the next bundle encode, cleared once
-    // one actually reaches a frame.
-    uint8_t _pendingBundleFlags = 0;
     uint8_t _bundleBuf[BinaryPacket::kMaxBundleLoRaSize] = {};
     uint8_t _bundleLen   = 0;
 
@@ -137,6 +141,6 @@ private:
         const BinaryPacket::FullStatePayload &sample);
 
     void resetBundleState();
-    bool encodeAccumulatedBundle(uint8_t extraFlags);
+    bool encodeAccumulatedBundle();
     void tryEncodeStatus(const SensorSnapshot &snap);
 };
