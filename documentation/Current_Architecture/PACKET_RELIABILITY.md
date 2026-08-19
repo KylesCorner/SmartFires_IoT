@@ -273,14 +273,21 @@ retryWaitMs = clamp(expectedAckIntervalMs * retryWaitMultiplierPermille / 1000,
 
 | Parameter | Value | Notes |
 |---|---|---|
-| `expectedAckIntervalMs` | 4 000 ms | Expected cadence of base-side `ACK_SUMMARY` packets |
+| `expectedAckIntervalMs` | 4 500 ms (= `kFramePeriodMs`) | Expected cadence of base-side `ACK_SUMMARY` packets — derived from the frame period, since the base can only transmit in slot 0 |
 | `retryWaitMultiplierPermille` | 2000 (2.0×) | Back-off multiplier applied to the expected interval |
-| `retryWaitMinMs` | 4 500 ms | Floor: one interval + 500 ms jitter margin |
-| `retryWaitMaxMs` | 10 000 ms | Ceiling: 2.5 intervals |
+| `retryWaitMinMs` | 4 500 ms | Floor: one full frame rotation, so a retry can never fire before the base has had one chance to ack (`static_assert`ed against `kFramePeriodMs`) |
+| `retryWaitMaxMs` | 10 000 ms | Ceiling: ~2.2 frame rotations |
 
-At current values, `retryWaitMs` evaluates to `4000 × 2.0 = 8000`, clamped into
-`[4500, 10000]` → **8 000 ms**. An entry younger than this is skipped by
-`pickRetransmitCandidate()` regardless of queue idleness.
+At current values, `retryWaitMs` evaluates to `4500 × 2.0 = 9000`, clamped into
+`[4500, 10000]` → **9 000 ms** (two full frame rotations). An entry younger than
+this is skipped by `pickRetransmitCandidate()` regardless of queue idleness.
+
+Note that `retryWaitMaxMs` is now the binding constraint at only one more slot:
+at `NUM_SLOTS=6` the formula would want `5400 × 2.0 = 10 800 ms` and clamp back
+to 10 000, dropping the margin below two rotations. The `static_assert` on
+`kRetryWaitMinMs >= kFramePeriodMs` fires first, at the same slot count, which is
+the intended prompt to re-derive both bounds rather than let the gate quietly
+under-wait.
 
 `requireAckSummaryBeforeFirstRetry` (currently `false`) optionally gates a
 pending entry's *first* retransmit attempt on having observed at least one

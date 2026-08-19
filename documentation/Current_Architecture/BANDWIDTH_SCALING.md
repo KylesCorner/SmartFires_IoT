@@ -33,11 +33,15 @@ This document summarizes sensing, bundle production, TDMA service capacity, and 
   summary becomes eligible whenever a node's tracker changes), gated only by
   a 25 ms anti-flood floor (`BaseConfig::kAckSummaryMinIntervalMs`) and the
   base's own TDMA slot-window availability, so real cadence can be faster or
-  slower than 4 s depending on traffic. The 4 s figure used in this model is
-  borrowed from `NetworkConfig::kExpectedAckIntervalMs` — the **node-side**
-  assumed cadence used in its own retry-wait-gate formula (see
-  PACKET_RELIABILITY.md), not an edge/Jetson setting (the Jetson never
-  generates `ACK_SUMMARY` at all) and not a literal base emission interval.
+  slower depending on traffic. The figure used in this model is borrowed from
+  `NetworkConfig::kExpectedAckIntervalMs` — the **node-side** assumed cadence
+  used in its own retry-wait-gate formula (see PACKET_RELIABILITY.md), not an
+  edge/Jetson setting (the Jetson never generates `ACK_SUMMARY` at all) and not
+  a literal base emission interval. As of the 5-slot deployment that constant
+  is derived from the frame period (`kFramePeriodMs` = 4 500 ms, so
+  `f_ack` = 0.222 Hz); the 0.25 Hz used in the table below is the older 4 s
+  figure, left in place so the occupancy columns stay comparable across
+  revisions and because it is the more conservative of the two.
 
 ## Airtime Model
 
@@ -116,6 +120,14 @@ with $f_{ack}=0.25$ Hz/node (modeling assumption — see note above), $T_{bundle
 
 ## Node Scaling Table (2–10 nodes)
 
+**Read $N$ carefully — the table uses it two ways.** The "Frame (s)", service
+and $\eta$ columns treat $N$ as the *slot* count (`NUM_SLOTS`), since a node's
+service opportunity recurs once per full rotation. The occupancy columns treat
+$N$ as the count of *bundle-producing nodes*, which is one fewer — the base
+occupies a slot but emits no bundles. For today's deployment (4 real nodes,
+`NUM_SLOTS=5`), read frame/$\eta$ off the `5` row and occupancy off the `4`
+row: 4.5 s frame, $\eta=0.40$, ~38.5% total occupancy.
+
 | Nodes | Frame (s) | Service old (1/slot) bundles/s | Service new (3/slot) bundles/s | Util old $\eta$ | Util new $\eta$ | Loss old | Loss new | Uplink occ @ offered load | ACK occ @0.25Hz | Total occ @0.25Hz |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | 2 | 1.8 | 0.5556 | 1.6667 | 0.48 | 0.16 | 0.0% | 0.0% | 16.9% | 2.3% | 19.3% |
@@ -131,7 +143,7 @@ with $f_{ack}=0.25$ Hz/node (modeling assumption — see note above), $T_{bundle
 ## Interpretation
 
 - The multi-send TDMA change ($k=3$, `kMaxSendsPerUpdate`) roughly triples per-node service capacity over the old $k=1$ baseline.
-- At current settings, 4 nodes at 4 Hz are comfortably stable ($\eta=0.32$).
+- At current settings, the deployed 4 real nodes (`NUM_SLOTS=5`) at 4 Hz are comfortably stable ($\eta=0.40$). The shipped node profiles sample well below 4 Hz — `SensingConfig::kTimedSamplePeriodMs` is 1 000 ms — which puts the real $\eta$ nearer 0.10.
 - With $k=3$, queue utilization $\eta$ stays well under 1 (≤0.80) all the way to 10 nodes — queue overflow is not the binding constraint in this range.
 - Channel occupancy, not queue stability, becomes the binding constraint at higher node counts: total offered occupancy crosses ~77% at 8 nodes and approaches ~96% at 10 nodes, leaving little margin for retransmits, AWAKEN/TIME_SYNC traffic, or clock drift before real-world loss appears.
 

@@ -88,15 +88,16 @@ private:
     uint8_t failedSendAttempts = 0;
   };
 
-  // KNOWN LIMITATION: the Jetson's "New Session" flow (ingest_service.py's
-  // reset_event handler) enqueues one CMD_RESET per configured node in a
-  // tight loop. With more than kMaxPendingCommands nodes configured, the
-  // extras silently fail to enqueue (QUEUE_FULL, visible only in the base
-  // debug log) and never get reset. Revisit this constant (and/or add
-  // Jetson-side batching that waits for a slot-0 window between batches)
-  // before deploying more than 4 nodes. See
-  // documentation/Pending_Plans/RESET_SYSTEM.md.
-  static constexpr uint8_t kMaxPendingCommands = 4;
+  // The Jetson's "New Session" flow (ingest_service.py's reset_event handler)
+  // enqueues one CMD_RESET per configured node in a tight loop, so the queue
+  // has to hold a command for every node at once or the extras silently fail
+  // to enqueue (QUEUE_FULL, visible only in the base debug log) and those
+  // nodes never get reset. Sized off kMaxAssignedNodes rather than a literal
+  // so it can no longer be outgrown by a NUM_SLOTS bump: the +1 leaves room
+  // for one operator-triggered per-node command to coexist with a full
+  // network-wide sweep. See documentation/Pending_Plans/RESET_SYSTEM.md.
+  static constexpr uint8_t kMaxPendingCommands =
+      static_cast<uint8_t>(BaseConfig::kMaxAssignedNodes + 1);
 
   struct UartRxState {
     enum class Stage : uint8_t {

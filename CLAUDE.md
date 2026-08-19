@@ -196,9 +196,9 @@ SmartFires_IoT/
 
 | Environment | Board | Key flags | Purpose |
 |---|---|---|---|
-| `feather_m0_lora_node` | Feather M0 | `LORA_NODE=2` `NUM_SLOTS=4` `SMARTFIRES_TDMA_RELIABILITY_MODE=1` `SMARTFIRES_STATUS_INTERVAL_MS=15000` `ICM_20948_USE_DMP` | Real sensor node firmware |
-| `feather_m0_lora_node_debug` | Feather M0 | `LORA_NODE=1` `NUM_SLOTS=4` `SMARTFIRES_TDMA_RELIABILITY_MODE=1` `SMARTFIRES_STATUS_INTERVAL_MS=1000` `ICM_20948_USE_DMP` | Default env; debug filter, faster STATUS |
-| `feather_m0_lora_base` | Feather M0 | `LORA_BASE=1` | Base station firmware |
+| `feather_m0_lora_node` | Feather M0 | `LORA_NODE=2` `NUM_SLOTS=5` `SMARTFIRES_TDMA_RELIABILITY_MODE=1` `SMARTFIRES_STATUS_INTERVAL_MS=15000` `ICM_20948_USE_DMP` | Real sensor node firmware |
+| `feather_m0_lora_node_debug` | Feather M0 | `LORA_NODE=1` `NUM_SLOTS=5` `SMARTFIRES_TDMA_RELIABILITY_MODE=1` `SMARTFIRES_STATUS_INTERVAL_MS=1000` `ICM_20948_USE_DMP` | Default env; debug filter, faster STATUS |
+| `feather_m0_lora_base` | Feather M0 | `LORA_BASE=1` `NUM_SLOTS=5` | Base station firmware |
 | `feather_m0_sensor_probe` | Feather M0 | `SENSOR_PROBE=1` `ICM_20948_USE_DMP` | No LoRa/TDMA/app layer; sensor bring-up + power draw measurement |
 | `feather_m0_lora_sniffer` | Feather M0 | `SMARTFIRES_LORA_SNIFFER=1` | Passive LoRa packet monitor |
 | `native` | Desktop | `UNIT_TEST` | Unity unit tests — no hardware required |
@@ -211,13 +211,12 @@ environments ship with today.
 
 ### Adding a node
 
-1. Add a new `[env:feather_m0_lora_node_N]` section in `platformio.ini` based on `feather_m0_lora_node`.
-2. **Update `NUM_SLOTS` to (new total node count) + 1 in ALL node environments (node and debug).** Slot 0 is permanently reserved for the base station — `NUM_SLOTS` is never just the node count.
-3. Reflash every node Feather — they all need the same `NUM_SLOTS` for TDMA to work.
-4. **The base Feather also needs `NUM_SLOTS` to match, but its `[env:feather_m0_lora_base]` section currently doesn't set the flag at all** — it silently falls back to `NetworkConfig.h`'s `#define NUM_SLOTS 4` default via `BaseConfig.h`. This only matches today because node deployments also use 4. If you change node `NUM_SLOTS` away from 4, add `-DNUM_SLOTS=<value>` to the base env explicitly (or wire up a shared `platformio.ini` value so it can't drift) and reflash the base, or the base's slot-0 reservation will silently disagree with the nodes' slot math.
-5. **If queuing more than 4 per-node resets/calibrates back-to-back, also bump `kMaxPendingCommands` in `SmartFiresBaseApp.h`** (currently `4`) and reflash the base. The per-node "Reset" button queues one `CMD_RESET` per click on the base — beyond 4 queued at once before the base drains them, the extras silently fail to enqueue (`QUEUE_FULL`). (The "New Session" web flow does not reset nodes or the base at all — it only clears Jetson-side session data.) See `documentation/Pending_Plans/RESET_SYSTEM.md`'s "Known Limitation" section.
+1. **Set `NUM_SLOTS` to (new total node count) + 1 in `platformio.ini`'s `[network]` section** — one line, `-DNUM_SLOTS=<value>`. Slot 0 is permanently reserved for the base station, so `NUM_SLOTS` is never just the node count. The base env and all four node envs interpolate `${network.build_flags}`, so they cannot drift apart; do **not** re-add a per-env `-DNUM_SLOTS`.
+2. Reflash **every node Feather and the base** — a slot-count mismatch is not a graceful degradation (see below).
+3. Update `DEFAULT_NUM_SLOTS` in `edge/edge-receiver/src/smartfires_edge/config.py`, and the explicit `--num-slots` in `documentation/User_Reference/JETSON_CHEATSHEET.md`'s saved web command if you use it. Sniffer slot alignment only — ingest is unaffected.
+4. Nothing else is sized by hand: `BaseConfig::kTotalEntities`/`kMaxAssignedNodes`, `kAckSummaryNodeSilenceMs`, `NetworkConfig::kFramePeriodMs`/`kExpectedAckIntervalMs`, and `SmartFiresBaseApp::kMaxPendingCommands` all derive from `kNumSlots`. A `static_assert` on `kRetryWaitMinMs >= kFramePeriodMs` fires if the slot count outgrows the app-layer retry floor (at 900 ms slots, `NUM_SLOTS=6` is the first count that trips it).
 
-`NUM_SLOTS` is the only flag that must match across all node Feathers (and, per the caveat above, the base).
+**Why the base matters as much as the nodes.** `NUM_SLOTS` feeds two independent things on the base: its own `TdmaClock` frame length (a mismatch makes the base's slot-0 window walk across the node slots and transmit on top of them), and `BaseConfig::kMaxAssignedNodes = kNumSlots - 1`, which sizes the node-assignment table. If the base's count is too low, `findOrCreateNodeAssignment()` returns `nullptr` for the surplus node — it never gets a `node_id`, never gets its direct TIME_SYNC, and sits re-broadcasting AWAKEN forever. The only symptom is `awaken_local_time_sync_queued result=NO_ASSIGNMENT` in the base debug log; the dashboard just shows a node that never appears.
 
 ### Common build commands (run from `platformio/`)
 
@@ -490,11 +489,11 @@ node) — not `N`.
 |---|---|---|
 | `slotWidthMs` | 900 ms | Fits worst-case bundle TX (340 ms) + link-ACK timeout (250 ms) + 2×20 ms guard |
 | `guardMs` | 20 ms | Covers crystal drift between 10-min sync intervals at 50 ppm |
-| `rxWakeAheadMs` | 50 ms | How long before slot 0 a node starts waking its radio for Rx gating — separate from `guardMs`, also covers main-loop jitter, not just drift |
+| `rxWakeAheadMs` | 150 ms | How long before slot 0 a node starts waking its radio for Rx gating — separate from `guardMs`, also covers main-loop jitter, not just drift |
 | `kLinkRetries` | 3 | Link-layer (RHReliableDatagram) retries — only active under `StrictLinkAck` mode |
 | `kLinkAckTimeoutMs` | 250 ms | Link-layer per-attempt timeout — only active under `StrictLinkAck` mode |
 | `syncStaleMs` | 1 320 000 ms | After 22 min without TIME_SYNC, fall back to immediate TX |
-| `NUM_SLOTS` (build flag) | 4 (default) | = (node count) + 1; must match across all node Feathers |
+| `NUM_SLOTS` (build flag) | 5 | = (node count) + 1; set once in `platformio.ini`'s `[network]` section, shared by the base env and all node envs |
 
 All values above live in `config/NetworkConfig.h`. Real node builds run in `AppLayerAckSummary`
 mode (`SMARTFIRES_TDMA_RELIABILITY_MODE=1`), where link-layer ACK is disabled
@@ -633,7 +632,7 @@ smartfires-edge receive --sync-interval 600      # 10-min sync interval
 smartfires-edge receive --anemometer-port /dev/ttyUSB0 --anemometer-baud 9600 --anemometer-address 1
 
 smartfires-edge web --port /dev/smartfires-base --http-port 8000          # ingest + FastAPI dashboard
-smartfires-edge web --sniffer-port /dev/ttyUSB1 --num-slots 4             # + passive sniffer feed
+smartfires-edge web --sniffer-port /dev/ttyUSB1 --num-slots 5             # + passive sniffer feed (must match flashed NUM_SLOTS)
 
 smartfires-edge visualize --port /dev/smartfires-base    # live terminal telemetry/status tables
 smartfires-edge summary --data-dir /mnt/nvme_drive/data  # packet-loss summary from saved state

@@ -49,9 +49,7 @@ constexpr uint8_t kMaxAckSummarySendAttempts = 3;
 // ~1 s blocking sendToWait() calls on a node that cannot answer. A node with
 // nothing new to say never has `dirty` set, so this can only ever gate a node
 // that really did stop responding.
-constexpr uint32_t kAckSummaryNodeSilenceMs =
-    2u * static_cast<uint32_t>(NetworkConfig::kNumSlots) *
-    NetworkConfig::kSlotWidthMs;
+constexpr uint32_t kAckSummaryNodeSilenceMs = 2u * NetworkConfig::kFramePeriodMs;
 
 // Bounded retry for a queued CMD_CALIBRATE/CMD_RESET before giving up on a
 // node that isn't link-acking it. Each attempt is one sendToWait() call from

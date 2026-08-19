@@ -31,7 +31,8 @@ automatically.
 
 | Constant | Value | Meaning |
 |---|---|---|
-| `kNumSlots` | 4 (from `NUM_SLOTS` build flag) | TDMA slots per frame; must match across all node Feathers |
+| `kNumSlots` | 5 (from `NUM_SLOTS` build flag) | TDMA slots per frame = node count + 1; set in `platformio.ini`'s `[network]` section, shared by node and base envs |
+| `kFramePeriodMs` | = `kNumSlots × kSlotWidthMs` (4 500 ms) | One full slot rotation; the spacing between consecutive base transmit windows |
 | `kSlotWidthMs` | 900 ms | Slot duration; fits worst-case one bundle TX (340 ms) + one link-ACK timeout (250 ms) + 2× guard |
 | `kGuardMs` | 20 ms | Guard time at slot edges; covers ≤50 ppm crystal drift at 22 min max sync interval |
 | `kRxWakeAheadMs` | 150 ms | How long before slot 0 a node starts waking its radio for Rx gating (`TdmaClock::baseRxWindowOpen()`); distinct from `kGuardMs` — also covers main-loop jitter from blocking sensor reads, not just crystal drift. Starting value, not yet bench-characterized |
@@ -48,7 +49,7 @@ automatically.
 | `kReliabilityMaxAttempts` | 3 | Max app-layer retransmit attempts per packet |
 | `kReliabilityMaxAgeMs` | 30 000 ms | Evict pending packet from window after this age |
 | `kReliabilityMode` | `AppLayerAckSummary` | Active reliability mode (build-flag selectable via `SMARTFIRES_TDMA_RELIABILITY_MODE`) |
-| `kExpectedAckIntervalMs` | 4 000 ms | ACK-paced retry gate: expected time between ACK_SUMMARY packets |
+| `kExpectedAckIntervalMs` | = `kFramePeriodMs` (4 500 ms) | ACK-paced retry gate: expected time between ACK_SUMMARY packets. The base only transmits in slot 0, so acks cannot arrive faster than one frame rotation |
 | `kRetryWaitMultiplierPermille` | 2000 (×2.0) | ACK-paced retry gate: back-off multiplier in permille |
 | `kRetryWaitMinMs` | 4 500 ms | Minimum retry wait |
 | `kRetryWaitMaxMs` | 10 000 ms | Maximum retry wait |
