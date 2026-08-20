@@ -275,6 +275,79 @@ void test_window_begin_holds_off_a_due_retransmit() {
   TEST_ASSERT_EQUAL_UINT32(1, rig.svc.retransmitCount());
 }
 
+// Walks the fake clock forward to a point where the node's receiver is open,
+// i.e. the base's slot 0 (or the rxWakeAheadMs run-up to it). That is the only
+// time an inbound command can physically arrive, which is the whole reason
+// acking one is harmful.
+static void advanceIntoBaseRxWindow(FakeClock &clock, const TdmaClock &tdma) {
+  for (uint32_t i = 0; i < 2 * kFrameMs; ++i) {
+    if (tdma.baseRxWindowOpen()) {
+      return;
+    }
+    clock.advance(1);
+  }
+  TEST_FAIL_MESSAGE("never reached the base Rx window");
+}
+
+// A command lands while the base is transmitting — by construction, inside slot
+// 0. Link-acking it there put this node's radio on the air in the base's own
+// window. The base sends commands fire-and-forget now and takes PKT_CMD_ACK,
+// sent in this node's slot, as the acknowledgement instead.
+void test_inbound_command_is_not_link_acked() {
+  Rig rig;
+
+  BinaryPacket::CmdSetTxPowerPayload cmd = {};
+  cmd.node_id = rig.cfg.nodeId;
+  cmd.tx_power_dbm = 11;
+  cmd.mode = BinaryPacket::TX_POWER_MODE_DYNAMIC;
+
+  uint8_t buf[BinaryPacket::kCmdSetTxPowerLoRaSize] = {};
+  const uint8_t len =
+      BinaryPacket::encodeCmdSetTxPowerPayload(/*seq=*/4, cmd, buf, sizeof(buf));
+  TEST_ASSERT_TRUE(len > 0);
+
+  rig.driver.pushInbound(buf, len, /*from=*/rig.cfg.baseAddr,
+                         /*to=*/rig.cfg.nodeId, /*id=*/9);
+
+  advanceIntoBaseRxWindow(rig.clock, rig.tdma);
+  rig.svc.update();
+
+  TEST_ASSERT_EQUAL_UINT8(0, rig.driver.ackCount);
+
+  // Still delivered to the app layer — dropping the ack must not drop the
+  // command with it.
+  TdmaRadioService::ReceivedCommand got;
+  TEST_ASSERT_TRUE(rig.svc.takePendingCommand(got));
+  TEST_ASSERT_EQUAL_UINT8(len, got.len);
+}
+
+// The counterpart: ACK_SUMMARY is still acked, because the base does block on
+// it via sendToWait(). Guards against "stop acking commands" being over-applied
+// to every inbound unicast.
+void test_ack_summary_is_still_link_acked() {
+  Rig rig;
+
+  BinaryPacket::AckSummaryPayload ack = {};
+  ack.node_id = rig.cfg.nodeId;
+  ack.ack_base_seq = 7;
+  ack.ack_mask = 0x0001;
+
+  uint8_t buf[BinaryPacket::kAckSummaryLoRaSize] = {};
+  const uint8_t len =
+      BinaryPacket::encodeAckSummaryPayload(/*seq=*/5, ack, buf, sizeof(buf));
+  TEST_ASSERT_TRUE(len > 0);
+
+  rig.driver.pushInbound(buf, len, /*from=*/rig.cfg.baseAddr,
+                         /*to=*/rig.cfg.nodeId, /*id=*/11);
+
+  advanceIntoBaseRxWindow(rig.clock, rig.tdma);
+  rig.svc.update();
+
+  TEST_ASSERT_EQUAL_UINT8(1, rig.driver.ackCount);
+  TEST_ASSERT_EQUAL_UINT8(rig.cfg.baseAddr, rig.driver.lastAckTo);
+  TEST_ASSERT_EQUAL_UINT8(11, rig.driver.lastAckId);
+}
+
 int main() {
   UNITY_BEGIN();
 
@@ -284,6 +357,8 @@ int main() {
   RUN_TEST(test_window_marker_does_not_enter_the_pending_window);
   RUN_TEST(test_window_begin_holds_off_a_due_retransmit);
   RUN_TEST(test_repeated_retransmits_are_byte_identical);
+  RUN_TEST(test_inbound_command_is_not_link_acked);
+  RUN_TEST(test_ack_summary_is_still_link_acked);
 
   UNITY_END();
   return 0;

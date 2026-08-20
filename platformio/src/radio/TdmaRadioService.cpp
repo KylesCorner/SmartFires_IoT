@@ -804,13 +804,13 @@ void TdmaRadioService::checkIncomingTimeSync() {
     ITdmaRadioDriver::ReceivedPacket packet;
 
     // autoAck=false: letting RadioHead ack automatically routes every
-    // unicast receipt (TIME_SYNC-direct, ACK_SUMMARY, CMD_CALIBRATE/RESET)
-    // through RHReliableDatagram::acknowledge(), which calls the no-timeout
-    // overload of waitPacketSent() — a missed DIO0 TX-done interrupt there
-    // hangs the whole node with no recovery (confirmed in the field: see
-    // documentation/Current_Architecture/PACKET_RELIABILITY.md). We still
-    // want these three packet types acked, since the base blocks on it via
-    // sendToWait() — so each branch below calls _driver.acknowledge()
+    // unicast receipt (TIME_SYNC-direct, ACK_SUMMARY, CMD_CALIBRATE/RESET/
+    // SET_TX_POWER) through RHReliableDatagram::acknowledge(), which calls the
+    // no-timeout overload of waitPacketSent() — a missed DIO0 TX-done interrupt
+    // there hangs the whole node with no recovery (confirmed in the field: see
+    // documentation/Current_Architecture/PACKET_RELIABILITY.md). Two of those
+    // types still want an ack, since the base blocks on it via sendToWait()
+    // — so those branches below call _driver.acknowledge()
     // itself once it's confirmed the packet is genuinely unicast and worth
     // acking, using the bounded-wait implementation documented on
     // ITdmaRadioDriver::acknowledge() (waits for its own ACK to finish
@@ -890,12 +890,13 @@ void TdmaRadioService::checkIncomingTimeSync() {
         (hdr.pkt_type == BinaryPacket::PKT_CMD_CALIBRATE ||
          hdr.pkt_type == BinaryPacket::PKT_CMD_RESET ||
          hdr.pkt_type == BinaryPacket::PKT_CMD_SET_TX_POWER)) {
-      // Always unicast (never broadcast). SmartFiresBaseApp::
-      // sendPendingCommand() blocks on this via sendToWait(); without it,
-      // the base gives up after BaseConfig::kMaxPendingCommandSendAttempts
-      // and the command is dropped (reason=no_link_ack in its log).
-      _driver.acknowledge(packet.from, packet.id);
-
+      // Deliberately *not* acked at the link layer, unlike the two branches
+      // above. A command can only arrive while the base is transmitting, which
+      // is by construction slot 0 — so acking it here put this node's radio on
+      // the air inside the base's own window, every time. The base now sends
+      // commands fire-and-forget (SmartFiresBaseApp::sendPendingCommand()) and
+      // takes its acknowledgement from PKT_CMD_ACK instead, which goes out in
+      // this node's slot like any other frame.
       rememberPendingCommand(packet);
       continue;
     }

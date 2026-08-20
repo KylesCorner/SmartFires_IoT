@@ -45,7 +45,12 @@ const PKT_COLORS = {
   ACK_SUMMARY: "#9b59b6",
   CMD_CALIBRATE: "#e8743a",
   CMD_RESET: "#e8743a",
+  CMD_SET_TX_POWER: "#ef476f",
   CMD_ACK: "#5dade2",
+  // Timed duty-cycle window edges. Teal rather than a shade of STATUS's green,
+  // which they would otherwise be mistaken for at 7 px wide.
+  WINDOW_BEGIN: "#2bb5a0",
+  WINDOW_END: "#17786c",
   // Bare RadioHead link-layer frames with no SmartFires magic byte — most
   // commonly RHReliableDatagram ACKs (zero-length payload). Given their own
   // colors/labels so they're distinguishable from genuinely-unrecognized
@@ -110,7 +115,11 @@ const PKT_TIMBRE = {
   ACK_SUMMARY: { wave: "square", durationMs: 60, gain: 0.08 },
   CMD_CALIBRATE: { wave: "sawtooth", durationMs: 180, gain: 0.18 },
   CMD_RESET: { wave: "sawtooth", durationMs: 180, gain: 0.18 },
+  CMD_SET_TX_POWER: { wave: "sawtooth", durationMs: 120, gain: 0.14 },
   CMD_ACK: { wave: "sine", durationMs: 70, gain: 0.1 },
+  // Mirrored sweeps so a window reads as an open/close pair by ear.
+  WINDOW_BEGIN: { wave: "sine", durationMs: 80, gain: 0.1, sweep: 1.4 },
+  WINDOW_END: { wave: "sine", durationMs: 80, gain: 0.1, sweep: 0.7 },
   RH_ACK: { wave: "sine", durationMs: 30, gain: 0.04 },
   RH_RAW: { wave: "square", durationMs: 50, gain: 0.05 },
 };

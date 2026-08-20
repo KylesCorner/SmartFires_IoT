@@ -623,12 +623,36 @@ bool SmartFiresNodeApp::sendCmdAck(uint8_t cmdType, uint8_t status) {
     return false;
   }
 
-  const bool ok = _radio.sendImmediate(payload, len, true);
+  // A command is only ever received while the base is transmitting — slot 0 —
+  // so acking it on the spot put this node's radio on the air inside the base's
+  // own window. Queue it for this node's slot instead, like any other frame.
+  //
+  // The queue is a safe home for it: TdmaRadioService::isTelemetryPacketForNode()
+  // admits only BUNDLE/STATUS/FULL_STATE to the app-layer reliability window, so
+  // a CMD_ACK cannot occupy a pending slot or punch a hole in the ack bitmap
+  // (its seq is _cmdSeq, its own counter — the same separation window markers
+  // get from window_id). Worst case it is dropped as the oldest entry under
+  // queue pressure, which the base already tolerates via
+  // BaseConfig::kCmdAckTimeoutMs.
+  //
+  // CMD_RESET is the one exception, for the same structural reason WINDOW_END
+  // cannot ride a data frame: it acknowledges a command whose whole effect is
+  // that this node stops being able to transmit. The hard path calls
+  // NVIC_SystemReset() a few hundred ms later and the soft path calls
+  // flushTelemetryBuffers(), which empties the very queue this would be sitting
+  // in — so a queued ack for it is not delayed, it is destroyed. It goes out
+  // immediately, but with requireLinkAck=false: still one off-slot frame, no
+  // longer a blocking one.
+  const bool isResetAck = cmdType == BinaryPacket::PKT_CMD_RESET;
+  const bool ok = isResetAck
+                      ? _radio.sendImmediate(payload, len, /*requireLinkAck=*/false)
+                      : _radio.enqueueTelemetry(payload, len);
   CalibrationDebug::logCmdAckSummary(ack, _cfg.nodeId, seq, "calib");
 
-  LOG_INFO("calib", "cmd_ack_tx_result cmd=%s status=%s ok=%u",
+  LOG_INFO("calib", "cmd_ack_tx cmd=%s status=%s path=%s ok=%u",
            CalibrationDebug::cmdTypeName(cmdType),
-           CalibrationDebug::statusName(status), ok ? 1 : 0);
+           CalibrationDebug::statusName(status),
+           isResetAck ? "immediate" : "queued", ok ? 1 : 0);
 
   return ok;
 }

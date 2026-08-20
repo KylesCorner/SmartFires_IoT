@@ -864,7 +864,22 @@ bool SmartFiresBaseApp::sendPendingCommand() {
       continue;
     }
 
-    const bool ok = _radio.sendToWait(cmd.payload, cmd.len, cmd.targetNodeId);
+    // Fire-and-forget, deliberately not sendToWait(). A link-ACKed command
+    // costs four extra transmissions and cannot fit the slot it is sent from:
+    // sendToWait() blocks (kLinkRetries + 1) * kLinkAckTimeoutMs = 1000 ms
+    // against a 900 ms kSlotWidthMs, so a single unreachable node walked the
+    // base's TX out of slot 0 and on top of whichever node owns the next one.
+    // The node's link-ACK was just as bad: it fires the moment the command
+    // lands, which is by construction inside slot 0, so the node transmitted
+    // in the base's window.
+    //
+    // Nothing is lost by dropping it. Every command type routed through this
+    // queue is acknowledged at the app layer by PKT_CMD_ACK, which rides the
+    // node's own slot, and TxPowerController already expires unacked commands
+    // on BaseConfig::kCmdAckTimeoutMs. For TX power specifically the levels are
+    // absolute and idempotent, and StatusPayload::tx_power_dbm — not the ack —
+    // is the authority on what the node actually applied.
+    const bool ok = _radio.send(cmd.payload, cmd.len, cmd.targetNodeId);
     if (ok) {
       LOG_INFO("base", "tx_pending_cmd_flush node=%u len=%u attempts=%u result=OK",
                static_cast<unsigned int>(cmd.targetNodeId),
@@ -874,14 +889,14 @@ bool SmartFiresBaseApp::sendPendingCommand() {
       return true;
     }
 
-    // No RadioHead link ACK within sendToWait()'s own retry burst. Bounded
-    // give-up below — otherwise an unreachable node (e.g. one that already
-    // rebooted and missed this window) would have this entry retried
-    // forever, once per base window, permanently occupying this slot.
+    // RadioHead refused to queue the frame at all — the radio is unhealthy,
+    // not the link. Bounded give-up below: otherwise the entry would be retried
+    // forever, once per base window, permanently occupying this slot. Retrying
+    // is cheap now that the attempt no longer blocks.
     cmd.failedSendAttempts++;
     if (cmd.failedSendAttempts >= BaseConfig::kMaxPendingCommandSendAttempts) {
       LOG_WARN("base",
-               "tx_pending_cmd_give_up node=%u len=%u attempts=%u reason=no_link_ack",
+               "tx_pending_cmd_give_up node=%u len=%u attempts=%u reason=radio_refused_send",
                static_cast<unsigned int>(cmd.targetNodeId),
                static_cast<unsigned int>(cmd.len),
                static_cast<unsigned int>(cmd.failedSendAttempts));

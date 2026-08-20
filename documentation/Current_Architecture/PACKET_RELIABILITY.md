@@ -35,12 +35,52 @@ acknowledgement exchange.
 | `TIME_SYNC` (direct, AWAKEN-triggered) | Base → Node | Link-layer ACK (`sendToWait`) | `sendDirectTimeSync()` is a distinct unicast path from the periodic broadcast above — replies to one node's `AWAKEN` |
 | `BUNDLE` / `STATUS` | Node → Base | Configurable (see below) | Telemetry — governed by reliability mode |
 | `ACK_SUMMARY` | Base → Node | Link-layer ACK (`sendToWait`) | `SmartFiresBaseApp::sendAckSummary()` blocks on the link ACK, it is not fire-and-forget. A missed reception triggers RadioHead's own link-layer retry (`kLinkRetries`/`kLinkAckTimeoutMs`, independent of `TdmaConfig::reliabilityMode`) immediately — this is what surfaces as base-side retries if a node's Rx happens to be asleep when the base transmits; see [radio-rx-gating](../Pending_Plans/RADIO_RX_GATING.md) |
-| `CMD_CALIBRATE` / `CMD_RESET` | Base → Node | Link-layer ACK (`sendToWait`) | `SmartFiresBaseApp::sendPendingCommand()` blocks on the link ACK; gives up after `BaseConfig::kMaxPendingCommandSendAttempts` and drops the command (`reason=no_link_ack`) if it never arrives |
+| `CMD_CALIBRATE` / `CMD_RESET` / `CMD_SET_TX_POWER` | Base → Node | Fire-and-forget (`send()`) | `SmartFiresBaseApp::sendPendingCommand()`. Acknowledged at the app layer by `CMD_ACK` instead — see "Commands are not link-ACKed" below |
+| `CMD_ACK` | Node → Base | Fire-and-forget, TDMA-queued | `SmartFiresNodeApp::sendCmdAck()` enqueues it like telemetry so it goes out in the node's own slot. Not admitted to the app-layer reliability window (`isTelemetryPacketForNode()` allows only `BUNDLE`/`STATUS`/`FULL_STATE`), so it consumes no pending slot and leaves no hole in the ack bitmap |
+| `CMD_ACK` (for `CMD_RESET`) | Node → Base | Fire-and-forget, immediate | Cannot be queued — see "Commands are not link-ACKed" below |
 
-**All four link-ACKed packet types above depend on the receiving node actually
+**All three link-ACKed packet types above depend on the receiving node actually
 sending that ACK back** — see "waitPacketSent() has no timeout" below for how
 that ACK is generated on the node side, and why it isn't as simple as letting
 RadioHead handle it automatically.
+
+### Commands are not link-ACKed
+
+Both halves of the command round trip used to be link-ACKed, and both were
+incompatible with the slot they had to happen in.
+
+The base's `sendtoWait()` blocks `(kLinkRetries + 1) × kLinkAckTimeoutMs` =
+**1000 ms** against a **900 ms** `kSlotWidthMs`. A single unreachable node — one
+in Timed standby, or one that rebooted and missed the window — was enough to
+carry the base's transmission past the end of slot 0 and on top of whichever node
+owned the next one. The `static_assert` at `NetworkConfig.h`'s
+`kSlotWidthMs > kBundleTxBudgetMs + kLinkAckTimeoutMs + 2 * kGuardMs` does not
+catch this: it budgets for *one* ack timeout, and reasons about the node's
+telemetry path where `enableLinkAck=false`, not about the base's `sendToWait()`
+calls.
+
+The node's ACK was the mirror image. A command can only arrive while the base is
+transmitting, which is by construction inside slot 0, so acking it on receipt put
+the node's radio on the air inside the base's own window — every command, every
+time.
+
+`CMD_ACK` covers what the link ACK was covering, and covers it better: it is
+TDMA-gated to the node's own slot, and the base already bounds the wait for it
+with `BaseConfig::kCmdAckTimeoutMs` (`TxPowerController` expires unacked commands
+on exactly that). For `CMD_SET_TX_POWER` in particular the link ACK carried no
+information worth the airtime — levels are absolute and idempotent, so a lost
+command is simply re-issued by the next decision, and `StatusPayload.tx_power_dbm`
+rather than any ack is the authority on what the node actually applied.
+
+**`CMD_RESET`'s ack cannot be queued.** It acknowledges a command whose entire
+effect is that the node stops being able to transmit — the same structural
+argument that keeps `WINDOW_END` off a data frame. The hard path calls
+`NVIC_SystemReset()` a few hundred ms later, and the soft path calls
+`flushTelemetryBuffers()`, which drains and clears the very queue the ack would
+be waiting in. Queuing it does not delay it, it destroys it. So that one ack
+still goes out through `sendImmediate()` — but with `requireLinkAck=false`, so it
+is a single off-slot frame rather than a blocking round trip. There is no later
+slot to move it to; that is the point of the command.
 
 ## `waitPacketSent()` Has No Timeout
 
@@ -99,11 +139,12 @@ Three independent call paths reach this:
 The node's `TdmaRadioService::checkIncomingTimeSync()` now calls
 `_driver.receive(packet, /*autoAck=*/false)`, disabling RadioHead's
 automatic ACK-on-receive entirely (matching what `SmartFiresBaseApp` already
-did for its own receive path). For the three packet types that still need
-an ACK for the base's `sendToWait()` to succeed (`ACK_SUMMARY`,
-`CMD_CALIBRATE`/`CMD_RESET`, and the direct/unicast `TIME_SYNC` reply — the
-periodic broadcast is deliberately never ACKed), the node now calls
-`_driver.acknowledge(packet.from, packet.id)` explicitly.
+did for its own receive path). For the two packet types that still need
+an ACK for the base's `sendToWait()` to succeed (`ACK_SUMMARY` and the
+direct/unicast `TIME_SYNC` reply — the periodic broadcast is deliberately never
+ACKed, and commands are no longer ACKed at all per "Commands are not
+link-ACKed" above), the node calls `_driver.acknowledge(packet.from, packet.id)`
+explicitly.
 
 `ITdmaRadioDriver::acknowledge()` (implemented in
 `RadioHeadTdmaDriver::acknowledge()`) reconstructs the same ACK frame

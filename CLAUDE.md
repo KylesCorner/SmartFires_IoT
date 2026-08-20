@@ -315,10 +315,35 @@ RadioHead `RHReliableDatagram` handles LoRa framing and addressing.
 Node fresh telemetry uses non-blocking `sendto()` with app-layer reliability. Both
 base and node receive with RadioHead's automatic link-layer ACK disabled
 (`autoAck=false`) and ACK explicitly, only for the packet types that need it
-(base: `AWAKEN`; node: `ACK_SUMMARY`, `CMD_CALIBRATE`/`CMD_RESET`, direct `TIME_SYNC`)
+(base: `AWAKEN`; node: `ACK_SUMMARY`, direct `TIME_SYNC`)
 via a non-blocking hand-rolled ACK — RadioHead's own automatic ACK path blocks on a
 no-timeout wait for the radio's TX-done interrupt, which can hang the board forever
 on a missed interrupt; see `documentation/Current_Architecture/PACKET_RELIABILITY.md`.
+
+**Commands are fire-and-forget in both directions.** `CMD_CALIBRATE`, `CMD_RESET`
+and `CMD_SET_TX_POWER` go out from `SmartFiresBaseApp::sendPendingCommand()` via
+`send()`, not `sendToWait()`, and the node does not link-ACK them. Two reasons,
+both about slot 0. The base's `sendtoWait()` blocks
+`(kLinkRetries + 1) × kLinkAckTimeoutMs` = 1000 ms against a 900 ms
+`kSlotWidthMs`, so one unreachable node walked the base's transmission out of its
+own window and on top of the next node's. And a command can only *arrive* while
+the base is transmitting — by construction inside slot 0 — so the node's ACK put
+its radio on the air in the base's window every time. `PKT_CMD_ACK` is the
+acknowledgement instead: it is enqueued on the normal TX queue and goes out in
+the node's own slot, and the base bounds the wait for it with
+`BaseConfig::kCmdAckTimeoutMs` (`TxPowerController` already did this). `CMD_ACK`
+is not admitted to the app-layer reliability window — `isTelemetryPacketForNode()`
+allows only `BUNDLE`/`STATUS`/`FULL_STATE` — so it cannot occupy a pending slot or
+leave a hole in the ack bitmap.
+
+**`CMD_RESET`'s ack is the one exception**, for the same structural reason
+`WINDOW_END` cannot ride a data frame: it acknowledges a command whose entire
+effect is that the node stops transmitting. The hard path calls
+`NVIC_SystemReset()` a few hundred ms later; the soft path calls
+`flushTelemetryBuffers()`, which empties the queue the ack would be sitting in.
+Queuing it would not delay it, it would destroy it — so it goes out via
+`sendImmediate(..., requireLinkAck=false)`: still one off-slot frame, no longer a
+blocking one.
 
 ### LoRa TIME_SYNC broadcast — base → all nodes (14 bytes)
 
