@@ -45,7 +45,12 @@ const PKT_COLORS = {
   ACK_SUMMARY: "#9b59b6",
   CMD_CALIBRATE: "#e8743a",
   CMD_RESET: "#e8743a",
+  CMD_SET_TX_POWER: "#ef476f",
   CMD_ACK: "#5dade2",
+  // Timed duty-cycle window edges. Teal rather than a shade of STATUS's green,
+  // which they would otherwise be mistaken for at 7 px wide.
+  WINDOW_BEGIN: "#2bb5a0",
+  WINDOW_END: "#17786c",
   // Bare RadioHead link-layer frames with no SmartFires magic byte — most
   // commonly RHReliableDatagram ACKs (zero-length payload). Given their own
   // colors/labels so they're distinguishable from genuinely-unrecognized
@@ -60,6 +65,13 @@ const UNKNOWN_LABEL = "UNKNOWN / other";
 // the most common offender (the base still sends it with link-layer
 // reliability on), but the dot is drawn for any packet type that qualifies.
 const RESEND_DOT_COLOR = "#ffa500";
+// Timed duty-cycle active-window boundaries, drawn as brackets flanking the
+// bundle blip (open on the left for FIRST, close on the right for LAST) so a
+// window reads as a span on the trace rather than needing a click per packet.
+const WINDOW_MARK_COLOR = "#7ee787";
+// App-layer retransmission (PKT_FLAG_RETX). Distinct from RESEND_DOT_COLOR,
+// which is RadioHead's link-layer retry — different layer, different cause.
+const RETX_DOT_COLOR = "#c792ea";
 
 // --- Audio feedback ----------------------------------------------------
 //
@@ -103,7 +115,11 @@ const PKT_TIMBRE = {
   ACK_SUMMARY: { wave: "square", durationMs: 60, gain: 0.08 },
   CMD_CALIBRATE: { wave: "sawtooth", durationMs: 180, gain: 0.18 },
   CMD_RESET: { wave: "sawtooth", durationMs: 180, gain: 0.18 },
+  CMD_SET_TX_POWER: { wave: "sawtooth", durationMs: 120, gain: 0.14 },
   CMD_ACK: { wave: "sine", durationMs: 70, gain: 0.1 },
+  // Mirrored sweeps so a window reads as an open/close pair by ear.
+  WINDOW_BEGIN: { wave: "sine", durationMs: 80, gain: 0.1, sweep: 1.4 },
+  WINDOW_END: { wave: "sine", durationMs: 80, gain: 0.1, sweep: 0.7 },
   RH_ACK: { wave: "sine", durationMs: 30, gain: 0.04 },
   RH_RAW: { wave: "square", durationMs: 50, gain: 0.05 },
 };
@@ -254,6 +270,26 @@ function renderLegend() {
   resendLabel.textContent = "Resend (link-layer retry)";
   resendItem.append(resendSwatch, resendLabel);
   el.appendChild(resendItem);
+
+  const retxItem = document.createElement("div");
+  retxItem.className = "sniffer-legend-item";
+  const retxSwatch = document.createElement("span");
+  retxSwatch.className = "sniffer-legend-swatch sniffer-legend-dot";
+  retxSwatch.style.background = RETX_DOT_COLOR;
+  const retxLabel = document.createElement("span");
+  retxLabel.textContent = "Retx (app-layer replay)";
+  retxItem.append(retxSwatch, retxLabel);
+  el.appendChild(retxItem);
+
+  const windowItem = document.createElement("div");
+  windowItem.className = "sniffer-legend-item";
+  const windowSwatch = document.createElement("span");
+  windowSwatch.className = "sniffer-legend-swatch";
+  windowSwatch.style.background = WINDOW_MARK_COLOR;
+  const windowLabel = document.createElement("span");
+  windowLabel.textContent = "⟦ ⟧ Active-window first / last";
+  windowItem.append(windowSwatch, windowLabel);
+  el.appendChild(windowItem);
 }
 
 function resizeCanvas() {
@@ -371,6 +407,35 @@ function draw() {
       ctx.beginPath();
       ctx.arc(x, y - 4, 2.5, 0, Math.PI * 2);
       ctx.fill();
+    }
+    // A RETX frame replays the original's window bits, so its markers describe
+    // the window it was *first* sent in — drawing them again would show a
+    // second open/close inside the current window. Show the retx dot instead.
+    if (ev.retx) {
+      ctx.fillStyle = RETX_DOT_COLOR;
+      ctx.beginPath();
+      ctx.arc(x, y + 20, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (ev.window_first || ev.window_last) {
+      ctx.strokeStyle = WINDOW_MARK_COLOR;
+      ctx.lineWidth = 2;
+      if (ev.window_first) {
+        ctx.beginPath();
+        ctx.moveTo(x - 6, y - 3);
+        ctx.lineTo(x - 9, y - 3);
+        ctx.lineTo(x - 9, y + 19);
+        ctx.lineTo(x - 6, y + 19);
+        ctx.stroke();
+      }
+      if (ev.window_last) {
+        ctx.beginPath();
+        ctx.moveTo(x + 7, y - 3);
+        ctx.lineTo(x + 10, y - 3);
+        ctx.lineTo(x + 10, y + 19);
+        ctx.lineTo(x + 7, y + 19);
+        ctx.stroke();
+      }
+      ctx.lineWidth = 1;
     }
     if (isSelected) {
       ctx.strokeStyle = "#ffd166";
@@ -571,6 +636,26 @@ const DETAIL_FIELDS = [
   ["Anchored to TIME_SYNC", (ev) => (ev.anchored ? "yes" : "no"), false],
   ["Num slots", (ev) => ev.num_slots, false],
   ["Battery %", (ev) => ev.battery_pct, false],
+  // Timed duty-cycle window markers (PktHeader.flags, BUNDLE only). Highlighted
+  // as flag rows because they are the boundaries you scan the trace for. RETX
+  // frames repeat whatever markers the original carried, so the window row
+  // says so rather than implying a second close inside one window.
+  [
+    "Window marker",
+    (ev) => {
+      const marks = [];
+      if (ev.window_first) marks.push("FIRST");
+      if (ev.window_last) marks.push("LAST");
+      if (!marks.length) return undefined;
+      return ev.retx ? `${marks.join(" + ")}  (replayed — see Retransmission)` : marks.join(" + ");
+    },
+    (ev) => !ev.retx && (ev.window_first || ev.window_last),
+  ],
+  [
+    "Retransmission",
+    (ev) => (ev.retx ? "YES — replay of an unacked bundle, same node/seq as an earlier frame" : undefined),
+    (ev) => ev.retx,
+  ],
   ["UID hash", (ev) => (ev.uid_hash != null ? `0x${ev.uid_hash.toString(16)}` : undefined), false],
   ["RadioHead to", (ev) => ev.rh_to, false],
   ["RadioHead from", (ev) => ev.rh_from, false],

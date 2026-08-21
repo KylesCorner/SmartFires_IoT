@@ -336,6 +336,11 @@ class LiveState:
                     "heading_accuracy_deg": heading_accuracy_deg,
                     "retx_total": status.get("retx_total"),
                     "fail_total": status.get("fail_total"),
+                    # Node-reported ground truth, not the base's record of what
+                    # it commanded — the dashboard's increase/decrease buttons
+                    # resolve their absolute target from this value.
+                    "tx_power_dbm": status.get("tx_power_dbm"),
+                    "tx_power_mode": status.get("tx_power_mode"),
                     "retx_session": status.get("retx_session"),
                     "fail_session": status.get("fail_session"),
                     "last_seen": status.get("last_seen"),

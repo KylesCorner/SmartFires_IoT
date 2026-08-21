@@ -5,6 +5,7 @@
 #include "app/SmartFiresNodeApp.h"
 
 #include "calibration/CalibrationDebug.h"
+#include "config/SensingConfig.h"
 #include "logging/DebugLogger.h"
 #include "platform/ResetDiagnostics.h"
 
@@ -12,6 +13,12 @@
 #include <string.h>
 
 namespace {
+  bool dutyPhaseSleepsRadio(
+    DutyCyclePhase phase) {
+      return
+          phase == DutyCyclePhase::CooldownSleeping ||
+          phase == DutyCyclePhase::IdleSleeping;
+    }
 
 const char *boolName(bool v) { return v ? "true" : "false"; }
 
@@ -29,10 +36,16 @@ const char *pktTypeName(uint8_t pktType) {
     return "TIME_SYNC";
   case BinaryPacket::PKT_ACK_SUMMARY:
     return "ACK_SUMMARY";
+  case BinaryPacket::PKT_WINDOW_BEGIN:
+    return "WINDOW_BEGIN";
+  case BinaryPacket::PKT_WINDOW_END:
+    return "WINDOW_END";
   case BinaryPacket::PKT_CMD_CALIBRATE:
     return "CMD_CALIBRATE";
   case BinaryPacket::PKT_CMD_RESET:
     return "CMD_RESET";
+  case BinaryPacket::PKT_CMD_SET_TX_POWER:
+    return "CMD_SET_TX_POWER";
   case BinaryPacket::PKT_CMD_ACK:
     return "CMD_ACK";
   default:
@@ -53,14 +66,35 @@ bool decodePacketHeader(const uint8_t *payload,
 
 } // namespace
 
-SmartFiresNodeApp::SmartFiresNodeApp(
-    const Config &cfg, IClock &clock, DutyCycleController &duty,
-    PacketHandler &packetHandler, TdmaRadioService &radio, TdmaClock &tdmaClock,
-    ISensor **sensors, size_t sensorCount, BatteryMonitor *battery)
-    : _cfg(cfg), _clock(clock), _duty(duty), _packetHandler(packetHandler),
-      _radio(radio), _tdmaClock(tdmaClock), _sensors(sensors),
-      _sensorCount(sensorCount), _battery(battery) {}
+// SmartFiresNodeApp::SmartFiresNodeApp(
+//     const Config &cfg, IClock &clock, DutyCycleController &duty,
+//     PacketHandler &packetHandler, TdmaRadioService &radio, TdmaClock &tdmaClock,
+//     ISensor **sensors, size_t sensorCount, BatteryMonitor *battery)
+//     : _cfg(cfg), _clock(clock), _duty(duty), _packetHandler(packetHandler),
+//       _radio(radio), _tdmaClock(tdmaClock), _sensors(sensors),
+//       _sensorCount(sensorCount), _battery(battery) {}
 
+SmartFiresNodeApp::SmartFiresNodeApp(
+    const Config &cfg,
+    IClock &clock,
+    DutyCycleController &duty,
+    PacketHandler &packetHandler,
+    TdmaRadioService &radio,
+    TdmaClock &tdmaClock,
+    IMcuSleep &mcuSleep,
+    ISensor **sensors,
+    size_t sensorCount,
+    BatteryMonitor *battery)
+    : _cfg(cfg),
+      _clock(clock),
+      _duty(duty),
+      _packetHandler(packetHandler),
+      _radio(radio),
+      _tdmaClock(tdmaClock),
+      _mcuSleep(mcuSleep),
+      _sensors(sensors),
+      _sensorCount(sensorCount),
+      _battery(battery) {}
 bool SmartFiresNodeApp::begin() {
   LOG_INFO("app",
            "begin node_id=%u uid_hash=0x%08lX enable_battery=%s "
@@ -119,12 +153,24 @@ void SmartFiresNodeApp::update() {
   }
 
   // Always poll radio so TIME_SYNC packets are processed.
+  // _radio.update();
+    const bool radioShouldSleep =
+      dutyPhaseSleepsRadio(_duty.phase()) &&
+      !_forceRadioAwake &&
+      !radioMustStayAwakeToDrain();
+
+  _radio.setDutySleep(radioShouldSleep);
   _radio.update();
 
   if (_tdmaClock.consumeSessionChanged()) {
     _packetHandler.reset();
+    // A new session id means a new session-clock origin — any pending
+    // wake_phase_err prediction is against the old origin, so drop it.
+    _predictedValid = false;
     LOG_INFO("app", "session_changed bundle_reset=1 seq_reset=1");
   }
+
+  logWakePhaseErrorOnNextSync();
 
   handleIncomingCommands();
 
@@ -143,6 +189,14 @@ void SmartFiresNodeApp::update() {
   const bool hasFreshSync = _tdmaClock.hasSync() && !_tdmaClock.syncStale();
 
   if (hasFreshSync && !_syncActive) {
+    if (_forceRadioAwake) {
+      _forceRadioAwake = false;
+
+      LOG_INFO(
+          "sleep",
+          "post_standby_sync_reacquired "
+          "radio_override_cleared=1");
+    }
     _syncActive = true;
     _awakenOnlyNotified = false;
     _packetHandler.resetStatusTimer();
@@ -157,6 +211,20 @@ void SmartFiresNodeApp::update() {
     _awakenOnlyNotified = false;
 
     LOG_WARN("tdma", "time_sync_lost_or_stale resuming_awaken_retry=1");
+
+    // The base is unreachable, so any TX power it commanded can no longer be
+    // revoked by it — and a CMD_SET_TX_POWER could not reach us either, since
+    // it rides the same downlink, in the same slot-0 window, from the same
+    // transmitter as the TIME_SYNC we just stopped hearing.
+    //
+    // That shared fate is exactly why this is the *only* node-side trigger.
+    // Reverting on missed ACK_SUMMARY instead would fire constantly on things
+    // that are not link failures at all — the base deliberately defers acks
+    // across Timed standby, rate-limits them, and gives up on them after
+    // kMaxAckSummarySendAttempts. TIME_SYNC is unconditional every
+    // kPeriodicTimeSyncMs whether or not there is anything to say, so its
+    // absence carries strictly more signal with strictly less noise.
+    revertTxPowerToBaseline("sync_stale");
   }
 
   // Hold off sensing until the base station has provided the session clock.
@@ -182,7 +250,41 @@ void SmartFiresNodeApp::update() {
     return;
   }
 
+  // Set before the tick, never after: the controller decides inside update()
+  // whether this is the tick that closes the window, so a hold published
+  // afterwards would always be one iteration stale and the window could close
+  // mid-bundle. Sizing the window as a whole number of bundles means this is
+  // normally already false when activeSampleMs expires and the hold costs
+  // nothing; it earns its keep when a starved sample tick has shifted the
+  // accumulator off the boundary.
+  _duty.setActiveWindowHold(_packetHandler.hasPartialBundle());
+
   _duty.update();
+  updateWindowMarkers();
+
+  // The post-standby override only has to hold the radio up for the tail of the
+  // sleeping phase. Once the duty controller is awake again, phase-based radio
+  // sleep no longer applies, so drop it here — previously this was cleared by
+  // the post-sleep resync, which no longer happens now that sync survives
+  // standby.
+  if (_forceRadioAwake && !_duty.sleeping()) {
+    _forceRadioAwake = false;
+
+    LOG_DEBUG("sleep", "radio_override_cleared reason=duty_awake phase=%u",
+              static_cast<unsigned int>(_duty.phase()));
+  }
+
+  const bool radioShouldSleepAfterDutyUpdate =
+    dutyPhaseSleepsRadio(_duty.phase()) &&
+    !_forceRadioAwake &&
+    !radioMustStayAwakeToDrain();
+
+  _radio.setDutySleep(
+      radioShouldSleepAfterDutyUpdate);
+
+  if (maybeEnterTimedMcuSleep()) {
+    return;
+  }
 
   if (_cfg.enableBattery && _battery && _battery->ready()) {
     if (_battery->sample()) {
@@ -197,6 +299,11 @@ void SmartFiresNodeApp::update() {
 
     // Must precede push() so the STATUS encoder sees current counters.
     _packetHandler.setLinkStats(_radio.retransmitCount(), _radio.failedSendCount());
+    // Read from the radio every cycle rather than cached at apply time, so a
+    // STATUS can never report a power the radio isn't actually using.
+    _packetHandler.setTxPowerState(
+        _radio.txPowerDbm(),
+        _txPowerMode == BinaryPacket::TX_POWER_MODE_STATIC);
     const bool bundleReadyFromPush = _packetHandler.push(snap);
 
     LOG_INFO("app",
@@ -218,66 +325,22 @@ void SmartFiresNodeApp::update() {
       const uint8_t len = _packetHandler.takeStatusPacket(buf, sizeof(buf));
 
       if (len > 0) {
-        BinaryPacket::PktHeader hdr = {};
-        const bool hasHdr = decodePacketHeader(buf, len, hdr);
-        const bool enqueued = _radio.enqueueTelemetry(buf, len);
-
-        if (enqueued) {
-          LOG_INFO("packet",
-                   "enqueue_ok pkt=%s seq=%u len=%u queue_depth=%u",
-                   hasHdr ? pktTypeName(hdr.pkt_type) : "RAW",
-                   static_cast<unsigned int>(hasHdr ? hdr.seq : 0),
-                   static_cast<unsigned int>(len),
-                   static_cast<unsigned int>(_radio.queuedCount()));
-        } else {
-          LOG_ERROR("packet",
-                    "enqueue_failed pkt=%s seq=%u len=%u queue_depth=%u",
-                    hasHdr ? pktTypeName(hdr.pkt_type) : "RAW",
-                    static_cast<unsigned int>(hasHdr ? hdr.seq : 0),
-                    static_cast<unsigned int>(len),
-                    static_cast<unsigned int>(_radio.queuedCount()));
-        }
+        enqueueTelemetryPayload(buf, len);
       } else {
         LOG_WARN("packet", "status_ready_but_take_returned_zero");
       }
     }
 
     if (_packetHandler.bundleReady()) {
-      uint8_t buf[BinaryPacket::kMaxBundleLoRaSize];
-      const uint8_t len = _packetHandler.takeBundle(buf, sizeof(buf));
-
-      if (len > 0) {
-        if (!_cfg.enableTelemetryTx) {
-          LOG_INFO("app",
-                   "bundle_tx_disabled bundle_dropped len=%u session_ms=%lu",
-                   static_cast<unsigned int>(len),
-                   static_cast<unsigned long>(snap.sessionTimeMs));
-          _duty.markTelemetrySent();
-          return;
-        }
-
-        BinaryPacket::PktHeader hdr = {};
-        const bool hasHdr = decodePacketHeader(buf, len, hdr);
-        const bool enqueued = _radio.enqueueTelemetry(buf, len);
-
-        if (enqueued) {
-          LOG_INFO("packet",
-                   "enqueue_ok pkt=%s seq=%u len=%u queue_depth=%u",
-                   hasHdr ? pktTypeName(hdr.pkt_type) : "RAW",
-                   static_cast<unsigned int>(hasHdr ? hdr.seq : 0),
-                   static_cast<unsigned int>(len),
-                   static_cast<unsigned int>(_radio.queuedCount()));
-        } else {
-          LOG_ERROR("packet",
-                    "enqueue_failed pkt=%s seq=%u len=%u queue_depth=%u",
-                    hasHdr ? pktTypeName(hdr.pkt_type) : "RAW",
-                    static_cast<unsigned int>(hasHdr ? hdr.seq : 0),
-                    static_cast<unsigned int>(len),
-                    static_cast<unsigned int>(_radio.queuedCount()));
-        }
-      } else {
-        LOG_WARN("packet", "bundle_ready_but_take_returned_zero");
+      if (!_cfg.enableTelemetryTx) {
+        LOG_INFO("app",
+                 "bundle_tx_disabled bundle_dropped session_ms=%lu",
+                 static_cast<unsigned long>(snap.sessionTimeMs));
+        _duty.markTelemetrySent();
+        return;
       }
+
+      takeAndEnqueueBundle();
     }
 
     _duty.markTelemetrySent();
@@ -457,10 +520,89 @@ void SmartFiresNodeApp::handleIncomingCommands() {
       continue;
     }
 
+    if (hdr.pkt_type == BinaryPacket::PKT_CMD_SET_TX_POWER) {
+      BinaryPacket::PktHeader ignored = {};
+      BinaryPacket::CmdSetTxPowerPayload txp = {};
+
+      if (!BinaryPacket::decodeCmdSetTxPower(cmd.data, cmd.len, ignored, txp)) {
+        LOG_WARN("calib", "cmd_set_tx_power_decode_failed len=%u",
+                 static_cast<unsigned int>(cmd.len));
+        continue;
+      }
+
+      if (txp.node_id != _cfg.nodeId) {
+        LOG_WARN("calib",
+                 "cmd_set_tx_power_skip target_node=%u local_node=%u seq=%u",
+                 static_cast<unsigned int>(txp.node_id),
+                 static_cast<unsigned int>(_cfg.nodeId),
+                 static_cast<unsigned int>(hdr.seq));
+        continue;
+      }
+
+      // The base decides the target; the node only applies and reports. The
+      // clamp inside setTxPower() is the one thing the node does insist on —
+      // see NetworkConfig::kMinTxPowerDbm for why obeying blindly is not safe.
+      const int8_t before = _radio.txPowerDbm();
+      const uint8_t modeBefore = _txPowerMode;
+      const int8_t applied = _radio.setTxPower(txp.tx_power_dbm);
+      _txPowerMode = (txp.mode == BinaryPacket::TX_POWER_MODE_STATIC)
+                         ? BinaryPacket::TX_POWER_MODE_STATIC
+                         : BinaryPacket::TX_POWER_MODE_DYNAMIC;
+      _packetHandler.setTxPowerState(
+          applied, _txPowerMode == BinaryPacket::TX_POWER_MODE_STATIC);
+
+      LOG_INFO("calib",
+               "cmd_set_tx_power_apply seq=%u requested_dbm=%d applied_dbm=%d "
+               "previous_dbm=%d clamped=%u mode=%s previous_mode=%s",
+               static_cast<unsigned int>(hdr.seq),
+               static_cast<int>(txp.tx_power_dbm), static_cast<int>(applied),
+               static_cast<int>(before),
+               (applied != txp.tx_power_dbm) ? 1u : 0u,
+               _txPowerMode == BinaryPacket::TX_POWER_MODE_STATIC ? "STATIC"
+                                                                 : "DYNAMIC",
+               modeBefore == BinaryPacket::TX_POWER_MODE_STATIC ? "STATIC"
+                                                                : "DYNAMIC");
+
+      // Acked unconditionally, including when the request was clamped: the ack
+      // says "command received and acted on", and the base learns the value
+      // that actually landed from StatusPayload::tx_power_dbm, which is the
+      // authority either way. A clamped request is not a failure — it is the
+      // node correctly refusing an out-of-range level.
+      sendCmdAck(BinaryPacket::PKT_CMD_SET_TX_POWER, kCalStatusSuccess);
+      continue;
+    }
+
     LOG_DEBUG("calib", "cmd_ignore type=0x%02X seq=%u",
               static_cast<unsigned int>(hdr.pkt_type),
               static_cast<unsigned int>(hdr.seq));
   }
+}
+
+void SmartFiresNodeApp::revertTxPowerToBaseline(const char *reason) {
+  const int8_t before = _radio.txPowerDbm();
+  const uint8_t modeBefore = _txPowerMode;
+
+  if (before == NetworkConfig::kMaxTxPowerDbm &&
+      modeBefore == BinaryPacket::TX_POWER_MODE_DYNAMIC) {
+    return;  // already there — don't log a no-op on every stale-sync tick
+  }
+
+  const int8_t applied = _radio.setTxPower(NetworkConfig::kMaxTxPowerDbm);
+  // The operator's STATIC pin is discarded along with the base's level. It is
+  // an override for bench and range work, not a safety state, and it is exactly
+  // as stale as anything else we were told before contact was lost. Keeping one
+  // fallback rule matters more than preserving an experiment's fidelity — the
+  // operator can re-pin it once the node is reachable again.
+  _txPowerMode = BinaryPacket::TX_POWER_MODE_DYNAMIC;
+  _packetHandler.setTxPowerState(applied, false);
+
+  LOG_WARN("radio",
+           "tx_power_revert_baseline reason=%s previous_dbm=%d applied_dbm=%d "
+           "previous_mode=%s",
+           reason ? reason : "unknown", static_cast<int>(before),
+           static_cast<int>(applied),
+           modeBefore == BinaryPacket::TX_POWER_MODE_STATIC ? "STATIC"
+                                                            : "DYNAMIC");
 }
 
 bool SmartFiresNodeApp::sendCmdAck(uint8_t cmdType, uint8_t status) {
@@ -481,13 +623,316 @@ bool SmartFiresNodeApp::sendCmdAck(uint8_t cmdType, uint8_t status) {
     return false;
   }
 
-  const bool ok = _radio.sendImmediate(payload, len, true);
+  // A command is only ever received while the base is transmitting — slot 0 —
+  // so acking it on the spot put this node's radio on the air inside the base's
+  // own window. Queue it for this node's slot instead, like any other frame.
+  //
+  // The queue is a safe home for it: TdmaRadioService::isTelemetryPacketForNode()
+  // admits only BUNDLE/STATUS/FULL_STATE to the app-layer reliability window, so
+  // a CMD_ACK cannot occupy a pending slot or punch a hole in the ack bitmap
+  // (its seq is _cmdSeq, its own counter — the same separation window markers
+  // get from window_id). Worst case it is dropped as the oldest entry under
+  // queue pressure, which the base already tolerates via
+  // BaseConfig::kCmdAckTimeoutMs.
+  //
+  // CMD_RESET is the one exception, for the same structural reason WINDOW_END
+  // cannot ride a data frame: it acknowledges a command whose whole effect is
+  // that this node stops being able to transmit. The hard path calls
+  // NVIC_SystemReset() a few hundred ms later and the soft path calls
+  // flushTelemetryBuffers(), which empties the very queue this would be sitting
+  // in — so a queued ack for it is not delayed, it is destroyed. It goes out
+  // immediately, but with requireLinkAck=false: still one off-slot frame, no
+  // longer a blocking one.
+  const bool isResetAck = cmdType == BinaryPacket::PKT_CMD_RESET;
+  const bool ok = isResetAck
+                      ? _radio.sendImmediate(payload, len, /*requireLinkAck=*/false)
+                      : _radio.enqueueTelemetry(payload, len);
   CalibrationDebug::logCmdAckSummary(ack, _cfg.nodeId, seq, "calib");
 
-  LOG_INFO("calib", "cmd_ack_tx_result cmd=%s status=%s ok=%u",
+  LOG_INFO("calib", "cmd_ack_tx cmd=%s status=%s path=%s ok=%u",
            CalibrationDebug::cmdTypeName(cmdType),
-           CalibrationDebug::statusName(status), ok ? 1 : 0);
+           CalibrationDebug::statusName(status),
+           isResetAck ? "immediate" : "queued", ok ? 1 : 0);
 
   return ok;
 }
 
+// True while the node is holding standby off to drain the TX queue (see
+// maybeEnterTimedMcuSleep). The duty phase is a sleeping one by then, so
+// phase-based radio sleep would otherwise apply — and TdmaRadioService::update()
+// returns before drainTxQueue() whenever the radio is duty-slept, meaning the
+// queue could never empty and the drain would always burn its full budget.
+bool SmartFiresNodeApp::radioMustStayAwakeToDrain() const {
+  return _duty.mode() == DutyCycleMode::Timed &&
+         _duty.sleeping() &&
+         !_mcuSleptThisCycle &&
+         _radio.queuedCount() > 0;
+}
+
+bool SmartFiresNodeApp::enqueueTelemetryPayload(const uint8_t *buf,
+                                               uint8_t len) {
+  BinaryPacket::PktHeader hdr = {};
+  const bool hasHdr = decodePacketHeader(buf, len, hdr);
+  const bool enqueued = _radio.enqueueTelemetry(buf, len);
+
+  if (enqueued) {
+    LOG_INFO("packet",
+             "enqueue_ok pkt=%s seq=%u len=%u flags=0x%02X queue_depth=%u",
+             hasHdr ? pktTypeName(hdr.pkt_type) : "RAW",
+             static_cast<unsigned int>(hasHdr ? hdr.seq : 0),
+             static_cast<unsigned int>(len),
+             static_cast<unsigned int>(hasHdr ? hdr.flags : 0),
+             static_cast<unsigned int>(_radio.queuedCount()));
+  } else {
+    LOG_ERROR("packet",
+              "enqueue_failed pkt=%s seq=%u len=%u flags=0x%02X queue_depth=%u",
+              hasHdr ? pktTypeName(hdr.pkt_type) : "RAW",
+              static_cast<unsigned int>(hasHdr ? hdr.seq : 0),
+              static_cast<unsigned int>(len),
+              static_cast<unsigned int>(hasHdr ? hdr.flags : 0),
+              static_cast<unsigned int>(_radio.queuedCount()));
+  }
+
+  return enqueued;
+}
+
+bool SmartFiresNodeApp::takeAndEnqueueBundle() {
+  uint8_t buf[BinaryPacket::kMaxBundleLoRaSize];
+  const uint8_t len = _packetHandler.takeBundle(buf, sizeof(buf));
+
+  if (len == 0) {
+    LOG_WARN("packet", "bundle_ready_but_take_returned_zero");
+    return false;
+  }
+
+  return enqueueTelemetryPayload(buf, len);
+}
+
+// Bounds each Timed duty cycle on the wire with PKT_WINDOW_BEGIN/PKT_WINDOW_END.
+//
+// BEGIN goes out on the wake edge (entering WarmingUp), not when sampling
+// starts: its main job is telling the base this node's radio is back, so the
+// ACK_SUMMARY deferred at the last WINDOW_END is released. Sending it at the top
+// of warmup spends the otherwise-silent warmup on that round trip instead of
+// starting the clock 10 s later. Warmup produces no samples, so every bundle
+// between BEGIN(n) and END(n) still belongs unambiguously to window n.
+//
+// END goes out on the close edge, enqueued behind the window's final bundle, so
+// the last thing the node puts on the air before standby is a frame nobody has
+// to acknowledge. That is the whole point of the pair: the retired WINDOW_LAST
+// flag rode on a bundle whose ack could only be sent in a slot 0 falling after
+// standby began, so that bundle was retransmitted in full on the next wake for
+// no reason but to prompt the ack.
+void SmartFiresNodeApp::updateWindowMarkers() {
+  const DutyCyclePhase phase = _duty.phase();
+
+  if (phase == _lastDutyPhase) {
+    return;
+  }
+
+  const DutyCyclePhase previous = _lastDutyPhase;
+  _lastDutyPhase = phase;
+
+  if (_duty.mode() != DutyCycleMode::Timed) {
+    return;
+  }
+
+  if (phase == DutyCyclePhase::WarmingUp) {
+    _windowId++;
+    sendWindowMarker(BinaryPacket::PKT_WINDOW_BEGIN, 0, 0);
+    return;
+  }
+
+  if (previous != DutyCyclePhase::ActiveSampling) {
+    return;
+  }
+
+  // Only reachable when the duty controller gave up waiting for the accumulator
+  // to reach a bundle boundary (overrun cap). Normally the window is a whole
+  // number of bundles and there is nothing left behind.
+  if (_packetHandler.flushWindow()) {
+    if (_cfg.enableTelemetryTx) {
+      LOG_WARN("app", "window_flush_partial_bundle overran=1");
+      takeAndEnqueueBundle();
+    } else {
+      LOG_INFO("app", "window_flush_tx_disabled bundle_dropped=1");
+    }
+  }
+
+  sendWindowMarker(BinaryPacket::PKT_WINDOW_END, _duty.plannedSleepMs(),
+                   _duty.lastWindowSampleCount());
+}
+
+// Window markers never enter the reliability window and never consume a
+// telemetry seq — TdmaRadioService::isTelemetryPacketForNode() allowlists
+// BUNDLE/STATUS/FULL_STATE, so they are queued, sent once, and forgotten.
+bool SmartFiresNodeApp::sendWindowMarker(uint8_t pktType,
+                                         uint32_t plannedSleepMs,
+                                         uint16_t sampleCount) {
+  BinaryPacket::WindowMarkerPayload marker = {};
+  marker.session_time_ms = _tdmaClock.sessionNowMs();
+  marker.planned_sleep_ms = plannedSleepMs;
+  marker.window_id = _windowId;
+  marker.sample_count = (sampleCount > 0xFFu)
+                            ? 0xFFu
+                            : static_cast<uint8_t>(sampleCount);
+
+  uint8_t buf[BinaryPacket::kWindowMarkerLoRaSize];
+  const uint8_t len = BinaryPacket::encodeWindowMarkerPayload(
+      pktType, _cfg.nodeId, marker, buf, sizeof(buf));
+
+  if (len == 0) {
+    LOG_WARN("app", "window_marker_encode_failed pkt=%s", pktTypeName(pktType));
+    return false;
+  }
+
+  LOG_INFO("app",
+           "window_marker pkt=%s window_id=%u session_ms=%lu "
+           "planned_sleep_ms=%lu samples=%u",
+           pktTypeName(pktType), static_cast<unsigned int>(_windowId),
+           static_cast<unsigned long>(marker.session_time_ms),
+           static_cast<unsigned long>(plannedSleepMs),
+           static_cast<unsigned int>(marker.sample_count));
+
+  return enqueueTelemetryPayload(buf, len);
+}
+
+// rtc-subsecond-sleep instrumentation. Phase 1 compared the sleep-compensated
+// clock against the forced post-standby resync; with sync now preserved across
+// standby (Phase 2), the comparison point is the next TIME_SYNC that arrives on
+// its own. applySync() overwrites the sync origin in place, so the prediction
+// has to be evaluated on the same tick the origin moves — hence watching
+// syncLocalMs() rather than a sync-acquired edge that no longer fires.
+void SmartFiresNodeApp::logWakePhaseErrorOnNextSync() {
+  if (!_predictedValid || !_tdmaClock.hasSync()) {
+    return;
+  }
+
+  if (_tdmaClock.syncLocalMs() == _predictedSyncLocalMs) {
+    return;
+  }
+
+  _predictedValid = false;
+
+  const uint32_t actualMs = _tdmaClock.sessionNowMs();
+  const uint32_t predictedMs = _predictedSessionOffsetMs + _clock.millis();
+  const int32_t errMs = static_cast<int32_t>(actualMs - predictedMs);
+
+  LOG_INFO("sleep",
+           "wake_phase_err predicted_ms=%lu actual_ms=%lu err_ms=%ld "
+           "guard_ms=%lu",
+           static_cast<unsigned long>(predictedMs),
+           static_cast<unsigned long>(actualMs),
+           static_cast<long>(errMs),
+           static_cast<unsigned long>(NetworkConfig::kGuardMs));
+}
+
+bool SmartFiresNodeApp::maybeEnterTimedMcuSleep() {
+  if (_duty.mode() != DutyCycleMode::Timed ||
+      !_duty.sleeping()) {
+    _mcuSleptThisCycle = false;
+    _txDrainDeadlineValid = false;
+    return false;
+  }
+
+  if (_mcuSleptThisCycle) {
+    return false;
+  }
+
+  // The window-flush bundle is enqueued the moment the active window closes,
+  // but it still has to wait for this node's TDMA slot to come around. Going
+  // to standby now would park it in the queue for the entire sleep, so stay
+  // awake until the queue drains — bounded, since a slot that never opens
+  // (base offline) must not stall the duty cycle indefinitely.
+  if (_radio.queuedCount() > 0) {
+    const uint32_t now = _clock.millis();
+
+    if (!_txDrainDeadlineValid) {
+      _txDrainDeadlineValid = true;
+      _txDrainDeadlineMs =
+          now + SensingConfig::DutyCycle::kMaxTxDrainBeforeStandbyMs;
+    }
+
+    if (static_cast<int32_t>(_txDrainDeadlineMs - now) > 0) {
+      return false;
+    }
+
+    LOG_WARN("sleep",
+             "tx_drain_timeout queued=%u drain_budget_ms=%lu sleeping_anyway=1",
+             static_cast<unsigned int>(_radio.queuedCount()),
+             static_cast<unsigned long>(
+                 SensingConfig::DutyCycle::kMaxTxDrainBeforeStandbyMs));
+  }
+
+  _txDrainDeadlineValid = false;
+
+  const uint32_t remainingMs =
+      _duty.timedSleepRemainingMs();
+
+  // RTC MODE0 alarms have ~1 ms resolution, so the full remainder can
+  // go to standby — only skip when it's too short to be worth the
+  // enter/exit overhead.
+  const uint32_t standbyMs = remainingMs;
+
+  if (standbyMs <
+      SensingConfig::DutyCycle::kMinMcuStandbyMs) {
+    return false;
+  }
+
+  LOG_INFO(
+      "sleep",
+      "timed_mcu_sleep_start "
+      "remaining_ms=%lu standby_ms=%lu",
+      static_cast<unsigned long>(remainingMs),
+      static_cast<unsigned long>(standbyMs));
+
+  // NodeApp owns radio sleep. Put the RFM95 down before
+  // entering SAMD21 standby.
+  _radio.setDutySleep(true);
+
+  const uint32_t elapsedMs =
+      _mcuSleep.sleepFor(standbyMs);
+
+  _mcuSleptThisCycle = true;
+
+  // Standby is not time the base was given to answer — the radio was off, so an
+  // ACK_SUMMARY sent during it could not have been heard. Exclude it from the
+  // pending window's retry/expiry math so the window's unacked bundles (always
+  // including the WINDOW_LAST one, whose ack can only arrive in a slot 0 that
+  // falls after this sleep begins) survive to be retransmitted during the next
+  // warmup instead of being dropped as max_age.
+  _radio.notifyMcuStandby(elapsedMs);
+
+  // The RTC MODE0 clock carries the session forward across standby to ~1 ms
+  // (rtc-subsecond-sleep Phase 1), well inside the 20 ms guard band, so the
+  // session survives the sleep — no reset(), no unslotted AWAKEN handshake,
+  // no waiting on a fresh TIME_SYNC before telemetry can resume. Cold boot and
+  // genuine lost/stale sync still fall back to AWAKEN via update().
+  //
+  // Instrumentation: the local clock is that same RTC counter, so it simply
+  // never stopped over the standby — sessionNowMs() is already current with
+  // nothing to correct. Storing its offset from the local clock lets the next
+  // naturally received TIME_SYNC be compared against it (wake_phase_err in
+  // update()) without the awake gap polluting the error.
+  if (_syncActive && _tdmaClock.hasSync()) {
+    _predictedSessionOffsetMs =
+        _tdmaClock.sessionNowMs() - _clock.millis();
+    _predictedSyncLocalMs = _tdmaClock.syncLocalMs();
+    _predictedValid = true;
+  }
+
+  // The duty controller is still technically in a sleeping phase until it next
+  // reads the clock and sees how far it advanced. Override phase-based radio
+  // sleep so the radio is listening again before the node's next slot.
+  _forceRadioAwake = true;
+  _radio.setDutySleep(false);
+
+  LOG_INFO(
+      "sleep",
+      "timed_mcu_sleep_complete "
+      "elapsed_ms=%lu sync_preserved=%u radio_override=1",
+      static_cast<unsigned long>(elapsedMs),
+      _tdmaClock.hasSync() ? 1 : 0);
+
+  return true;
+}

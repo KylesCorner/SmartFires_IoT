@@ -12,7 +12,7 @@
 
 // Bundles in these tests use maxDeltas=2 (ref + 2 deltas = 3 pushes per bundle)
 // to keep scenarios short. Wire layout under test:
-//   [PktHeader:4][FullStatePayload:20][n_deltas:1][DeltaPayload x n:12][crc8:1]
+//   [PktHeader:5][FullStatePayload:20][n_deltas:1][DeltaPayload x n:12][crc8:1]
 
 namespace {
 
@@ -68,6 +68,28 @@ DecodedBundle pushBundle(PacketHandler &ph, const SensorSnapshot *snaps, size_t 
   TEST_ASSERT_TRUE(ph.bundleReady());
   TEST_ASSERT_GREATER_THAN_UINT8(0, ph.takeBundle(buf, sizeof(buf)));
   return decodeBundle(buf);
+}
+
+// Takes the ready bundle and returns its PktHeader::flags byte, checking the
+// frame's CRC still covers the header (flushWindow() may have edited it in
+// place after encoding).
+uint8_t takeBundleFlags(PacketHandler &ph) {
+  uint8_t buf[BinaryPacket::kMaxBundleLoRaSize] = {};
+  const uint8_t len = ph.takeBundle(buf, sizeof(buf));
+  TEST_ASSERT_GREATER_THAN_UINT8(0, len);
+  TEST_ASSERT_EQUAL_UINT8(buf[len - 1], BinaryPacket::crc8(buf, len - 1));
+
+  BinaryPacket::PktHeader hdr = {};
+  memcpy(&hdr, buf, sizeof(hdr));
+  return hdr.flags;
+}
+
+// Pushes `n` identical samples, taking any bundle that completes.
+void pushSamples(PacketHandler &ph, uint32_t startMs, size_t n) {
+  for (size_t i = 0; i < n; ++i) {
+    ph.push(makeSnap(startMs + 1000u * static_cast<uint32_t>(i),
+                     PacketHandler::SHT31_FLAG, 25.0f, 45.0f));
+  }
 }
 
 constexpr uint16_t kAllFlags =
@@ -237,6 +259,96 @@ void test_valid_readings_encode_unchanged(void) {
   TEST_ASSERT_EQUAL_INT8(-3, b.deltas[1].temp_delta_deci_c);
 }
 
+// -----------------------------------------------------------------------------
+// Timed duty-cycle windows
+// -----------------------------------------------------------------------------
+//
+// Window edges live on their own PKT_WINDOW_BEGIN/PKT_WINDOW_END frames now, so
+// PacketHandler's remaining window duty is just reporting whether the
+// accumulator is mid-bundle (which holds the active window open to the next
+// bundle boundary) and force-encoding a runt if that hold ever gives up.
+
+void test_bundles_carry_no_window_flags(void) {
+  PacketHandler ph(PacketHandler::Config::make(2, kMaxDeltas));
+
+  pushSamples(ph, 1000, 3);  // ref + 2 deltas completes bundle 1
+  TEST_ASSERT_TRUE(ph.bundleReady());
+  TEST_ASSERT_EQUAL_UINT8(0, takeBundleFlags(ph));
+
+  pushSamples(ph, 5000, 3);
+  TEST_ASSERT_TRUE(ph.bundleReady());
+  TEST_ASSERT_EQUAL_UINT8(0, takeBundleFlags(ph));
+}
+
+void test_has_partial_bundle_tracks_the_accumulator(void) {
+  PacketHandler ph(PacketHandler::Config::make(2, kMaxDeltas));
+
+  // Nothing pushed: the window is free to close on activeSampleMs.
+  TEST_ASSERT_FALSE(ph.hasPartialBundle());
+
+  pushSamples(ph, 1000, 1);  // reference only — mid-bundle
+  TEST_ASSERT_TRUE(ph.hasPartialBundle());
+
+  pushSamples(ph, 2000, 1);  // still short of a full bundle
+  TEST_ASSERT_TRUE(ph.hasPartialBundle());
+
+  pushSamples(ph, 3000, 1);  // completes the bundle
+  TEST_ASSERT_TRUE(ph.bundleReady());
+
+  // A completed-but-untaken bundle leaves the accumulator empty, so the window
+  // may close even though a frame is still waiting to be taken — that frame is
+  // whole and goes out ahead of the WINDOW_END marker.
+  TEST_ASSERT_FALSE(ph.hasPartialBundle());
+}
+
+void test_flush_is_a_noop_on_a_bundle_boundary(void) {
+  PacketHandler ph(PacketHandler::Config::make(2, kMaxDeltas));
+
+  pushSamples(ph, 1000, 3);
+  TEST_ASSERT_EQUAL_UINT8(0, takeBundleFlags(ph));
+
+  // The normal case: a whole number of bundles, so there is nothing to flush.
+  TEST_ASSERT_FALSE(ph.flushWindow());
+  TEST_ASSERT_FALSE(ph.bundleReady());
+}
+
+void test_flush_force_encodes_a_runt_when_the_hold_gave_up(void) {
+  PacketHandler ph(PacketHandler::Config::make(2, kMaxDeltas));
+
+  // Only reachable when the duty controller hit its overrun cap waiting for the
+  // accumulator to fill. The samples must not be discarded.
+  pushSamples(ph, 1000, 2);
+  TEST_ASSERT_TRUE(ph.hasPartialBundle());
+  TEST_ASSERT_FALSE(ph.bundleReady());
+
+  TEST_ASSERT_TRUE(ph.flushWindow());
+  TEST_ASSERT_TRUE(ph.bundleReady());
+  TEST_ASSERT_EQUAL_UINT8(0, takeBundleFlags(ph));
+  TEST_ASSERT_FALSE(ph.hasPartialBundle());
+}
+
+void test_flush_keeps_a_completed_untaken_bundle_intact(void) {
+  PacketHandler ph(PacketHandler::Config::make(2, kMaxDeltas));
+
+  pushSamples(ph, 1000, 3);  // bundle completed, deliberately not taken
+  TEST_ASSERT_TRUE(ph.bundleReady());
+
+  // Must not encode over _bundleBuf and lose the frame.
+  TEST_ASSERT_TRUE(ph.flushWindow());
+  TEST_ASSERT_EQUAL_UINT8(0, takeBundleFlags(ph));
+}
+
+void test_reset_clears_a_partial_bundle(void) {
+  PacketHandler ph(PacketHandler::Config::make(2, kMaxDeltas));
+
+  pushSamples(ph, 1000, 2);
+  TEST_ASSERT_TRUE(ph.hasPartialBundle());
+
+  ph.reset();
+  TEST_ASSERT_FALSE(ph.hasPartialBundle());
+  TEST_ASSERT_FALSE(ph.flushWindow());
+}
+
 void runPacketHandlerTests(void) {
   UNITY_BEGIN();
 
@@ -247,6 +359,13 @@ void runPacketHandlerTests(void) {
   RUN_TEST(test_sensor_flags_on_wire_preserve_invalidity);
   RUN_TEST(test_reset_clears_last_good);
   RUN_TEST(test_valid_readings_encode_unchanged);
+
+  RUN_TEST(test_bundles_carry_no_window_flags);
+  RUN_TEST(test_has_partial_bundle_tracks_the_accumulator);
+  RUN_TEST(test_flush_is_a_noop_on_a_bundle_boundary);
+  RUN_TEST(test_flush_force_encodes_a_runt_when_the_hold_gave_up);
+  RUN_TEST(test_flush_keeps_a_completed_untaken_bundle_intact);
+  RUN_TEST(test_reset_clears_a_partial_bundle);
 
   UNITY_END();
 }

@@ -164,7 +164,7 @@ and 25 °C / 50 %RH from the dummy SHT31.
 | TIME_SYNC flows | Base monitor shows `TX TIME_SYNC_LOCAL` and/or `TX TIME_SYNC_PERIODIC` |
 | Node synced and sensing | `rx_fwd` increases by ≥1 every ~15 s (one BUNDLE per duty cycle) |
 | STATUS packets relayed | Jetson CSV contains non-zero `lat_deg` / `lon_deg` (37.7456 / −119.5936) |
-| Delta encoding works | BUNDLE packets arrive at ~194 bytes max; Jetson CSV shows smoothly varying values |
+| Delta encoding works | BUNDLE packets arrive at ~195 bytes max; Jetson CSV shows smoothly varying values |
 | No UART framing errors | `uart_err` stays at 0 on base serial |
 
 ---

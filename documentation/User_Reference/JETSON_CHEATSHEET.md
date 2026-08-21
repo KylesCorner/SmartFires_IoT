@@ -86,6 +86,12 @@ SUBSYSTEM=="tty", ATTRS{serial}=="<sniffer-serial>", SYMLINK+="smartfires-sniffe
 then `sudo udevadm control --reload-rules && sudo udevadm trigger`.
 
 Current working web command: (Do not delete)
-smartfires-edge web --port /dev/smartfires-base --sniffer-port /dev/smartfires-sniffer --num-slots 4
+smartfires-edge web --port /dev/smartfires-base --sniffer-port /dev/smartfires-sniffer --num-slots 5
+
+`--num-slots` must equal the `NUM_SLOTS` the Feathers were flashed with —
+(node count) + 1, set in platformio.ini's `[network]` section. Passing it
+explicitly here overrides `DEFAULT_NUM_SLOTS` in config.py, so it has to be
+updated alongside a slot-count change; omit the flag entirely to just inherit
+the default. It only affects sniffer slot alignment, not ingest.
 
 pio device monitor -e feather_m0_lora_node_debug -f log2file

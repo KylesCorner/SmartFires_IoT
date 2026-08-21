@@ -38,6 +38,19 @@ constexpr uint32_t kAckSummaryMinIntervalMs = 25;
 // new telemetry arrives from that node or it re-AWAKENs.
 constexpr uint8_t kMaxAckSummarySendAttempts = 3;
 
+// Fallback for a Timed node whose PKT_WINDOW_END frame was itself lost, so the
+// base never learned it was entering standby. Silence longer than this
+// gates ACK_SUMMARY the same way the explicit marker does — the tracker keeps
+// `dirty`, so the ack is still deferred rather than dropped.
+//
+// Two frame periods. One frame is the natural spacing between the base's own
+// slot-0 windows, so this permits a first attempt (the ack may simply have been
+// lost, which is worth one retry) and gates the rest, instead of spending three
+// ~1 s blocking sendToWait() calls on a node that cannot answer. A node with
+// nothing new to say never has `dirty` set, so this can only ever gate a node
+// that really did stop responding.
+constexpr uint32_t kAckSummaryNodeSilenceMs = 2u * NetworkConfig::kFramePeriodMs;
+
 // Bounded retry for a queued CMD_CALIBRATE/CMD_RESET before giving up on a
 // node that isn't link-acking it. Each attempt is one sendToWait() call from
 // sendPendingCommand(), which already contains RHReliableDatagram's own
@@ -81,5 +94,81 @@ constexpr uint8_t kTotalEntities = NetworkConfig::kNumSlots;
 constexpr uint8_t kMaxAssignedNodes = kTotalEntities - 1;
 constexpr uint8_t kFirstNodeId = 0x02;
 constexpr uint8_t kMaxAckTrackedNodes = 16;
+
+// --- Dynamic TX power control loop (TxPowerController) ----------------------
+// See documentation/Pending_Plans/DYNAMIC_TX_POWER.md. The base is the only
+// decision-maker; the node applies absolute levels and reports what it applied.
+// None of these are bench-characterized yet — they are starting values chosen
+// to be conservative, and the loop's own debug log is the instrument for tuning
+// them.
+
+// How many nodes the controller tracks. Matches kMaxAckTrackedNodes so the two
+// per-node tables can never disagree about how many nodes the base can follow.
+constexpr uint8_t kMaxTxPowerTrackedNodes = kMaxAckTrackedNodes;
+
+// SNR, in tenths of a dB, at which the modem stops being able to demodulate.
+// -7.5 dB is the SX1276's figure for SF7, which is what every node runs today
+// (RadioHead's implicit Bw125Cr45Sf128 default — see LORA_VS_LORAWAN.md). This
+// is the reference point link margin is measured against; it must change if the
+// spreading factor ever becomes configurable, since the floor is SF-dependent.
+constexpr int16_t kSnrDemodFloorDbX10 = -75;
+
+// Link margin the loop aims to leave above the demod floor, in tenths of a dB.
+// A single target rather than the separate floor/headroom threshold pair the
+// plan first proposed: two independent thresholds can be set into an
+// oscillation (floor above headroom) with nothing to catch it, whereas one
+// target plus a dead band cannot.
+constexpr int16_t kTargetSnrMarginDbX10 = 100;  // 10.0 dB
+
+// Step size for a power *reduction*, in dB. Power increases are not stepped —
+// see TxPowerController::decide() for why recovery is a single jump.
+constexpr int8_t kTxPowerStepDbm = 2;
+
+// Extra margin above the target required before stepping down, in tenths of a
+// dB. Without it a node sitting exactly at the target oscillates: step down,
+// fall below target, step back up, forever. The static_assert below is the
+// actual guarantee — the dead band must exceed one step, or a step-down can
+// land the node under target and immediately re-trigger a step-up.
+constexpr int16_t kSnrDeadBandDbX10 = 30;  // 3.0 dB
+static_assert(kSnrDeadBandDbX10 > static_cast<int16_t>(kTxPowerStepDbm) * 10,
+              "TX power dead band must exceed one step, or the loop oscillates");
+
+// Minimum time between two decisions for the same node.
+//
+// This — not STATUS arrival — is what paces the loop, and it is the reason the
+// plan's "what do we do about the debug env" question does not need answering.
+// STATUS interval is a build flag that ranges over three orders of magnitude
+// (1 s on feather_m0_lora_node_debug, 15 s on feather_m0_lora_node, 15 min on
+// PacketHandler's default), so a loop gated purely on STATUS arrival would run
+// at wildly different rates per build with one set of thresholds. Gating on the
+// controller's own clock instead means STATUS is only the trigger to *consider*
+// a decision, and retx/fail deltas are always measured across this fixed
+// window regardless of how many STATUS packets landed inside it.
+constexpr uint32_t kTxPowerMinDecisionIntervalMs = 60000;  // 60 s
+
+// How long to wait for the CMD_ACK confirming a power change before giving up
+// and re-arming the decision.
+//
+// Must exceed the Timed duty-cycle period (SensingConfig::kTimedCyclePeriodMs,
+// 75 s): a command queued while the node is in MCU standby physically cannot be
+// delivered until its next PKT_WINDOW_BEGIN. Sized off a frame period instead —
+// the obvious-looking choice — the base would time out and re-arm on every node
+// that was merely asleep.
+constexpr uint32_t kCmdAckTimeoutMs = 120000;  // 120 s
+
+// Silence after which a node's TX power is treated as unknown and it is probed
+// back to baseline. This is the uplink-dead case: the base has stopped hearing
+// the node but may still be able to reach it, and it is the only actor that
+// can, since a node with a working downlink never trips its own stale-sync
+// fallback. Comfortably longer than a full duty cycle so a sleeping node is
+// never mistaken for a dark one.
+constexpr uint32_t kTxPowerSilenceTimeoutMs = 300000;  // 5 min
+static_assert(kTxPowerSilenceTimeoutMs > kCmdAckTimeoutMs,
+              "silence timeout must outlast a pending command's ack window");
+
+// Bound on best-effort baseline probes sent into silence before giving up on a
+// node. Unbounded probing would spend the base's slot-0 airtime forever on a
+// node that is simply gone. Reset when the node is heard from again.
+constexpr uint8_t kMaxTxPowerSilenceProbes = 3;
 
 }  // namespace BaseConfig

@@ -1,11 +1,12 @@
 ---
 name: packet-reliability
-description: StrictLinkAck vs AppLayerAckSummary reliability modes, retry gating, ACK_SUMMARY, and the waitPacketSent() hang risk.
+description: StrictLinkAck vs AppLayerAckSummary reliability modes, retry gating, ACK_SUMMARY, duty-cycled-node ack deferral, and the waitPacketSent() hang risk.
 category: architecture
 status: current
-last_verified: 2026-07-13
+last_verified: 2026-08-17
 source_refs:
   - platformio/include/config/NetworkConfig.h
+  - platformio/include/config/BaseConfig.h
   - platformio/include/radio/TdmaConfig.h
   - platformio/include/radio/ITdmaRadioDriver.h
   - platformio/src/radio/TdmaRadioService.cpp
@@ -16,6 +17,7 @@ related_docs:
   - tunable-parameters
   - radio-rx-gating
   - watchdog-timer
+  - duty-cycling
 ---
 
 # Packet Reliability
@@ -33,12 +35,52 @@ acknowledgement exchange.
 | `TIME_SYNC` (direct, AWAKEN-triggered) | Base → Node | Link-layer ACK (`sendToWait`) | `sendDirectTimeSync()` is a distinct unicast path from the periodic broadcast above — replies to one node's `AWAKEN` |
 | `BUNDLE` / `STATUS` | Node → Base | Configurable (see below) | Telemetry — governed by reliability mode |
 | `ACK_SUMMARY` | Base → Node | Link-layer ACK (`sendToWait`) | `SmartFiresBaseApp::sendAckSummary()` blocks on the link ACK, it is not fire-and-forget. A missed reception triggers RadioHead's own link-layer retry (`kLinkRetries`/`kLinkAckTimeoutMs`, independent of `TdmaConfig::reliabilityMode`) immediately — this is what surfaces as base-side retries if a node's Rx happens to be asleep when the base transmits; see [radio-rx-gating](../Pending_Plans/RADIO_RX_GATING.md) |
-| `CMD_CALIBRATE` / `CMD_RESET` | Base → Node | Link-layer ACK (`sendToWait`) | `SmartFiresBaseApp::sendPendingCommand()` blocks on the link ACK; gives up after `BaseConfig::kMaxPendingCommandSendAttempts` and drops the command (`reason=no_link_ack`) if it never arrives |
+| `CMD_CALIBRATE` / `CMD_RESET` / `CMD_SET_TX_POWER` | Base → Node | Fire-and-forget (`send()`) | `SmartFiresBaseApp::sendPendingCommand()`. Acknowledged at the app layer by `CMD_ACK` instead — see "Commands are not link-ACKed" below |
+| `CMD_ACK` | Node → Base | Fire-and-forget, TDMA-queued | `SmartFiresNodeApp::sendCmdAck()` enqueues it like telemetry so it goes out in the node's own slot. Not admitted to the app-layer reliability window (`isTelemetryPacketForNode()` allows only `BUNDLE`/`STATUS`/`FULL_STATE`), so it consumes no pending slot and leaves no hole in the ack bitmap |
+| `CMD_ACK` (for `CMD_RESET`) | Node → Base | Fire-and-forget, immediate | Cannot be queued — see "Commands are not link-ACKed" below |
 
-**All four link-ACKed packet types above depend on the receiving node actually
+**All three link-ACKed packet types above depend on the receiving node actually
 sending that ACK back** — see "waitPacketSent() has no timeout" below for how
 that ACK is generated on the node side, and why it isn't as simple as letting
 RadioHead handle it automatically.
+
+### Commands are not link-ACKed
+
+Both halves of the command round trip used to be link-ACKed, and both were
+incompatible with the slot they had to happen in.
+
+The base's `sendtoWait()` blocks `(kLinkRetries + 1) × kLinkAckTimeoutMs` =
+**1000 ms** against a **900 ms** `kSlotWidthMs`. A single unreachable node — one
+in Timed standby, or one that rebooted and missed the window — was enough to
+carry the base's transmission past the end of slot 0 and on top of whichever node
+owned the next one. The `static_assert` at `NetworkConfig.h`'s
+`kSlotWidthMs > kBundleTxBudgetMs + kLinkAckTimeoutMs + 2 * kGuardMs` does not
+catch this: it budgets for *one* ack timeout, and reasons about the node's
+telemetry path where `enableLinkAck=false`, not about the base's `sendToWait()`
+calls.
+
+The node's ACK was the mirror image. A command can only arrive while the base is
+transmitting, which is by construction inside slot 0, so acking it on receipt put
+the node's radio on the air inside the base's own window — every command, every
+time.
+
+`CMD_ACK` covers what the link ACK was covering, and covers it better: it is
+TDMA-gated to the node's own slot, and the base already bounds the wait for it
+with `BaseConfig::kCmdAckTimeoutMs` (`TxPowerController` expires unacked commands
+on exactly that). For `CMD_SET_TX_POWER` in particular the link ACK carried no
+information worth the airtime — levels are absolute and idempotent, so a lost
+command is simply re-issued by the next decision, and `StatusPayload.tx_power_dbm`
+rather than any ack is the authority on what the node actually applied.
+
+**`CMD_RESET`'s ack cannot be queued.** It acknowledges a command whose entire
+effect is that the node stops being able to transmit — the same structural
+argument that keeps `WINDOW_END` off a data frame. The hard path calls
+`NVIC_SystemReset()` a few hundred ms later, and the soft path calls
+`flushTelemetryBuffers()`, which drains and clears the very queue the ack would
+be waiting in. Queuing it does not delay it, it destroys it. So that one ack
+still goes out through `sendImmediate()` — but with `requireLinkAck=false`, so it
+is a single off-slot frame rather than a blocking round trip. There is no later
+slot to move it to; that is the point of the command.
 
 ## `waitPacketSent()` Has No Timeout
 
@@ -97,11 +139,12 @@ Three independent call paths reach this:
 The node's `TdmaRadioService::checkIncomingTimeSync()` now calls
 `_driver.receive(packet, /*autoAck=*/false)`, disabling RadioHead's
 automatic ACK-on-receive entirely (matching what `SmartFiresBaseApp` already
-did for its own receive path). For the three packet types that still need
-an ACK for the base's `sendToWait()` to succeed (`ACK_SUMMARY`,
-`CMD_CALIBRATE`/`CMD_RESET`, and the direct/unicast `TIME_SYNC` reply — the
-periodic broadcast is deliberately never ACKed), the node now calls
-`_driver.acknowledge(packet.from, packet.id)` explicitly.
+did for its own receive path). For the two packet types that still need
+an ACK for the base's `sendToWait()` to succeed (`ACK_SUMMARY` and the
+direct/unicast `TIME_SYNC` reply — the periodic broadcast is deliberately never
+ACKed, and commands are no longer ACKed at all per "Commands are not
+link-ACKed" above), the node calls `_driver.acknowledge(packet.from, packet.id)`
+explicitly.
 
 `ITdmaRadioDriver::acknowledge()` (implemented in
 `RadioHeadTdmaDriver::acknowledge()`) reconstructs the same ACK frame
@@ -146,7 +189,7 @@ exposure `acknowledge()`'s first version turned out to have.
 `send()` now calls `RHGenericDriver::waitPacketSent(NetworkConfig::
 kSendTxWaitMs)` after `sendto()`, logging `send_tx_timeout` if it gives up.
 `kSendTxWaitMs` reuses `kBundleTxBudgetMs` (the largest existing per-slot TX
-budget, sized for a ≤194-byte `BUNDLE`) rather than branching on payload
+budget, sized for a ≤195-byte `BUNDLE`) rather than branching on payload
 size — waiting a bit longer than strictly necessary for a small `STATUS`/
 `TIME_SYNC` send costs nothing but a few extra milliseconds in the rare
 timeout case; under-timing a `BUNDLE` would defeat the point. A timeout
@@ -251,7 +294,7 @@ re-sends the oldest unacknowledged entry from this window.
 | `kMaxReliabilityWindow` | 8 | Hard cap in firmware |
 | `reliabilityWindowDepth` | 8 | Effective window size (configurable) |
 | `reliabilityMaxAttempts` | 3 | Pending entry dropped after this many retransmits |
-| `reliabilityMaxAgeMs` | 30 000 ms | Pending entry dropped after 30 s regardless of attempts |
+| `reliabilityMaxAgeMs` | 30 000 ms | Pending entry dropped after 30 s regardless of attempts — MCU standby is excluded from this age, see [Duty-Cycled Nodes](#duty-cycled-nodes-timed-mode) |
 | `reliabilityMinRetryGapMs` | 2 000 ms | Minimum gap between retransmits of the same seq |
 | `reliabilityFreshTrafficHoldoffMs` | 2 000 ms | Retransmits are suppressed for 2 s after a fresh send |
 
@@ -271,14 +314,21 @@ retryWaitMs = clamp(expectedAckIntervalMs * retryWaitMultiplierPermille / 1000,
 
 | Parameter | Value | Notes |
 |---|---|---|
-| `expectedAckIntervalMs` | 4 000 ms | Expected cadence of base-side `ACK_SUMMARY` packets |
+| `expectedAckIntervalMs` | 4 500 ms (= `kFramePeriodMs`) | Expected cadence of base-side `ACK_SUMMARY` packets — derived from the frame period, since the base can only transmit in slot 0 |
 | `retryWaitMultiplierPermille` | 2000 (2.0×) | Back-off multiplier applied to the expected interval |
-| `retryWaitMinMs` | 4 500 ms | Floor: one interval + 500 ms jitter margin |
-| `retryWaitMaxMs` | 10 000 ms | Ceiling: 2.5 intervals |
+| `retryWaitMinMs` | 4 500 ms | Floor: one full frame rotation, so a retry can never fire before the base has had one chance to ack (`static_assert`ed against `kFramePeriodMs`) |
+| `retryWaitMaxMs` | 10 000 ms | Ceiling: ~2.2 frame rotations |
 
-At current values, `retryWaitMs` evaluates to `4000 × 2.0 = 8000`, clamped into
-`[4500, 10000]` → **8 000 ms**. An entry younger than this is skipped by
-`pickRetransmitCandidate()` regardless of queue idleness.
+At current values, `retryWaitMs` evaluates to `4500 × 2.0 = 9000`, clamped into
+`[4500, 10000]` → **9 000 ms** (two full frame rotations). An entry younger than
+this is skipped by `pickRetransmitCandidate()` regardless of queue idleness.
+
+Note that `retryWaitMaxMs` is now the binding constraint at only one more slot:
+at `NUM_SLOTS=6` the formula would want `5400 × 2.0 = 10 800 ms` and clamp back
+to 10 000, dropping the margin below two rotations. The `static_assert` on
+`kRetryWaitMinMs >= kFramePeriodMs` fires first, at the same slot count, which is
+the intended prompt to re-derive both bounds rather than let the gate quietly
+under-wait.
 
 `requireAckSummaryBeforeFirstRetry` (currently `false`) optionally gates a
 pending entry's *first* retransmit attempt on having observed at least one
@@ -323,6 +373,96 @@ Sequence number comparison uses 8-bit modulo arithmetic:
 
 - If `(ack_base_seq − seq) < 128`: seq is at or before base → acknowledged.
 - If `1 ≤ (seq − ack_base_seq) ≤ 16`: check the corresponding mask bit.
+
+## Duty-Cycled Nodes (Timed mode)
+
+A `Timed` node spends most of each duty cycle in SAMD21 standby with the SX1276
+asleep. Both sides of the reliability loop have to account for that, because for
+`kTimedSleepMs` (35 s) out of every cycle the node simply cannot hear anything —
+and the packet most affected is the window-close bundle, whose `ACK_SUMMARY`
+can only be sent in a slot 0 that falls *after* the node has already gone down.
+
+Nothing is lost to memory across standby: SRAM is retained, so `TdmaTxQueue`,
+`PacketHandler`'s accumulator, and the pending window all survive byte-identical.
+The problems are all timing ones.
+
+### Node side — standby does not count as retry time
+
+`SmartFiresNodeApp::maybeEnterTimedMcuSleep()` calls
+`TdmaRadioService::notifyMcuStandby(elapsedMs)` on wake, which slides every
+pending entry's `firstSentMs`/`lastSentMs` (and `_lastAckSummarySessionMs`)
+forward by the measured sleep.
+
+Without it, the sleep counts as elapsed retry time: pending timestamps are in
+session-clock terms, the session clock runs through standby (see
+[RTC_SUBSECOND_SLEEP](../Completed_Plans/RTC_SUBSECOND_SLEEP.md) Phase 2), and
+`kTimedSleepMs` (35 s) exceeds `reliabilityMaxAgeMs` (30 s) — so **every**
+unacked entry would be discarded as `max_age` on the first post-wake drain, with
+no retransmit. Not a race; it would fire on every cycle.
+
+With the shift, those entries become eligible again one `retryWaitMs` (8 s) into
+the wake. In practice they should not become eligible at all: `PKT_WINDOW_BEGIN`
+goes out at the top of `WarmingUp`, and `holdPendingRetriesForAckRoundTrip()`
+slides the same timestamps a further `kAckRoundTripFrames` (2) frame periods so
+the deferred `ACK_SUMMARY` has time to arrive first. A retransmission during
+warmup now means the `WINDOW_BEGIN` was itself lost.
+
+The hold is keyed off the marker actually reaching the air, not its enqueue — it
+can wait a whole frame for the node's slot. And `drainTxQueue()` lets a queued
+`WINDOW_BEGIN` preempt a due retransmit for that slot: on the first slot after a
+wake both are ready at once, and retransmit normally wins, which would mean
+paying for the full bundle replay the marker exists to prevent.
+
+### Retransmissions are marked on the wire
+
+`pickRetransmitCandidate()` ORs `PKT_FLAG_RETX` into the *outgoing copy*'s
+`PktHeader::flags` and recomputes the trailing `crc8`. The stored pending payload
+is deliberately left untouched, so repeated attempts are byte-identical.
+
+The bit tells the base its previous `ACK_SUMMARY` never landed, so that send must
+bypass the "nothing changed since last sent" suppression. It also gives the
+Jetson a way to separate replayed samples from first-transmission ones (`retx`
+CSV column).
+
+It used to carry a second job: while the sleep signal was a flag on a
+retransmittable bundle, a replayed `WINDOW_LAST` meant the exact opposite of a
+fresh one, and `RETX` was how the base told them apart. Moving the signal onto
+`PKT_WINDOW_END` retired that inversion.
+
+### Base side — deferring ACK_SUMMARY across the sleep
+
+Each `AckTracker` carries an `asleep` flag, set by `PKT_WINDOW_END` and cleared
+by any other frame from that node. Because the marker is never retransmitted the
+rule needs no qualification: END means asleep, anything else means awake.
+`sendPendingAckSummary()` skips `asleep` trackers **while leaving `dirty` set**,
+so the acknowledgement is *deferred*, not dropped: it goes out on the first slot 0
+after the node is heard from again, merged with whatever that packet added to the
+mask.
+
+This matters for more than tidiness. `sendAckSummary()` uses the blocking
+`sendToWait()` (`kLinkRetries` × `kLinkAckTimeoutMs` ≈ 1 s), which is longer than
+the base's own 900 ms slot 0. Without the gate the base spends roughly three
+consecutive slot-0 windows blocked against a node that cannot answer, delaying
+`TIME_SYNC` and queued commands for every *other* node, before
+`kMaxAckSummarySendAttempts` finally trips `retryHeld`.
+
+Two supporting rules:
+
+| Rule | Why |
+|---|---|
+| A `RETX` frame sets `forceResend`, bypassing the `unchangedFromLastSent` suppression for one send | The node re-asking is proof it never got the ack. Taking the "nothing changed" shortcut would clear `dirty` and leave the node retrying into silence until `reliabilityMaxAttempts`. |
+| A `PKT_WINDOW_BEGIN` sets `forceResend` too, and additionally bypasses `ackSummaryMinIntervalMs` for one flush | Anything the base transmitted during the node's standby went to a switched-off radio, so the last ack must be assumed lost whatever `lastSentAckBaseSeq`/`Mask` say. And the node's retry hold is only two frame periods long — spending it on a rate limiter meant for steady-state coalescing would let the retransmission fire anyway. |
+| Silence beyond `kAckSummaryNodeSilenceMs` (2 frame periods) gates the same way | Fallback for a `PKT_WINDOW_END` that was itself lost, so `asleep` never got set. A node with nothing new to say never has `dirty` set, so this can only gate a node that really stopped responding. |
+
+`resetAckTracker()` clears `asleep` — a rebooting node is awake and about to
+`AWAKEN`, and must never stay gated on a marker from before the reset.
+
+**Not covered:** queued `CMD_CALIBRATE`/`CMD_RESET` use the same blocking send
+against the same deaf node, and `kMaxPendingCommandSendAttempts` (3, one per base
+window ≈ 11 s) expires well inside a 35 s standby — so operator commands aimed at
+a sleeping `Timed` node are dropped rather than deferred. Gating them needs a
+deferral deadline so a genuinely dead node can't hold a command slot forever;
+that design is not yet done.
 
 ## Reliability Boundary
 

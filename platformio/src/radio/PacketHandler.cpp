@@ -8,6 +8,7 @@
 
 #include <limits.h>
 #include <math.h>
+#include <stddef.h>
 #include <string.h>
 
 namespace {
@@ -88,10 +89,47 @@ bool PacketHandler::push(const SensorSnapshot &snap) {
         return false;
     }
 
+    return encodeAccumulatedBundle();
+}
+
+// --- Timed duty-cycle windows ---
+
+bool PacketHandler::hasPartialBundle() const {
+    // A completed-but-untaken bundle is not partial — the accumulator behind it
+    // is empty, so the window is free to close.
+    return _bundleEncodingEnabled && _hasRef;
+}
+
+bool PacketHandler::flushWindow() {
+    // A bundle that completed but hasn't been taken yet owns _bundleBuf, so
+    // encoding over it would lose it. Nothing to do either way: it is already a
+    // complete frame.
+    if (_bundleReady) {
+        LOG_DEBUG("packet", "window_flush_noop reason=bundle_already_ready");
+        return true;
+    }
+
+    if (!_bundleEncodingEnabled || !_hasRef) {
+        LOG_DEBUG("packet", "window_flush_empty delta_count=%u",
+                  static_cast<unsigned int>(_deltaCount));
+        return false;
+    }
+
+    // Reached only when the duty controller's active-window hold gave up on
+    // waiting for the bundle to fill (overrun cap). Encode the runt rather than
+    // discard the samples.
+    LOG_WARN("packet", "window_flush_partial delta_count=%u max_deltas=%u",
+             static_cast<unsigned int>(_deltaCount),
+             static_cast<unsigned int>(_cfg.maxDeltas));
+
+    return encodeAccumulatedBundle();
+}
+
+bool PacketHandler::encodeAccumulatedBundle() {
     _bundleLen = BinaryPacket::encodeBundlePayload(
         _cfg.nodeId, _seq++,
         _ref, _deltas, _deltaCount,
-        _bundleBuf, sizeof(_bundleBuf));
+        _bundleBuf, sizeof(_bundleBuf), 0);
 
     _bundleReady = (_bundleLen > 0);
     _hasRef      = false;
@@ -165,6 +203,11 @@ void PacketHandler::setLinkStats(uint32_t retxTotal, uint32_t failTotal) {
     _failTotal = failTotal;
 }
 
+void PacketHandler::setTxPowerState(int8_t dbm, bool isStatic) {
+    _txPowerDbm = dbm;
+    _txPowerStatic = isStatic;
+}
+
 // --- full reset ---
 
 void PacketHandler::reset() {
@@ -229,6 +272,11 @@ void PacketHandler::tryEncodeStatus(const SensorSnapshot &snap) {
         ? static_cast<uint16_t>(0xFFFFu)
         : static_cast<uint16_t>(_failTotal);
 
+    sp.tx_power_dbm = _txPowerDbm;
+    if (_txPowerStatic) {
+        flags |= BinaryPacket::STATUS_TX_POWER_STATIC;
+    }
+
     sp.flags = flags;
 
     _statusLen   = BinaryPacket::encodeStatusPayload(
@@ -240,13 +288,15 @@ void PacketHandler::tryEncodeStatus(const SensorSnapshot &snap) {
         _statusEverSent  = true;
 
         LOG_INFO("packet",
-                 "status_encoded len=%u node=%u flags=0x%02X session_ms=%lu retx=%u fail=%u",
+                 "status_encoded len=%u node=%u flags=0x%02X session_ms=%lu retx=%u fail=%u tx_power_dbm=%d tx_power_static=%u",
                  static_cast<unsigned int>(_statusLen),
                  static_cast<unsigned int>(_cfg.nodeId),
                  static_cast<unsigned int>(sp.flags),
                  static_cast<unsigned long>(snap.sessionTimeMs),
                  static_cast<unsigned int>(sp.retx_total),
-                 static_cast<unsigned int>(sp.fail_total));
+                 static_cast<unsigned int>(sp.fail_total),
+                 static_cast<int>(sp.tx_power_dbm),
+                 _txPowerStatic ? 1u : 0u);
         if ((sp.flags & BinaryPacket::STATUS_IMU_VALID) != 0u) {
             LOG_DEBUG("packet",
                       "status_imu_payload node=%u heading_deg=%.1f accuracy_deg=%.2f",

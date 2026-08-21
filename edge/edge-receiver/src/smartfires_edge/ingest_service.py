@@ -22,13 +22,18 @@ from smartfires_edge.packet import (
     PKT_DEBUG_LOG,
     PKT_FULL_STATE,
     PKT_STATUS,
+    PKT_WINDOW_BEGIN,
+    PKT_WINDOW_END,
+    TX_POWER_MODE_STATIC,
     encode_cmd_reset_frame,
+    encode_cmd_set_tx_power_frame,
     encode_time_sync_frame,
 )
 from smartfires_edge.packet_loss import PacketLossTracker
 from smartfires_edge.session import SessionManager
 from smartfires_edge.session_meta import SessionMetaLogger
 from smartfires_edge.uart_receiver import iter_packets
+from smartfires_edge.window_state import WindowTracker
 
 
 def _fmt_field(value, spec: str) -> str:
@@ -106,6 +111,45 @@ def _send_time_sync(
     return True
 
 
+def _send_cmd_set_tx_power(
+    ser,
+    write_lock: threading.Lock,
+    cmd_seq_state: dict,
+    node_id: int,
+    tx_power_dbm: int,
+    mode: int,
+    log_fn=None,
+) -> None:
+    """Send a CMD_SET_TX_POWER frame for the base to relay to one node.
+
+    The value is absolute. The dashboard's increase/decrease buttons resolve to
+    an absolute target client-side from the node's last reported power, so a
+    stale reading can only produce a slightly-wrong level, never a runaway —
+    see encode_cmd_set_tx_power_frame().
+    """
+    with write_lock:
+        seq = int(cmd_seq_state.setdefault("next_seq", 0)) & 0xFF
+        frame = encode_cmd_set_tx_power_frame(
+            node_id=node_id, tx_power_dbm=tx_power_dbm, mode=mode, seq=seq
+        )
+        try:
+            ser.write(frame)
+        except Exception as exc:  # noqa: BLE001 - surfaced to the operator, not fatal
+            if log_fn is not None:
+                log_fn(f"[CMD] set_tx_power node={node_id} FAILED: {exc}", node_id, kind="cmd")
+            return
+        cmd_seq_state["next_seq"] = (seq + 1) & 0xFF
+
+    if log_fn is not None:
+        mode_name = "STATIC" if mode == TX_POWER_MODE_STATIC else "DYNAMIC"
+        log_fn(
+            f"[CMD] set_tx_power node={node_id} tx_power_dbm={tx_power_dbm} "
+            f"mode={mode_name} seq={seq}",
+            node_id,
+            kind="cmd",
+        )
+
+
 def _send_cmd_reset(
     ser: serial.Serial,
     write_lock: threading.Lock,
@@ -157,6 +201,7 @@ def run_receive(
     live_state: LiveState | None = None,
     log_fn: Callable[[str, int | None], None] | None = None,
     reset_event: threading.Event | None = None,
+    tx_power_queue: "queue.Queue[dict] | None" = None,
     node_reset_queue: "queue.Queue[int] | None" = None,
 ) -> int:
     """Run the UART ingest loop.
@@ -169,6 +214,10 @@ def run_receive(
         log_fn: Optional log callback ``(msg, node_id)`` injected by ``web`` subcommand
                 to stream log lines to the browser. Defaults to plain ``print``.
         reset_event: Optional threading.Event set by the web API to trigger a new session.
+        tx_power_queue: Optional queue of TX power commands from the web API. Each item is
+                        {node_id, tx_power_dbm, mode} and is relayed verbatim — the API
+                        layer, not this loop, resolves increase/decrease into an absolute
+                        level from the node's last reported power.
         node_reset_queue: Optional queue of node_ids, populated by the web API's
                            per-node "Reset" button. Drained once per loop tick —
                            each entry triggers a hard CMD_RESET to that node.
@@ -177,6 +226,7 @@ def run_receive(
         log_fn = lambda msg, node_id=None, source="ingest", kind="other": print(msg)  # noqa: E731
 
     tracker = PacketLossTracker(cfg.nodes)
+    window_tracker = WindowTracker()
     if live_state is not None:
         live_state.tracker = tracker
     sync_state = {"next_seq": 0}
@@ -321,18 +371,78 @@ def run_receive(
                         # Node rebooted, so its wire seq counter restarted from 0 —
                         # reset the loss-tracking baseline before observing this
                         # packet, or the gap since the old session's last seq gets
-                        # miscounted as missing.
+                        # miscounted as missing. The window counter restarted with
+                        # it, and a node that rebooted mid-sleep never sent the END
+                        # for the window it was in.
                         tracker.reset_node(int(hdr_node))
+                        window_tracker.on_reboot(int(hdr_node))
 
-                    # Observe every packet (all types share the same rolling seq counter).
-                    # Done once per LoRa packet here so that STATUS/AWAKEN seqs are counted
-                    # and bundle samples don't inflate crc_valid_packets.
-                    if hdr_node is not None and hdr_seq is not None and event.get("rssi") is not None:
+                    is_window_marker = pkt_type in (PKT_WINDOW_BEGIN, PKT_WINDOW_END)
+
+                    # Observe every packet that carries a telemetry seq (they all
+                    # share one rolling counter). Done once per LoRa packet here so
+                    # that STATUS/AWAKEN seqs are counted and bundle samples don't
+                    # inflate crc_valid_packets.
+                    #
+                    # Window markers are excluded deliberately: they carry seq=0 as
+                    # a placeholder, are never retransmitted, and are identified by
+                    # window_id instead. Feeding them in would register a phantom
+                    # seq-0 packet every duty cycle and read as a huge backwards
+                    # sequence jump.
+                    if (
+                        hdr_node is not None
+                        and hdr_seq is not None
+                        and event.get("rssi") is not None
+                        and not is_window_marker
+                    ):
                         tracker.observe_packet(
                             node_id=int(hdr_node),
                             seq=int(hdr_seq),
                             rssi=int(event["rssi"]),
                         )
+
+                    marker = event.get("window_marker")
+                    if marker is not None:
+                        marker_node = int(marker["node_id"])
+                        window_id = int(marker["window_id"])
+                        is_end = bool(marker["is_end"])
+
+                        if is_end:
+                            window_tracker.on_window_end(marker_node, window_id)
+                        else:
+                            window_tracker.on_window_begin(marker_node, window_id)
+
+                        marker_row = {
+                            "timestamp": datetime.utcnow().isoformat(timespec="milliseconds"),
+                            "packet_type": "window_end" if is_end else "window_begin",
+                            "node_id": marker_node,
+                            "session_time_ms": marker["session_time_ms"],
+                            "uptime_ms": marker["session_time_ms"],
+                            "rssi": marker.get("rssi"),
+                            "pkt_flags": marker.get("pkt_flags"),
+                            "window_id": window_id,
+                            "window_first": 1 if not is_end else 0,
+                            # The END frame *is* the window's last packet, and its
+                            # timestamp is the only record of the close instant —
+                            # the final bundle's last sample is taken before it.
+                            "window_last": 1 if is_end else 0,
+                            "planned_sleep_ms": marker.get("planned_sleep_ms"),
+                            "window_sample_count": marker.get("sample_count"),
+                        }
+                        logger.write_row(marker_row)
+                        log_fn(
+                            f"[EDGE][WINDOW] node={marker_node} "
+                            f"{'end' if is_end else 'begin'} id={window_id} "
+                            f"session_ms={marker['session_time_ms']}"
+                            + (
+                                f" samples={marker['sample_count']}"
+                                f" planned_sleep_ms={marker['planned_sleep_ms']}"
+                                if is_end
+                                else ""
+                            ),
+                            marker_node,
+                        )
+                        continue
 
                     if hdr_node is not None and hdr_seq is not None and pkt_type == PKT_AWAKEN:
                         awaken = event.get("awaken") or {}
@@ -451,6 +561,13 @@ def run_receive(
                             "jetson_wind_dir_deg": "",
                             "retx_total": status.get("retx_total") if status.get("retx_total") is not None else "",
                             "fail_total": status.get("fail_total") if status.get("fail_total") is not None else "",
+                            # Node's applied radio TX power. Empty on firmware
+                            # predating dynamic-tx-power. Reaches the JSONL
+                            # status stream, the log line, and the CSV; the
+                            # web dashboard's node-list column is a separate
+                            # step (DYNAMIC_TX_POWER.md checklist item 10).
+                            "tx_power_dbm": status.get("tx_power_dbm") if status.get("tx_power_dbm") is not None else "",
+                            "tx_power_mode": status.get("tx_power_mode") or "",
                         }
                         _append_jsonl(status_path, status_row)
                         logger.write_row(status_row)
@@ -464,7 +581,9 @@ def run_receive(
                             f"rssi={status_row['rssi']} "
                             f"heading={status_row['heading_true_deg']} "
                             f"location_corrected_heading={status_row['location_corrected_heading']} "
-                            f"retx_total={status_row['retx_total']} fail_total={status_row['fail_total']}",
+                            f"retx_total={status_row['retx_total']} fail_total={status_row['fail_total']} "
+                            f"tx_power_dbm={status_row['tx_power_dbm']} "
+                            f"tx_power_mode={status_row['tx_power_mode']}",
                             int(status_row["node_id"]) if status_row["node_id"] is not None else None,
                             kind="status",
                         )
@@ -517,6 +636,11 @@ def run_receive(
                             pkt["jetson_wind_mps"] = ""
                             pkt["jetson_wind_dir_deg"] = ""
 
+                        # Attribute the sample to the duty-cycle window that is
+                        # currently open for this node (no-op in Continuous mode,
+                        # which never sends markers).
+                        window_tracker.annotate(int(pkt["node_id"]), pkt)
+
                         logger.write_row(pkt)
                         if live_state is not None:
                             live_state.record_telemetry(pkt)
@@ -557,6 +681,22 @@ def run_receive(
                                 node_id=target_node_id, reset_type=0x01, log_fn=log_fn,
                             )
 
+                    # Drain TX power commands queued by the web API's per-node
+                    # dynamic/static and power-level controls.
+                    if tx_power_queue is not None:
+                        while True:
+                            try:
+                                cmd = tx_power_queue.get_nowait()
+                            except queue.Empty:
+                                break
+                            _send_cmd_set_tx_power(
+                                ser, write_lock, cmd_seq_state,
+                                node_id=int(cmd["node_id"]),
+                                tx_power_dbm=int(cmd["tx_power_dbm"]),
+                                mode=int(cmd["mode"]),
+                                log_fn=log_fn,
+                            )
+
                     # Check for new-session request from the web API
                     if reset_event is not None and reset_event.is_set():
                         reset_event.clear()
@@ -586,6 +726,7 @@ def run_receive(
                         )
 
                         tracker = PacketLossTracker(cfg.nodes)
+                        window_tracker = WindowTracker()
                         if live_state is not None:
                             live_state.tracker = tracker
                             live_state.reset()

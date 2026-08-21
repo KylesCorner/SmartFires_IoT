@@ -52,6 +52,18 @@ public:
   uint8_t nodeId() const;
   uint8_t numSlots() const;
 
+  // Radio TX power passthrough, for the base-commanded dynamic TX power path
+  // (PKT_CMD_SET_TX_POWER — see documentation/Pending_Plans/DYNAMIC_TX_POWER.md).
+  // The service holds no opinion and keeps no copy: setTxPower() clamps to
+  // NetworkConfig::kMinTxPowerDbm..kMaxTxPowerDbm and hands the result to the
+  // driver, and txPowerDbm() reads straight back out of the driver, so the
+  // value reported in STATUS can never drift from the value in the radio.
+  //
+  // Returns the power actually applied, which may be a clamped version of what
+  // was asked for; the caller compares it against its request to detect that.
+  int8_t setTxPower(int8_t dbm);
+  int8_t txPowerDbm() const;
+
   TdmaRadioState state() const;
   TdmaRadioError error() const;
 
@@ -63,7 +75,33 @@ public:
 
   uint32_t lastTxSlotIndex() const;
 
+  void setDutySleep(bool requested);
+
+  // Called by the app right after the MCU returns from standby, with the
+  // measured sleep duration. Every pending-window timestamp is in session-clock
+  // terms, and the session clock now runs through standby (rtc-subsecond-sleep
+  // Phase 2) — so without this the sleep counts as elapsed retry time and every
+  // unacked entry is discarded as `max_age` on the first post-wake drain
+  // (kTimedSleepMs 35 s > kReliabilityMaxAgeMs 30 s, so it is not a race). The
+  // node cannot hear an ACK_SUMMARY with its radio off, so that interval is not
+  // time the base was given to answer; sliding the timestamps forward excludes
+  // it and leaves the entries retransmittable in the next active window.
+  void notifyMcuStandby(uint32_t sleptMs);
+
+  // Frame periods of retry hold applied once a PKT_WINDOW_BEGIN reaches the air.
+  // The base defers a sleeping node's ACK_SUMMARY and releases it on the first
+  // slot 0 after WINDOW_BEGIN, so the ack is at most one frame period behind the
+  // marker; two frames leaves margin and matches the base's own
+  // kAckSummaryNodeSilenceMs. Without the hold, an entry whose retry gate had
+  // already opened would retransmit a full bundle in the same warmup the ack is
+  // already on its way through — which is precisely the duplicate the window
+  // markers exist to remove.
+  static constexpr uint32_t kAckRoundTripFrames = 2;
+
 private:
+
+  bool _dutySleepRequested = false;
+
   // Compile-time capacity ceiling. Single source: NetworkConfig.h's
   // kReliabilityWindowHardCap, so the operating kReliabilityWindowDepth
   // value and this cap can never silently diverge.
@@ -112,6 +150,12 @@ private:
   bool _radioAsleep = false;
 
   void drainTxQueue();
+  // Slides every pending entry's timestamps forward, delaying retry eligibility
+  // by that much. Shared by notifyMcuStandby() (excluding radio-off time from
+  // the retry clock) and the post-WINDOW_BEGIN hold (waiting out the ack the
+  // base is about to release).
+  void shiftPendingTimestamps(uint32_t shiftMs, const char *reason);
+  void holdPendingRetriesForAckRoundTrip();
   void updateRxPower();
   void checkIncomingTimeSync();
   void rememberPendingCommand(const ITdmaRadioDriver::ReceivedPacket &packet);

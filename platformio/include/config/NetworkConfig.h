@@ -74,6 +74,14 @@ constexpr uint32_t kSyncStaleMs = 1320000;  // 22 min
 
 constexpr Geometry kGeometry{kNumSlots, kSlotWidthMs, kGuardMs, kSyncStaleMs};
 
+// One full TDMA rotation — the spacing between consecutive openings of any
+// given slot, and so the natural unit for anything that has to wait for the
+// base to get a turn. BaseConfig::kAckSummaryNodeSilenceMs and
+// kExpectedAckIntervalMs below are both expressed in terms of it rather than
+// as literals, since both go stale the moment kNumSlots changes.
+constexpr uint32_t kFramePeriodMs =
+    static_cast<uint32_t>(kNumSlots) * kSlotWidthMs;
+
 // How long before slot 0 a node starts waking its radio for
 // TdmaClock::baseRxWindowOpen() (see radio/TdmaConfig.h's rxWakeAheadMs for
 // the full rationale: absorbs both SX1276 sleep->Rx latency and main-loop
@@ -101,6 +109,27 @@ constexpr uint8_t kRadioIntPin = 3;
 constexpr uint8_t kRadioRstPin = 4;
 constexpr float kRadioFrequencyMhz = 915.0f;
 constexpr int8_t kRadioTxPowerDbm = 13;
+
+// Bounds a node clamps an incoming PKT_CMD_SET_TX_POWER to before applying it.
+// The base station is the decision-maker for dynamic TX power
+// (documentation/Pending_Plans/DYNAMIC_TX_POWER.md), but "the base decides" is
+// not the same as "the node obeys anything" — a corrupted-but-CRC-valid frame,
+// or a base running mismatched firmware, must not be able to push the radio
+// somewhere the hardware cannot go.
+//
+// Ceiling is kRadioTxPowerDbm, deliberately *not* the SX1276's +23 dBm maximum:
+// this feature only ever walks a node down from the known-working, field-
+// validated baseline and back up to it. Raising the baseline itself is a manual
+// change, not something a control loop gets to do.
+//
+// Floor is +5 dBm, the bottom of RadioHead's PA_BOOST range — begin() calls
+// setTxPower(..., useRFO=false), and RH_RF95 silently clamps anything under 5
+// on that path, so a lower value here would just be a lie about what the radio
+// is doing.
+constexpr int8_t kMinTxPowerDbm = 5;
+constexpr int8_t kMaxTxPowerDbm = kRadioTxPowerDbm;
+static_assert(kMinTxPowerDbm <= kMaxTxPowerDbm,
+              "TX power floor must not exceed the baseline ceiling");
 
 // Link-layer retry count / ACK timeout. Single source for two fields that
 // used to be set independently and could drift: TdmaConfig::maxRetries /
@@ -152,7 +181,16 @@ constexpr TdmaReliabilityMode kReliabilityMode =
 // Appendix B for the retry-wait derivation, implementation status, and the
 // open decision on whether expectedAckIntervalMs should instead be derived
 // from the base's ackSummaryMinIntervalMs (BaseConfig.h).
-constexpr uint32_t kExpectedAckIntervalMs = 4000;
+// The base can only transmit in slot 0, so no matter how dirty a node's
+// tracker is, its ACK_SUMMARY cannot arrive more often than once per frame
+// rotation. Deriving this from kFramePeriodMs rather than leaving it the
+// former literal 4000 keeps the node's retry-wait gate honest as the network
+// grows: at NUM_SLOTS=4 the two happened to be close (3600 vs 4000), but at
+// NUM_SLOTS=5 a literal 4000 would have the node assuming acks arrive faster
+// than the base can physically send them, shrinking the retry margin from
+// 2.2 ack intervals to 1.8 and making a single lost ack much likelier to
+// provoke a spurious retransmit.
+constexpr uint32_t kExpectedAckIntervalMs = kFramePeriodMs;
 constexpr uint16_t kRetryWaitMultiplierPermille = 2000;  // 2.0x
 constexpr uint32_t kRetryWaitMinMs = 4500;
 constexpr uint32_t kRetryWaitMaxMs = 10000;
@@ -184,6 +222,15 @@ static_assert(kSlotWidthMs > kBundleTxBudgetMs + kLinkAckTimeoutMs + 2 * kGuardM
               "slotWidthMs too small for worst-case bundle TX + ACK + guard");
 static_assert(kRetryWaitMinMs <= kRetryWaitMaxMs,
               "retryWaitMinMs must not exceed retryWaitMaxMs");
+// The retry-wait floor has to cover at least one full frame rotation, or a
+// node can give up on an ack before the base has had a single opportunity to
+// send it — every retry would then be spent racing a window that was never
+// open. Adding nodes grows kFramePeriodMs, so this is the assertion that
+// fires when the slot count outgrows the floor (at 900 ms slots, NUM_SLOTS=6
+// is the first count that trips it) and forces kRetryWaitMinMs/kRetryWaitMaxMs
+// to be re-derived rather than silently under-waiting.
+static_assert(kRetryWaitMinMs >= kFramePeriodMs,
+              "retryWaitMinMs must cover at least one TDMA frame period");
 static_assert(kQueueDepth <= kQueueCapacityHardCap,
               "queueDepth exceeds TdmaTxQueue's compile-time capacity");
 static_assert(kReliabilityWindowDepth <= kReliabilityWindowHardCap,

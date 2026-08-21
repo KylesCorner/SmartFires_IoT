@@ -17,6 +17,14 @@ public:
     uint8_t data[255] = {};
     uint8_t len = 0;
     int8_t rssi = 0;
+    // Signal-to-noise ratio in dB for this packet, as reported by the radio.
+    //
+    // Carried alongside rssi because RSSI alone cannot express LoRa link margin:
+    // the modem demodulates *below* the noise floor (about -7.5 dB SNR at SF7),
+    // so two packets at the same RSSI can be comfortably linked or one fade from
+    // dropping depending on SNR. The base's TX power control loop needs the
+    // margin, not the strength — see BaseConfig::kSnrDemodFloorDbX10.
+    int8_t snr = 0;
   };
 
   // Matches RadioHead's RH_BROADCAST_ADDRESS (0xFF) without pulling a
@@ -56,6 +64,26 @@ public:
   virtual bool sendToWait(const uint8_t *data, uint8_t len, uint8_t to) = 0;
 
   virtual bool setLocalAddress(uint8_t address) = 0;
+
+  // Changes the radio's transmit power, in dBm, for every subsequent send.
+  // Callers are responsible for clamping to a sane range before calling
+  // (NetworkConfig::kMinTxPowerDbm..kMaxTxPowerDbm) — this is a passthrough,
+  // not a policy layer.
+  //
+  // Implementations must also make the new value survive a driver re-begin(),
+  // since begin() re-applies the radio's whole configuration and would
+  // otherwise silently revert a commanded power on the next radio reinit
+  // (SmartFiresBaseApp's soft self-reset does exactly that). A genuine MCU
+  // reboot still returns to the static baseline, because that reconstructs
+  // Config from NetworkConfig — which is the intended fail-safe, not an
+  // accident of this method.
+  virtual bool setTxPower(int8_t dbm) = 0;
+
+  // The value most recently applied by setTxPower(), or the configured
+  // baseline if it has never been called. This is what the node reports in
+  // StatusPayload::tx_power_dbm — ground truth from the radio's own
+  // configuration rather than a separately-tracked copy that could drift.
+  virtual int8_t txPowerDbm() const = 0;
 
   virtual bool available() = 0;
 

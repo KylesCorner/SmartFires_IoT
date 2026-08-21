@@ -62,8 +62,10 @@ DEFAULT_WEB_HTTP_PORT: int = 8080
 DEFAULT_SNIFFER_PORT: str | None = None  # None = sniffer disabled
 DEFAULT_SNIFFER_BAUD: int = 115200
 # Must match the NUM_SLOTS build flag baked into the deployed node Feathers
-# (see platformio/platformio.ini and the root CLAUDE.md "must match" note).
-DEFAULT_NUM_SLOTS: int = 4
+# (see platformio.ini's [network] section and the root CLAUDE.md "must match"
+# note). Wrong here does not break ingest — only the sniffer's slot alignment,
+# which silently misattributes every jitter figure and guard violation.
+DEFAULT_NUM_SLOTS: int = 5
 
 # Visualize (visualize subcommand only)
 DEFAULT_TELEMETRY_ROWS: int = 20
@@ -236,7 +238,7 @@ def _apply_json_config(cfg: EdgeConfig, path: Path) -> None:
           "sniffer": {
             "port": null,
             "baud": 115200,
-            "num_slots": 4
+            "num_slots": 5
           }
         }
 

@@ -202,7 +202,7 @@ function updateLossTable(nodes) {
   const sorted = Object.values(nodes || {}).sort((a, b) => a.node_id - b.node_id);
   if (sorted.length === 0) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td colspan="10" style="color:#6a7480;font-style:italic">No nodes connected this session yet.</td>`;
+    tr.innerHTML = `<td colspan="12" style="color:#6a7480;font-style:italic">No nodes connected this session yet.</td>`;
     tbody.appendChild(tr);
     return;
   }
@@ -223,10 +223,51 @@ function updateLossTable(nodes) {
       <td>${fmt(info.retx_session)}</td>
       <td>${fmt(info.fail_session)}</td>
       <td>${fmtTime(info.last_seen)}</td>
+      <td>${formatTxPower(info)}</td>
+      <td class="tx-power-controls">${txPowerControls(info)}</td>
       <td><button class="reset-node-btn" data-node-id="${info.node_id}">Reset</button></td>
     `;
     tbody.appendChild(tr);
   }
+}
+
+// ── TX power ────────────────────────────────────────────────────────────────
+// The displayed level is what the *node* reported applying, not what the base
+// last commanded — the two disagree whenever a command was clamped or its
+// CMD_ACK was lost, and the node is the one that knows.
+function formatTxPower(info) {
+  if (info.tx_power_dbm === null || info.tx_power_dbm === undefined) {
+    return `<span title="Node firmware predates dynamic TX power">—</span>`;
+  }
+  const mode = info.tx_power_mode || "DYNAMIC";
+  const pinned = mode === "STATIC";
+  const badge = pinned
+    ? `<span class="tx-mode tx-mode-static" title="Pinned by an operator — the base's control loop will not change it">STATIC</span>`
+    : `<span class="tx-mode tx-mode-dynamic" title="The base station's control loop owns this node's power">DYNAMIC</span>`;
+  return `${info.tx_power_dbm} dBm ${badge}`;
+}
+
+function txPowerControls(info) {
+  const id = info.node_id;
+  const pinned = (info.tx_power_mode || "DYNAMIC") === "STATIC";
+  // Nudges need a reported level to compute an absolute target from, so they
+  // are disabled until the node has sent a STATUS carrying one.
+  const nudgeDisabled = typeof info.tx_power_dbm === "number" ? "" : "disabled";
+  return `
+    <button class="tx-btn" data-node-id="${id}" data-action="decrease" ${nudgeDisabled}
+            title="Lower this node's TX power one step (pins it to Static)">−</button>
+    <button class="tx-btn" data-node-id="${id}" data-action="increase" ${nudgeDisabled}
+            title="Raise this node's TX power one step (pins it to Static)">+</button>
+    <button class="tx-btn" data-node-id="${id}" data-action="set"
+            title="Set an exact TX power in dBm (pins it to Static)">Set…</button>
+    <button class="tx-btn tx-mode-btn" data-node-id="${id}"
+            data-action="${pinned ? "dynamic" : "static"}"
+            title="${pinned
+              ? "Hand this node back to the base station's control loop"
+              : "Pin this node at its current level, excluding it from the control loop"}">
+      ${pinned ? "Auto" : "Pin"}
+    </button>
+  `;
 }
 
 // ── Node Reboot Events ───────────────────────────────────────────────────────
@@ -298,6 +339,44 @@ function wireResetButtons() {
   });
 }
 
+// ── Per-node TX power control ───────────────────────────────────────────────
+function wireTxPowerButtons() {
+  const tbody = document.querySelector("#loss-table tbody");
+  tbody.addEventListener("click", async (ev) => {
+    const btn = ev.target.closest(".tx-btn");
+    if (!btn || btn.disabled) return;
+
+    const nodeId = Number(btn.dataset.nodeId);
+    const action = btn.dataset.action;
+    let dbm;
+
+    if (action === "set") {
+      const raw = prompt(`Set node ${nodeId} TX power (dBm, 5–13):`);
+      if (raw === null) return;
+      dbm = Number(raw);
+      if (!Number.isFinite(dbm)) {
+        alert("Enter a number.");
+        return;
+      }
+    }
+
+    btn.disabled = true;
+    try {
+      const res = await Api.setTxPower(nodeId, action, dbm);
+      // The node clamps again on receipt and only the next STATUS proves what
+      // actually landed, so this reports what was *sent*, not what took effect.
+      console.info(
+        `SmartFires: queued node ${nodeId} -> ${res.tx_power_dbm} dBm (${res.mode})`
+      );
+    } catch (err) {
+      console.error("SmartFires TX power request failed:", err);
+      alert(`Failed to set TX power for node ${nodeId}: ${err.message || err}`);
+    }
+    // Table rebuilds on the next poll tick (2 s), restoring the buttons. The
+    // displayed level only changes once the node's next STATUS confirms it.
+  });
+}
+
 // ── Poll loop ───────────────────────────────────────────────────────────────
 async function pollAll() {
   let nodes, baseStation, timeline;
@@ -323,6 +402,7 @@ async function init() {
   renderNav(window.location.pathname);
   initMap();
   wireResetButtons();
+  wireTxPowerButtons();
   await pollAll();
   setInterval(pollAll, 2000);
 }

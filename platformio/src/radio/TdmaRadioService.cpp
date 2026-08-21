@@ -9,6 +9,7 @@
 #include "telemetry/BinaryPacket.h"
 
 #include <Arduino.h>
+#include <stddef.h>
 #include <string.h>
 
 namespace {
@@ -49,10 +50,16 @@ const char *pktTypeName(uint8_t pktType) {
     return "TIME_SYNC";
   case BinaryPacket::PKT_ACK_SUMMARY:
     return "ACK_SUMMARY";
+  case BinaryPacket::PKT_WINDOW_BEGIN:
+    return "WINDOW_BEGIN";
+  case BinaryPacket::PKT_WINDOW_END:
+    return "WINDOW_END";
   case BinaryPacket::PKT_CMD_CALIBRATE:
     return "CMD_CALIBRATE";
   case BinaryPacket::PKT_CMD_RESET:
     return "CMD_RESET";
+  case BinaryPacket::PKT_CMD_SET_TX_POWER:
+    return "CMD_SET_TX_POWER";
   case BinaryPacket::PKT_CALIBRATION_DATA:
     return "CALIBRATION_DATA";
   case BinaryPacket::PKT_CMD_ACK:
@@ -151,8 +158,27 @@ bool TdmaRadioService::begin() {
   return true;
 }
 
+// void TdmaRadioService::update() {
+//   if (_state != TdmaRadioState::Ready) {
+//     return;
+//   }
+
+//   updateRxPower();
+//   drainTxQueue();
+//   maybeLogRetransmitHealth();
+// }
+
 void TdmaRadioService::update() {
   if (_state != TdmaRadioState::Ready) {
+    return;
+  }
+
+  if (_dutySleepRequested) {
+    if (!_radioAsleep) {
+      _driver.sleep();
+      _radioAsleep = true;
+    }
+
     return;
   }
 
@@ -181,6 +207,7 @@ bool TdmaRadioService::sendAwakenHandshake(const uint8_t *payload, uint8_t len) 
   }
 
   const bool ok = _driver.sendToWait(payload, len, _cfg.baseAddr);
+  _radioAsleep = false;
 
   if (!ok) {
     _error = TdmaRadioError::SendFailed;
@@ -219,6 +246,8 @@ bool TdmaRadioService::sendImmediate(const uint8_t *payload,
   const bool ok = requireLinkAck
                       ? _driver.sendToWait(payload, len, _cfg.baseAddr)
                       : _driver.send(payload, len, _cfg.baseAddr);
+  _radioAsleep = false;
+
   if (!ok) {
     _error = TdmaRadioError::SendFailed;
     _failedSendCount++;
@@ -367,6 +396,26 @@ uint8_t TdmaRadioService::nodeId() const { return _cfg.nodeId; }
 
 uint8_t TdmaRadioService::numSlots() const { return _cfg.numSlots; }
 
+int8_t TdmaRadioService::setTxPower(int8_t dbm) {
+  int8_t clamped = dbm;
+  if (clamped < NetworkConfig::kMinTxPowerDbm) {
+    clamped = NetworkConfig::kMinTxPowerDbm;
+  } else if (clamped > NetworkConfig::kMaxTxPowerDbm) {
+    clamped = NetworkConfig::kMaxTxPowerDbm;
+  }
+
+  if (!_driver.setTxPower(clamped)) {
+    LOG_WARN("radio", "tx_power_set_failed requested=%d clamped=%d current=%d",
+             static_cast<int>(dbm), static_cast<int>(clamped),
+             static_cast<int>(_driver.txPowerDbm()));
+    return _driver.txPowerDbm();
+  }
+
+  return _driver.txPowerDbm();
+}
+
+int8_t TdmaRadioService::txPowerDbm() const { return _driver.txPowerDbm(); }
+
 TdmaRadioState TdmaRadioService::state() const { return _state; }
 
 TdmaRadioError TdmaRadioService::error() const { return _error; }
@@ -429,8 +478,19 @@ void TdmaRadioService::drainTxQueue() {
     uint8_t pendingIndex = 0;
     uint8_t retrySeq = 0;
 
-    const bool allowRetxThisSlot =
-        useAppReliability && (_lastRetxAttemptSlotIndex != slotIndex);
+    // A PKT_WINDOW_BEGIN waiting at the head of the queue jumps ahead of the
+    // retransmit that would otherwise take this slot. On the first slot after a
+    // wake both are ready at once, and retransmit normally wins — but the whole
+    // reason the marker exists is to make that retransmit unnecessary, by
+    // telling the base to release the ack it deferred at WINDOW_END. Sending it
+    // second would mean paying for the full bundle replay first, every cycle.
+    uint8_t queueHeadType = 0;
+    const bool windowBeginQueued =
+        _queue.peekPacketType(queueHeadType) &&
+        queueHeadType == BinaryPacket::PKT_WINDOW_BEGIN;
+
+    const bool allowRetxThisSlot = useAppReliability && !windowBeginQueued &&
+                                   (_lastRetxAttemptSlotIndex != slotIndex);
 
     bool selectedPacket = false;
 
@@ -541,6 +601,7 @@ void TdmaRadioService::drainTxQueue() {
                 static_cast<unsigned long>(slotIndex));
 
       ok = _driver.send(payload, len, _cfg.baseAddr);
+      _radioAsleep = false;
     }
 
     for (uint8_t attempt = 1; useLinkAck && attempt <= maxAttempts; ++attempt) {
@@ -558,6 +619,7 @@ void TdmaRadioService::drainTxQueue() {
 
       if (_driver.sendToWait(payload, len, _cfg.baseAddr)) {
         ok = true;
+        _radioAsleep = false;
 
         LOG_DEBUG("radio", "link_ack_rx ack_ok seq=%u attempt=%u retries_used=%u",
                   static_cast<unsigned int>(hdr.seq),
@@ -576,6 +638,16 @@ void TdmaRadioService::drainTxQueue() {
 
     if (ok) {
       _sentCount++;
+
+      // Timed only: the marker is on the air, so the base is about to release
+      // the ack it deferred at WINDOW_END. Hold off retransmitting into that
+      // round trip. Deliberately keyed off the actual send rather than the
+      // enqueue — the marker can wait a whole frame for this node's slot, and
+      // starting the hold early would spend most of it before the base has even
+      // heard the node is awake.
+      if (hdr.pkt_type == BinaryPacket::PKT_WINDOW_BEGIN) {
+        holdPendingRetriesForAckRoundTrip();
+      }
 
       if (useAppReliability) {
         if (fromQueue) {
@@ -732,13 +804,13 @@ void TdmaRadioService::checkIncomingTimeSync() {
     ITdmaRadioDriver::ReceivedPacket packet;
 
     // autoAck=false: letting RadioHead ack automatically routes every
-    // unicast receipt (TIME_SYNC-direct, ACK_SUMMARY, CMD_CALIBRATE/RESET)
-    // through RHReliableDatagram::acknowledge(), which calls the no-timeout
-    // overload of waitPacketSent() — a missed DIO0 TX-done interrupt there
-    // hangs the whole node with no recovery (confirmed in the field: see
-    // documentation/Current_Architecture/PACKET_RELIABILITY.md). We still
-    // want these three packet types acked, since the base blocks on it via
-    // sendToWait() — so each branch below calls _driver.acknowledge()
+    // unicast receipt (TIME_SYNC-direct, ACK_SUMMARY, CMD_CALIBRATE/RESET/
+    // SET_TX_POWER) through RHReliableDatagram::acknowledge(), which calls the
+    // no-timeout overload of waitPacketSent() — a missed DIO0 TX-done interrupt
+    // there hangs the whole node with no recovery (confirmed in the field: see
+    // documentation/Current_Architecture/PACKET_RELIABILITY.md). Two of those
+    // types still want an ack, since the base blocks on it via sendToWait()
+    // — so those branches below call _driver.acknowledge()
     // itself once it's confirmed the packet is genuinely unicast and worth
     // acking, using the bounded-wait implementation documented on
     // ITdmaRadioDriver::acknowledge() (waits for its own ACK to finish
@@ -816,13 +888,15 @@ void TdmaRadioService::checkIncomingTimeSync() {
 
     if (decodeHeader(packet.data, packet.len, hdr) &&
         (hdr.pkt_type == BinaryPacket::PKT_CMD_CALIBRATE ||
-         hdr.pkt_type == BinaryPacket::PKT_CMD_RESET)) {
-      // Always unicast (never broadcast). SmartFiresBaseApp::
-      // sendPendingCommand() blocks on this via sendToWait(); without it,
-      // the base gives up after BaseConfig::kMaxPendingCommandSendAttempts
-      // and the command is dropped (reason=no_link_ack in its log).
-      _driver.acknowledge(packet.from, packet.id);
-
+         hdr.pkt_type == BinaryPacket::PKT_CMD_RESET ||
+         hdr.pkt_type == BinaryPacket::PKT_CMD_SET_TX_POWER)) {
+      // Deliberately *not* acked at the link layer, unlike the two branches
+      // above. A command can only arrive while the base is transmitting, which
+      // is by construction slot 0 — so acking it here put this node's radio on
+      // the air inside the base's own window, every time. The base now sends
+      // commands fire-and-forget (SmartFiresBaseApp::sendPendingCommand()) and
+      // takes its acknowledgement from PKT_CMD_ACK instead, which goes out in
+      // this node's slot like any other frame.
       rememberPendingCommand(packet);
       continue;
     }
@@ -1205,6 +1279,16 @@ bool TdmaRadioService::pickRetransmitCandidate(uint8_t *payloadOut,
 
   memcpy(payloadOut, e.payload, e.len);
 
+  // Mark the copy, never the stored entry — a retransmit that fails to reach the
+  // air must leave the pending payload byte-identical for the next attempt, and
+  // the base reads this bit to tell a replayed WINDOW_LAST (node awake, still
+  // waiting on an ack) from a fresh one (node about to enter standby).
+  if (e.len > sizeof(BinaryPacket::PktHeader)) {
+    payloadOut[offsetof(BinaryPacket::PktHeader, flags)] |=
+        BinaryPacket::PKT_FLAG_RETX;
+    payloadOut[e.len - 1] = BinaryPacket::crc8(payloadOut, e.len - 1);
+  }
+
   lenOut = e.len;
   seqOut = e.seq;
   pendingIndexOut = static_cast<uint8_t>(bestIndex);
@@ -1451,4 +1535,88 @@ void TdmaRadioService::maybeLogRetransmitHealth() {
            _hasReceivedAckSummary ? 1 : 0);
 
   _lastRetxHealthLogMs = nowMs;
+}
+
+void TdmaRadioService::setDutySleep(
+    bool requested) {
+  if (_dutySleepRequested == requested) {
+    return;
+  }
+
+  _dutySleepRequested = requested;
+
+  LOG_INFO(
+      "radio",
+      "duty_sleep changed=%u",
+      requested ? 1 : 0);
+
+  if (requested) {
+    if (!_radioAsleep) {
+      _driver.sleep();
+      _radioAsleep = true;
+    }
+
+    return;
+  }
+
+  // The hardware may still physically be asleep, but the next
+  // available()/send()/sendToWait() call rearms it. Clearing
+  // this flag prevents stale software state after wake.
+  _radioAsleep = false;
+}
+
+void TdmaRadioService::shiftPendingTimestamps(uint32_t shiftMs,
+                                              const char *reason) {
+  if (!_cfg.enableAppReliability || shiftMs == 0) {
+    return;
+  }
+
+  const uint8_t windowDepth =
+      (_cfg.reliabilityWindowDepth > kMaxReliabilityWindow)
+          ? kMaxReliabilityWindow
+          : _cfg.reliabilityWindowDepth;
+
+  uint8_t shifted = 0;
+
+  for (uint8_t i = 0; i < windowDepth; ++i) {
+    PendingEntry &e = _pending[i];
+
+    if (!e.inUse) {
+      continue;
+    }
+
+    e.firstSentMs += shiftMs;
+    e.lastSentMs += shiftMs;
+    shifted++;
+  }
+
+  // requireAckSummaryBeforeFirstRetry compares _lastAckSummarySessionMs against
+  // firstSentMs, so it has to move with them or every entry would look like it
+  // predates the last ACK_SUMMARY and stall behind the retryWaitMaxMs fallback.
+  if (_hasReceivedAckSummary) {
+    _lastAckSummarySessionMs += shiftMs;
+  }
+
+  if (shifted > 0) {
+    LOG_INFO("radio",
+             "pending_shift reason=%s shift_ms=%lu entries=%u max_age_ms=%lu",
+             reason, static_cast<unsigned long>(shiftMs),
+             static_cast<unsigned int>(shifted),
+             static_cast<unsigned long>(_cfg.reliabilityMaxAgeMs));
+  }
+}
+
+void TdmaRadioService::notifyMcuStandby(uint32_t sleptMs) {
+  shiftPendingTimestamps(sleptMs, "mcu_standby");
+}
+
+// Called once a PKT_WINDOW_BEGIN has physically gone out. The base has been
+// sitting on this node's ACK_SUMMARY since its WINDOW_END and releases it on the
+// first slot 0 after hearing the marker, so anything still pending is about to
+// be acked without being asked twice.
+void TdmaRadioService::holdPendingRetriesForAckRoundTrip() {
+  const uint32_t framePeriodMs =
+      static_cast<uint32_t>(_cfg.numSlots) * _cfg.slotWidthMs;
+
+  shiftPendingTimestamps(framePeriodMs * kAckRoundTripFrames, "window_begin");
 }

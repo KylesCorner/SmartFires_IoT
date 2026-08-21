@@ -4,6 +4,7 @@
 // ---
 #pragma once
 
+#include "config/NetworkConfig.h"
 #include "telemetry/BinaryPacket.h"
 #include "telemetry/SensorSnapshot.h"
 
@@ -62,6 +63,28 @@ public:
     bool    bundleReady() const;
     uint8_t takeBundle(uint8_t *buf, size_t bufSize);
 
+    // --- Timed duty-cycle windows ---
+    //
+    // Window edges are announced on the wire by PKT_WINDOW_BEGIN/PKT_WINDOW_END
+    // (SmartFiresNodeApp owns those), not by flags on the sample stream, so the
+    // handler's only remaining window duty is to say whether the accumulator is
+    // mid-bundle.
+    //
+    // hasPartialBundle() drives DutyCycleController's active-window hold: the
+    // window runs past activeSampleMs until this goes false, so every bundle on
+    // the air carries a full maxDeltas+1 samples and no runt is ever encoded. A
+    // runt spends a fresh 20-byte FullState reference on a handful of samples,
+    // and — before the hold existed — was also the frame that could not be acked
+    // before standby.
+    //
+    // flushWindow() is the escape hatch for when the hold hits its overrun cap
+    // (a wedged sensor starving the sample tick). It force-encodes whatever has
+    // accumulated so those samples are not lost, and returns true if a bundle is
+    // now ready to take. In normal operation the hold means nothing is
+    // accumulated at window close and this returns false.
+    bool hasPartialBundle() const;
+    bool flushWindow();
+
     // --- STATUS (GPS + battery, interval from Config::statusIntervalMs) ---
     bool    statusPacketReady() const;
     uint8_t takeStatusPacket(uint8_t *buf, size_t bufSize);
@@ -71,6 +94,18 @@ public:
     void setNodeId(uint8_t nodeId);
     void setBundleEncodingEnabled(bool enabled);
     void setLinkStats(uint32_t retxTotal, uint32_t failTotal);
+
+    // Radio TX power state to report in the next STATUS. Pushed in by
+    // SmartFiresNodeApp (from TdmaRadioService::txPowerDbm() and its own mode
+    // flag) rather than pulled, so the handler keeps no radio dependency —
+    // same shape as setLinkStats() above. See StatusPayload::tx_power_dbm for
+    // why this is sourced from the node's own radio and not from the base's
+    // record of what it commanded.
+    //
+    // Both values travel together because they are read together: reporting a
+    // level without the mode that produced it leaves the dashboard unable to
+    // tell an operator-pinned 7 dBm from one the control loop chose.
+    void setTxPowerState(int8_t dbm, bool isStatic);
 
     // Full reset (new node session / reboot).
     void reset();
@@ -98,6 +133,8 @@ private:
     bool     _bundleEncodingEnabled = true;
     uint32_t _retxTotal  = 0;
     uint32_t _failTotal  = 0;
+    int8_t   _txPowerDbm = NetworkConfig::kRadioTxPowerDbm;
+    bool     _txPowerStatic = false;
 
     // Last-good values substituted when a sensor's validity flag is clear, so
     // SensorSnapshot's -1.0f placeholders never reach the wire (they alias real
@@ -119,5 +156,6 @@ private:
         const BinaryPacket::FullStatePayload &sample);
 
     void resetBundleState();
+    bool encodeAccumulatedBundle();
     void tryEncodeStatus(const SensorSnapshot &snap);
 };

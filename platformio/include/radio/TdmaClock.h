@@ -21,6 +21,12 @@ public:
   void reset();
 
   uint32_t sessionNowMs() const;
+
+  // Local-clock timestamp of the most recent applySync(). Changes exactly when
+  // a TIME_SYNC lands, which is how a caller that no longer drops sync across
+  // an MCU standby can still tell that a fresh sync has arrived.
+  uint32_t syncLocalMs() const;
+
   uint32_t currentSlotIndex() const;
   uint8_t currentSlotNumber() const;
   uint32_t positionInSlotMs() const;

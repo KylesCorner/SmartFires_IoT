@@ -20,16 +20,21 @@ from smartfires_edge.config import SnifferConfig
 from smartfires_edge.live_state import LiveState
 from smartfires_edge.packet import (
     HEADER_FMT,
+    HEADER_SIZE,
+    PKT_FLAG_RETX,
     PKT_ACK_SUMMARY,
     PKT_AWAKEN,
     PKT_BUNDLE,
     PKT_CMD_ACK,
     PKT_CMD_CALIBRATE,
     PKT_CMD_RESET,
+    PKT_CMD_SET_TX_POWER,
     PKT_FULL_STATE,
     PKT_GPS,
     PKT_MAGIC,
     PKT_STATUS,
+    PKT_WINDOW_BEGIN,
+    PKT_WINDOW_END,
     PKT_TIME_SYNC,
     decode_ack_summary,
     decode_awaken,
@@ -37,8 +42,10 @@ from smartfires_edge.packet import (
     decode_cmd_ack,
     decode_cmd_calibrate,
     decode_cmd_reset,
+    decode_cmd_set_tx_power,
     decode_full_state,
     decode_status,
+    decode_window_marker,
     decode_time_sync,
 )
 
@@ -55,7 +62,12 @@ GUARD_MS = 20
 # stays excluded: it's the anchor itself, so its own jitter relative to
 # itself is degenerate.
 _VIRTUAL_BASE_NODE_ID = 1
-_BASE_SLOTTED_TYPES = {PKT_ACK_SUMMARY, PKT_CMD_CALIBRATE, PKT_CMD_RESET}
+_BASE_SLOTTED_TYPES = {
+    PKT_ACK_SUMMARY,
+    PKT_CMD_CALIBRATE,
+    PKT_CMD_RESET,
+    PKT_CMD_SET_TX_POWER,
+}
 
 # RadioHead link-layer header flags (RHReliableDatagram) — not part of the
 # SmartFires wire protocol. See RadioHeadTdmaDriver.cpp's setHeaderFlags()
@@ -81,7 +93,10 @@ def _pkt_type_name(pkt_type: int) -> str:
         PKT_ACK_SUMMARY: "ACK_SUMMARY",
         PKT_CMD_CALIBRATE: "CMD_CALIBRATE",
         PKT_CMD_RESET: "CMD_RESET",
+        PKT_CMD_SET_TX_POWER: "CMD_SET_TX_POWER",
         PKT_CMD_ACK: "CMD_ACK",
+        PKT_WINDOW_BEGIN: "WINDOW_BEGIN",
+        PKT_WINDOW_END: "WINDOW_END",
     }.get(pkt_type, f"0x{pkt_type:02x}")
 
 
@@ -130,15 +145,15 @@ def _slot_timing(node_id: int, session_ms: int, num_slots: int) -> tuple[float, 
     return jitter_ms, guard_violation
 
 
-def _peek_header(raw: bytes) -> tuple[Optional[int], Optional[int], Optional[int]]:
-    """Best-effort header peek (pkt_type, node_id, seq) without CRC validation,
-    used only for logging when full decode fails."""
-    if len(raw) < 4:
-        return None, None, None
-    magic, pkt_type, node_id, seq = struct.unpack_from(HEADER_FMT, raw, 0)
+def _peek_header(raw: bytes) -> tuple[Optional[int], Optional[int], Optional[int], int]:
+    """Best-effort header peek (pkt_type, node_id, seq, flags) without CRC
+    validation, used only for logging when full decode fails."""
+    if len(raw) < HEADER_SIZE:
+        return None, None, None, 0
+    magic, pkt_type, node_id, seq, flags = struct.unpack_from(HEADER_FMT, raw, 0)
     if magic != PKT_MAGIC:
-        return None, None, None
-    return pkt_type, node_id, seq
+        return None, None, None, 0
+    return pkt_type, node_id, seq, flags
 
 
 def _decode_rx_event(
@@ -152,7 +167,7 @@ def _decode_rx_event(
     except ValueError:
         return None
 
-    pkt_type, hdr_node_id, hdr_seq = _peek_header(raw)
+    pkt_type, hdr_node_id, hdr_seq, hdr_flags = _peek_header(raw)
     rssi = rx.get("rssi")
     snr = rx.get("snr")
     t_ms = int(rx.get("t_ms", 0))
@@ -179,6 +194,27 @@ def _decode_rx_event(
         decode_full_state(raw, rssi)
     elif pkt_type == PKT_BUNDLE:
         decode_bundle(raw, rssi)
+        # A replay of a bundle the base never acked — the same samples as an
+        # earlier frame, not a new observation.
+        if hdr_flags & PKT_FLAG_RETX:
+            extra["retx"] = True
+    elif pkt_type in (PKT_WINDOW_BEGIN, PKT_WINDOW_END):
+        # Timed duty-cycle window edges, so the sniffer view shows where each
+        # active window starts and ends rather than an undifferentiated bundle
+        # stream. These are their own tiny frames now rather than flags on a
+        # bundle, so they show up as their own marks on the timeline — which is
+        # also how you can see that the last frame before a node's standby is one
+        # nobody has to acknowledge.
+        dec = decode_window_marker(raw, rssi)
+        if pkt_type == PKT_WINDOW_BEGIN:
+            extra["window_first"] = True
+        else:
+            extra["window_last"] = True
+        if dec is not None:
+            extra["window_id"] = dec.get("window_id")
+            if dec["is_end"]:
+                extra["planned_sleep_ms"] = dec.get("planned_sleep_ms")
+                extra["window_sample_count"] = dec.get("sample_count")
     elif pkt_type == PKT_ACK_SUMMARY:
         # Header node_id stays 0 (broadcast convention) — these are base
         # station transmissions, so they land in the dedicated base lane.
@@ -197,6 +233,11 @@ def _decode_rx_event(
         dec = decode_cmd_reset(raw)
         if dec is not None:
             extra["target_node_id"] = dec["node_id"]
+    elif pkt_type == PKT_CMD_SET_TX_POWER:
+        dec = decode_cmd_set_tx_power(raw)
+        if dec is not None:
+            extra["target_node_id"] = dec["node_id"]
+            extra["tx_power_dbm"] = dec["tx_power_dbm"]
     elif pkt_type == PKT_CMD_ACK:
         decode_cmd_ack(raw, rssi)
 

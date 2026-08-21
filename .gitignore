@@ -7,3 +7,6 @@
 .vscode/
 compile_commands.json
 platformio/logs/
+
+.venv-dashboard/
+

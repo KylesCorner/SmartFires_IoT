@@ -3,7 +3,7 @@ name: tunable-parameters
 description: Every tunable constant in the system — TDMA, sensing/duty-cycle, power, Jetson.
 category: architecture
 status: current
-last_verified: 2026-06-26
+last_verified: 2026-08-17
 source_refs:
   - platformio/include/config/NetworkConfig.h
   - platformio/include/config/SensingConfig.h
@@ -31,14 +31,17 @@ automatically.
 
 | Constant | Value | Meaning |
 |---|---|---|
-| `kNumSlots` | 4 (from `NUM_SLOTS` build flag) | TDMA slots per frame; must match across all node Feathers |
+| `kNumSlots` | 5 (from `NUM_SLOTS` build flag) | TDMA slots per frame = node count + 1; set in `platformio.ini`'s `[network]` section, shared by node and base envs |
+| `kFramePeriodMs` | = `kNumSlots × kSlotWidthMs` (4 500 ms) | One full slot rotation; the spacing between consecutive base transmit windows |
 | `kSlotWidthMs` | 900 ms | Slot duration; fits worst-case one bundle TX (340 ms) + one link-ACK timeout (250 ms) + 2× guard |
 | `kGuardMs` | 20 ms | Guard time at slot edges; covers ≤50 ppm crystal drift at 22 min max sync interval |
 | `kRxWakeAheadMs` | 150 ms | How long before slot 0 a node starts waking its radio for Rx gating (`TdmaClock::baseRxWindowOpen()`); distinct from `kGuardMs` — also covers main-loop jitter from blocking sensor reads, not just crystal drift. Starting value, not yet bench-characterized |
 | `kSyncStaleMs` | 1 320 000 ms (22 min) | Node transmits unconditionally after this long without a TIME_SYNC |
 | `kBaseAddr` | 0x01 | RadioHead address of the base station |
 | `kRadioFrequencyMhz` | 915.0 MHz | LoRa carrier frequency |
-| `kRadioTxPowerDbm` | 13 dBm | RadioHead TX power |
+| `kRadioTxPowerDbm` | 13 dBm | Boot/baseline RadioHead TX power. Under dynamic TX power this is the **ceiling**, not the operating point — the loop only ever walks a node below it and back to it, never above |
+| `kMinTxPowerDbm` | 5 dBm | Floor a node clamps a commanded level to. Bottom of RadioHead's PA_BOOST range (`setTxPower(..., useRFO=false)` silently clamps under 5), so a lower value would be a lie about what the radio is doing |
+| `kMaxTxPowerDbm` | = `kRadioTxPowerDbm` | Ceiling a node clamps to. The node clamps even though the base decides — a CRC-valid but corrupt frame, or a base on mismatched firmware, must not be able to drive the radio out of range |
 | `kLinkRetries` | 3 | RadioHead `RHReliableDatagram` retransmit attempts per send |
 | `kLinkAckTimeoutMs` | 250 ms | Per-attempt link-layer ACK timeout |
 | `kQueueDepth` | 8 | `TdmaTxQueue` capacity (drop-oldest when full) |
@@ -48,7 +51,7 @@ automatically.
 | `kReliabilityMaxAttempts` | 3 | Max app-layer retransmit attempts per packet |
 | `kReliabilityMaxAgeMs` | 30 000 ms | Evict pending packet from window after this age |
 | `kReliabilityMode` | `AppLayerAckSummary` | Active reliability mode (build-flag selectable via `SMARTFIRES_TDMA_RELIABILITY_MODE`) |
-| `kExpectedAckIntervalMs` | 4 000 ms | ACK-paced retry gate: expected time between ACK_SUMMARY packets |
+| `kExpectedAckIntervalMs` | = `kFramePeriodMs` (4 500 ms) | ACK-paced retry gate: expected time between ACK_SUMMARY packets. The base only transmits in slot 0, so acks cannot arrive faster than one frame rotation |
 | `kRetryWaitMultiplierPermille` | 2000 (×2.0) | ACK-paced retry gate: back-off multiplier in permille |
 | `kRetryWaitMinMs` | 4 500 ms | Minimum retry wait |
 | `kRetryWaitMaxMs` | 10 000 ms | Maximum retry wait |
@@ -76,6 +79,10 @@ automatically.
 | `kMaxAssignedNodes` | `kTotalEntities − 1` | Derives automatically; base is entity 0 |
 | `kFirstNodeId` | 0x02 | Lowest assignable node ID (0x01 = base, 0x00 = unassigned) |
 | `kMaxAckTrackedNodes` | 16 | Upper bound for ACK-summary bitmap tracking table |
+| `kAckSummaryMinIntervalMs` | 25 ms | Minimum spacing between ACK_SUMMARY flushes |
+| `kMaxAckSummarySendAttempts` | 3 | Consecutive `sendAckSummary()` failures before a tracker is held; cleared by new telemetry or re-AWAKEN |
+| `kAckSummaryNodeSilenceMs` | = 2 × `kNumSlots` × `kSlotWidthMs` (7 200 ms at defaults) | Silence after which ACK_SUMMARY is deferred for that node — fallback for a `PKT_WINDOW_END` frame that was itself lost. See [PACKET_RELIABILITY.md](PACKET_RELIABILITY.md#duty-cycled-nodes-timed-mode) |
+| `kMaxPendingCommandSendAttempts` | 3 | Base-window attempts for a queued CMD_CALIBRATE/CMD_RESET before giving up (≈ 11 s — shorter than a Timed node's standby, see the reliability doc's "Not covered" note) |
 | `kPeriodicTimeSyncMs` | 50 000 ms | Base firmware fallback TIME_SYNC interval (Jetson normally sends every 600 s) |
 | `kHealthLogPeriodMs` | 5 000 ms | Periodic health-log print interval in base firmware |
 
@@ -85,46 +92,86 @@ automatically.
 
 **Source (firmware):** `platformio/include/config/SensingConfig.h` — `SensingConfig::DutyCycle` namespace
 
-Two named constant sets exist in `SensingConfig::DutyCycle`. There are no
-`dutyCycleCfgContinuous()` / `dutyCycleCfg()` factory functions — the only
-runtime factory is `DutyCycleConfig::make(...)` (`include/power/DutyCycleController.h`).
-`main.cpp` wires it up exclusively from a third, derived `kActive*` set, which
-`SensingConfig.h` resolves to either `kThreshold*` or `kContinuous*` at
-compile time based on the `SMARTFIRES_DUTY_CYCLE_CONTINUOUS` build flag
-(set per-environment in `platformio.ini`):
+Four named constant sets exist in `SensingConfig::DutyCycle`, one per controller
+mode. There are no `dutyCycleCfgContinuous()` / `dutyCycleCfg()` factory
+functions — the only runtime factory is `DutyCycleConfig::make(...)`
+(`include/power/DutyCycleController.h`). `main.cpp` wires it up exclusively from
+a derived `kActive*` set, which `SensingConfig.h` resolves from the
+`SMARTFIRES_DUTY_CYCLE_MODE` build flag (set per-environment in
+`platformio.ini`). An unrecognised value is a `#error`, not a silent default.
 
-| `SMARTFIRES_DUTY_CYCLE_CONTINUOUS` | Active set | Environment |
-|---|---|---|
-| `1` (default if unset) | `kContinuous*` (`enabled = false`) | `feather_m0_lora_node_debug` |
-| `0` | `kThreshold*` (`enabled = true`) | `feather_m0_lora_node` |
+| `SMARTFIRES_DUTY_CYCLE_MODE` | `DutyCycleMode` | Active set | Environment |
+|---|---|---|---|
+| `0` | `Continuous` | `kContinuous*` (`enabled = false`) | — |
+| `1` (default if unset) | `SensorTriggered` | `kSensorTriggered*` | `feather_m0_lora_node` |
+| `2` | `Timed` | `kTimed*` | `feather_m0_lora_node_debug`, `feather_m0_lora_node_timed` |
+| `3` | `Hybrid` | `kHybrid*` | `feather_m0_lora_node_hybrid` — deprecated |
 
-### Threshold constant set (real node build — `enabled = true`)
-
-| Constant | Value | Meaning |
-|---|---|---|
-| `kThresholdEnabled` | true | Duty-cycle gate is active — full `IdleSleeping`/`WarmingUp`/`ActiveSampling`/`CooldownSleeping` cycle runs |
-| `kThresholdMinSleepMs` | 3 000 ms | Minimum idle sleep before wake |
-| `kThresholdMaxWakeMs` | 1 000 ms | Max additional wake delay |
-| `kThresholdActiveSampleMs` | 30 000 ms | Duration of the `ActiveSampling` window |
-| `kThresholdSamplePeriodMs` | 750 ms | Sample cadence within `ActiveSampling` (carries a `//TEMP` marker in source, not yet retuned) |
-| `kThresholdWarmupMs` | 10 000 ms | Sensor stabilization delay after wake |
-| `kThresholdTempDeltaThresholdC` | 1.0 °C | Temperature delta to trigger early wake |
-| `kThresholdHumidityDeltaThresholdPct` | 5.0 %RH | Humidity delta to trigger early wake |
-| `kThresholdFailOnSampleError` | false | Sensor errors do not halt the node |
-
-### Continuous constant set (debug build — `enabled = false`)
+### Cross-mode constants
 
 | Constant | Value | Meaning |
 |---|---|---|
-| `kContinuousEnabled` | false | Duty-cycle gate is disabled — sensors run back-to-back at `samplePeriodMs` |
+| `kMinMcuStandbyMs` | 250 ms | Shortest remaining sleep worth entering MCU standby for; below this the enter/exit overhead isn't worth it |
+| `kMaxTxDrainBeforeStandbyMs` | 5 000 ms | How long the node stays awake at the end of an active window waiting for the TX queue to drain before entering standby anyway (≈ one TDMA frame plus slack) |
+
+### Sensor-triggered constant set (real node build)
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `kSensorTriggeredMode` | `SensorTriggered` | Wakes only on a threshold crossing — no scheduled timer wakeup |
+| `kSensorTriggeredMinSleepMs` | 3 000 ms | Minimum idle sleep before a trigger may wake |
+| `kSensorTriggeredMaxWakeMs` | 1 000 ms | Max additional wake delay |
+| `kSensorTriggeredActiveSampleMs` | 30 000 ms | Duration of the `ActiveSampling` window |
+| `kSensorTriggeredSamplePeriodMs` | 750 ms | Sample cadence within `ActiveSampling` |
+| `kSensorTriggeredWarmupMs` | 10 000 ms | Sensor stabilization delay after wake |
+| `kSensorTriggeredTimedSleepMs` | 0 ms | Ignored in this mode |
+| `kSensorTriggeredTempDeltaThresholdC` | 1.0 °C | Temperature delta to trigger early wake |
+| `kSensorTriggeredHumidityDeltaThresholdPct` | 5.0 %RH | Humidity delta to trigger early wake |
+| `kSensorTriggeredFailOnSampleError` | false | Sensor errors do not halt the node |
+
+### Timed constant set (scheduled wake — the only mode that enters MCU standby)
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `kTimedMode` | `Timed` | Fixed sleep/active cycle; trigger thresholds ignored |
+| `kTimedCyclePeriodMs` | 75 000 ms | Fixed wake-to-wake period. The standby is its remainder after warmup, the active window and the post-close TX drain — so an overrun shortens the sleep rather than stretching the cycle |
+| `kTimedMinStandbyMs` | 5 000 ms | Floor on the derived standby |
+| `kTimedBundlesPerWindow` | 2 | Whole bundles the active window is sized to produce |
+| `kTimedActiveSampleMs` | 30 000 ms | `ActiveSampling` duration — **derived** as `kTimedBundlesPerWindow × kSamplesPerBundle × kTimedSamplePeriodMs`, `static_assert`ed to be a whole number of bundles. Do not hand-edit |
+| `kTimedActiveOverrunMaxMs` | 15 000 ms | Cap on holding the window open past `kTimedActiveSampleMs` for a partial bundle |
+| `kTimedSamplePeriodMs` | 1 000 ms | Sample cadence within `ActiveSampling` |
+| `kTimedWarmupMs` | 10 000 ms | Sensor stabilization delay after each wake |
+| `kTimedMinSleepMs` | 0 ms | `CooldownSleeping` hands straight over to `IdleSleeping` |
+| `kTimedMaxWakeMs` | 1 000 ms | Max additional wake delay |
+| `kTimedTempDeltaThresholdC` / `kTimedHumidityDeltaThresholdPct` | 0.0 | Ignored in this mode |
+| `kTimedFailOnSampleError` | false | Sensor errors do not halt the node |
+
+At these values one window produces 25 samples — one full 15-sample bundle plus a
+10-sample partial that is force-flushed at window close (see
+[DUTY_CYCLING.md](DUTY_CYCLING.md#active-windows-on-the-wire-timed-mode)).
+
+### Continuous constant set (duty-cycle gate disabled)
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `kContinuousMode` | `Continuous` | Duty-cycle gate is disabled — sensors run back-to-back at `samplePeriodMs` |
 | `kContinuousMinSleepMs` | 0 ms | Not used in continuous mode |
 | `kContinuousMaxWakeMs` | 0 ms | Not used in continuous mode |
 | `kContinuousActiveSampleMs` | 0 ms | Not used in continuous mode |
 | `kContinuousSamplePeriodMs` | 750 ms | Master loop cadence — how often the sensor-service tick fires |
 | `kContinuousWarmupMs` | 10 000 ms | One-time warmup delay at boot before first sample |
+| `kContinuousTimedSleepMs` | 0 ms | Not used in continuous mode |
 | `kContinuousTempDeltaThresholdC` | 0.0 °C | Not used in continuous mode |
 | `kContinuousHumidityDeltaThresholdPct` | 0.0 %RH | Not used in continuous mode |
 | `kContinuousFailOnSampleError` | false | Sensor errors do not halt the node |
+
+### Hybrid constant set (deprecated)
+
+Wakes on either a threshold crossing after `kHybridMinSleepMs` (3 000 ms) or
+`kHybridTimedSleepMs` (5 min), whichever comes first; `kHybridActiveSampleMs`
+30 000 ms, `kHybridSamplePeriodMs` 750 ms, `kHybridWarmupMs` 10 000 ms. Retained
+so the `feather_m0_lora_node_hybrid` env still compiles, but not a target for
+further work — `Hybrid` never enters MCU standby.
 
 ---
 
@@ -267,3 +314,22 @@ forwarded to `AdafruitGpsDriver::begin()`.
 |---|---|---|
 | `CLI_CMD_ACK_TIMEOUT_S` | 5.0 s | Warn if no CMD_ACK received within this window |
 | `CLI_CALIBRATION_DURATION_S` | 60 s | Duration sent in CMD_CALIBRATE frame |
+
+### Dynamic TX power (`config/BaseConfig.h`)
+
+The base station's per-node TX power control loop (`radio/TxPowerController.h`). **Every
+value here is a starting point with a rationale, not a bench-characterized number** — the
+loop's own `tx_power_decision` debug log is the instrument for tuning them. See
+[dynamic-tx-power](../Pending_Plans/DYNAMIC_TX_POWER.md).
+
+| Parameter | Value | Purpose |
+|---|---|---|
+| `kMaxTxPowerTrackedNodes` | = `kMaxAckTrackedNodes` (16) | Per-node controller table size; tied to the ack table so the two cannot disagree about how many nodes the base follows |
+| `kSnrDemodFloorDbX10` | -75 (-7.5 dB) | SX1276 demodulation floor at SF7 — the reference link margin is measured against. **SF-dependent**: must change if the spreading factor ever becomes configurable |
+| `kTargetSnrMarginDbX10` | 100 (10.0 dB) | Margin above the demod floor the loop aims to hold. A single target rather than a floor/headroom threshold pair, which could be set into an oscillation |
+| `kTxPowerStepDbm` | 2 dB | Step size for a power *reduction*. Increases are not stepped — recovery is one jump to `kMaxTxPowerDbm` |
+| `kSnrDeadBandDbX10` | 30 (3.0 dB) | Extra margin required before stepping down, so a step-down cannot land under target and immediately re-trigger a step-up. `static_assert`-ed to exceed one step |
+| `kTxPowerMinDecisionIntervalMs` | 60 000 ms | Minimum time between decisions per node. This — not STATUS arrival — paces the loop, so behaviour is identical across the 1 s / 15 s / 15 min `SMARTFIRES_STATUS_INTERVAL_MS` build envs, and the retx/fail delta window always matches the decision window |
+| `kCmdAckTimeoutMs` | 120 000 ms | Wait for the `CMD_ACK` confirming a change before re-arming. **Must exceed `kTimedCyclePeriodMs` (75 s)** — a command queued while a node is in standby cannot be delivered until its next `WINDOW_BEGIN`, so a frame-period-sized value would time out on every merely-sleeping node |
+| `kTxPowerSilenceTimeoutMs` | 300 000 ms (5 min) | Silence after which a node's power is treated as unknown and it is probed back to baseline (the uplink-dead case). `static_assert`-ed to outlast `kCmdAckTimeoutMs` |
+| `kMaxTxPowerSilenceProbes` | 3 | Bound on best-effort baseline probes into silence before giving up; refilled whenever the node is heard from again |

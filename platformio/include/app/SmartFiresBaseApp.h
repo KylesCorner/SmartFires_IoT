@@ -9,6 +9,7 @@
 #include "radio/ITdmaRadioDriver.h"
 #include "radio/TdmaClock.h"
 #include "radio/TdmaConfig.h"
+#include "radio/TxPowerController.h"
 #include "telemetry/BinaryPacket.h"
 
 #include <stddef.h>
@@ -73,10 +74,17 @@ private:
   // CMD_CALIBRATE/CMD_RESET forwards from the Jetson are deferred the same
   // way — encoded immediately (so the original UART payload doesn't need to
   // be retained) but only transmitted once the base's window opens.
-  static constexpr size_t kPendingCommandPayloadSize =
+  // Max over every command type that can be queued here — CALIBRATE, RESET,
+  // and SET_TX_POWER (all 8 bytes today, but written as a max so adding a
+  // larger command type can't silently truncate one).
+  static constexpr size_t kCalibrateOrResetLoRaSize =
       BinaryPacket::kCmdCalibrateLoRaSize > BinaryPacket::kCmdResetLoRaSize
           ? BinaryPacket::kCmdCalibrateLoRaSize
           : BinaryPacket::kCmdResetLoRaSize;
+  static constexpr size_t kPendingCommandPayloadSize =
+      kCalibrateOrResetLoRaSize > BinaryPacket::kCmdSetTxPowerLoRaSize
+          ? kCalibrateOrResetLoRaSize
+          : BinaryPacket::kCmdSetTxPowerLoRaSize;
 
   struct PendingCommand {
     bool inUse = false;
@@ -88,15 +96,16 @@ private:
     uint8_t failedSendAttempts = 0;
   };
 
-  // KNOWN LIMITATION: the Jetson's "New Session" flow (ingest_service.py's
-  // reset_event handler) enqueues one CMD_RESET per configured node in a
-  // tight loop. With more than kMaxPendingCommands nodes configured, the
-  // extras silently fail to enqueue (QUEUE_FULL, visible only in the base
-  // debug log) and never get reset. Revisit this constant (and/or add
-  // Jetson-side batching that waits for a slot-0 window between batches)
-  // before deploying more than 4 nodes. See
-  // documentation/Pending_Plans/RESET_SYSTEM.md.
-  static constexpr uint8_t kMaxPendingCommands = 4;
+  // The Jetson's "New Session" flow (ingest_service.py's reset_event handler)
+  // enqueues one CMD_RESET per configured node in a tight loop, so the queue
+  // has to hold a command for every node at once or the extras silently fail
+  // to enqueue (QUEUE_FULL, visible only in the base debug log) and those
+  // nodes never get reset. Sized off kMaxAssignedNodes rather than a literal
+  // so it can no longer be outgrown by a NUM_SLOTS bump: the +1 leaves room
+  // for one operator-triggered per-node command to coexist with a full
+  // network-wide sweep. See documentation/Completed_Plans/RESET_SYSTEM.md.
+  static constexpr uint8_t kMaxPendingCommands =
+      static_cast<uint8_t>(BaseConfig::kMaxAssignedNodes + 1);
 
   struct UartRxState {
     enum class Stage : uint8_t {
@@ -132,6 +141,32 @@ private:
     uint8_t failedSendAttempts = 0;
     bool retryHeld = false;
 
+    // Timed-mode duty-cycle gating, driven by PKT_WINDOW_END/PKT_WINDOW_BEGIN.
+    // A node that just sent WINDOW_END is about to enter MCU standby with its
+    // radio off: every ACK_SUMMARY aimed at it would be a ~1 s blocking
+    // sendToWait (kLinkRetries x kLinkAckTimeoutMs, longer than the base's own
+    // 900 ms slot 0) that cannot possibly be heard, starving TIME_SYNC and
+    // commands for other nodes. While `asleep`, the tracker keeps `dirty` set
+    // and is simply skipped, so the ack is deferred rather than lost — it goes
+    // out on the first slot 0 after WINDOW_BEGIN says the node is back, merged
+    // with whatever has since been added to the mask.
+    //
+    // Because the signal now rides its own frame rather than a flag on a
+    // retransmittable bundle, the rule is simply "END means asleep, anything
+    // else means awake" — no need to tell a fresh window close from a replayed
+    // one asserting the opposite. `lastHeard*` remains the fallback for a
+    // WINDOW_END that was itself lost, so `asleep` never got set.
+    bool asleep = false;
+    bool lastHeardValid = false;
+    uint32_t lastHeardMs = 0;
+
+    // Set when a RETX-flagged frame or a PKT_WINDOW_BEGIN arrives: both are
+    // proof the node never received the last ack (a RETX because it is asking
+    // again, a BEGIN because anything sent during its standby was transmitted
+    // at a switched-off radio), so this one send must bypass the
+    // unchangedFromLastSent suppression that would otherwise silently drop it.
+    bool forceResend = false;
+
     bool lastSentInitialized = false;
     uint8_t lastSentAckBaseSeq = 0;
     uint16_t lastSentAckMask = 0;
@@ -158,6 +193,11 @@ private:
   // anything over the radio.
   TdmaClock _baseTdmaClock;
 
+  // Per-node dynamic TX power decisions. Pure logic, deliberately owning no
+  // radio and no clock — this class feeds it observations and transmits the
+  // decisions it hands back. See radio/TxPowerController.h.
+  TxPowerController _txPower;
+
   UartRxState _uartRx;
   bool _initialized = false;
 
@@ -178,6 +218,15 @@ private:
   uint32_t _lastRxMs = 0;
   uint32_t _lastPeriodicTimeSyncMs = 0;
   uint32_t _lastAckSummaryFlushMs = 0;
+
+  // Set by a PKT_WINDOW_BEGIN so the ack deferred across that node's standby
+  // goes out in the very next slot 0 rather than waiting on
+  // ackSummaryMinIntervalMs. The node is holding unacked entries whose retry
+  // gate is on a hold of only a couple of frame periods
+  // (TdmaRadioService::kAckRoundTripFrames); spending that budget on a rate
+  // limiter meant for steady-state coalescing would let the retransmission the
+  // markers exist to prevent fire anyway.
+  bool _ackSummaryFlushRequested = false;
   uint32_t _sessionId = 0;
   uint8_t _timeSyncSeq = 0;
   bool _hasJetsonTime = false;
@@ -197,7 +246,14 @@ private:
   bool sendDirectTimeSync(uint8_t radioAddr, uint8_t nodeId, const char *reason,
                           uint8_t triggerSeq = 0);
   NodeAssignment *findOrCreateNodeAssignment(uint32_t uidHash);
-  bool handleTelemetryAckSummary(uint8_t nodeId, uint8_t seq);
+  bool handleTelemetryAckSummary(uint8_t nodeId, uint8_t seq, uint8_t flags);
+
+  // PKT_WINDOW_BEGIN / PKT_WINDOW_END. Deliberately kept off the sequence path
+  // that handleTelemetryAckSummary() runs: markers carry no telemetry seq, so
+  // recording one would put a phantom entry in the ack bitmap and the seq20
+  // receipt-window loss stats.
+  bool handleWindowMarker(uint8_t nodeId, uint8_t pktType,
+                          const BinaryPacket::WindowMarkerPayload &marker);
   AckTracker *findOrCreateAckTracker(uint8_t nodeId);
   void resetAckTracker(uint8_t nodeId, const char *reason);
   void recordTelemetrySequence(AckTracker &tracker, uint8_t seq);
@@ -218,6 +274,12 @@ private:
   bool sendPendingCommand();
   bool sendPendingAckSummary(uint32_t slotIndex);
   bool enqueuePendingCommand(uint8_t targetNodeId, const uint8_t *payload, uint8_t len);
+
+  // Encodes and queues one TxPowerController decision, then reports the
+  // outcome back to the controller. A failed enqueue must leave the controller
+  // un-armed so the decision simply re-arms next interval — see
+  // TxPowerController::onCommandFailed().
+  bool sendTxPowerDecision(const TxPowerController::Decision &decision);
 
   bool pushJetsonUartByte(uint8_t b, uint8_t *payloadOut, uint8_t &lenOut);
   void resetJetsonUartRx();

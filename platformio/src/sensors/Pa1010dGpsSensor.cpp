@@ -284,6 +284,10 @@ bool Pa1010dGpsSensor::service() {
     return false;
   }
 
+  if (_state == SensorPowerState::Sleeping) {
+    return true;
+  }
+
   if (!_driver.poll()) {
     LOG_WARN("gps", "service_poll_failed state=%s", sensorPowerStateName(_state));
     return false;

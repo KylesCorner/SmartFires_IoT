@@ -26,10 +26,16 @@ const char *pktTypeName(uint8_t pktType) {
       return "TIME_SYNC";
     case BinaryPacket::PKT_ACK_SUMMARY:
       return "ACK_SUMMARY";
+    case BinaryPacket::PKT_WINDOW_BEGIN:
+      return "WINDOW_BEGIN";
+    case BinaryPacket::PKT_WINDOW_END:
+      return "WINDOW_END";
     case BinaryPacket::PKT_CMD_CALIBRATE:
       return "CMD_CALIBRATE";
     case BinaryPacket::PKT_CMD_RESET:
       return "CMD_RESET";
+    case BinaryPacket::PKT_CMD_SET_TX_POWER:
+      return "CMD_SET_TX_POWER";
     case BinaryPacket::PKT_CMD_ACK:
       return "CMD_ACK";
     default:
@@ -37,10 +43,18 @@ const char *pktTypeName(uint8_t pktType) {
   }
 }
 
+// Types that carry a telemetry PktHeader::seq and therefore belong in the ack
+// bitmap and the seq20 receipt-window stats. Window markers are deliberately
+// absent: they carry no seq at all.
 bool isTelemetryPacketType(uint8_t pktType) {
   return pktType == BinaryPacket::PKT_BUNDLE ||
          pktType == BinaryPacket::PKT_STATUS ||
          pktType == BinaryPacket::PKT_FULL_STATE;
+}
+
+bool isWindowMarkerPacketType(uint8_t pktType) {
+  return pktType == BinaryPacket::PKT_WINDOW_BEGIN ||
+         pktType == BinaryPacket::PKT_WINDOW_END;
 }
 
 bool decodeCmdCalibrateFromJetson(const uint8_t *payload,
@@ -190,6 +204,17 @@ void SmartFiresBaseApp::update() {
 
   processIncomingLoRa();
   processIncomingJetsonUart();
+
+  // Time-driven half of the TX power loop: expiring commands whose CMD_ACK
+  // never came, and probing nodes that have gone silent. Runs before
+  // maybeSendInBaseWindow() so anything it queues can go out in this same
+  // window rather than waiting a full frame period. It returns at most one
+  // decision per tick, so it can never flood the shared command queue.
+  const TxPowerController::Decision timed = _txPower.update(_clock.millis());
+  if (timed.action == TxPowerController::Action::SetPower) {
+    sendTxPowerDecision(timed);
+  }
+
   maybeSendInBaseWindow();
   maybeLogHealth();
 }
@@ -276,12 +301,23 @@ void SmartFiresBaseApp::processIncomingLoRa() {
       _cmdAckRxCount++;
     }
 
-    LOG_INFO("base", "rx_lora from=%u type=%s seq=%u node=%u len=%u rssi=%d",
+    // Margin sampling for the TX power loop. Fed from every frame type, not
+    // just STATUS: SNR is a property of the reception, and BUNDLEs vastly
+    // outnumber STATUS packets, so restricting it to STATUS would average over
+    // a handful of samples per decision instead of dozens. node_id 0 is skipped
+    // because that is an unassigned node's AWAKEN — onAwaken() handles those.
+    if (validHeader && hdr.node_id != 0 &&
+        hdr.pkt_type != BinaryPacket::PKT_AWAKEN) {
+      _txPower.onPacketReceived(hdr.node_id, pkt.snr, _clock.millis());
+    }
+
+    LOG_INFO("base", "rx_lora from=%u type=%s seq=%u node=%u len=%u rssi=%d snr=%d",
          static_cast<unsigned int>(pkt.from),
          validHeader ? pktTypeName(hdr.pkt_type) : "RAW",
          static_cast<unsigned int>(validHeader ? hdr.seq : 0),
          static_cast<unsigned int>(validHeader ? hdr.node_id : pkt.from),
-         static_cast<unsigned int>(pkt.len), static_cast<int>(pkt.rssi));
+         static_cast<unsigned int>(pkt.len), static_cast<int>(pkt.rssi),
+         static_cast<int>(pkt.snr));
 
     if (validHeader && hdr.pkt_type == BinaryPacket::PKT_AWAKEN) {
       BinaryPacket::AwakenPayload awaken = {};
@@ -320,6 +356,14 @@ void SmartFiresBaseApp::processIncomingLoRa() {
         assignment->pendingTriggerSeq = hdr.seq;
         syncQueued = true;
         resetAckTracker(assignment->nodeId, "awaken");
+        // Same reason the ack tracker is reset here and does not fall out of
+        // findOrCreateNodeAssignment() for free: for a known uid_hash that
+        // function *reuses* the record, so per-node state survives the node's
+        // reboot unless something explicitly clears it. For TX power the stale
+        // state is worse than useless — the node is back at the baseline in
+        // DYNAMIC mode with its retx/fail counters restarted from zero, so a
+        // carried-over baseline would produce a hugely negative delta.
+        _txPower.onAwaken(assignment->nodeId, _clock.millis());
       }
       LOG_INFO("base", "awaken_local_time_sync_queued count=%lu result=%s",
                static_cast<unsigned long>(_awakenRxCount),
@@ -388,6 +432,19 @@ void SmartFiresBaseApp::processIncomingLoRa() {
                      : 0.0,
                  static_cast<unsigned int>(battValid ? status.battery_mv : 0),
                  static_cast<unsigned int>(battValid ? status.battery_pct : 0));
+
+        // STATUS is the trigger to *consider* a TX power decision. Whether one
+        // is actually made is paced by the controller's own clock, so this
+        // behaves the same on a build sending STATUS every second as on one
+        // sending it every 15 minutes.
+        const TxPowerController::Decision decision = _txPower.onStatus(
+            statusHdr.node_id, status.retx_total, status.fail_total,
+            status.tx_power_dbm,
+            (status.flags & BinaryPacket::STATUS_TX_POWER_STATIC) != 0u,
+            _clock.millis());
+        if (decision.action == TxPowerController::Action::SetPower) {
+          sendTxPowerDecision(decision);
+        }
       }
     } else if (validHeader && hdr.pkt_type == BinaryPacket::PKT_CMD_ACK) {
       BinaryPacket::PktHeader ackHdr = {};
@@ -396,6 +453,15 @@ void SmartFiresBaseApp::processIncomingLoRa() {
       if (BinaryPacket::decodeCmdAck(pkt.data, pkt.len, ackHdr, ack)) {
         CalibrationDebug::logCmdAckSummary(ack, ackHdr.node_id, ackHdr.seq,
                                            "calib");
+        // Gated on cmd_type: CALIBRATE and RESET acks share this frame type,
+        // and letting one of those clear the TX power in-flight gate would
+        // confirm a change the node never actually made.
+        if (ack.cmd_type == BinaryPacket::PKT_CMD_SET_TX_POWER) {
+          _txPower.onCmdAck(ackHdr.node_id, _clock.millis());
+          LOG_INFO("base", "tx_power_cmd_ack_confirmed node=%u applied_dbm=%d",
+                   static_cast<unsigned int>(ackHdr.node_id),
+                   static_cast<int>(_txPower.currentDbm(ackHdr.node_id)));
+        }
       } else {
         LOG_WARN("calib", "cmd_ack_decode_failed node=%u seq=%u len=%u",
                  static_cast<unsigned int>(hdr.node_id),
@@ -410,11 +476,23 @@ void SmartFiresBaseApp::processIncomingLoRa() {
     }
 
     if (validHeader && isTelemetryPacketType(hdr.pkt_type)) {
-      const bool ackTracked = handleTelemetryAckSummary(hdr.node_id, hdr.seq);
-      LOG_INFO("base", "ack_track node=%u seq=%u pkt=%s tracked=%u",
+      const bool ackTracked =
+          handleTelemetryAckSummary(hdr.node_id, hdr.seq, hdr.flags);
+      LOG_INFO("base", "ack_track node=%u seq=%u pkt=%s flags=0x%02X tracked=%u",
                static_cast<unsigned int>(hdr.node_id),
                static_cast<unsigned int>(hdr.seq), pktTypeName(hdr.pkt_type),
-               ackTracked ? 1 : 0);
+               static_cast<unsigned int>(hdr.flags), ackTracked ? 1 : 0);
+    } else if (validHeader && isWindowMarkerPacketType(hdr.pkt_type)) {
+      BinaryPacket::WindowMarkerPayload marker = {};
+
+      if (BinaryPacket::decodeWindowMarker(pkt.data, pkt.len, hdr, marker)) {
+        handleWindowMarker(hdr.node_id, hdr.pkt_type, marker);
+      } else {
+        LOG_WARN("base", "window_marker_decode_failed node=%u pkt=%s len=%u",
+                 static_cast<unsigned int>(hdr.node_id),
+                 pktTypeName(hdr.pkt_type),
+                 static_cast<unsigned int>(pkt.len));
+      }
     }
 
     uint8_t frame[2 + 1 + 1 + 255 + 1] = {};
@@ -496,13 +574,32 @@ SmartFiresBaseApp::NodeAssignment *SmartFiresBaseApp::findOrCreateNodeAssignment
   return freeAssignment;
 }
 
-bool SmartFiresBaseApp::handleTelemetryAckSummary(uint8_t nodeId, uint8_t seq) {
+bool SmartFiresBaseApp::handleTelemetryAckSummary(uint8_t nodeId, uint8_t seq,
+                                                  uint8_t flags) {
   AckTracker *tracker = findOrCreateAckTracker(nodeId);
   if (!tracker) {
     LOG_WARN("base", "ack_summary_skip node=%u reason=no_tracker_slot",
              static_cast<unsigned int>(nodeId));
     return false;
   }
+
+  const bool isRetx = (flags & BinaryPacket::PKT_FLAG_RETX) != 0;
+
+  tracker->lastHeardValid = true;
+  tracker->lastHeardMs = _clock.millis();
+
+  if (isRetx) {
+    tracker->forceResend = true;
+  }
+
+  // A telemetry frame proves the node's radio is on right now. Standby is
+  // announced separately by PKT_WINDOW_END (handleWindowMarker), so there is no
+  // longer any need to tell a fresh window close from a replayed one.
+  if (tracker->asleep) {
+    LOG_INFO("base", "ack_node_awake node=%u seq=%u reason=telemetry_rx",
+             static_cast<unsigned int>(nodeId), static_cast<unsigned int>(seq));
+  }
+  tracker->asleep = false;
 
   updateTelemetryReceiptWindow(*tracker, seq);
   recordTelemetrySequence(*tracker, seq);
@@ -524,6 +621,50 @@ bool SmartFiresBaseApp::handleTelemetryAckSummary(uint8_t nodeId, uint8_t seq) {
             static_cast<unsigned int>(seq),
             static_cast<unsigned int>(tracker->ackBaseSeq),
             static_cast<unsigned int>(tracker->ackMask));
+  return true;
+}
+
+bool SmartFiresBaseApp::handleWindowMarker(
+    uint8_t nodeId, uint8_t pktType,
+    const BinaryPacket::WindowMarkerPayload &marker) {
+  AckTracker *tracker = findOrCreateAckTracker(nodeId);
+  if (!tracker) {
+    LOG_WARN("base", "window_marker_skip node=%u reason=no_tracker_slot",
+             static_cast<unsigned int>(nodeId));
+    return false;
+  }
+
+  const bool isEnd = (pktType == BinaryPacket::PKT_WINDOW_END);
+
+  tracker->lastHeardValid = true;
+  tracker->lastHeardMs = _clock.millis();
+  tracker->asleep = isEnd;
+
+  if (!isEnd) {
+    // The node has just come back from standby. Anything the base transmitted
+    // while it was down went to a switched-off radio, so the last ack must be
+    // assumed lost no matter what lastSentAckBaseSeq/Mask say — same reasoning
+    // as a RETX frame, reached without making the node spend a whole bundle
+    // retransmission to say so.
+    tracker->forceResend = true;
+    _ackSummaryFlushRequested = true;
+
+    // A node that came back is reachable again, whatever the state of the
+    // circuit breaker before it went to sleep.
+    tracker->failedSendAttempts = 0;
+    tracker->retryHeld = false;
+  }
+
+  LOG_INFO("base",
+           "window_marker node=%u pkt=%s window_id=%u session_ms=%lu "
+           "planned_sleep_ms=%lu samples=%u dirty=%u",
+           static_cast<unsigned int>(nodeId), pktTypeName(pktType),
+           static_cast<unsigned int>(marker.window_id),
+           static_cast<unsigned long>(marker.session_time_ms),
+           static_cast<unsigned long>(marker.planned_sleep_ms),
+           static_cast<unsigned int>(marker.sample_count),
+           tracker->dirty ? 1 : 0);
+
   return true;
 }
 
@@ -554,6 +695,10 @@ SmartFiresBaseApp::AckTracker *SmartFiresBaseApp::findOrCreateAckTracker(
   freeTracker->dirtyTriggerSeq = 0;
   freeTracker->failedSendAttempts = 0;
   freeTracker->retryHeld = false;
+  freeTracker->asleep = false;
+  freeTracker->lastHeardValid = false;
+  freeTracker->lastHeardMs = 0;
+  freeTracker->forceResend = false;
   freeTracker->lastSentInitialized = false;
   freeTracker->lastSentAckBaseSeq = 0;
   freeTracker->lastSentAckMask = 0;
@@ -585,6 +730,12 @@ void SmartFiresBaseApp::resetAckTracker(uint8_t nodeId, const char *reason) {
     tracker.dirtyTriggerSeq = 0;
     tracker.failedSendAttempts = 0;
     tracker.retryHeld = false;
+    // A rebooting node is awake and about to AWAKEN — never leave it gated as
+    // asleep on the strength of a window marker from before the reset.
+    tracker.asleep = false;
+    tracker.lastHeardValid = false;
+    tracker.lastHeardMs = 0;
+    tracker.forceResend = false;
     tracker.lastSentInitialized = false;
     tracker.lastSentAckBaseSeq = 0;
     tracker.lastSentAckMask = 0;
@@ -713,7 +864,22 @@ bool SmartFiresBaseApp::sendPendingCommand() {
       continue;
     }
 
-    const bool ok = _radio.sendToWait(cmd.payload, cmd.len, cmd.targetNodeId);
+    // Fire-and-forget, deliberately not sendToWait(). A link-ACKed command
+    // costs four extra transmissions and cannot fit the slot it is sent from:
+    // sendToWait() blocks (kLinkRetries + 1) * kLinkAckTimeoutMs = 1000 ms
+    // against a 900 ms kSlotWidthMs, so a single unreachable node walked the
+    // base's TX out of slot 0 and on top of whichever node owns the next one.
+    // The node's link-ACK was just as bad: it fires the moment the command
+    // lands, which is by construction inside slot 0, so the node transmitted
+    // in the base's window.
+    //
+    // Nothing is lost by dropping it. Every command type routed through this
+    // queue is acknowledged at the app layer by PKT_CMD_ACK, which rides the
+    // node's own slot, and TxPowerController already expires unacked commands
+    // on BaseConfig::kCmdAckTimeoutMs. For TX power specifically the levels are
+    // absolute and idempotent, and StatusPayload::tx_power_dbm — not the ack —
+    // is the authority on what the node actually applied.
+    const bool ok = _radio.send(cmd.payload, cmd.len, cmd.targetNodeId);
     if (ok) {
       LOG_INFO("base", "tx_pending_cmd_flush node=%u len=%u attempts=%u result=OK",
                static_cast<unsigned int>(cmd.targetNodeId),
@@ -723,14 +889,14 @@ bool SmartFiresBaseApp::sendPendingCommand() {
       return true;
     }
 
-    // No RadioHead link ACK within sendToWait()'s own retry burst. Bounded
-    // give-up below — otherwise an unreachable node (e.g. one that already
-    // rebooted and missed this window) would have this entry retried
-    // forever, once per base window, permanently occupying this slot.
+    // RadioHead refused to queue the frame at all — the radio is unhealthy,
+    // not the link. Bounded give-up below: otherwise the entry would be retried
+    // forever, once per base window, permanently occupying this slot. Retrying
+    // is cheap now that the attempt no longer blocks.
     cmd.failedSendAttempts++;
     if (cmd.failedSendAttempts >= BaseConfig::kMaxPendingCommandSendAttempts) {
       LOG_WARN("base",
-               "tx_pending_cmd_give_up node=%u len=%u attempts=%u reason=no_link_ack",
+               "tx_pending_cmd_give_up node=%u len=%u attempts=%u reason=radio_refused_send",
                static_cast<unsigned int>(cmd.targetNodeId),
                static_cast<unsigned int>(cmd.len),
                static_cast<unsigned int>(cmd.failedSendAttempts));
@@ -773,8 +939,15 @@ bool SmartFiresBaseApp::enqueuePendingCommand(uint8_t targetNodeId,
 
 bool SmartFiresBaseApp::sendPendingAckSummary(uint32_t slotIndex) {
   const uint32_t now = _clock.millis();
-  if (_cfg.ackSummaryMinIntervalMs > 0 &&
-      (now - _lastAckSummaryFlushMs) < _cfg.ackSummaryMinIntervalMs) {
+
+  // A WINDOW_BEGIN overrides the coalescing rate limit for one pass: the node is
+  // awake, waiting on an ack that has been deferred across its whole standby,
+  // and its retry hold is only a couple of frame periods long.
+  if (_ackSummaryFlushRequested) {
+    _ackSummaryFlushRequested = false;
+    LOG_DEBUG("base", "ack_summary_min_interval_bypassed reason=window_begin");
+  } else if (_cfg.ackSummaryMinIntervalMs > 0 &&
+             (now - _lastAckSummaryFlushMs) < _cfg.ackSummaryMinIntervalMs) {
     return false;
   }
 
@@ -787,8 +960,29 @@ bool SmartFiresBaseApp::sendPendingAckSummary(uint32_t slotIndex) {
       continue;
     }
 
+    // Deferral, not suppression: `dirty` is deliberately left set, so this ack
+    // — merged with anything the node's next packet adds to the mask — goes out
+    // on the first slot 0 after the node is heard from again.
+    const bool silent =
+        tracker.lastHeardValid &&
+        (now - tracker.lastHeardMs) >= BaseConfig::kAckSummaryNodeSilenceMs;
+
+    if (tracker.asleep || silent) {
+      LOG_DEBUG("base",
+                "ack_summary_defer node=%u ack_base=%u mask=0x%04X reason=%s",
+                static_cast<unsigned int>(tracker.nodeId),
+                static_cast<unsigned int>(tracker.ackBaseSeq),
+                static_cast<unsigned int>(tracker.ackMask),
+                tracker.asleep ? "window_end" : "node_silent");
+      continue;
+    }
+
+    // A RETX frame is the node telling us it never got the last ack, so the
+    // "nothing changed since we last sent" shortcut is provably wrong here —
+    // taking it would clear `dirty` and leave the node retrying into silence
+    // until its pending entry hits reliabilityMaxAttempts.
     const bool unchangedFromLastSent =
-        tracker.lastSentInitialized &&
+        tracker.lastSentInitialized && !tracker.forceResend &&
         tracker.lastSentAckBaseSeq == tracker.ackBaseSeq &&
         tracker.lastSentAckMask == tracker.ackMask;
 
@@ -830,6 +1024,7 @@ bool SmartFiresBaseApp::sendPendingAckSummary(uint32_t slotIndex) {
     }
 
     tracker.failedSendAttempts = 0;
+    tracker.forceResend = false;
     tracker.lastSentInitialized = true;
     tracker.lastSentAckBaseSeq = tracker.ackBaseSeq;
     tracker.lastSentAckMask = tracker.ackMask;
@@ -1082,10 +1277,117 @@ bool SmartFiresBaseApp::handleJetsonCommandPayload(const uint8_t *payload, uint8
     return queued;
   }
 
+  if (hdr.pkt_type == BinaryPacket::PKT_CMD_SET_TX_POWER) {
+    BinaryPacket::PktHeader cmdHdr = {};
+    BinaryPacket::CmdSetTxPowerPayload cmd = {};
+
+    // No legacy no-CRC fallback here, unlike CALIBRATE/RESET above: this
+    // command type is new, so there is no older Jetson build whose frames omit
+    // the CRC. Requiring it keeps a corrupted frame from being relayed as a
+    // power change.
+    if (!BinaryPacket::decodeCmdSetTxPower(payload, len, cmdHdr, cmd)) {
+      LOG_WARN("base",
+               "uart_cmd_reject type=CMD_SET_TX_POWER reason=decode_failed len=%u",
+               static_cast<unsigned int>(len));
+      return false;
+    }
+
+    // node_id 0 is "the base itself" for CMD_RESET, but the base's own TX
+    // power is a separate static config decision, not something to be changed
+    // at runtime — see DYNAMIC_TX_POWER.md's "Base station TX power ceiling".
+    if (cmd.node_id == 0) {
+      LOG_WARN("base",
+               "uart_cmd_reject type=CMD_SET_TX_POWER reason=base_self_not_supported seq=%u",
+               static_cast<unsigned int>(cmdHdr.seq));
+      return false;
+    }
+
+    uint8_t loraPayload[BinaryPacket::kCmdSetTxPowerLoRaSize] = {};
+    const uint8_t loraLen = BinaryPacket::encodeCmdSetTxPowerPayload(
+        cmdHdr.seq, cmd, loraPayload, sizeof(loraPayload));
+    if (loraLen == 0) {
+      LOG_ERROR("base", "tx_cmd_set_tx_power_encode_failed seq=%u node=%u",
+                static_cast<unsigned int>(cmdHdr.seq),
+                static_cast<unsigned int>(cmd.node_id));
+      return false;
+    }
+
+    // Record the operator's mode locally as the command is relayed. Done even
+    // if the send below fails: a node the base wrongly believes is STATIC is
+    // merely left alone, which is safe, whereas one wrongly believed DYNAMIC
+    // would be stepped against the operator's explicit instruction.
+    _txPower.setMode(cmd.node_id, cmd.mode);
+
+    // Deferred to the base's reserved TDMA window rather than sent
+    // immediately — see maybeSendInBaseWindow()/sendPendingCommand(). Shares
+    // the queue with the control loop's own sends, so a QUEUE_FULL here is the
+    // same condition the loop treats as "no change issued".
+    const bool queued = enqueuePendingCommand(cmd.node_id, loraPayload, loraLen);
+    LOG_INFO("base",
+             "tx_cmd_set_tx_power_queue seq=%u node=%u tx_power_dbm=%d mode=%s source=operator lora_len=%u result=%s",
+             static_cast<unsigned int>(cmdHdr.seq),
+             static_cast<unsigned int>(cmd.node_id),
+             static_cast<int>(cmd.tx_power_dbm),
+             cmd.mode == BinaryPacket::TX_POWER_MODE_STATIC ? "STATIC" : "DYNAMIC",
+             static_cast<unsigned int>(loraLen), queued ? "QUEUED" : "QUEUE_FULL");
+    return queued;
+  }
+
   LOG_WARN("base", "uart_cmd_unsupported type=%s code=0x%02X",
            pktTypeName(hdr.pkt_type), static_cast<unsigned int>(hdr.pkt_type));
 
   return false;
+}
+
+bool SmartFiresBaseApp::sendTxPowerDecision(
+    const TxPowerController::Decision &decision) {
+  if (decision.action != TxPowerController::Action::SetPower) {
+    return false;
+  }
+
+  BinaryPacket::CmdSetTxPowerPayload cmd = {};
+  cmd.node_id = decision.nodeId;
+  cmd.tx_power_dbm = decision.targetDbm;
+  // The loop only ever commands nodes it is allowed to manage, so the mode it
+  // sends is always DYNAMIC — it must not silently un-pin a node, and a STATIC
+  // node never produces a decision in the first place.
+  cmd.mode = BinaryPacket::TX_POWER_MODE_DYNAMIC;
+
+  uint8_t loraPayload[BinaryPacket::kCmdSetTxPowerLoRaSize] = {};
+  const uint8_t loraLen = BinaryPacket::encodeCmdSetTxPowerPayload(
+      _timeSyncSeq, cmd, loraPayload, sizeof(loraPayload));
+  if (loraLen == 0) {
+    LOG_ERROR("base", "tx_power_decision_encode_failed node=%u target_dbm=%d",
+              static_cast<unsigned int>(decision.nodeId),
+              static_cast<int>(decision.targetDbm));
+    _txPower.onCommandFailed(decision.nodeId);
+    return false;
+  }
+
+  const bool queued =
+      enqueuePendingCommand(decision.nodeId, loraPayload, loraLen);
+
+  LOG_INFO("base",
+           "tx_power_decision node=%u target_dbm=%d current_dbm=%d reason=%s "
+           "margin_db=%d.%d source=loop result=%s",
+           static_cast<unsigned int>(decision.nodeId),
+           static_cast<int>(decision.targetDbm),
+           static_cast<int>(_txPower.currentDbm(decision.nodeId)),
+           TxPowerController::reasonName(decision.reason),
+           static_cast<int>(decision.marginDbX10 / 10),
+           static_cast<int>(decision.marginDbX10 < 0 ? -(decision.marginDbX10 % 10)
+                                                     : decision.marginDbX10 % 10),
+           queued ? "QUEUED" : "QUEUE_FULL");
+
+  if (queued) {
+    _txPower.onCommandSent(decision.nodeId, decision.targetDbm, _clock.millis());
+  } else {
+    // Queue full — the decision is simply dropped and re-arms next interval.
+    // Arming the in-flight gate here would stall this node's decisions for a
+    // whole ack timeout waiting on a command that was never sent.
+    _txPower.onCommandFailed(decision.nodeId);
+  }
+  return queued;
 }
 
 bool SmartFiresBaseApp::pushJetsonUartByte(uint8_t b,

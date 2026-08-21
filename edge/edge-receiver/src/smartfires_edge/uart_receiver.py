@@ -11,12 +11,15 @@ from smartfires_edge.packet import (
     FRAME_M0,
     FRAME_M1,
     HEADER_FMT,
+    HEADER_SIZE,
     PKT_AWAKEN,
     PKT_BUNDLE,
     PKT_FULL_STATE,
     PKT_GPS,
     PKT_MAGIC,
     PKT_STATUS,
+    PKT_WINDOW_BEGIN,
+    PKT_WINDOW_END,
     crc8,
     decode_awaken,
     decode_bundle,
@@ -25,6 +28,7 @@ from smartfires_edge.packet import (
     decode_full_state,
     decode_gps,
     decode_status,
+    decode_window_marker,
 )
 
 _ST_WAIT_M0 = 0
@@ -86,8 +90,9 @@ class FrameReceiver:
             pkt_type = raw_payload[1] if len(raw_payload) >= 2 else 0xFF
             hdr_node = None
             hdr_seq = None
-            if len(raw_payload) >= 4:
-                magic, _hdr_pkt, node_id, seq = struct.unpack_from(HEADER_FMT, raw_payload, 0)
+            if len(raw_payload) >= HEADER_SIZE:
+                magic, _hdr_pkt, node_id, seq, _flags = struct.unpack_from(
+                    HEADER_FMT, raw_payload, 0)
                 if magic == PKT_MAGIC:
                     hdr_node = node_id
                     hdr_seq = seq
@@ -97,6 +102,7 @@ class FrameReceiver:
             awaken = None
             cmd_ack = None
             debug_log = None
+            window_marker = None
             packets: list[dict] = []
             if pkt_type == PKT_AWAKEN:
                 awaken = decode_awaken(raw_payload, rssi)
@@ -113,6 +119,8 @@ class FrameReceiver:
                 cmd_ack = decode_cmd_ack(raw_payload, rssi)
             elif pkt_type == PKT_DEBUG_LOG:
                 debug_log = decode_debug_log(raw_payload)
+            elif pkt_type in (PKT_WINDOW_BEGIN, PKT_WINDOW_END):
+                window_marker = decode_window_marker(raw_payload, rssi)
 
             for pkt in packets:
                 t = self._session_start + pkt["session_time_ms"] / 1000.0
@@ -130,6 +138,7 @@ class FrameReceiver:
                 "status": status,
                 "cmd_ack": cmd_ack,
                 "debug_log": debug_log,
+                "window_marker": window_marker,
                 "packets": packets,
             }
 

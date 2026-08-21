@@ -77,6 +77,9 @@ void loop() {
 #include "config/SystemHealthConfig.h"
 #include "platform/ResetDiagnostics.h"
 #include "platform/Samd21RamMonitor.h"
+#include "platform/Samd21Rtc.h"
+#include "platform/Samd21RtcClock.h"
+#include "platform/Samd21RtcSleep.h"
 
 #include "app/SmartFiresNodeApp.h"
 #include "platform/BoardIdentify.h"
@@ -85,7 +88,6 @@ void loop() {
 #include "config/SensingConfig.h"
 #include "interfaces/ISensor.h"
 #include "platform/ArduinoAnalogReader.h"
-#include "platform/ArduinoClock.h"
 #include "platform/RadioHeadTdmaDriver.h"
 
 #include "power/BatteryMonitor.h"
@@ -155,7 +157,12 @@ void logSensorFloorVsCadence(const char *sensorName, uint32_t minSamplePeriodMs)
 // -----------------------------------------------------------------------------
 // Platform
 // -----------------------------------------------------------------------------
-ArduinoClock clock;
+// One free-running RTC counter is the node's whole timebase: the clock every
+// consumer reads and the timer standby is measured against are the same
+// register, so standby leaves no gap for anyone to patch up afterwards.
+Samd21Rtc rtc;
+Samd21RtcClock clock(rtc);
+Samd21RtcSleep mcuSleep(rtc);
 ArduinoAnalogReader analog;
 
 Samd21RamMonitor::Config ramMonitorCfg =
@@ -198,7 +205,7 @@ Pa1010dGpsSensor::Config gpsCfg = Pa1010dGpsSensor::Config::make(
     SensingConfig::Gps::kPeriodicSecondRunTimeMs,
     SensingConfig::Gps::kPeriodicSecondSleepTimeMs,
     SensingConfig::Gps::kPeriodicMinSamplePeriodMs,
-    GpsPowerMode::PeriodicBackup);
+    GpsPowerMode::Backup);
 Pa1010dGpsSensor gps(gpsCfg, gpsDriver, clock);
 
 SparkfunIcm20948Driver imuDriver;
@@ -235,18 +242,48 @@ BatteryMonitor battery(batteryCfg, analog, clock);
 // Duty Cycle
 // -----------------------------------------------------------------------------
 
-DutyCycleConfig dutyCfg = DutyCycleConfig::make(
-    SensingConfig::DutyCycle::kActiveEnabled,
-    SensingConfig::DutyCycle::kActiveMinSleepMs,
-    SensingConfig::DutyCycle::kActiveMaxWakeMs,
-    SensingConfig::DutyCycle::kActiveActiveSampleMs,
-    SensingConfig::DutyCycle::kActiveSamplePeriodMs,
-    SensingConfig::DutyCycle::kActiveWarmupMs,
-    SensingConfig::DutyCycle::kActiveTempDeltaThresholdC,
-    SensingConfig::DutyCycle::kActiveHumidityDeltaThresholdPct,
-    SensingConfig::DutyCycle::kActiveFailOnSampleError);
-DutyCycleController duty(dutyCfg, sht31, sensors, sensorCount, clock, battery);
+// DutyCycleConfig dutyCfg = DutyCycleConfig::make(
+//     SensingConfig::DutyCycle::kActiveEnabled,
+//     SensingConfig::DutyCycle::kActiveMinSleepMs,
+//     SensingConfig::DutyCycle::kActiveMaxWakeMs,
+//     SensingConfig::DutyCycle::kActiveActiveSampleMs,
+//     SensingConfig::DutyCycle::kActiveSamplePeriodMs,
+//     SensingConfig::DutyCycle::kActiveWarmupMs,
+//     SensingConfig::DutyCycle::kActiveTempDeltaThresholdC,
+//     SensingConfig::DutyCycle::kActiveHumidityDeltaThresholdPct,
+//     SensingConfig::DutyCycle::kActiveFailOnSampleError);
+// DutyCycleController duty(dutyCfg, sht31, sensors, sensorCount, clock, battery);
 
+DutyCycleConfig dutyCfg =
+    DutyCycleConfig::make(
+        SensingConfig::DutyCycle::kActiveMode,
+        SensingConfig::DutyCycle::kActiveMinSleepMs,
+        SensingConfig::DutyCycle::kActiveMaxWakeMs,
+        SensingConfig::DutyCycle::
+            kActiveActiveSampleMs,
+        SensingConfig::DutyCycle::
+            kActiveSamplePeriodMs,
+        SensingConfig::DutyCycle::kActiveWarmupMs,
+        SensingConfig::DutyCycle::
+            kActiveCyclePeriodMs,
+        SensingConfig::DutyCycle::
+            kActiveMinStandbyMs,
+        SensingConfig::DutyCycle::
+            kActiveActiveOverrunMaxMs,
+        SensingConfig::DutyCycle::
+            kActiveTempDeltaThresholdC,
+        SensingConfig::DutyCycle::
+            kActiveHumidityDeltaThresholdPct,
+        SensingConfig::DutyCycle::
+            kActiveFailOnSampleError);
+
+DutyCycleController duty(
+    dutyCfg,
+    sht31,
+    sensors,
+    sensorCount,
+    clock,
+    battery);
 // -----------------------------------------------------------------------------
 // Networking
 // -----------------------------------------------------------------------------
@@ -277,16 +314,28 @@ RadioHeadTdmaDriver radioDriver(radioDriverCfg);
 
 TdmaRadioService tdmaRadio(tdmaCfg, tdmaClock, tdmaQueue, radioDriver);
 
-SmartFiresNodeApp::Config appCfg = SmartFiresNodeApp::Config::appCfg(
-  kUnassignedNodeId, nodeUidHash, true, false,
-  NetworkConfig::kEnableTelemetryTx);
 
 // -----------------------------------------------------------------------------
 // App
 // -----------------------------------------------------------------------------
+SmartFiresNodeApp::Config appCfg = SmartFiresNodeApp::Config::appCfg(
+  kUnassignedNodeId, nodeUidHash, true, false,
+  NetworkConfig::kEnableTelemetryTx);
 
-SmartFiresNodeApp app(appCfg, clock, duty, packetHandler, tdmaRadio, tdmaClock,
-                      sensors, sensorCount, &battery);
+SmartFiresNodeApp app(
+    appCfg,
+    clock,
+    duty,
+    packetHandler,
+    tdmaRadio,
+    tdmaClock,
+    mcuSleep,
+    sensors,
+    sensorCount,
+    &battery);
+
+// SmartFiresNodeApp app(appCfg, clock, duty, packetHandler, tdmaRadio, tdmaClock,
+//                       sensors, sensorCount, &battery);
 
 DebugLogger gLog(Serial, initialRadioAddr);
 
@@ -334,6 +383,12 @@ void setup() {
   }
 
   gLog.setMinLevel(LogLevel::Debug);
+
+  // Start the RTC counter before anything reads the clock — it backs every
+  // IClock::millis() call from here on, not just the standby timer, so nothing
+  // downstream (sensors, duty cycle, TDMA) can be constructed against a
+  // stopped counter.
+  rtc.begin();
 
   LOG_WARN("boot", "reset_cause=0x%02X wdt=%u hang_zone=%u boot_count=%u",
            resetCause, (resetCause & PM_RCAUSE_WDT) ? 1 : 0,

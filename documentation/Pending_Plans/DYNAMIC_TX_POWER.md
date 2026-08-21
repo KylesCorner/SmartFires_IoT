@@ -2,15 +2,38 @@
 name: dynamic-tx-power
 description: Plan for base-station-driven, per-node dynamic TX power adjustment using RSSI and retry telemetry the system already collects.
 category: plan-pending
-status: draft
+status: in-progress — implemented, flashed and baked. Constants still untuned; base ceiling raise not done.
 related_docs:
   - lora-vs-lorawan
   - tdma-protocol
   - packet-reliability
   - tunable-parameters
+  - reset-reason-diagnostics
 ---
 
 # Dynamic TX Power
+
+## Status (audited 2026-08-21)
+
+The control loop is **built, flashed and running**: `TxPowerController` on the base (23 native
+tests), `PKT_CMD_SET_TX_POWER` (0x15), `StatusPayload.tx_power_dbm` +
+`STATUS_TX_POWER_STATIC`, and per-node DYNAMIC/STATIC controls on the dashboard
+(`POST /api/tx_power`). "implemented-unflashed" is no longer accurate.
+
+This stays in `Pending_Plans/` for one reason: **every threshold in `BaseConfig.h`'s
+dynamic-TX-power block is a starting value, not a bench-characterised one.** The mechanism
+is done; the tuning is the remaining work. See "Still open" and "Open questions" below —
+the debug-env question (`SMARTFIRES_STATUS_INTERVAL_MS=1000` against thresholds meant for
+15-minute deltas) is the one most likely to bite first.
+
+Also still outstanding and independent of tuning: the base's own TX power ceiling raise to
++20 dBm (a separate static change, documented at the end of this doc), and excluding
+BOD-cycling nodes from optimisation.
+
+Note the interaction recorded under "Still open" has not gone away: this feature pays close
+to nothing until the WDT reboot rate drops, because every reboot discards a node's converged
+level. That makes `reset-reason-diagnostics`' remaining hardware validation a soft
+prerequisite for tuning these constants against real data.
 
 ## Background
 
@@ -78,22 +101,29 @@ needed.
 machinery that already defers Jetson-forwarded `CMD_CALIBRATE`/`CMD_RESET` to the base's
 slot-0 window — no parallel send path. Two consequences the decision loop must respect:
 
-- `kMaxPendingCommands` is 4 (`SmartFiresBaseApp.h`) and the queue is *shared* with
-  user-issued calibrate/reset commands; a full queue silently fails to enqueue
-  (`QUEUE_FULL` — the same limitation already documented for the per-node Reset button in
-  `RESET_SYSTEM.md`). With more than ~4 nodes all stepping in the same STATUS interval,
-  or with user resets queued, some enqueues will fail.
+- `kMaxPendingCommands` is `kMaxAssignedNodes + 1` = `kNumSlots` (5 at NUM_SLOTS=5), *not*
+  the literal 4 this plan originally assumed — it was re-derived from the slot count when
+  the Jetson's "New Session" flow needed room for a whole-network reset sweep. The queue is
+  still *shared* with user-issued calibrate/reset commands, and a full queue silently fails
+  to enqueue (`QUEUE_FULL` — the same limitation documented for the per-node Reset button in
+  `RESET_SYSTEM.md`). Four nodes all stepping in one STATUS interval *plus* a reset sweep
+  still overruns it.
 - A failed enqueue must be treated as "no change issued": do **not** set
   `pendingTxPowerDbm` — the loop simply retries the decision at the next STATUS interval.
   Whether `kMaxPendingCommands` needs bumping is a deployment-size question, not one this
   plan resolves.
 
 ```
-CmdSetTxPowerPayload (proposed):
-  node_id   : uint8_t   (redundant with PktHeader.node_id, mirrors CMD_RESET's pattern)
-  tx_power_dbm : int8_t  (new target power, signed to allow future negative-range radios)
-  seq       : uint8_t   (mirrors existing CMD_* sequencing)
+CmdSetTxPowerPayload (as built — BinaryPacket.h, PKT_CMD_SET_TX_POWER = 0x15):
+  node_id      : uint8_t  (redundant with PktHeader.node_id, mirrors CMD_RESET's pattern)
+  tx_power_dbm : int8_t   (target power, signed to allow future negative-range radios)
 ```
+
+**The proposed third `seq` byte was dropped.** This plan originally called it "mirrors
+existing CMD_* sequencing", but that was a misreading of the existing code: neither
+`CmdCalibratePayload` nor `CmdResetPayload` carries a seq — `PktHeader::seq` already
+sequences all of them. A second copy could only ever disagree with the header, so the
+payload is 2 bytes and the frame is 8, matching CALIBRATE/RESET exactly.
 
 Node-side handling mirrors `CalibrationDebug.cpp`'s dispatch for `CMD_CALIBRATE`/
 `CMD_RESET`: decode, apply (`ITdmaRadioDriver` gains a `setTxPower(int8_t)` passthrough to
@@ -285,51 +315,160 @@ base-internal variable: node applies it and logs it locally → the new value ri
 the next STATUS → the base separately logs its own decision/ack timeline → the web surfaces
 both the current value (node list) and the change history (base debug log stream).
 
-## Implementation checklist (not started)
+## Implementation status
 
-1. Add `CMD_SET_TX_POWER` packet type + payload to `BinaryPacket.h` and `packet.py`
+**Implemented 2026-08-19, unflashed. Threshold constants are untuned starting values.**
+The full loop is in place — transport, telemetry, the base-side decision loop, both
+fail-safes, and per-node operator control from the dashboard. What has *not* happened is
+any bench or field characterisation, so every constant in `BaseConfig.h`'s dynamic-TX-power
+block should be treated as a guess with a rationale, not a tuned value.
+
+### The organising principle the design settled on
+
+Every failure mode is owned by **whichever side still has a working link**. This is what
+resolves the "should a node raise its own power when acks stop?" question, and it is worth
+stating before the mechanics:
+
+| Failure | Who can still act | Owner |
+|---|---|---|
+| Downlink dead (node hears nothing) | Node only | Node self-reverts to baseline on stale sync |
+| Uplink dead (base hears nothing, node still hears) | Base only | Base probes node back to baseline |
+| Both dead | Neither | Node self-reverts; nothing else matters |
+| Neither dead | Both | Base's control loop decides |
+
+No case has two owners and no case has zero. The node's entire share of authority is
+*discarding an instruction it can no longer trust* — never judging link quality. Because
+the baseline is the ceiling in this design, that revert is always a step up or a no-op:
+monotonic, terminal, and incapable of oscillating or fighting the base.
+
+**Missed `ACK_SUMMARY` is deliberately not a node-side trigger.** It is ambiguous in at
+least five ways — weak uplink, weak downlink, Rx gating missing the slot-0 window, normal
+Timed-standby ack deferral, and the base's own `kMaxAckSummarySendAttempts` circuit breaker
+— and only the first is fixable by raising node TX power. Stale sync has none of that
+ambiguity and strictly dominates it as a signal: `ACK_SUMMARY` and `TIME_SYNC` ride the same
+downlink, from the same transmitter, in the same slot-0 window, so any downlink failure bad
+enough to eat acks eats syncs too — but `TIME_SYNC` goes out unconditionally every
+`kPeriodicTimeSyncMs` whether or not there is anything to say, while `ACK_SUMMARY` is
+conditional, rate-limited and deferred. One trigger, the one that already existed.
+
+### Deviations from this plan as originally drafted
+
+1. **SNR, not RSSI.** RSSI cannot express LoRa link margin — the modem demodulates below the
+   noise floor (≈ -7.5 dB SNR at SF7), so two frames at equal RSSI can be comfortable or one
+   fade from dropping. `ITdmaRadioDriver::ReceivedPacket` gained an `snr` field
+   (`RH_RF95::lastSNR()`, already whole dB).
+2. **One margin target plus a dead band, not two thresholds.** The drafted
+   `kRssiFloorThreshold`/`kRssiHeadroomThreshold` pair can be set into an oscillation (floor
+   above headroom) with nothing to catch it. `kTargetSnrMarginDbX10` + `kSnrDeadBandDbX10`
+   cannot, and the relationship is enforced by `static_assert`.
+3. **Power-up is a single jump to baseline, not a step.** The cost asymmetry is large enough
+   that feeling the way back up is indefensible: too high costs a sliver of battery, too low
+   costs telemetry and the retries to recover it. Also makes base-side recovery and the
+   node-side fallback the *same* action, so there is one recovery state reached two ways.
+4. **`retx`/`fail` inhibit a step-down; they never trigger a step-up.** The drafted
+   `kRetryAlarmThreshold` would have to be calibrated against a duty-cycle-structural floor
+   (the base defers acks across standby by design, and a lost window marker costs a
+   retransmission by design) that moves whenever the window period changes. Retries are
+   trustworthy in exactly one direction — evidence the node is not comfortable, no evidence
+   whose fault it is — so they gate the optimisation and nothing more.
+5. **The payload's proposed third `seq` byte was dropped**; `PktHeader::seq` already
+   sequences CMD_* and the existing CALIBRATE/RESET payloads carry none.
+6. **The debug-env open question is resolved by construction, not by a policy choice.**
+   Pacing decisions on `kTxPowerMinDecisionIntervalMs` — the controller's own clock — rather
+   than on STATUS arrival makes behaviour identical whether STATUS comes every second or
+   every 15 minutes, and makes the retx/fail delta window match the decision window. None of
+   the three options this plan originally offered (disable below a floor / let it run fast /
+   scale thresholds) was needed.
+7. **Added: per-node DYNAMIC/STATIC mode**, carried in the command payload and reported back
+   in `StatusPayload.flags` (`STATUS_TX_POWER_STATIC`, free — the byte had a spare bit).
+   STATIC is an operator override for bench and range work, not a safety state: a node that
+   loses contact reverts to DYNAMIC at baseline along with everything else, because keeping
+   *one* fallback rule matters more than preserving an experiment's fidelity.
+
+### Things found while building that the checklist did not anticipate
+
+- **`TdmaRadioService`'s command RX allowlist** admitted only `PKT_CMD_CALIBRATE`/
+  `PKT_CMD_RESET`. Without adding the new type there the node ACKs nothing and the frame is
+  logged as `rx_unhandled`. Any future command type hits the same trap.
+- **`csv_logger`'s `DictWriter` has no `extrasaction='ignore'`**, so a new key in a status
+  row raises unless the column is added to `CSV_COLUMNS`.
+- **`kMaxPendingCommands` is no longer the literal 4** this plan assumed — it is
+  `kMaxAssignedNodes + 1` = `kNumSlots`.
+- **`kCmdAckTimeoutMs` must exceed the Timed duty-cycle period** (75 s), not a frame period.
+  A command queued while a node is in standby cannot be delivered until its next
+  `WINDOW_BEGIN`; sized off a frame period the base would time out and re-arm on every node
+  that was merely asleep.
+- **Brownout inverts the fail-safe, and is deliberately left out of this loop.** A BOD reset
+  already returns the node to baseline for free (nothing is persisted), but that is the
+  maximum-current state, and post-reset the node broadcasts `AWAKEN` every 5 s at full power
+  — a positive feedback term on an already-sagging battery. The energy at stake in a few
+  hundred ms of airtime is small next to duty cycling and battery health, so this belongs in
+  a battery-gated startup policy, not folded into a link-quality control loop. What the loop
+  *should* eventually do is narrow: the AWAKEN payload already carries `reset_cause`, so the
+  base can bucket a BOD-cycling node and stop optimising it, since a node rebooting every few
+  minutes never converges and a too-low setting costs more in retries than it saves. **Not
+  implemented — see Open questions.**
+
+### Still open
+
+- Every constant in `BaseConfig.h`'s dynamic-TX-power block needs bench/field characterisation.
+- The base's own TX power ceiling raise to +20 dBm (step 13) — a separate static change.
+- BOD-cycling nodes are not yet excluded from optimisation (see above).
+- **This feature pays roughly nothing until the WDT reboot rate drops.** At the 2026-07-14
+  rate of 15 reboots/night (~1 per 45 min) and one step per 60 s decision interval, a node
+  reaches its converged level only if the link is clean for several minutes at a time — but
+  every reboot discards it. The loop is *correct* at any reboot rate, just unprofitable at a
+  high one. See `RESET_REASON_DIAGNOSTICS.md`.
+
+## Implementation checklist
+
+1. **[done]** Add `CMD_SET_TX_POWER` packet type + payload to `BinaryPacket.h` and `packet.py`
    (passive decode only on the Jetson side — it doesn't originate or act on these).
-2. Add `tx_power_dbm` (`int8_t`) to `StatusPayload` (`BinaryPacket.h`), set to the node's
+2. **[done]** Add `tx_power_dbm` (`int8_t`) to `StatusPayload` (`BinaryPacket.h`), set to the node's
    currently-applied TX power at STATUS-encode time; mirror the field in `packet.py`. Bumps
-   `STATUS` from 20 to 21 payload bytes (25 to 26 bytes on air) — update `CLAUDE.md`'s
-   wire-protocol tables and `BANDWIDTH_SCALING.md` accordingly.
-3. Add `ITdmaRadioDriver::setTxPower(int8_t)` and the `RadioHeadTdmaDriver` implementation
+   `STATUS` from 20 to 21 payload bytes — **26 to 27 bytes on air**, not the "25 to 26" this
+   plan said before: `PktHeader` has been 5 bytes since the flags byte landed, so STATUS was
+   already 26. Update `CLAUDE.md`'s wire-protocol tables and `BANDWIDTH_SCALING.md`
+   accordingly.
+3. **[done]** Add `ITdmaRadioDriver::setTxPower(int8_t)` and the `RadioHeadTdmaDriver` implementation
    (thin wrapper over `RH_RF95::setTxPower()`, same pattern as the existing `sleep()`
    passthrough from `radio-rx-gating`).
-4. Add node-side dispatch in `CalibrationDebug.cpp`/`SmartFiresNodeApp.cpp` alongside the
+4. **[done]** Add node-side dispatch in `CalibrationDebug.cpp`/`SmartFiresNodeApp.cpp` alongside the
    existing `CMD_CALIBRATE`/`CMD_RESET` handling, including a serial (`@SFDBG`) log line on
    apply — old value, new value, seq — matching the existing CALIBRATE/RESET log pattern.
-5. Extend the base's per-node assignment table with the state fields above, and reset
+5. **[done]** Extend the base's per-node assignment table with the state fields above, and reset
    those fields in the AWAKEN handler alongside the existing
    `resetAckTracker(nodeId, "awaken")` call (see "Fail-safe behavior" — this does *not*
    happen automatically via `findOrCreateNodeAssignment()`).
-6. Implement the decision loop in `SmartFiresBaseApp` (or a small new
+6. **[done]** Implement the decision loop in `SmartFiresBaseApp` (or a small new
    `TxPowerController`-style collaborator it owns), gated on `STATUS` arrival the same way
    `ACK_SUMMARY` dispatch is gated on TDMA slot 0. Sends go through the existing
    `enqueuePendingCommand()` queue; a failed (queue-full) enqueue leaves
    `pendingTxPowerDbm` unset so the decision re-arms next interval.
-7. Add base-side `DebugLogger`/`FramedDebugLogSink` log lines (same `PKT_DEBUG_LOG` path
+7. **[done]** Add base-side `DebugLogger`/`FramedDebugLogSink` log lines (same `PKT_DEBUG_LOG` path
    already streamed to the Jetson's `/debug` page and `/ws/base-debug` stream) at both
    decision points: when the loop issues a `CMD_SET_TX_POWER` (node, target, triggering
    reason — RSSI floor, headroom step-down, or silence-timeout probe) and when the
    corresponding `CMD_ACK` confirms or times out.
-8. Add `kPowerStepDbm`, `kMinTxPowerDbm`, `kRssiHeadroomThreshold`,
+8. **[done, renamed]** Add `kPowerStepDbm`, `kMinTxPowerDbm`, `kRssiHeadroomThreshold`,
    `kRssiFloorThreshold`, `kRetryAlarmThreshold`, and `kCmdAckTimeoutMs` (base-side
    CMD_ACK revert window — no base-side equivalent exists today) to `BaseConfig.h`,
    documented in `tunable-parameters`.
-9. Native tests using `FakeRadio`/`FakeClock` (per the gap already flagged in
+9. **[done]** Native tests using `FakeRadio`/`FakeClock` (per the gap already flagged in
    `radio-rx-gating`'s testing section) — this plan adds another consumer that needs that
    fake, worth building it once for both.
-10. Surface per-node TX power as a column in the Jetson web dashboard's node list
+10. **[done]** `tx_power_dbm` reaches the CSV/JSONL/ingest log, and the map-history
+    node table shows per-node TX power + mode with set/±/pin controls (`/api/tx_power`).
+    Original text: surface per-node TX power as a column in the Jetson web dashboard's node list
     (read-only, visibility only, not control) — sourced from the new
     `StatusPayload.tx_power_dbm` field (item 2) so the displayed value reflects what the
     node has actually confirmed applying, not just what the base last commanded.
-11. Add the base-side per-node silence timeout (≈`2 × kStatusIntervalMs`) alongside the
+11. **[done]** Add the base-side per-node silence timeout (≈`2 × kStatusIntervalMs`) alongside the
     STATUS-gated trigger, including the bounded best-effort `CMD_SET_TX_POWER` probe
     behavior described in "Fail-safe behavior" above.
-12. Add the node-side reset of `currentTxPowerDbm` to `kRadioTxPowerDbm` on `TdmaClock`
+12. **[done]** Add the node-side reset of `currentTxPowerDbm` to `kRadioTxPowerDbm` on `TdmaClock`
     stale-sync (reuse `syncStaleMs`, no new packet).
-13. Add `kBaseRadioTxPowerDbm` (`BaseConfig.h`) and wire the base's `main.cpp`
+13. **[not started]** Add `kBaseRadioTxPowerDbm` (`BaseConfig.h`) and wire the base's `main.cpp`
     construction to use it instead of inheriting the shared `NetworkConfig::kRadioTxPowerDbm`
     default — see "Base station TX power ceiling" below.
 

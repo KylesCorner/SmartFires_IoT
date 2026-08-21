@@ -44,11 +44,11 @@ at 2. The base station uses the reserved identity `NODE_ID = 1` (→ slot 0)
 internally via its own `TdmaClock` (`SmartFiresBaseApp::_baseTdmaClock`),
 self-clocked from its own session time rather than from a received
 `TIME_SYNC`. `NUM_SLOTS` is a build flag and must be identical across all
-deployed node Feathers — **with N real nodes, `NUM_SLOTS` must be `N + 1`**,
-not `N`. The base station's own `[env:feather_m0_lora_base]` build does not
-currently pass a `-DNUM_SLOTS` flag and falls back to `NetworkConfig.h`'s
-default (4); keep it in sync manually if a deployment changes node
-`NUM_SLOTS` away from the default.
+deployed node Feathers **and the base** — **with N real nodes, `NUM_SLOTS`
+must be `N + 1`**, not `N`. It is set once in `platformio.ini`'s `[network]`
+section and interpolated into the base env and every node env, so the two can
+no longer drift; the base env used to omit the flag entirely and inherit
+`NetworkConfig.h`'s `#define NUM_SLOTS 4` fallback.
 
 Mismatch in `NUM_SLOTS` causes slot collisions.
 
@@ -69,7 +69,7 @@ Mismatch in `NUM_SLOTS` causes slot collisions.
 | `slotWidthMs` | 900 ms | Fits worst-case bundle TX (340 ms) + link-ACK timeout (250 ms) + 2×20 ms guard |
 | `guardMs` | 20 ms | Covers ±50 ppm crystal drift over 22 min max sync interval |
 | Usable TX window | 860 ms | `slotWidthMs − guardMs` |
-| `NUM_SLOTS` (build flag) | 4 (production default) | Must match across all node Feathers |
+| `NUM_SLOTS` (build flag) | 5 (4 nodes + base) | Must match across all node Feathers and the base |
 | `syncStaleMs` | 1 320 000 ms (22 min) | After this without TIME_SYNC, node transmits unconditionally |
 
 Real node builds run in `AppLayerAckSummary` mode (`SMARTFIRES_TDMA_RELIABILITY_MODE=1`), where

@@ -11,7 +11,7 @@
 class Pa1010dGpsSensor final : public ISensor {
 public:
   struct Config {
-    SensorDutyClass dutyClass = SensorDutyClass::AlwaysOn;
+    SensorDutyClass dutyClass = SensorDutyClass::DutyCycled;
     GpsPowerMode powerMode;
     GpsPeriodicConfig periodic;
     uint32_t minSamplePeriodMs;
@@ -29,7 +29,7 @@ public:
         uint32_t secondRunTimeMs = 24000,
         uint32_t secondSleepTimeMs = 90000,
         uint32_t minSamplePeriodMs = 1000,
-        GpsPowerMode powermode = GpsPowerMode::PeriodicBackup) {
+        GpsPowerMode powermode = GpsPowerMode::Backup) {
       Pa1010dGpsSensor::Config cfg;
       cfg.minSamplePeriodMs = minSamplePeriodMs;
       cfg.powerMode = powermode;
