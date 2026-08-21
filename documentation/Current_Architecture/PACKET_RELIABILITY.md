@@ -395,7 +395,7 @@ forward by the measured sleep.
 
 Without it, the sleep counts as elapsed retry time: pending timestamps are in
 session-clock terms, the session clock runs through standby (see
-[RTC_SUBSECOND_SLEEP](../Pending_Plans/RTC_SUBSECOND_SLEEP.md) Phase 2), and
+[RTC_SUBSECOND_SLEEP](../Completed_Plans/RTC_SUBSECOND_SLEEP.md) Phase 2), and
 `kTimedSleepMs` (35 s) exceeds `reliabilityMaxAgeMs` (30 s) — so **every**
 unacked entry would be discarded as `max_age` on the first post-wake drain, with
 no retransmit. Not a race; it would fire on every cycle.

@@ -103,7 +103,7 @@ private:
   // nodes never get reset. Sized off kMaxAssignedNodes rather than a literal
   // so it can no longer be outgrown by a NUM_SLOTS bump: the +1 leaves room
   // for one operator-triggered per-node command to coexist with a full
-  // network-wide sweep. See documentation/Pending_Plans/RESET_SYSTEM.md.
+  // network-wide sweep. See documentation/Completed_Plans/RESET_SYSTEM.md.
   static constexpr uint8_t kMaxPendingCommands =
       static_cast<uint8_t>(BaseConfig::kMaxAssignedNodes + 1);
 

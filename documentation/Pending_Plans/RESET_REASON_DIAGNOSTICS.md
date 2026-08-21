@@ -46,9 +46,26 @@ capture) remains deferred. Touchpoints as built:
   WDT-caused reboots. Current-session only (matches the rest of the dashboard);
   legacy pre-diagnostics AWAKEN frames show "—".
 
-Remaining before moving to `Completed_Plans/`: hardware validation (induced-hang
-test per the Validation section) and the SOFTWARE_DESIGN.md / TDMA_PROTOCOL.md /
-BANDWIDTH_SCALING.md wire-table updates.
+Remaining before moving to `Completed_Plans/` (re-checked 2026-08-21):
+
+1. **Hardware validation** — the induced-hang test per the Validation section, plus the
+   cold-boot and bootloader-double-tap regression checks. None of it done. This is the
+   substantive item: nothing has yet proved the breadcrumb survives a real WDT reset on this
+   hardware, so the whole attribution mechanism is unverified in the field.
+2. **Doc updates — partly done.** `CLAUDE.md` **is** updated (its wire tables carry the
+   12-byte AWAKEN with `reset_cause`/`hang_zone`). Still outstanding, verified by grep:
+   `SOFTWARE_DESIGN.md`, `Current_Architecture/TDMA_PROTOCOL.md`,
+   `Current_Architecture/BANDWIDTH_SCALING.md` and `Current_Architecture/JETSON_BRIDGE.md`
+   contain no mention of `reset_cause` or `hang_zone` at all.
+
+**Note the sizes in the Phase 1 section below are superseded.** This plan was written against
+a 4-byte `PktHeader`, so it says AWAKEN goes 9 → 11 bytes. `PktHeader` has since grown to 5
+bytes (`rtc-subsecond-sleep`), so the shipped frame is **12 bytes**: 5-byte header + 6-byte
+`AwakenPayload` + crc8. Use 12 when updating the wire tables above, not 11.
+
+A dedicated `ZONE_MCU_STANDBY` is worth adding alongside the induced-hang work — see
+`standby-watchdog-coverage`, which needs the same harness and would otherwise report a
+standby-hang recovery under whatever zone was marked before the sleep.
 
 ## Background
 

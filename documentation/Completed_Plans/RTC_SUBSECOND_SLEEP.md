@@ -1,17 +1,47 @@
 ---
 name: rtc-subsecond-sleep
 description: Plan to replace RTCZero's whole-second calendar-mode alarm (used by Samd21RtcSleep for MCU standby) with the SAMD21 RTC's raw COUNT32 tick-counter mode, so sleep-elapsed time is known to ~1 ms instead of ~1 s — precise enough that a node can resume its TDMA session across a sleep instead of discarding sync and re-running the full AWAKEN handshake every wake.
-category: plan-pending
-status: in-progress — Phase 1 (T0–T4) shipped; Phase 2 (T6) implemented 2026-08-17, awaiting user compile/flash + bake. T8 dropped (Hybrid deprecated).
+category: plan-completed
+status: historical
 related_docs:
   - mcu-duty-cycle-changelog
   - duty-cycling
   - tdma-protocol
   - watchdog-timer
   - radio-rx-gating
+  - window-marker-packets
+  - standby-watchdog-coverage
 ---
 
 # RTC Sub-Second Sleep
+
+## Completion record (audited 2026-08-21)
+
+Phase 1 (T0–T4) and Phase 2 (T6, T9, T10, T11) are shipped, flashed and baked clean.
+T8 was dropped (`Hybrid` deprecated). The code is now authoritative; read
+`Samd21Rtc`/`Samd21RtcClock`/`Samd21RtcSleep` and `SmartFiresNodeApp::maybeEnterTimedMcuSleep()`
+rather than this doc.
+
+Confirmed in source at audit time: `src/platform/Samd21RtcSleep.cpp` runs MODE0 COUNT32
+@1024 Hz with a CMP0 alarm and returns measured elapsed ms; `maybeEnterTimedMcuSleep()`
+(`SmartFiresNodeApp.cpp:894-904`) calls `sleepFor()` then `notifyMcuStandby(elapsedMs)`
+with **no `_tdmaClock.reset()`** — the recurring unslotted AWAKEN handshake this plan
+existed to remove is gone.
+
+**Two things this plan produced that outlived it**, both carried forward rather than closed
+here:
+
+- T9's `PKT_FLAG_WINDOW_FIRST`/`WINDOW_LAST` bits were **superseded** by dedicated
+  `PKT_WINDOW_BEGIN`/`PKT_WINDOW_END` frames — see `window-marker-packets` (also completed).
+  The already-noted supersession block below the Phase 2 execution log stands.
+- T11's **known gap is still open**: queued `CMD_CALIBRATE`/`CMD_RESET` use a blocking send
+  to a node that may be in standby, and `kMaxPendingCommandSendAttempts` (3, ≈11 s) expires
+  well inside the standby, so operator commands to a sleeping `Timed` node are dropped
+  rather than deferred. Now tracked as an open item in `base-slot-overrun-fix`, which is
+  reworking the base's send paths anyway.
+
+The watchdog-coverage gap across standby (`Watchdog.disable()` in `Samd21RtcSleep::sleepFor()`)
+is tracked separately in `standby-watchdog-coverage`.
 
 ## Background
 
@@ -355,7 +385,7 @@ show up clearly.
   as a no-op — the other suites pick it up transitively through `FakeClock.h` — but this
   suite includes only `Samd21RtcTicks.h`, so `delay` was undeclared and the suite could not
   build, failing `pio test -e native` as a whole. Removed. (`test/test_config` still fails
-  to compile for the separate reason tracked in `[[duty-cycle-test-factory-fix]]`.)
+  to compile for the separate reason tracked in `[[native-test-repair]]`.)
 - **Wire compatibility:** the header change is a hard break. Nodes, the base, and the Jetson
   package must be updated together — a mixed set will CRC-fail every packet. The legacy
   9-byte `AWAKEN` decode still works (it is parsed against the old 4-byte header) but only

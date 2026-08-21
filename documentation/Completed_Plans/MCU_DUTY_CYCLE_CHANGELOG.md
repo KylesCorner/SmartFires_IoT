@@ -1,19 +1,50 @@
 ---
 name: mcu-duty-cycle-changelog
 description: Changelog and implications review of commit d7ba3c5 (branch feature/mcu-duty-cycle) — adds SAMD21 RTC standby, a Timed/Hybrid DutyCycleController mode, and radio duty-sleep gating; flags that every RTC wake forces a full TDMA resync (fresh AWAKEN handshake) and that RTCZero's whole-second alarm resolution introduces cumulative clock error.
-category: plan-pending
-status: review
+category: plan-completed
+status: historical
 related_docs:
   - duty-cycling
   - tdma-protocol
   - watchdog-timer
   - tunable-parameters
-  - duty-cycle-test-factory-fix
+  - native-test-repair
+  - rtc-subsecond-sleep
+  - standby-watchdog-coverage
 ---
 
 # MCU Duty Cycle — Changelog & Implications
 
-## Status
+## Disposition (audited 2026-08-21)
+
+This was never a plan — it is a **review of one commit**, and it did its job: four of its five
+Implications drove concrete follow-on work that has since shipped. Retired to
+`Completed_Plans/` as the historical record of why that work happened. **Do not read the
+Changelog section below as current behaviour** — most of what it describes has since been
+replaced.
+
+Resolution of each Implication:
+
+| # | Implication | Resolution |
+|---|---|---|
+| 1 | RTCZero whole-second alarm → up to ~1 s uncounted error per cycle, cumulative | **Fixed.** `rtc-subsecond-sleep` Phase 1 replaced MODE2 calendar with MODE0 COUNT32 @1024 Hz. Shipped and baked |
+| 2 | `_tdmaClock.reset()` every wake → recurring unslotted AWAKEN handshake | **Fixed.** `rtc-subsecond-sleep` Phase 2 (T6) removed the reset; the session now survives standby. Shipped and baked |
+| 3 | Watchdog disabled across standby → no hang recovery for the sleep duration | **Still open.** Carried forward to `standby-watchdog-coverage` |
+| 4 | `Hybrid` never enters MCU standby despite its doc comment | **Resolved by decision, not code.** `Hybrid` is deprecated; `DutyCycleMode::Hybrid` and `feather_m0_lora_node_hybrid` remain in the tree but are not a target for further work |
+| 5 | Scope check — production env untouched | **Superseded.** No longer true, and no longer the relevant question: `Timed` is the developed path and the whole stack has since been flashed and baked |
+
+Two factual corrections to the Status text below, left in place rather than rewritten so the
+record reads as it did at the time:
+
+- "**Unmerged — 1 commit ahead of `master`**" was accurate on 2026-08-04. As of 2026-08-21
+  `feature/mcu-duty-cycle` is **13 commits ahead of `master` and still unmerged**, and every
+  piece of work since — RTC sub-second sleep, window markers, GPS clock Step 1, `NUM_SLOTS=5`,
+  dynamic TX power — sits on it. The branch, not `master`, is what is flashed on hardware.
+- The final open question referred to `duty-cycle-test-factory-fix`. That plan has been
+  replaced by `native-test-repair`, which covers the same test file plus everything else
+  keeping `pio test -e native` red.
+
+## Status (as written 2026-08-04)
 
 Branch `feature/mcu-duty-cycle`, commit `d7ba3c5` (Kyle Krstulich, 2026-08-04). **Unmerged —
 1 commit ahead of `master`.** Commit message: *"Duty cycling the MCU now. Timer doesn't work

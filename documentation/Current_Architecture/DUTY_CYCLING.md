@@ -207,7 +207,7 @@ the samples, and `lastWindowOverran()` says so.
 A runt is worth avoiding on two counts: it spends a fresh 20-byte `FullState`
 reference on a handful of samples, and it used to be the frame that could not be
 acked before standby. See
-[WINDOW_MARKER_PACKETS.md](../Pending_Plans/WINDOW_MARKER_PACKETS.md).
+[WINDOW_MARKER_PACKETS.md](../Completed_Plans/WINDOW_MARKER_PACKETS.md).
 
 `SmartFiresNodeApp::maybeEnterTimedMcuSleep()` holds off standby while
 `TdmaRadioService::queuedCount() > 0`, up to

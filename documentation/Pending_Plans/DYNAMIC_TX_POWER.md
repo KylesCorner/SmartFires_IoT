@@ -2,15 +2,38 @@
 name: dynamic-tx-power
 description: Plan for base-station-driven, per-node dynamic TX power adjustment using RSSI and retry telemetry the system already collects.
 category: plan-pending
-status: implemented-unflashed
+status: in-progress — implemented, flashed and baked. Constants still untuned; base ceiling raise not done.
 related_docs:
   - lora-vs-lorawan
   - tdma-protocol
   - packet-reliability
   - tunable-parameters
+  - reset-reason-diagnostics
 ---
 
 # Dynamic TX Power
+
+## Status (audited 2026-08-21)
+
+The control loop is **built, flashed and running**: `TxPowerController` on the base (23 native
+tests), `PKT_CMD_SET_TX_POWER` (0x15), `StatusPayload.tx_power_dbm` +
+`STATUS_TX_POWER_STATIC`, and per-node DYNAMIC/STATIC controls on the dashboard
+(`POST /api/tx_power`). "implemented-unflashed" is no longer accurate.
+
+This stays in `Pending_Plans/` for one reason: **every threshold in `BaseConfig.h`'s
+dynamic-TX-power block is a starting value, not a bench-characterised one.** The mechanism
+is done; the tuning is the remaining work. See "Still open" and "Open questions" below —
+the debug-env question (`SMARTFIRES_STATUS_INTERVAL_MS=1000` against thresholds meant for
+15-minute deltas) is the one most likely to bite first.
+
+Also still outstanding and independent of tuning: the base's own TX power ceiling raise to
++20 dBm (a separate static change, documented at the end of this doc), and excluding
+BOD-cycling nodes from optimisation.
+
+Note the interaction recorded under "Still open" has not gone away: this feature pays close
+to nothing until the WDT reboot rate drops, because every reboot discards a node's converged
+level. That makes `reset-reason-diagnostics`' remaining hardware validation a soft
+prerequisite for tuning these constants against real data.
 
 ## Background
 
