@@ -178,16 +178,21 @@ SmartFires_IoT/
 │   │   ├── TDMA_PROTOCOL.md       Slot timing, session clock, boot handshake, TX budget
 │   │   ├── PACKET_RELIABILITY.md  StrictLinkAck vs AppLayerAckSummary, pending window, ACK_SUMMARY
 │   │   ├── DUTY_CYCLING.md        DutyCycleController phases, config, trigger sensor
-│   │   ├── UART_JETSON_BRIDGE.md  Frame format, FrameReceiver, ingest loop, SessionManager
+│   │   ├── JETSON_BRIDGE.md  Frame format, FrameReceiver, ingest loop, SessionManager
 │   │   └── BANDWIDTH_SCALING.md   Airtime math, node-count scaling table
 │   ├── User_Reference/            ← practical how-to guides
 │   │   ├── FLASHING.md
 │   │   ├── DEBUG_FILTER.md
 │   │   ├── JETSON_CHEATSHEET.md
 │   │   └── NETWORK_TEST.md
-│   ├── Pending_Plans/             ← not-yet-built designs (not current state)
-│   │   ├── JETSON_SENSOR_EXPANSION.md
-│   │   └── RESET_SYSTEM.md
+│   ├── Pending_Plans/             ← open work (see documentation/README.md for the audited list)
+│   │   ├── BASE_SLOT_OVERRUN_FIX.md
+│   │   ├── NATIVE_TEST_REPAIR.md
+│   │   ├── STANDBY_WATCHDOG_COVERAGE.md
+│   │   ├── DYNAMIC_TX_POWER.md
+│   │   ├── RESET_REASON_DIAGNOSTICS.md
+│   │   ├── GPS_DISCIPLINED_CLOCK.md
+│   │   └── JETSON_SENSOR_EXPANSION.md
 │   └── Completed_Plans/           ← historical design docs (code is now authoritative)
 ```
 
@@ -390,7 +395,7 @@ unackable (its ack could only be sent in a slot 0 falling after standby began)
 and so was retransmitted in full on every wake purely to prompt the ack. Markers
 never enter the reliability window, are never retransmitted, and **never consume
 a `seq`** — `window_id` is their own counter. See
-`documentation/Pending_Plans/WINDOW_MARKER_PACKETS.md`.
+`documentation/Completed_Plans/WINDOW_MARKER_PACKETS.md`.
 
 **Retransmit marker.** `PKT_FLAG_RETX` is stamped by
 `TdmaRadioService::pickRetransmitCandidate()` into the *outgoing copy* of a
@@ -417,7 +422,7 @@ meaning inverts on a replay. See
 | `0x08` | PKT_WINDOW_BEGIN | Node→Base | 17 bytes | Timed wake edge; releases the base's deferred ACK_SUMMARY. No `seq` |
 | `0x09` | PKT_WINDOW_END | Node→Base | 17 bytes | Timed window close; base defers ACK_SUMMARY until the next BEGIN. Carries `planned_sleep_ms` + `sample_count`. No `seq` |
 | `0x10` | PKT_CMD_CALIBRATE | Jetson→Node | 8 bytes | Forwarded by base; node just logs + ACKs (DMP self-calibrates regardless) |
-| `0x11` | PKT_CMD_RESET | Jetson→Node | 8 bytes | Forwarded by base; node logs + ACKs but does not yet actually reset |
+| `0x11` | PKT_CMD_RESET | Jetson→Node | 8 bytes | Forwarded by base; node ACKs then resets (hard = `NVIC_SystemReset()`, soft = clear sync + flush + re-AWAKEN). `node_id=0` means "reset the base itself" and is not forwarded over LoRa |
 | `0x12` | PKT_CALIBRATION_DATA | — | — | Reserved, unused — no encode/decode functions exist |
 | `0x13` | PKT_CMD_ACK | Node→Jetson | 12 bytes | Acknowledge CALIBRATE or RESET; relayed through base |
 | `0x14` | PKT_DEBUG_LOG | Base→Jetson | variable | USB/UART only, never sent over LoRa; carries `@SFDBG` text lines (`FramedDebugLogSink`) |
@@ -568,7 +573,7 @@ node's own slot). `TdmaClock::baseRxWindowOpen()` mirrors `myTurn()`'s shape:
 
 Gating is opt-in only for `AppLayerAckSummary` mode; `StrictLinkAck` (diagnostics-only, not
 deployed) keeps the radio Rx-continuous since it needs to hear its own link-layer ACK right
-after its own TX slot. See `documentation/Pending_Plans/RADIO_RX_GATING.md` for the full
+after its own TX slot. See `documentation/Completed_Plans/RADIO_RX_GATING.md` for the full
 design rationale and remaining test/bench-verification work.
 
 ---
@@ -608,15 +613,16 @@ SmartFiresNodeApp::update() — sensing begins
 | AWAKEN boot handshake | **Done** | Node broadcasts PKT_AWAKEN every 5 s until TIME_SYNC received; sensors withheld until synced |
 | SHT31 sensor wired end-to-end | **Done** | fillSnapshot() implemented |
 | TDMA clock + slot gating | **Done** | TdmaClock, TdmaRadioService |
-| Rx power gating | **Code done; tests/bench pending** | `baseRxWindowOpen()`/`updateRxPower()`/`sleep()` shipped and wired in; `TdmaRadioService`/`SmartFiresBaseApp` native test coverage and hardware bench verification still open — see `documentation/Pending_Plans/RADIO_RX_GATING.md` |
+| Rx power gating | **Code done; tests/bench pending** | `baseRxWindowOpen()`/`updateRxPower()`/`sleep()` shipped and wired in; `TdmaRadioService`/`SmartFiresBaseApp` native test coverage and hardware bench verification still open — see `documentation/Completed_Plans/RADIO_RX_GATING.md` |
 | TIME_SYNC binary decode | **Done** | TdmaRadioService uses BinaryPacket::decodeTimeSync() |
 | Base station port | **Done** | SmartFiresBaseApp fully implemented: LoRa RX, UART framing, TIME_SYNC, ACK_SUMMARY, node assignment |
 | edge-receiver packet bundle decode | **Done** | `smartfires_edge/packet.py` for 20-byte FullStatePayload + 12-byte deltas |
 | Jetson anemometer integration | **Done** | `smartfires-edge receive` can poll ES-W302 and log `jetson_wind_mps` + `jetson_wind_dir_deg` |
 | Sensor fillSnapshot() (Wind, GPS, SPS30, IMU) | **Done** | All four sensors implement `fillSnapshot()` |
-| CMD_CALIBRATE/CMD_RESET/CMD_ACK | **Round-trip done; node action is log-only** | Wire protocol + ACK is implemented node↔base↔Jetson; node-side handling only logs + ACKs — DMP free-runs calibration already, and CMD_RESET does not yet actually reset the board (`reset_type` is decoded but unused) |
+| CMD_CALIBRATE/CMD_RESET/CMD_ACK | **Done** | Wire protocol + ACK implemented node↔base↔Jetson. `CMD_RESET` now actually resets: node hard path `NVIC_SystemReset()`, soft path `TdmaClock::reset()` + `flushTelemetryBuffers("cmd_reset_soft")` + re-AWAKEN (`SmartFiresNodeApp.cpp:502-515`); base self-reset on `node_id=0` (`SmartFiresBaseApp.cpp:1233-1248`). `CMD_CALIBRATE` remains log-only by design — the DMP free-runs calibration. See `documentation/Completed_Plans/RESET_SYSTEM.md` |
 | Heading/calibration system | **Done** | DMP self-calibration on boot; heading carried in every STATUS packet |
-| Dynamic TX power | **Code done; unflashed, constants untuned** | Base-owned control loop (`TxPowerController`, 23 native tests) + `PKT_CMD_SET_TX_POWER` + `StatusPayload.tx_power_dbm`/`STATUS_TX_POWER_STATIC` + per-node DYNAMIC/STATIC dashboard controls. Thresholds in `BaseConfig.h` are starting values, not bench-characterized — see `documentation/Pending_Plans/DYNAMIC_TX_POWER.md` |
+| Dynamic TX power | **Shipped and flashed; constants untuned** | Base-owned control loop (`TxPowerController`, 23 native tests) + `PKT_CMD_SET_TX_POWER` + `StatusPayload.tx_power_dbm`/`STATUS_TX_POWER_STATIC` + per-node DYNAMIC/STATIC dashboard controls. Thresholds in `BaseConfig.h` are starting values, not bench-characterized — see `documentation/Pending_Plans/DYNAMIC_TX_POWER.md` |
+| `pio test -e native` | **Red** | Does not compile: `test_config` calls removed `DutyCycleConfig` factories. Six further `test_duty_cycle_controller` assertions fail once it does. See `documentation/Pending_Plans/NATIVE_TEST_REPAIR.md` |
 
 Full details and design notes in `documentation/Completed_Plans/BINARY_PACKET_PIPELINE.md`.
 Sizing and scaling math tables are in `documentation/Current_Architecture/BANDWIDTH_SCALING.md`.
@@ -685,7 +691,7 @@ decodes these packet types for monitoring.
 `edge/edge-receiver/src/smartfires_edge/packet.py` mirrors `BinaryPacket.h` for
 STATUS/FULL_STATE/BUNDLE/CMD_CALIBRATE/CMD_RESET/CMD_ACK parsing and bundle delta expansion.
 
-Base station link (USB, not UART — see `UART_JETSON_BRIDGE.md`):
+Base station link (USB, not UART — see `JETSON_BRIDGE.md`):
 1. Plug the base station Feather's USB cable into the Jetson.
 2. One-time udev setup so the base and sniffer (both generic USB-CDC, same
    VID/PID) get stable, non-swapping device paths — see
@@ -743,4 +749,4 @@ Base station link (USB, not UART — see `UART_JETSON_BRIDGE.md`):
   default), so a STATUS-gated loop would run at wildly different rates with one set of
   thresholds. `kTxPowerMinDecisionIntervalMs` fixes the decision cadence and the retx/fail
   delta window regardless of how many STATUS packets land inside it.
-- **Rx power gating (`AppLayerAckSummary` mode only):** nodes sleep the radio outside the base's slot 0, since that's the only slot the base ever transmits in and node telemetry is fire-and-forget. `TdmaClock::baseRxWindowOpen()` mirrors `myTurn()`'s pre-sync/stale-sync fallback. A dedicated `rxWakeAheadMs` (not a `guardMs` bump) opens the window slightly before slot 0 to absorb main-loop jitter from blocking sensor reads, not just crystal drift — added after field testing showed nodes missing the start of slot 0 without it. See "Rx power gating" above and `documentation/Pending_Plans/RADIO_RX_GATING.md`.
+- **Rx power gating (`AppLayerAckSummary` mode only):** nodes sleep the radio outside the base's slot 0, since that's the only slot the base ever transmits in and node telemetry is fire-and-forget. `TdmaClock::baseRxWindowOpen()` mirrors `myTurn()`'s pre-sync/stale-sync fallback. A dedicated `rxWakeAheadMs` (not a `guardMs` bump) opens the window slightly before slot 0 to absorb main-loop jitter from blocking sensor reads, not just crystal drift — added after field testing showed nodes missing the start of slot 0 without it. See "Rx power gating" above and `documentation/Completed_Plans/RADIO_RX_GATING.md`.

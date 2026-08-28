@@ -1,17 +1,43 @@
 ---
 name: window-marker-packets
 description: Replaces the WINDOW_FIRST/WINDOW_LAST header flags with dedicated PKT_WINDOW_BEGIN/PKT_WINDOW_END frames, and makes the Timed active window run to a whole bundle boundary on a fixed wake-to-wake period, removing the retransmission of the last bundle of every duty cycle.
-category: plan-pending
-status: in-progress — implemented 2026-08-19, awaiting user compile/flash + bake
+category: plan-completed
+status: historical
 related_docs:
   - rtc-subsecond-sleep
   - packet-reliability
   - duty-cycling
   - tdma-protocol
   - bandwidth-scaling
+  - base-slot-overrun-fix
+  - native-test-repair
 ---
 
 # Window Marker Packets
+
+## Completion record (audited 2026-08-21)
+
+Implemented 2026-08-19, flashed and baked clean. `PKT_WINDOW_BEGIN` (0x08) and
+`PKT_WINDOW_END` (0x09) with `WindowMarkerPayload` are the authoritative window-edge
+signal; the `WINDOW_FIRST`/`WINDOW_LAST` header bits are retired (`0x01`/`0x02` now
+reserved in `PktHeader::flags`). The per-cycle duplicate bundle is gone.
+
+**Open items from this plan have been rehomed** rather than closed:
+
+- The six pre-existing `test_duty_cycle_controller` failures and the stale
+  `test/support/Arduino.cpp` shim moved into `native-test-repair`, which now owns every
+  reason `pio test -e native` is red.
+- Deferring `CMD_CALIBRATE`/`CMD_RESET` on the same asleep/awake state (T11's known gap)
+  moved to `base-slot-overrun-fix`, which is reworking the base's send paths anyway.
+- `kTimedBundlesPerWindow = 2` remains a first choice rather than a measured one. That is a
+  tuning knob in `SensingConfig.h`, not outstanding design work.
+
+**One field defect surfaced by this design after the bake**, and it is the direct subject of
+`base-slot-overrun-fix`: because a marker is fire-and-forget and never retransmitted, a lost
+`PKT_WINDOW_END` leaves the base believing the node is awake, and its blocking
+`sendAckSummary()` then transmits past the end of slot 0 into slot 1. The marker loss is
+expected and cheap; the slot overrun is the real defect. That plan repeats `WINDOW_END`
+(making Defect A rare) and makes the overrun structurally impossible.
 
 ## Background — the duplicate this removes
 

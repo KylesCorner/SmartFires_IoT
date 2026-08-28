@@ -1,8 +1,8 @@
 ---
 name: reset-system
 description: Plan to wire up base-station and per-node CMD_RESET handling end-to-end, including Jetson auto-reset of the base on session start.
-category: plan-pending
-status: draft
+category: plan-completed
+status: historical
 related_docs:
   - tdma-protocol
   - packet-reliability
@@ -10,6 +10,30 @@ related_docs:
 ---
 
 # Reset System
+
+## Completion record (audited 2026-08-21)
+
+All four gaps below are implemented; the code is now authoritative. Verified touchpoints:
+
+| Gap | Where it landed |
+|---|---|
+| 1 — base self-reset on `node_id == 0` | `src/app/SmartFiresBaseApp.cpp:1233-1248` (`uart_cmd_reset_self`, hard path `NVIC_SystemReset()`, soft path radio reinit + `uart_cmd_reset_self_done`) |
+| 2 — node executes `CMD_RESET` | `src/app/SmartFiresNodeApp.cpp:502-515` (`cmd_reset_apply`; hard `NVIC_SystemReset()`, soft `flushTelemetryBuffers("cmd_reset_soft")`) |
+| 3 — `TdmaClock::reset()` | `src/radio/TdmaClock.cpp:32-37`, exactly as specified |
+| 4 — Jetson base reset at session start | `ingest_service.py:309` — `_send_cmd_reset(node_id=0, reset_type=0)` on the first packet, then `sleep(0.5)`, then `_send_time_sync(reason="session_start")` |
+
+Phase 4 (operator-facing reset) shipped as **dedicated endpoints rather than a generic
+command CLI**: `POST /api/node_reset` → `node_reset_queue` → `_send_cmd_reset(node_id=N)`
+(`web/app.py:274-278`, `ingest_service.py:673-693`), and `POST /api/new_session` →
+`reset_event` for Jetson-side data clearing only. The generic `POST /api/command`
+(`web/app.py:262`) is still the stub described in `CLAUDE.md` — it echoes without writing
+to serial — but nothing in this plan depends on it.
+
+The `kMaxPendingCommands` note at the end of this doc is a documented operating limit, not
+outstanding work; it remains tracked in code at `SmartFiresBaseApp.h`. Note its worked
+example is stale in one number — it says "default `NUM_SLOTS=4`", and the slot count is now
+5 (frame period 4500 ms, so the queue drains once per ~4.5 s rather than ~3.6 s). The
+conclusion is unchanged.
 
 ## Background
 

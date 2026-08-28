@@ -2,7 +2,7 @@
 name: gps-disciplined-clock
 description: Plan to give each node a continuously-running SAMD21 RTC COUNT32 timebase (replacing Arduino core millis() plus sleep-compensation), then periodically discipline that counter's tick rate using the PA1010D GPS's 1 Hz PPS edge. Two independent steps — Step 1 has no GPS dependency at all.
 category: plan-pending
-status: in-progress — Step 1 (timebase unification) implemented 2026-08-18, awaiting user compile/flash + bake. Step 2 (GPS PPS discipline) not started.
+status: in-progress — Step 1 (timebase unification) shipped, flashed and baked. Step 2 (GPS PPS discipline) not started.
 related_docs:
   - rtc-subsecond-sleep
   - tdma-protocol
@@ -10,6 +10,21 @@ related_docs:
 ---
 
 # GPS-Disciplined Node Clock
+
+## Status (audited 2026-08-21)
+
+**Step 1 is done.** The node's clock runs on the free-running RTC COUNT32 counter
+(`Samd21Rtc`/`Samd21RtcClock`, RTC moved to GCLK generator 4 to stay clear of the watchdog's
+generator 2). Implemented 2026-08-18, flashed and baked clean along with the rest of that
+stack. Its implementation record below is the historical detail; the code is authoritative.
+
+**Step 2 has not been started**, which is why this doc is still in `Pending_Plans/`. It is
+genuinely independent of Step 1 — the two share only the counter Step 1 made authoritative —
+so nothing here is blocked. Read Step 1 for context, not for work to do.
+
+The Step 1 → Step 2 verification gate is worth re-reading before starting Step 2: it wants
+demonstrated free-running-counter accuracy in hand before any PPS discipline is layered on
+top, and that evidence now exists from the bake rather than being pending.
 
 ## Background
 
