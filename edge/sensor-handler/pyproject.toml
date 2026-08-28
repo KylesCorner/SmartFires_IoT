@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+
+[project]
+name = "smartfires-sensors"
+version = "0.1.0"
+description = "Edge sensor acquisition package for SmartFires"
+readme = "README.md"
+requires-python = ">=3.10"
+
+dependencies = [
+    "pyserial>=3.5",
+    "minimalmodbus>=2.1",
+
+    "adafruit-blinka",
+    "adafruit-extended-bus",
+    "adafruit-circuitpython-gps",
+    "adafruit-circuitpython-icm20x",
+    "adafruit-circuitpython-bme680",
+]
+
+
+[project.scripts]
+smartfires-sensors = "smartfires_sensors.cli:main"
+
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["smartfires_sensors*"]
