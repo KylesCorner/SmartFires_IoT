@@ -4,7 +4,6 @@
 //   attributed to the blocking region (radio TX / I2C sensor / SPS30 UART) the
 //   firmware hung in, and reports both through the AWAKEN payload.
 // role: interface
-// docs: [reset-reason-diagnostics, watchdog-timer]
 // ---
 #pragma once
 

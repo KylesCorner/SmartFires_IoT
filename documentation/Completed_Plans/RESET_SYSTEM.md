@@ -6,7 +6,7 @@ status: historical
 related_docs:
   - tdma-protocol
   - packet-reliability
-  - uart-jetson-bridge
+  - jetson-bridge
 ---
 
 # Reset System

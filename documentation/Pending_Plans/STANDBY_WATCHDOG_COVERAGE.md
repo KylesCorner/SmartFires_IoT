@@ -2,7 +2,7 @@
 name: standby-watchdog-coverage
 description: The node's hardware watchdog is disabled for the whole of every MCU standby, leaving roughly 47% of wall-clock time with no hang recovery on a Timed node. Scopes the options for closing that window, and re-examines the stale five-minute justification the disable was originally written against.
 category: plan-pending
-status: draft — 2026-08-21, not implemented
+status: draft
 related_docs:
   - watchdog-timer
   - duty-cycling

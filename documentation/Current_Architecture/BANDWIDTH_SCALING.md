@@ -3,7 +3,7 @@ name: bandwidth-scaling
 description: Airtime math and node-count scaling table for the current TDMA/bundle scheme.
 category: architecture
 status: current
-last_verified: 2026-08-17
+last_verified: 2026-09-04
 source_refs:
   - platformio/include/telemetry/BinaryPacket.h
   - platformio/include/config/NetworkConfig.h
@@ -13,142 +13,66 @@ related_docs:
   - packet-reliability
 ---
 
-# Bandwidth and Scaling Math (Current Scheme)
+# Bandwidth and scaling
 
-This document summarizes sensing, bundle production, TDMA service capacity, and channel occupancy for the current SmartFires node scheme.
+## Current inputs
 
-## Current Parameters
+| Parameter | Value |
+|---|---:|
+| Slots | `NUM_SLOTS=5`: base + four node slots |
+| Slot width / usable window | 900 ms / 860 ms |
+| Bundle | 15 samples, maximum 195 bytes |
+| Conservative bundle TX budget | 340 ms |
+| SensorTriggered/Continuous sample period | 750 ms |
+| Timed sample period | 1,000 ms |
+| Timed window | 30 samples = two full bundles per 75 s cycle |
 
-- Sample rate: `4 Hz`
-- Bundle composition: `1 reference + 14 deltas = 15 samples`
-- Bundle payload (`PKT_BUNDLE`): `195 bytes` max (`BinaryPacket::kMaxBundleLoRaSize` — `PktHeader(5) + FullStatePayload(20) + n_deltas(1) + 14×DeltaPayload(12) + crc8(1)`)
-- TDMA slot width: `900 ms`
-- TDMA guard: `20 ms` on each edge
-- Usable slot window: `860 ms`
-- Multi-send budget in node radio service: up to `3 sends/slot` (`kMaxSendsPerUpdate` in `TdmaRadioService::drainTxQueue()` — a hard iteration cap applied uniformly to fresh queue items and retransmits, not specific to `PKT_BUNDLE`; layered on top of, not a substitute for, the per-send time-budget check, conservative `340 ms` budget each for bundle-class payloads)
-- ACK summary payload (`PKT_ACK_SUMMARY`): `10 bytes` on LoRa (`PktHeader + AckSummaryPayload + crc8`)
-- ACK summary cadence (modeling assumption, not a configured base-side rate):
-  `1 summary per node every 4 seconds` (`0.25 Hz`). The base does **not** emit
-  `ACK_SUMMARY` on a fixed timer — actual emission is dirty-flag-driven (a
-  summary becomes eligible whenever a node's tracker changes), gated only by
-  a 25 ms anti-flood floor (`BaseConfig::kAckSummaryMinIntervalMs`) and the
-  base's own TDMA slot-window availability, so real cadence can be faster or
-  slower depending on traffic. The figure used in this model is borrowed from
-  `NetworkConfig::kExpectedAckIntervalMs` — the **node-side** assumed cadence
-  used in its own retry-wait-gate formula (see PACKET_RELIABILITY.md), not an
-  edge/Jetson setting (the Jetson never generates `ACK_SUMMARY` at all) and not
-  a literal base emission interval. As of the 5-slot deployment that constant
-  is derived from the frame period (`kFramePeriodMs` = 4 500 ms, so
-  `f_ack` = 0.222 Hz); the 0.25 Hz used in the table below is the older 4 s
-  figure, left in place so the occupancy columns stay comparable across
-  revisions and because it is the more conservative of the two.
+The maximum bundle is `PktHeader(5) + FullState(20) + count(1) + 14 * Delta(12) + CRC(1) = 195 bytes`. The code permits at most three sends per update, but the 860 ms usable slot can fit only two full-bundle budgets (`2 * 340 = 680 ms`; a third would require 1,020 ms). Small packets can still reach the three-send cap across repeated calls while the slot stays open.
 
-## Airtime Model
+## Production rate versus service rate
 
-Using SF7/BW125/CR 4/5 with RadioHead's 4-byte over-the-air header added on top
-of each LoRa payload:
+At a 750 ms sample period, a continuously active node produces:
 
-- Bundle airtime (195-byte LoRa payload + 4-byte RadioHead header = 199 bytes on air): `317.696 ms`
-- ACK summary airtime (10-byte LoRa payload + 4-byte RadioHead header = 14 bytes on air): `46.336 ms`
+```text
+1 / (0.75 s * 15 samples) = 0.0889 bundles/s
+```
 
-Both figures are unchanged by the `PktHeader` flags byte that grew each payload
-by one. LoRa airtime is quantized to whole symbols, and at SF7/CR 4/5 one symbol
-group carries 28 payload bits — the extra 8 bits fall inside the existing
-`ceil()`, so neither packet crosses into another symbol group.
+A node gets one slot per frame. Using the conservative two-full-bundle limit:
 
-## Core Formulas
+```text
+service = 2 / (NUM_SLOTS * 0.9 s)
+```
 
-Let:
+For the shipped five-slot geometry, service is `0.444 bundles/s`, five times the continuously active production rate. The offered-load ratio is `0.0889 / 0.444 = 0.20` per node slot. Because each node has its own slot, adding nodes lengthens every node's frame rather than sharing one service queue.
 
-- $f_s$ = sample rate (Hz)
-- $S_b$ = samples per bundle
-- $N$ = number of nodes
-- $W$ = slot width (s)
-- $k$ = sends per slot (old: $k=1$, current multi-send cap: $k=3$, i.e. `kMaxSendsPerUpdate`)
+| Real nodes | `NUM_SLOTS` | Frame | Full-bundle service per node | 750 ms production/service |
+|---:|---:|---:|---:|---:|
+| 1 | 2 | 1.8 s | 1.111/s | 0.08 |
+| 4 (current capacity) | 5 | 4.5 s | 0.444/s | 0.20 |
+| 6 | 7 | 6.3 s | 0.317/s | 0.28 |
+| 9 | 10 | 9.0 s | 0.222/s | 0.40 |
 
-Bundle production per node:
+This table is a queue-pressure bound, not a deployment recommendation. The current retry-wait static assertion prevents `NUM_SLOTS=6` or greater until retry timing is retuned, so those rows are scaling illustrations only.
 
-$$
-r_{prod} = \frac{f_s}{S_b}
-$$
+## Airtime occupancy
 
-With current values:
+Using the project's recorded maximum-bundle airtime of about 317.7 ms, a continuously active 750 ms node occupies approximately:
 
-$$
-r_{prod} = \frac{4}{15} = 0.2667\ \text{bundles/s}
-$$
+```text
+0.0889 bundles/s * 0.3177 s = 2.82% raw uplink airtime
+```
 
-Per-node TDMA service:
+Four continuously active nodes would therefore use about 11.3% for first-transmission full bundles. A Timed node averages two bundles per 75 seconds, or roughly 0.85% raw uplink airtime per node (3.4% for four nodes).
 
-$$
-r_{svc} = \frac{k}{N \cdot W}
-$$
+These figures exclude STATUS, window markers, `AWAKEN`, time sync, acknowledgement summaries, command traffic, retransmissions, link-layer ACKs on selected control paths, and packet headers below maximum bundle size. They are useful first-order estimates, not legal duty-cycle calculations or RF bench measurements.
 
-For $W=0.9$ s:
+## Scaling constraints beyond airtime
 
-$$
-r_{svc,old} = \frac{1}{0.9N},\quad r_{svc,new} = \frac{3}{0.9N}
-$$
+- `NUM_SLOTS` must match on the base and all nodes; update edge `DEFAULT_NUM_SLOTS` for sniffer alignment.
+- `NetworkConfig::kRetryWaitMinMs` must cover a full frame. Its 4,500 ms value exactly matches the current five-slot frame, so adding a sixth slot trips a compile-time assertion.
+- Base node-assignment capacity derives from `NUM_SLOTS - 1`.
+- Queue depth and pending reliability depth are both eight. Bursty sensor-triggered operation and retries can consume them even when average airtime looks comfortable.
+- Blocking base `ACK_SUMMARY` and direct `TIME_SYNC` paths can overrun slot 0; pure uplink math does not capture that known risk.
+- Radio range, interference, antenna placement, spreading factor, and regulatory constraints must be validated independently.
 
-Utilization ratio (stable if $\eta \le 1$):
-
-$$
-\eta = \frac{r_{prod}}{r_{svc}}
-$$
-
-Approximate steady-state drop rate when $\eta > 1$:
-
-$$
-\text{loss} \approx \frac{\eta - 1}{\eta}
-$$
-
-Offered channel occupancy estimate:
-
-$$
-\text{uplink\_occ} = N \cdot r_{prod} \cdot T_{bundle}
-$$
-
-$$
-\text{ack\_occ} = N \cdot f_{ack} \cdot T_{ack}
-$$
-
-$$
-\text{total\_occ} = \text{uplink\_occ} + \text{ack\_occ}
-$$
-
-with $f_{ack}=0.25$ Hz/node (modeling assumption — see note above), $T_{bundle}=317.696$ ms, $T_{ack}=46.336$ ms.
-
-## Node Scaling Table (2–10 nodes)
-
-**Read $N$ carefully — the table uses it two ways.** The "Frame (s)", service
-and $\eta$ columns treat $N$ as the *slot* count (`NUM_SLOTS`), since a node's
-service opportunity recurs once per full rotation. The occupancy columns treat
-$N$ as the count of *bundle-producing nodes*, which is one fewer — the base
-occupies a slot but emits no bundles. For today's deployment (4 real nodes,
-`NUM_SLOTS=5`), read frame/$\eta$ off the `5` row and occupancy off the `4`
-row: 4.5 s frame, $\eta=0.40$, ~38.5% total occupancy.
-
-| Nodes | Frame (s) | Service old (1/slot) bundles/s | Service new (3/slot) bundles/s | Util old $\eta$ | Util new $\eta$ | Loss old | Loss new | Uplink occ @ offered load | ACK occ @0.25Hz | Total occ @0.25Hz |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| 2 | 1.8 | 0.5556 | 1.6667 | 0.48 | 0.16 | 0.0% | 0.0% | 16.9% | 2.3% | 19.3% |
-| 3 | 2.7 | 0.3704 | 1.1111 | 0.72 | 0.24 | 0.0% | 0.0% | 25.4% | 3.5% | 28.9% |
-| 4 | 3.6 | 0.2778 | 0.8333 | 0.96 | 0.32 | 0.0% | 0.0% | 33.9% | 4.6% | 38.5% |
-| 5 | 4.5 | 0.2222 | 0.6667 | 1.20 | 0.40 | 16.7% | 0.0% | 42.4% | 5.8% | 48.2% |
-| 6 | 5.4 | 0.1852 | 0.5556 | 1.44 | 0.48 | 30.6% | 0.0% | 50.8% | 7.0% | 57.8% |
-| 7 | 6.3 | 0.1587 | 0.4762 | 1.68 | 0.56 | 40.5% | 0.0% | 59.3% | 8.1% | 67.4% |
-| 8 | 7.2 | 0.1389 | 0.4167 | 1.92 | 0.64 | 47.9% | 0.0% | 67.8% | 9.3% | 77.0% |
-| 9 | 8.1 | 0.1235 | 0.3704 | 2.16 | 0.72 | 53.7% | 0.0% | 76.2% | 10.4% | 86.7% |
-| 10 | 9.0 | 0.1111 | 0.3333 | 2.40 | 0.80 | 58.3% | 0.0% | 84.7% | 11.6% | 96.3% |
-
-## Interpretation
-
-- The multi-send TDMA change ($k=3$, `kMaxSendsPerUpdate`) roughly triples per-node service capacity over the old $k=1$ baseline.
-- At current settings, the deployed 4 real nodes (`NUM_SLOTS=5`) at 4 Hz are comfortably stable ($\eta=0.40$). The shipped node profiles sample well below 4 Hz — `SensingConfig::kTimedSamplePeriodMs` is 1 000 ms — which puts the real $\eta$ nearer 0.10.
-- With $k=3$, queue utilization $\eta$ stays well under 1 (≤0.80) all the way to 10 nodes — queue overflow is not the binding constraint in this range.
-- Channel occupancy, not queue stability, becomes the binding constraint at higher node counts: total offered occupancy crosses ~77% at 8 nodes and approaches ~96% at 10 nodes, leaving little margin for retransmits, AWAKEN/TIME_SYNC traffic, or clock drift before real-world loss appears.
-
-## Practical Notes
-
-- The table uses offered-load occupancy (what the sensing pipeline attempts to send).
-- Real-world reliability may require lower ACK summary frequency at higher node counts.
-- If base station LoRa forwarding/summary scheduling is constrained, practical capacity may be lower than this model.
+Recalculate this page whenever slot width/count, bundle layout, sample cadence, radio modem settings, or TX-budget estimates change.

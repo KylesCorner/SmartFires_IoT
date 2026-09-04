@@ -3,95 +3,111 @@ name: jetson-cheatsheet
 description: Common Jetson-side commands — installing edge-receiver, pulling data, the web dashboard, and one-time udev setup for stable base/sniffer device paths.
 category: reference
 status: current
-last_verified: 2026-06-23
+last_verified: 2026-09-04
 source_refs:
   - util/udev/99-smartfires.rules
   - edge/edge-receiver/src/smartfires_edge/main.py
 related_docs:
-  - uart-jetson-bridge
+  - jetson-bridge
 ---
 
-# SmartFires — Jetson Cheatsheet
+# SmartFires Jetson cheatsheet
 
-## Install the edge-receiver package
+## Install or update
 
-From the repo root on the Jetson:
-
-```bash
-python3 -m pip install --use-pep517 -e .
-```
-
-or equivalently, from anywhere:
+From the repository root:
 
 ```bash
-pip install -e edge/edge-receiver
+python3 -m pip install --use-pep517 -e edge/edge-receiver
 ```
 
-This installs the `smartfires-edge` console script (defined in
-`edge/edge-receiver/pyproject.toml`'s `[project.scripts]`), exposing the
-`receive`, `summary`, `visualize`, and `web` subcommands used below.
+This installs `smartfires-edge` with `receive`, `summary`, `visualize`, and `web` subcommands.
 
-## Pull data off the Jetson
+## Run
 
 ```bash
-rsync -avz --progress smartfires@10.8.184.94:/mnt/nvme_drive/data/ ./data/
+# Durable ingest only
+smartfires-edge receive --port /dev/smartfires-base \
+  --data-dir /mnt/nvme_drive/data
+
+# Live terminal tables
+smartfires-edge visualize --port /dev/smartfires-base
+
+# Dashboard plus ingest (default bind 0.0.0.0:8080)
+smartfires-edge web --port /dev/smartfires-base
+
+# Dashboard with passive sniffer
+smartfires-edge web --port /dev/smartfires-base \
+  --sniffer-port /dev/smartfires-sniffer --num-slots 5
+
+# Saved loss summary
+smartfires-edge summary --data-dir /mnt/nvme_drive/data
 ```
 
-(See also `util/rsync_from_jetson.sh` for a saved variant of this command.)
+Open `http://<jetson-ip>:8080`. `--num-slots` affects only sniffer alignment and must match firmware `NUM_SLOTS`; omit it to use the edge default.
 
-## Bring up wired Ethernet (if DHCP didn't apply automatically)
+The dashboard can issue a real per-node reset and DYNAMIC/STATIC TX-power commands. The generic `/api/command` endpoint remains an echo stub, and there is no calibration CLI.
+
+## Optional Jetson anemometer
+
+Add these arguments to `receive` or `web`:
 
 ```bash
-sudo nmcli connection up wired-dhcp
+--anemometer-port /dev/ttyUSB0 --anemometer-baud 9600 \
+--anemometer-address 1 --anemometer-interval 1.0
 ```
 
-## Web dashboard
+## Stable USB device names
 
-`smartfires-edge web` runs UART ingest (CSV logging, packet-loss tracking) and
-the live web dashboard (Signal Map, Link Quality, Reception Timeline) in one
-process — no separate `receive` step needed.
-
-1. On the Jetson, find its LAN IP and start the dashboard:
-
-   ```bash
-   hostname -I && smartfires-edge web --port /dev/smartfires-base
-   ```
-
-2. From any machine on the same network, open `http://<jetson-ip>:8080` in a browser.
-
-Defaults: host `0.0.0.0` (LAN-reachable), port `8080`. Override with `--host`/`--http-port`.
-CSV + metrics still land under the default data dir unless `--data-dir` is set.
-
-The base station and sniffer are both USB-connected Feathers now and enumerate
-identically (same VID/PID), so raw `/dev/ttyACM*` paths can swap between them
-on reboot/reconnect. Use the udev-assigned stable symlinks instead — see
-"One-time udev setup" below.
-
-## One-time udev setup
-
-Run once per board, with only that board plugged in, to find its USB serial
-number:
+The base and sniffer Feathers have the same USB VID/PID, so `/dev/ttyACM*` ordering can swap. With only one board attached, identify its serial:
 
 ```bash
 udevadm info -a -n /dev/ttyACM0 | grep '{serial}'
 ```
 
-Add the result to `/etc/udev/rules.d/99-smartfires.rules`, one line per board:
+Install one rule per board in `/etc/udev/rules.d/99-smartfires.rules` (the repo template is `util/udev/99-smartfires.rules`):
 
 ```text
 SUBSYSTEM=="tty", ATTRS{serial}=="<base-serial>", SYMLINK+="smartfires-base"
 SUBSYSTEM=="tty", ATTRS{serial}=="<sniffer-serial>", SYMLINK+="smartfires-sniffer"
 ```
 
-then `sudo udevadm control --reload-rules && sudo udevadm trigger`.
+Reload and check:
 
-Current working web command: (Do not delete)
-smartfires-edge web --port /dev/smartfires-base --sniffer-port /dev/smartfires-sniffer --num-slots 5
+```bash
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+ls -l /dev/smartfires-base /dev/smartfires-sniffer
+```
 
-`--num-slots` must equal the `NUM_SLOTS` the Feathers were flashed with —
-(node count) + 1, set in platformio.ini's `[network]` section. Passing it
-explicitly here overrides `DEFAULT_NUM_SLOTS` in config.py, so it has to be
-updated alongside a slot-count change; omit the flag entirely to just inherit
-the default. It only affects sniffer slot alignment, not ingest.
+## Service manager
 
-pio device monitor -e feather_m0_lora_node_debug -f log2file
+From the repo root:
+
+```bash
+./edge/smartfires-manager.sh status
+./edge/smartfires-manager.sh update-edge
+./edge/smartfires-manager.sh deploy
+```
+
+Read `SMARTFIRES_MANAGER.md` before using flash/deploy actions.
+
+## Data transfer
+
+```bash
+rsync -avz --progress \
+  smartfires@10.8.184.94:/mnt/nvme_drive/data/ ./data/
+```
+
+Adjust the host as needed; `util/rsync_from_jetson.sh` contains the saved project variant.
+
+## Networking and diagnostics
+
+```bash
+hostname -I
+sudo nmcli connection up wired-dhcp
+systemctl --no-pager --full status smartfires-edge.service
+journalctl -u smartfires-edge.service -f
+```
+
+Do not run `smartfires-edge`, a serial monitor, and the systemd receiver against `/dev/smartfires-base` at the same time. Stop the current owner first.

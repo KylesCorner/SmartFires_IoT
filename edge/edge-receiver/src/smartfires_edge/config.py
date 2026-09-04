@@ -31,7 +31,7 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 # Serial link to the base station — native USB CDC, not the Jetson's hardware
-# UART (see documentation/Current_Architecture/UART_JETSON_BRIDGE.md). Use the
+# UART (see documentation/Current_Architecture/JETSON_BRIDGE.md). Use the
 # udev-assigned stable symlink, not a raw /dev/ttyACM* path, since the base
 # and sniffer Feathers enumerate identically and their ttyACM index can swap
 # on reconnect/reboot.
@@ -42,7 +42,7 @@ DEFAULT_BAUD: int = 115200
 DEFAULT_DATA_DIR: Path = Path("/mnt/nvme_drive/data")
 
 # Tracked nodes for packet-loss metrics (receive, web)
-DEFAULT_NODES: list[int] = [1, 2]
+DEFAULT_NODES: list[int] = [2, 3, 4]
 
 # Ingest loop cadences (receive, web)
 DEFAULT_METRICS_INTERVAL_S: int = 10    # how often packet-loss state is flushed to disk
@@ -62,7 +62,7 @@ DEFAULT_WEB_HTTP_PORT: int = 8080
 DEFAULT_SNIFFER_PORT: str | None = None  # None = sniffer disabled
 DEFAULT_SNIFFER_BAUD: int = 115200
 # Must match the NUM_SLOTS build flag baked into the deployed node Feathers
-# (see platformio.ini's [network] section and the root CLAUDE.md "must match"
+# (see platformio.ini's [network] section and the root AGENTS.md "must match"
 # note). Wrong here does not break ingest — only the sniffer's slot alignment,
 # which silently misattributes every jitter figure and guard violation.
 DEFAULT_NUM_SLOTS: int = 5
@@ -219,7 +219,7 @@ def _apply_json_config(cfg: EdgeConfig, path: Path) -> None:
             "port": "/dev/smartfires-base",
             "baud": 115200,
             "data_dir": "/mnt/nvme_drive/data",
-            "nodes": [1, 2],
+            "nodes": [2, 3, 4],
             "metrics_interval_s": 10,
             "sync_interval_s": 600,
             "fsync_every_row": false,

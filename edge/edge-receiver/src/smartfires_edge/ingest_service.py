@@ -122,8 +122,8 @@ def _send_cmd_set_tx_power(
 ) -> None:
     """Send a CMD_SET_TX_POWER frame for the base to relay to one node.
 
-    The value is absolute. The dashboard's increase/decrease buttons resolve to
-    an absolute target client-side from the node's last reported power, so a
+    The value is absolute. The dashboard API resolves increase/decrease into
+    an absolute target from the node's last reported power, so a
     stale reading can only produce a slightly-wrong level, never a runaway —
     see encode_cmd_set_tx_power_frame().
     """
@@ -564,8 +564,8 @@ def run_receive(
                             # Node's applied radio TX power. Empty on firmware
                             # predating dynamic-tx-power. Reaches the JSONL
                             # status stream, the log line, and the CSV; the
-                            # web dashboard's node-list column is a separate
-                            # step (DYNAMIC_TX_POWER.md checklist item 10).
+                            # web dashboard also exposes both fields in its
+                            # node state and controls.
                             "tx_power_dbm": status.get("tx_power_dbm") if status.get("tx_power_dbm") is not None else "",
                             "tx_power_mode": status.get("tx_power_mode") or "",
                         }

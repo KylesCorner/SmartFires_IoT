@@ -1,83 +1,101 @@
 ---
 name: documentation-index
-description: Table of contents for documentation/ — start here.
+description: Table of contents and implementation-status ledger for documentation/.
 category: index
 status: current
-last_verified: 2026-08-21
+last_verified: 2026-09-04
 related_docs:
   - software-design
 ---
 
-# SmartFires IoT Documentation
+# SmartFires IoT documentation
 
-## Top-level docs
+Current architecture and reference docs were consolidated against the source tree on 2026-09-04. Use this index to distinguish shipped behavior from proposals and historical design records.
 
-- [SOFTWARE_DESIGN.md](SOFTWARE_DESIGN.md) — master system architecture: topology, runtime, data flow, wire protocol, build environments
-- [SOFTWARE_DESIGN_DIAGRAM.md](SOFTWARE_DESIGN_DIAGRAM.md) — mermaid system diagram
+## Reading order
 
-## Current Architecture
+1. [`../AGENTS.md`](../AGENTS.md) for repository guardrails and agent-facing invariants.
+2. [`SOFTWARE_DESIGN.md`](SOFTWARE_DESIGN.md) for the end-to-end system.
+3. The relevant `Current_Architecture/` deep dive.
+4. A `User_Reference/` guide for operational work.
+5. Pending/completed plans only when investigating future work or design history.
 
-In-depth reference for subsystems as they exist in the current codebase.
+If a statement conflicts, shipped code/config wins over current docs; current docs win over plans. Files under `Completed_Plans/` and `Project_Progress/` are intentionally historical and may contain values that were correct only at that stage.
 
-| Document | Covers |
-|---|---|
-| [TUNABLE_PARAMETERS.md](Current_Architecture/TUNABLE_PARAMETERS.md) | Every tunable constant — TDMA timing, sensor floors, duty cycle, battery, Jetson edge runtime |
-| [TDMA_PROTOCOL.md](Current_Architecture/TDMA_PROTOCOL.md) | Slot assignment, frame layout, session clock, TX budget, Rx power gating, TIME_SYNC, boot handshake, scaling |
-| [PACKET_RELIABILITY.md](Current_Architecture/PACKET_RELIABILITY.md) | StrictLinkAck vs AppLayerAckSummary modes, pending window, ACK_SUMMARY format and dispatch |
-| [DUTY_CYCLING.md](Current_Architecture/DUTY_CYCLING.md) | DutyCycleController phases, config presets, trigger sensor, sample dispatch, error handling |
-| [JETSON_BRIDGE.md](Current_Architecture/JETSON_BRIDGE.md) | Frame format, Feather↔Jetson protocol, FrameReceiver state machine, ingest loop, SessionManager |
-| [BANDWIDTH_SCALING.md](Current_Architecture/BANDWIDTH_SCALING.md) | Airtime math, per-node service rate, node-count scaling table |
-| [LORA_VS_LORAWAN.md](Current_Architecture/LORA_VS_LORAWAN.md) | Custom RadioHead/TDMA stack vs. LoRaWAN, mesh capability, CAD explainer, range/optimization levers |
-
-## User Reference
-
-Practical how-to guides for day-to-day development and deployment.
+## Current architecture
 
 | Document | Covers |
 |---|---|
-| [FLASHING.md](User_Reference/FLASHING.md) | PlatformIO CLI commands to flash node and base firmware |
-| [DEBUG_FILTER.md](User_Reference/DEBUG_FILTER.md) | Debug build structured logging and PlatformIO monitor filter |
-| [JETSON_CHEATSHEET.md](User_Reference/JETSON_CHEATSHEET.md) | Jetson one-time setup, udev rules, edge-receiver install and run |
-| [NETWORK_TEST.md](User_Reference/NETWORK_TEST.md) | End-to-end LoRa → base → Jetson integration test procedure |
+| [`SOFTWARE_DESIGN.md`](SOFTWARE_DESIGN.md) | Hardware topology, firmware and edge responsibilities, packet table, command/reset behavior, build state |
+| [`SOFTWARE_DESIGN_DIAGRAM.md`](SOFTWARE_DESIGN_DIAGRAM.md) | System, join, Timed-cycle, command, and framing diagrams |
+| [`Current_Architecture/TUNABLE_PARAMETERS.md`](Current_Architecture/TUNABLE_PARAMETERS.md) | TDMA, reliability, sensing, power, base, and edge operating values |
+| [`Current_Architecture/TDMA_PROTOCOL.md`](Current_Architecture/TDMA_PROTOCOL.md) | Slot geometry, assignment, clocks, TX budgets, RX gating, window markers |
+| [`Current_Architecture/PACKET_RELIABILITY.md`](Current_Architecture/PACKET_RELIABILITY.md) | Link-ACK versus app-ACK modes, pending window, retry/ACK rules, sleeping nodes |
+| [`Current_Architecture/DUTY_CYCLING.md`](Current_Architecture/DUTY_CYCLING.md) | Continuous, SensorTriggered, Timed, and Hybrid state/timing behavior |
+| [`Current_Architecture/JETSON_BRIDGE.md`](Current_Architecture/JETSON_BRIDGE.md) | Native-USB framing, ingest, session startup, command and web routes |
+| [`Current_Architecture/BANDWIDTH_SCALING.md`](Current_Architecture/BANDWIDTH_SCALING.md) | Bundle production, slot service, airtime estimates, scaling constraints |
+| [`Current_Architecture/LORA_VS_LORAWAN.md`](Current_Architecture/LORA_VS_LORAWAN.md) | Raw-LoRa stack, LoRaWAN tradeoffs, collision scope, CAD, mesh, range levers |
 
-## Pending Plans
+## User references
 
-Active design documents for work not yet implemented. Code is not yet authoritative for
-these — check status tables within each doc for what's done vs. open.
-
-Last audited 2026-08-21.
-
-| Document | What it covers | State |
-|---|---|---|
-| [BASE_SLOT_OVERRUN_FIX.md](Pending_Plans/BASE_SLOT_OVERRUN_FIX.md) | Removes the last blocking `sendToWait()` from the base's slot-0 paths, adds a deadline-aware TX gate so no base send can start unless it fits the slot remainder, and repeats `PKT_WINDOW_END` | Not started. One open decision blocks it (`sendDirectTimeSync()`) |
-| [NATIVE_TEST_REPAIR.md](Pending_Plans/NATIVE_TEST_REPAIR.md) | Everything keeping `pio test -e native` red: `test_config`'s removed duty-cycle factories, six `test_duty_cycle_controller` assertion failures, the stale `test/support/Arduino.cpp` shim | Not started |
-| [STANDBY_WATCHDOG_COVERAGE.md](Pending_Plans/STANDBY_WATCHDOG_COVERAGE.md) | The watchdog is disabled across every MCU standby, leaving ~47% of wall-clock time with no hang recovery on a Timed node | Not started. Needs a decision between four options |
-| [DYNAMIC_TX_POWER.md](Pending_Plans/DYNAMIC_TX_POWER.md) | Base-owned per-node TX power control loop (SNR margin + retry inhibitor), DYNAMIC/STATIC operator override, both link-failure fail-safes; dynamic SF deferred | **Shipped and flashed**; every constant still untuned, base ceiling raise not done |
-| [RESET_REASON_DIAGNOSTICS.md](Pending_Plans/RESET_REASON_DIAGNOSTICS.md) | Reporting node reset cause + hang-zone breadcrumb through AWAKEN to attribute watchdog reboots (I2C stall vs RadioHead hang) | Phases 1–2 **shipped**; hardware validation and four wire-table doc updates outstanding |
-| [GPS_DISCIPLINED_CLOCK.md](Pending_Plans/GPS_DISCIPLINED_CLOCK.md) | Run each node's clock continuously off RTC COUNT32 (Step 1, no GPS), then discipline its tick rate with the GPS 1 Hz PPS edge (Step 2) | Step 1 **shipped and baked**; Step 2 not started |
-| [JETSON_SENSOR_EXPANSION.md](Pending_Plans/JETSON_SENSOR_EXPANSION.md) | Adding temp/humidity, BMV080, GPS, and ICM-20948 IMU sensors directly to the Jetson via I2C | Not started; two research spikes open (BMV080 SDK, GPS I2C→PTY bridge) |
-
-## Completed Plans
-
-Historical design and implementation documents. Accurate at time of writing;
-the code is now the authoritative record.
-
-| Document | What it captured |
+| Document | Covers |
 |---|---|
-| [BINARY_PACKET_PIPELINE.md](Completed_Plans/BINARY_PACKET_PIPELINE.md) | Binary protocol rollout plan and field layout reference |
-| [PHASE_PROGRESS.md](Completed_Plans/PHASE_PROGRESS.md) | Staged reliability migration (Phases 1–5) |
-| [NETWORK_RELIABILITY_NOTES.md](Completed_Plans/NETWORK_RELIABILITY_NOTES.md) | Pre-design reliability debugging session notes |
-| [TDMA_BUNDLE_SIZING.md](Completed_Plans/TDMA_BUNDLE_SIZING.md) | Early TDMA slot and bundle sizing derivation |
-| [TELEMETRY_REWORK_PLAN.md](Completed_Plans/TELEMETRY_REWORK_PLAN.md) | Original telemetry text→binary migration plan |
-| [BOARD_REFACTOR_PLAN.md](Completed_Plans/BOARD_REFACTOR_PLAN.md) | Directory structure refactor plan |
-| [DMP_CLEANUP_PLAN.md](Completed_Plans/DMP_CLEANUP_PLAN.md) | ICM-20948 DMP heading computation design |
-| [DEPLOYMENT_SCHEDULE.md](Completed_Plans/DEPLOYMENT_SCHEDULE.md) | Phased heading/CLI deployment schedule (7 phases) |
-| [JETSON_CLI_AND_COMMAND_SYSTEM.md](Completed_Plans/JETSON_CLI_AND_COMMAND_SYSTEM.md) | Jetson split-screen CLI and command system design |
-| [ORIENTATION_CALIBRATION_PLAN.md](Completed_Plans/ORIENTATION_CALIBRATION_PLAN.md) | Node orientation calibration and absolute heading plan |
-| [LINK_STATS_PACKET_PLAN.md](Completed_Plans/LINK_STATS_PACKET_PLAN.md) | Extending PKT_STATUS with lifetime retransmit/fail counters |
-| [RADIO_RX_GATING.md](Completed_Plans/RADIO_RX_GATING.md) | Sleeping the node's SX1276 outside the base's TDMA window to cut radio power draw |
-| [WATCHDOG_TIMER.md](Completed_Plans/WATCHDOG_TIMER.md) | Hardware watchdog for nodes (Phase 1) and the base station (Phase 2) to auto-recover from unrecoverable hangs |
-| [RESET_SYSTEM.md](Completed_Plans/RESET_SYSTEM.md) | Jetson/base/node reset coordination and time-sync recovery — base self-reset on `node_id=0`, node `CMD_RESET` execution, `TdmaClock::reset()`, Jetson session-start base reset |
-| [MCU_DUTY_CYCLE_CHANGELOG.md](Completed_Plans/MCU_DUTY_CYCLE_CHANGELOG.md) | Review of commit `d7ba3c5` (SAMD21 RTC standby, Timed/Hybrid modes). Historical — four of its five implications drove the work below; **do not read its changelog as current behaviour** |
-| [RTC_SUBSECOND_SLEEP.md](Completed_Plans/RTC_SUBSECOND_SLEEP.md) | Replacing RTCZero's whole-second calendar alarm with SAMD21 RTC COUNT32 (~1 ms), so a node resumes TDMA sync across MCU standby instead of re-handshaking every wake |
-| [WINDOW_MARKER_PACKETS.md](Completed_Plans/WINDOW_MARKER_PACKETS.md) | Dedicated `PKT_WINDOW_BEGIN`/`PKT_WINDOW_END` frames replacing the window header flags, plus the fixed-period whole-bundle Timed window — removed the per-cycle duplicate bundle |
+| [`User_Reference/FLASHING.md`](User_Reference/FLASHING.md) | Active PlatformIO targets, build/upload/monitor commands, troubleshooting |
+| [`User_Reference/DEBUG_FILTER.md`](User_Reference/DEBUG_FILTER.md) | `@SFDBG` format and `SFDBG_*` monitor filters |
+| [`User_Reference/JETSON_CHEATSHEET.md`](User_Reference/JETSON_CHEATSHEET.md) | Edge install/run commands, udev links, service/data operations |
+| [`User_Reference/NETWORK_TEST.md`](User_Reference/NETWORK_TEST.md) | Current real-hardware LoRa -> base -> Jetson integration test |
+| [`User_Reference/LORA_SNIFFER.md`](User_Reference/LORA_SNIFFER.md) | Passive sniffer firmware and dashboard integration |
+| [`User_Reference/SMARTFIRES_MANAGER.md`](User_Reference/SMARTFIRES_MANAGER.md) | Jetson update/service/gateway-flashing manager |
+| [`POWER_MEASURMENTS.md`](POWER_MEASURMENTS.md) | Isolated power-test environments and measurement setup |
+
+## Pending plans
+
+These contain remaining work. A plan may describe already-shipped prerequisites; its status section says what remains.
+
+| Document | Current state at 2026-09-04 |
+|---|---|
+| [`Pending_Plans/BASE_SLOT_OVERRUN_FIX.md`](Pending_Plans/BASE_SLOT_OVERRUN_FIX.md) | Open: replace blocking base `ACK_SUMMARY` and direct `TIME_SYNC` paths with deadline-safe sending; command sending is already fire-and-forget |
+| [`Pending_Plans/NATIVE_TEST_REPAIR.md`](Pending_Plans/NATIVE_TEST_REPAIR.md) | Open: repair removed duty-config factory references, controller assertions, and stale Arduino shim so `pio test -e native` is green |
+| [`Pending_Plans/STANDBY_WATCHDOG_COVERAGE.md`](Pending_Plans/STANDBY_WATCHDOG_COVERAGE.md) | Open design choice: watchdog is disabled during Timed MCU standby |
+| [`Pending_Plans/DYNAMIC_TX_POWER.md`](Pending_Plans/DYNAMIC_TX_POWER.md) | Control loop, packet, safeguards, and dashboard are shipped; field-tune constants and decide whether to raise the 13 dBm ceiling |
+| [`Pending_Plans/RESET_REASON_DIAGNOSTICS.md`](Pending_Plans/RESET_REASON_DIAGNOSTICS.md) | Reset cause and hang-zone AWAKEN fields are shipped; hardware validation remains, optional early-warning PC capture is deferred |
+| [`Pending_Plans/GPS_DISCIPLINED_CLOCK.md`](Pending_Plans/GPS_DISCIPLINED_CLOCK.md) | RTC COUNT32 timebase is shipped; GPS PPS discipline is not implemented |
+| [`Pending_Plans/JETSON_SENSOR_EXPANSION.md`](Pending_Plans/JETSON_SENSOR_EXPANSION.md) | Direct Jetson temp/humidity, BMV080, GPS, and IMU expansion is not implemented; research spikes remain |
+
+## Completed plans (historical)
+
+| Document | Historical subject |
+|---|---|
+| [`Completed_Plans/BINARY_PACKET_PIPELINE.md`](Completed_Plans/BINARY_PACKET_PIPELINE.md) | Text-to-binary packet pipeline |
+| [`Completed_Plans/BUNDLE_TIMESTAMP_FIX.md`](Completed_Plans/BUNDLE_TIMESTAMP_FIX.md) | Bundle timestamp correction |
+| [`Completed_Plans/BOARD_REFACTOR_PLAN.md`](Completed_Plans/BOARD_REFACTOR_PLAN.md) | Firmware directory/class refactor |
+| [`Completed_Plans/DEPLOYMENT_SCHEDULE.md`](Completed_Plans/DEPLOYMENT_SCHEDULE.md) | Heading/CLI deployment phases |
+| [`Completed_Plans/DMP_CLEANUP_PLAN.md`](Completed_Plans/DMP_CLEANUP_PLAN.md) | ICM-20948 DMP heading design |
+| [`Completed_Plans/EDGE_REFACTOR_WEB_DASHBOARD.md`](Completed_Plans/EDGE_REFACTOR_WEB_DASHBOARD.md) | Edge package/dashboard refactor |
+| [`Completed_Plans/JETSON_CLI_AND_COMMAND_SYSTEM.md`](Completed_Plans/JETSON_CLI_AND_COMMAND_SYSTEM.md) | Earlier CLI/command design (not every proposed command shipped) |
+| [`Completed_Plans/LINK_STATS_PACKET_PLAN.md`](Completed_Plans/LINK_STATS_PACKET_PLAN.md) | STATUS retransmit/failure counters |
+| [`Completed_Plans/MCU_DUTY_CYCLE_CHANGELOG.md`](Completed_Plans/MCU_DUTY_CYCLE_CHANGELOG.md) | Review of the initial RTC standby change |
+| [`Completed_Plans/NETWORK_RELIABILITY_NOTES.md`](Completed_Plans/NETWORK_RELIABILITY_NOTES.md) | Reliability investigation notes |
+| [`Completed_Plans/ORIENTATION_CALIBRATION_PLAN.md`](Completed_Plans/ORIENTATION_CALIBRATION_PLAN.md) | Orientation/calibration concept |
+| [`Completed_Plans/PERSISTENT_NODE_REGISTRY.md`](Completed_Plans/PERSISTENT_NODE_REGISTRY.md) | Jetson UID/node correlation persistence and patched AWAKEN forwarding |
+| [`Completed_Plans/PHASE_PROGRESS.md`](Completed_Plans/PHASE_PROGRESS.md) | Staged reliability rollout |
+| [`Completed_Plans/RADIO_RX_GATING.md`](Completed_Plans/RADIO_RX_GATING.md) | Node SX1276 receive-window gating |
+| [`Completed_Plans/RESET_SYSTEM.md`](Completed_Plans/RESET_SYSTEM.md) | Base/node reset coordination |
+| [`Completed_Plans/RTC_SUBSECOND_SLEEP.md`](Completed_Plans/RTC_SUBSECOND_SLEEP.md) | SAMD21 COUNT32 standby clock |
+| [`Completed_Plans/TDMA_BUNDLE_SIZING.md`](Completed_Plans/TDMA_BUNDLE_SIZING.md) | Early airtime and bundle sizing |
+| [`Completed_Plans/TDMA_SNIFFER_VISUALIZATION.md`](Completed_Plans/TDMA_SNIFFER_VISUALIZATION.md) | Sniffer timing dashboard |
+| [`Completed_Plans/TELEMETRY_REWORK_PLAN.md`](Completed_Plans/TELEMETRY_REWORK_PLAN.md) | Original telemetry rework |
+| [`Completed_Plans/TUNABLE_PARAMETER_ARCHITECTURE_PLAN.md`](Completed_Plans/TUNABLE_PARAMETER_ARCHITECTURE_PLAN.md) | Config-header consolidation |
+| [`Completed_Plans/WATCHDOG_TIMER.md`](Completed_Plans/WATCHDOG_TIMER.md) | Node/base watchdog rollout |
+| [`Completed_Plans/WINDOW_MARKER_PACKETS.md`](Completed_Plans/WINDOW_MARKER_PACKETS.md) | Dedicated Timed-window markers |
+
+[`Project_Progress/Network_System_Design.md`](Project_Progress/Network_System_Design.md) is a historical narrative spanning several of these stages.
+
+## Documentation maintenance
+
+- [`DOC_FRONTMATTER.md`](DOC_FRONTMATTER.md) defines documentation metadata and `source_refs`.
+- [`CODE_FRONTMATTER.md`](CODE_FRONTMATTER.md) defines reciprocal firmware file headers.
+- `python3 documentation/check_doc_freshness.py` checks missing metadata, source paths, and stale verification dates.
+- `python3 documentation/check_code_headers.py` checks C++ headers and doc/source backlink symmetry.
+
+Run both checks after changing current documentation or firmware. A green metadata check proves structural consistency, not the truth of prose; review claims against code before changing `last_verified`.

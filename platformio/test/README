@@ -1,53 +1,32 @@
-# Test Directory
+# Native firmware tests
 
-SmartFires native unit tests live here.
+The `native` PlatformIO environment runs Unity tests on the host with injected drivers, fake clocks/sensors/radio, and a small Arduino compatibility shim.
 
-## Current Test Suites
+## Suites
 
-- `test_duty_cycle_controller/`
-  Duty-cycle state machine and continuous-sampling behavior.
+- `test_config`: config values and derived invariants.
+- `test_duty_cycle_controller`: mode/state/timing behavior.
+- `test_gps_sensor`, `test_imu_sensor`, `test_sht31_sensor`, `test_sps30_sensor`: sensor adapters.
+- `test_packet_handler`: binary bundle/STATUS assembly.
+- `test_rtc_ticks`: RTC tick conversion and wrap behavior.
+- `test_tdma_clock`: session/slot and base RX-window math.
+- `test_tdma_radio_service`: queueing, slot gates, app reliability, window markers, radio sleep.
+- `test_tx_power_controller`: base per-node power decisions and recovery.
+- `support/fakes`: reusable test doubles.
 
-- `test_gps_sensor/`
-  GPS wrapper behavior through a fake GPS driver.
+## Commands
 
-- `test_imu_sensor/`
-  ICM-20948 wrapper behavior through a fake IMU driver.
-
-- `test_sht31_sensor/`
-  SHT31 wrapper behavior through a fake SHT31 driver.
-
-- `test_sps30_sensor/`
-  SPS30 wrapper behavior through a fake SPS30 driver.
-
-- `test_tdma_clock/`
-  TdmaClock slot-index math, myTurn() transmit gating, and baseRxWindowOpen()
-  receive gating (pre-sync, in/out of the base's slot 0, stale-sync fallback).
-
-- `support/`
-  Native Arduino shim, test context notes, and reusable fakes.
-
-## How Tests Run
-
-The project uses the PlatformIO `native` environment with Unity. These tests run on the host machine and avoid Arduino hardware dependencies by using:
-
-- `test/support/Arduino.h`
-- `test/support/Arduino.cpp`
-- fake drivers and clocks under `test/support/fakes/`
-
-## Useful Commands
+Run from `platformio/`:
 
 ```bash
 pio test -e native
-pio test -e native -f test_duty_cycle_controller
-pio test -e native -f test_sht31_sensor
-pio test -e native -f test_imu_sensor
-pio test -e native -f test_gps_sensor
-pio test -e native -f test_sps30_sensor
-pio test -e native -f test_tdma_clock
+pio test -e native -f test_tdma_radio_service
+pio test -e native -f test_packet_handler
+pio test -e native -f test_tx_power_controller
 ```
 
-## Current Behavior Worth Testing
+The full suite is currently known to be red. `documentation/Pending_Plans/NATIVE_TEST_REPAIR.md` is the consolidated source of truth for removed config-factory calls, duty-controller assertion drift, and the stale Arduino shim. Do not reinterpret failing tests as desired production behavior merely to make them green.
 
-- disabled duty cycling should remain in continuous sampling mode
-- node join logic is out-of-band until `TIME_SYNC` assignment arrives
-- packet bundling is buffered and does not emit one bundle per snapshot
+`platformio.ini`'s native source filter includes production `power/`, `sensors/`, TDMA clock/service/queue, PacketHandler, and TxPowerController code. Add a production source explicitly when a new native suite needs it; a test file including a header is not enough to link its implementation.
+
+Use `FakeClock` for time, injected driver interfaces for sensors, and `FakeTdmaRadioDriver` for radio behavior. Test public outcomes and keep hardware/vendor libraries out of native builds.

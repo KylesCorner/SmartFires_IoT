@@ -1,7 +1,7 @@
 // ---
-// description: Print sink that buffers DebugLogger output line-by-line and flushes each line as a PKT_DEBUG_LOG frame over the base-to-Jetson USB UART link.
+// description: Print sink that buffers DebugLogger output line-by-line and flushes each line as a PKT_DEBUG_LOG frame over the base-to-Jetson USB CDC link.
 // role: implementation
-// docs: [uart-jetson-bridge]
+// docs: [jetson-bridge]
 // ---
 #pragma once
 
@@ -14,7 +14,7 @@
 // Routes DebugLogger output (see logging/DebugLogger.h) through the same
 // binary frame protocol used for telemetry, so @SFDBG lines reach the Jetson
 // over the single USB link now shared with the base<->Jetson protocol (see
-// documentation/Current_Architecture/UART_JETSON_BRIDGE.md). DebugLogger
+// documentation/Current_Architecture/JETSON_BRIDGE.md). DebugLogger
 // issues many Print::print() calls per logical line; this sink buffers them
 // and flushes one PKT_DEBUG_LOG frame per line, on '\n'.
 class FramedDebugLogSink : public Print {

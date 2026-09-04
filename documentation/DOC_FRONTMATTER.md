@@ -1,8 +1,9 @@
 # Documentation Frontmatter Schema
 
-Every `.md` file under `documentation/` carries a YAML frontmatter block at the top of the
-file, before the H1. This page is the schema definition — read it before adding or editing
-frontmatter, and update it if the schema changes.
+Every content `.md` file under `documentation/` carries a YAML frontmatter block at the top
+of the file, before the H1. `DOC_FRONTMATTER.md` and `CODE_FRONTMATTER.md` are the two schema
+definitions and are exempt. Read this page before adding or editing frontmatter, and update
+it if the schema changes.
 
 ## Why
 
@@ -33,8 +34,8 @@ superseded_by: null                  # optional — only on plan-completed docs;
 
 ### `name` — slug naming rule
 
-Lowercase the filename, strip `.md`, replace `_` with `-`. `UART_JETSON_BRIDGE.md` →
-`uart-jetson-bridge`. `documentation/README.md` is the one exception → `documentation-index`.
+Lowercase the filename, strip `.md`, replace `_` with `-`. `JETSON_BRIDGE.md` →
+`jetson-bridge`. `documentation/README.md` is the one exception → `documentation-index`.
 Slugs must be unique across all of `documentation/` since `related_docs`/`superseded_by`
 reference them without a path.
 
@@ -43,9 +44,9 @@ reference them without a path.
 | category | directory | meaning |
 |---|---|---|
 | `architecture` | `Current_Architecture/`, `SOFTWARE_DESIGN.md`, `SOFTWARE_DESIGN_DIAGRAM.md` | Must match code now. `source_refs` required. |
-| `reference` | `User_Reference/` | Practical how-to. `source_refs` optional (only if it names specific build files/scripts). |
+| `reference` | `User_Reference/`, `POWER_MEASURMENTS.md` | Practical how-to or measurement reference. `source_refs` optional (only if it names specific build files/scripts). |
 | `plan-pending` | `Pending_Plans/` | Describes work not yet built. No `source_refs` (nothing to point at yet), no `last_verified`. |
-| `plan-completed` | `Completed_Plans/` | Historical design record; code is authoritative, not this doc. No `last_verified` requirement. Use `superseded_by` if a `Current_Architecture` doc now fully covers what this plan describes. |
+| `plan-completed` | `Completed_Plans/`, `Project_Progress/` | Historical design record; code is authoritative, not this doc. No `last_verified` requirement. Use `superseded_by` if a `Current_Architecture` doc now fully covers what this plan describes. |
 | `index` | `documentation/README.md` | Doc table of contents. `last_verified` meaningful (the list itself can go stale), no `source_refs`. |
 
 ### `status`
@@ -73,7 +74,9 @@ right," not just when you fix something. A stale `last_verified` is itself a sta
 python3 documentation/check_doc_freshness.py
 ```
 
-Compares each doc's `last_verified` against the date of the most recent commit touching each
+Validates required fields, path/category and category/status combinations, unique `name`
+slugs, and `related_docs`/`superseded_by` targets, then compares
+each current doc's `last_verified` against the date of the most recent commit touching each
 of its `source_refs` (`git log -1 --format=%cI -- <path>`). Flags any doc where a referenced
 source file was committed after the doc's last verification, and separately flags any
 `source_refs` path that no longer exists (renamed/deleted file). This is a heuristic — it

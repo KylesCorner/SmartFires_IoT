@@ -1,52 +1,27 @@
-# Include Directory
+# Firmware include tree
 
-SmartFires public headers live here.
+Public firmware declarations live here. Exact operating values come from `config/` and `platformio.ini`; historical defaults in individual runtime structs are fallbacks, not the active deployment profile.
 
-## Header Layout
+## Layout
 
-- `app/`
-  Base and node application interfaces.
+- `app/`: node and base application coordinators.
+- `calibration/`: command naming/status logging helpers.
+- `config/`: authoritative network, sensing, power, base, and health constants.
+- `drivers/`: small sensor-driver interfaces used for dependency injection.
+- `interfaces/`: common clock, sensor, radio, analog, and TPS abstractions.
+- `logging/`: structured `@SFDBG` logger and USB frame sink.
+- `platform/`: Feather/SAMD21/RadioHead concrete adapters.
+- `power/`: battery monitor and duty-cycle state machine.
+- `radio/`: TDMA clock/config/service, TX queue, packet handler, TX-power controller.
+- `sensors/`: sensor wrappers and trigger interface.
+- `telemetry/`: `SensorSnapshot` and binary wire protocol.
 
-- `drivers/`
-  Small hardware-facing driver interfaces used to decouple sensors from vendor libraries.
+## Current invariants
 
-- `interfaces/`
-  Common abstractions such as `IClock`, `ISensor`, `IRadio`, and analog readers.
+- `config/NetworkConfig.h` resolves shared `NUM_SLOTS=5` geometry from the build and defines 900 ms slots, two 20 ms guards, 150 ms receive wake-ahead, radio/reliability settings, and the 15-second active-build STATUS cadence.
+- `telemetry/BinaryPacket.h` is the C++ wire-format authority. Keep it synchronized with `edge/edge-receiver/src/smartfires_edge/packet.py`.
+- `interfaces/ISensor.h` supplies lifecycle and `fillSnapshot()`; sensors must not encode wire packets directly.
+- `radio/TdmaConfig.h` contains safe member defaults, while `NetworkConfig::nodeTdmaProfile()` supplies values used by real node composition.
+- Node assignment is runtime state derived from SAMD21 UID/`AWAKEN`; node ID is not a build-time slot constant.
 
-- `platform/`
-  Concrete hardware/platform adapter declarations.
-
-- `power/`
-  Battery and duty-cycle interfaces/configuration.
-
-- `radio/`
-  TDMA configuration, clocking, queueing, packet handling, and radio-service APIs.
-
-- `sensors/`
-  Sensor wrappers and helper sensor interfaces such as `ITriggerSensor`.
-
-- `telemetry/`
-  Wire-format structs and telemetry data containers.
-
-## Important Interfaces
-
-- `interfaces/ISensor.h`
-  Common sensor lifecycle: `begin`, `wake`, `sleep`, `service`, `sample`, `ready`, `healthy`, and `fillSnapshot`.
-
-- `radio/TdmaConfig.h`
-  Current TDMA defaults. The firmware is presently configured for 4 total TDMA entities: one base plus three assignable node slots.
-
-- `telemetry/BinaryPacket.h`
-  On-air packet definitions. This now includes:
-  - `AWAKEN` carrying a UID hash payload
-  - `TIME_SYNC` used both for periodic sync and direct node assignment
-  - `ACK_SUMMARY` for app-layer reliability
-
-- `app/SmartFiresNodeApp.h`
-  Node application config includes the assigned node ID, device UID hash, battery enable flag, and awaken-only mode flag.
-
-## Include Conventions
-
-- Headers in `include/` are the public interface for code under `src/`.
-- Keep hardware-specific third-party includes out of generic interfaces when possible.
-- Prefer depending on small interfaces from `include/interfaces/` or `include/drivers/` so native tests can use fakes.
+Every `.h` and `.cpp` under `include/` and `src/` starts with the metadata format described by `documentation/CODE_FRONTMATTER.md`. Run `python3 documentation/check_code_headers.py` after changing current docs or firmware backlinks.

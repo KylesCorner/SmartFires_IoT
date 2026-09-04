@@ -1,7 +1,7 @@
 // ---
 // description: TDMA slot geometry, LoRa radio link, link-layer ACK, and app-layer reliability constants — the single source of truth for the network domain, including the node TdmaConfig profile builder.
 // role: config
-// docs: [bandwidth-scaling, packet-reliability, tdma-protocol, tunable-parameters]
+// docs: [bandwidth-scaling, lora-vs-lorawan, packet-reliability, tdma-protocol, tunable-parameters]
 // ---
 #pragma once
 
@@ -35,7 +35,7 @@
 // Build-flag resolution
 // ---------------------------------------------------------------------------
 // NUM_SLOTS and SMARTFIRES_TDMA_RELIABILITY_MODE are set per-environment in
-// platformio.ini (node/node_debug envs). This is the one place that reads
+// platformio.ini (all network environments). This is the one place that reads
 // the raw -D flags and turns them into typed values — main.cpp no longer
 // repeats these #ifndef guards itself.
 //
@@ -143,7 +143,7 @@ constexpr uint16_t kLinkAckTimeoutMs = 250;
 // physically finish sending (RHGenericDriver::waitPacketSent(timeout)) —
 // distinct from kLinkAckTimeoutMs above, which bounds a different wait (the
 // base waiting to *receive* a reply ACK). Our ACK payload (1-byte body +
-// RadioHead header, ~5-6 bytes on air) is smaller than AWAKEN's 9-byte
+// RadioHead header, ~5-6 bytes on air) is smaller than the current 12-byte AWAKEN
 // payload, so this reuses kAwakenTxBudgetMs's conservative margin rather
 // than introducing an untested new number. Not bench-verified — flag for
 // tuning once real hardware timing is measured, same as rxWakeAheadMs was.
@@ -151,7 +151,7 @@ constexpr uint16_t kAckTxWaitMs = kAwakenTxBudgetMs;
 
 // Bound on how long RadioHeadTdmaDriver::send() waits for its own telemetry
 // transmission to physically finish sending. Unlike acknowledge()'s payload,
-// send() carries anything up to a full BUNDLE (kBundleTxBudgetMs's ≤194-byte
+// send() carries anything up to a full BUNDLE (kBundleTxBudgetMs's 195-byte
 // case), so it reuses that largest, already-conservative budget rather than
 // branching on payload size — waiting a bit longer than strictly necessary
 // for a small STATUS/TIME_SYNC payload is harmless (only the timed-out path
@@ -212,11 +212,11 @@ constexpr bool kEnableTelemetryTx = true;
 // ---------------------------------------------------------------------------
 // Compile-time invariants
 // ---------------------------------------------------------------------------
-// Worst-case per-slot occupancy: ONE TX burst + ONE ACK timeout + guard bands.
-// (TdmaRadioService checks budget before each send, so at most one bundle can
-// start in a slot regardless of kLinkRetries.  In APP_ACK_SUMMARY mode
-// enableLinkAck=false, so kLinkAckTimeoutMs doesn't apply at all — this
-// assertion is a conservative upper bound that also covers StrictLinkAck mode.)
+// One StrictLinkAck transaction must fit in a slot: one TX burst, one ACK wait,
+// and guard bands. TdmaRadioService checks the remaining budget before each
+// send; AppLayerAckSummary does not use this remote ACK wait and may fit two
+// maximum bundles in the usable 860 ms span. This assertion conservatively
+// covers the alternative StrictLinkAck mode.
 // 340 (bundle TX) + 250 (ACK timeout) + 2×20 (guard) = 630 ms < 900 ms ✓
 static_assert(kSlotWidthMs > kBundleTxBudgetMs + kLinkAckTimeoutMs + 2 * kGuardMs,
               "slotWidthMs too small for worst-case bundle TX + ACK + guard");

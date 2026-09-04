@@ -1,30 +1,33 @@
 SmartFires PlatformIO command reference
 
-Build firmware
+Run these commands from SmartFires_IoT/platformio.
+
+Build network firmware
 pio run -e feather_m0_lora_base
 pio run -e feather_m0_lora_node
-pio run -e feather_m0_lora_node_dummy
+pio run -e feather_m0_lora_node_debug
+pio run -e feather_m0_lora_node_timed
+pio run -e feather_m0_lora_node_hybrid
+pio run -e feather_m0_lora_sniffer
 
-Upload firmware
+Upload network firmware
 pio run -e feather_m0_lora_base --target upload
 pio run -e feather_m0_lora_node --target upload
-pio run -e feather_m0_lora_node_dummy --target upload
+pio run -e feather_m0_lora_node_debug --target upload
+pio run -e feather_m0_lora_sniffer --target upload
 
-Open serial monitor
+Open a serial monitor
 pio device monitor -e feather_m0_lora_base
-pio device monitor -e feather_m0_lora_node
-pio device monitor -e feather_m0_lora_node_dummy
+pio device monitor -e feather_m0_lora_node_debug
+pio device monitor -e feather_m0_lora_sniffer
 
-Run native tests
+Run native tests (known failures: documentation/Pending_Plans/NATIVE_TEST_REPAIR.md)
 pio test -e native
 pio test -e native -f test_duty_cycle_controller
-pio test -e native -f test_sht31_sensor
-pio test -e native -f test_imu_sensor
-pio test -e native -f test_gps_sensor
-pio test -e native -f test_sps30_sensor
+pio test -e native -f test_tdma_radio_service
+pio test -e native -f test_packet_handler
 
-Reliability mode override
-SMARTFIRES_TDMA_RELIABILITY_MODE=0 pio run -e feather_m0_lora_node
-SMARTFIRES_TDMA_RELIABILITY_MODE=0 pio run -e feather_m0_lora_node_dummy
+List isolated power targets
+pio project config | sed -n '/env:feather_m0_power_/p'
 
-If `pio` is not on your shell PATH, use `platformio` instead.
+If pio is not on PATH, use platformio instead.

@@ -3,7 +3,7 @@ name: flashing
 description: PlatformIO flash, monitor, and build commands for every Feather M0 environment, plus upload troubleshooting.
 category: reference
 status: current
-last_verified: 2026-06-25
+last_verified: 2026-09-04
 source_refs:
   - platformio/platformio.ini
 related_docs:
@@ -12,110 +12,96 @@ related_docs:
   - tdma-protocol
 ---
 
-# SmartFires — Flashing Guide
+# SmartFires flashing guide
 
-All commands are run from the `platformio/` directory. The PlatformIO CLI is at
-`~/.platformio/penv/bin/pio` — it is not on the system PATH by default.
+Run every command from `SmartFires_IoT/platformio`:
 
 ```bash
 cd ~/Documents/Smart_Fires/SmartFires_IoT/platformio
 ```
 
----
+Use `pio`, `platformio`, or `~/.platformio/penv/bin/pio` according to the local installation.
 
-## Devices and their environments
+## Active environments
 
-| Device | Board | Environment | Notes |
-|---|---|---|---|
-| Feather M0 — LoRa node | Adafruit Feather M0 RFM95 | `feather_m0_lora_node` | Production sensor node firmware |
-| Feather M0 — LoRa node (debug) | Adafruit Feather M0 RFM95 | `feather_m0_lora_node_debug` | Same as above, lower sample rate, structured debug logging (see DEBUG_FILTER.md) |
-| Feather M0 — Base station | Adafruit Feather M0 RFM95 | `feather_m0_lora_base` | Connects to Jetson via UART |
-| Feather M0 — Sensor probe | Adafruit Feather M0 RFM95 | `feather_m0_sensor_probe` | No LoRa/TDMA/app layer; for sensor bring-up and power measurement |
-| Feather M0 — LoRa sniffer | Adafruit Feather M0 RFM95 | `feather_m0_lora_sniffer` | Passive listener, prints packet metadata, does not participate in TDMA |
-| Native unit tests | n/a (runs on dev machine) | `native` | `pio test -e native` |
+| Environment | Use |
+|---|---|
+| `feather_m0_lora_base` | Base station connected to the Jetson over native USB |
+| `feather_m0_lora_node` | Production SensorTriggered node |
+| `feather_m0_lora_node_debug` | Default Timed node with structured/log-to-file monitor filters |
+| `feather_m0_lora_node_timed` | Explicit Timed node |
+| `feather_m0_lora_node_hybrid` | Hybrid node |
+| `feather_m0_lora_sniffer` | Passive LoRa sniffer |
+| `native` | Host Unity tests; no Feather |
 
----
+Ten `feather_m0_power_*` environments isolate MCU run/standby, I2C idle, radio standby/RX, SHT31, IMU, GPS, SPS30, and wind power. List them in `platformio.ini` before choosing one. There is no current dummy-node or sensor-probe target.
 
-## Flash commands
+All current node targets use app-layer ACK summaries and a 15-second STATUS interval. Production differs from debug primarily by its duty-cycle mode; debug STATUS is not faster than production.
 
-### Feather M0 — LoRa node
-```bash
-~/.platformio/penv/bin/pio run -e feather_m0_lora_node --target upload
-```
-
-### Feather M0 — LoRa node (debug build)
-```bash
-~/.platformio/penv/bin/pio run -e feather_m0_lora_node_debug --target upload
-```
-
-### Feather M0 — Base station
-```bash
-~/.platformio/penv/bin/pio run -e feather_m0_lora_base --target upload
-```
-
-### Feather M0 — Sensor probe
-```bash
-~/.platformio/penv/bin/pio run -e feather_m0_sensor_probe --target upload
-```
-
-### Feather M0 — LoRa sniffer
-```bash
-~/.platformio/penv/bin/pio run -e feather_m0_lora_sniffer --target upload
-```
-
----
-
-## Serial monitor commands
-
-Useful for watching debug output after flashing.
-
-### Feather M0 node (debug build)
-```bash
-~/.platformio/penv/bin/pio device monitor -e feather_m0_lora_node_debug
-```
-
-### Feather M0 base station
-```bash
-~/.platformio/penv/bin/pio device monitor -e feather_m0_lora_base
-```
-
-See DEBUG_FILTER.md for `SFDBG_*` environment variables that filter the
-structured debug log stream.
-
----
-
-## Build only (no upload)
-
-To compile without flashing — useful for catching errors:
+## Build and upload
 
 ```bash
-~/.platformio/penv/bin/pio run -e feather_m0_lora_node
-~/.platformio/penv/bin/pio run -e feather_m0_lora_base
-~/.platformio/penv/bin/pio run -e feather_m0_sensor_probe
-~/.platformio/penv/bin/pio run -e feather_m0_lora_sniffer
-~/.platformio/penv/bin/pio test -e native
+# Build only
+pio run -e feather_m0_lora_base
+pio run -e feather_m0_lora_node
+pio run -e feather_m0_lora_node_debug
+pio run -e feather_m0_lora_sniffer
+
+# Build and flash
+pio run -e feather_m0_lora_base --target upload
+pio run -e feather_m0_lora_node --target upload
+pio run -e feather_m0_lora_node_debug --target upload
+pio run -e feather_m0_lora_sniffer --target upload
 ```
 
----
+Attach a suitable 915 MHz antenna before powering/transmitting with an RFM95. Verify the environment matches the board's physical role before upload.
 
-## Feather M0 upload troubleshooting
+## Monitor
 
-The Feather M0 uses a SAM-BA bootloader that can be timing-sensitive. If the upload
-fails partway through or the port is not found, use the manual bootloader trick:
-
-1. **Double-tap the reset button** on the Feather — the red LED will pulse slowly,
-   indicating it is in bootloader mode.
-2. Run the upload command immediately (within ~10 seconds).
-
-To confirm the Feather is visible to macOS before uploading:
 ```bash
-ls /dev/cu.usbmodem*
+pio device monitor -e feather_m0_lora_node_debug
+pio device monitor -e feather_m0_lora_base
+pio device monitor -e feather_m0_lora_sniffer
 ```
 
-If nothing appears, the cable may be charge-only. Swap to a data-capable USB cable.
+The base's native USB port carries binary Jetson frames and structured logs, so a plain monitor can display mixed/binary output. The running edge receiver and a serial monitor cannot own the same device simultaneously. See `DEBUG_FILTER.md` for source/level filtering.
 
-If the port is detected but upload still fails, specify it explicitly:
+## Network-wide changes
+
+`NUM_SLOTS` is shared through the `[network]` section. After changing it:
+
+1. rebuild and reflash the base;
+2. rebuild and reflash every node;
+3. update edge `DEFAULT_NUM_SLOTS` or the dashboard `--num-slots` argument;
+4. recheck retry timing and bandwidth constraints.
+
+Mixing different slot counts is unsafe because frame periods disagree and base assignment capacity changes.
+
+## Upload troubleshooting
+
+For a Feather M0 that does not enter upload mode:
+
+1. Double-tap reset until the bootloader LED pulses.
+2. Start the upload within the bootloader window.
+3. Confirm a data-capable USB cable and find the port:
+
+   ```bash
+   ls /dev/cu.usbmodem*
+   ```
+
+4. If needed, specify the resolved port:
+
+   ```bash
+   pio run -e feather_m0_lora_base --target upload \
+     --upload-port /dev/cu.usbmodem1101
+   ```
+
+Replace the example port with the actual device. Disconnect or stop any monitor/service holding it.
+
+## Native tests
+
 ```bash
-~/.platformio/penv/bin/pio run -e feather_m0_lora_base --target upload --upload-port /dev/cu.usbmodem1101
+pio test -e native
 ```
-(Replace `/dev/cu.usbmodem1101` with whatever `ls /dev/cu.usbmodem*` shows.)
+
+The suite currently has known failures described in `documentation/Pending_Plans/NATIVE_TEST_REPAIR.md`; distinguish those from new build/link failures when reporting results.

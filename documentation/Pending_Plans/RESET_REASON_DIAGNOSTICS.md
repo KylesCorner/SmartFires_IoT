@@ -1,262 +1,105 @@
 ---
 name: reset-reason-diagnostics
-description: Plan to report node reset cause (WDT/brownout/power-on) and a hang-zone breadcrumb through the AWAKEN packet, so watchdog reboots can be attributed to the I2C-stall vs RadioHead-hang candidates.
+description: Remaining hardware validation for shipped AWAKEN reset-cause and retained hang-zone diagnostics.
 category: plan-pending
-status: implemented-phase-1-2
+status: draft
 related_docs:
   - watchdog-timer
   - reset-system
   - packet-reliability
-  - uart-jetson-bridge
+  - jetson-bridge
 ---
 
-# Reset Reason Diagnostics
+# Reset reason diagnostics: remaining work
 
-## Implementation status (Phase 1 + Phase 2 shipped)
+## Status at 2026-09-04
 
-Both phases below are implemented as of this build; Phase 3 (WDT early-warning PC
-capture) remains deferred. Touchpoints as built:
+Wire transport, retained breadcrumb, firmware instrumentation, edge persistence, and dashboard display are implemented. The outstanding work is real-hardware validation; optional program-counter capture remains deliberately deferred.
 
-- **Wire:** `AwakenPayload` grew 4 → 6 bytes (`reset_cause`, `hang_zone`); AWAKEN
-  LoRa frame 9 → 11 bytes. `decodeAwaken` (firmware) and `decode_awaken`
-  (`packet.py`) are length-adaptive — a legacy 9-byte node still decodes, new
-  fields → 0/None.
-- **Breadcrumb:** `include/platform/ResetDiagnostics.h` + `src/platform/
-  ResetDiagnostics.cpp` hold the `.noinit` `ResetBreadcrumb` (magic + zone +
-  ~zone + boot_count), `harvest()`, `markZone()`, and a `ZoneScope` RAII guard.
-- **Linker:** `ldscripts/flash_with_bootloader_noinit.ld` adds a `.noinit
-  (NOLOAD)` section; node envs point `board_build.ldscript` at it and define
-  `-DSMARTFIRES_RESET_DIAG`. Base/native are unchanged (plain zeroed global,
-  stock ldscript).
-- **Harvest + reporting:** `main.cpp` (node) calls `ResetDiagnostics::harvest()`
-  right after reading `PM->RCAUSE`, marks `ZONE_BOOT` → `ZONE_LOOP_IDLE`;
-  `SmartFiresNodeApp::sendAwakenHandshake()` populates the payload.
-- **Zones instrumented:** `ZONE_RADIO_TX` (RadioHeadTdmaDriver send/sendToWait/
-  acknowledge), `ZONE_I2C_SHT31`, `ZONE_I2C_GPS`, `ZONE_I2C_IMU`,
-  `ZONE_UART_SPS30`.
-- **Edge:** `ingest_service.py` writes `reset_cause`/`reset_cause_names`/
-  `hang_zone`/`hang_zone_name` into each `awaken` row of `status.jsonl` and
-  `telemetry.csv` (the latter was silently crashing the entire ingest loop on
-  every AWAKEN until `csv_logger.CSV_COLUMNS` was updated to include the four
-  new fields — `csv.DictWriter` defaults to `extrasaction="raise"`).
-- **Dashboard restart-bucketing:** `SessionTelemetryCache.awaken_events()` +
-  `GET /api/awaken_events` surface every AWAKEN this session (timestamp, node,
-  reset cause, hang zone, seq, RSSI) in a "Node Reboot Events" table on the
-  Map & History page (`map_history.html`/`map_history_page.js`), colour-flagging
-  WDT-caused reboots. Current-session only (matches the rest of the dashboard);
-  legacy pre-diagnostics AWAKEN frames show "—".
+Current wire format:
 
-Remaining before moving to `Completed_Plans/` (re-checked 2026-08-21):
+```text
+AWAKEN = PktHeader(5) + AwakenPayload(6) + CRC(1) = 12 bytes
 
-1. **Hardware validation** — the induced-hang test per the Validation section, plus the
-   cold-boot and bootloader-double-tap regression checks. None of it done. This is the
-   substantive item: nothing has yet proved the breadcrumb survives a real WDT reset on this
-   hardware, so the whole attribution mechanism is unverified in the field.
-2. **Doc updates — partly done.** `CLAUDE.md` **is** updated (its wire tables carry the
-   12-byte AWAKEN with `reset_cause`/`hang_zone`). Still outstanding, verified by grep:
-   `SOFTWARE_DESIGN.md`, `Current_Architecture/TDMA_PROTOCOL.md`,
-   `Current_Architecture/BANDWIDTH_SCALING.md` and `Current_Architecture/JETSON_BRIDGE.md`
-   contain no mention of `reset_cause` or `hang_zone` at all.
-
-**Note the sizes in the Phase 1 section below are superseded.** This plan was written against
-a 4-byte `PktHeader`, so it says AWAKEN goes 9 → 11 bytes. `PktHeader` has since grown to 5
-bytes (`rtc-subsecond-sleep`), so the shipped frame is **12 bytes**: 5-byte header + 6-byte
-`AwakenPayload` + crc8. Use 12 when updating the wire tables above, not 11.
-
-A dedicated `ZONE_MCU_STANDBY` is worth adding alongside the induced-hang work — see
-`standby-watchdog-coverage`, which needs the same harness and would otherwise report a
-standby-hang recovery under whatever zone was marked before the sleep.
-
-## Background
-
-The overnight run of 2026-07-14 (`analysis and scripts/data/2026-07-14_233947/RUN_REPORT.md`)
-showed 15 node reboots in 16.5 h, confirmed by status-packet `seq` + lifetime `retx_total`
-both zeroing at each event. The watchdog (see `Completed_Plans/WATCHDOG_TIMER.md`) is the
-presumed trigger, but nothing on the wire proves it, and nothing distinguishes the two
-root-cause candidates:
-
-1. **Shared I2C bus stall** — a sensor transaction hangs the blocking Wire library.
-   2 of the 15 reboots were preceded by heavy sensor-glitch storms consistent with this.
-2. **RadioHead TX-done hang** — `waitPacketSent()` blocks forever on a missed interrupt
-   (the same bug class that motivated disabling autoAck; see `PACKET_RELIABILITY.md`).
-   The other 13 reboots had no preceding sensor glitches and occurred on a marginal link
-   (RSSI −90 to −96 dBm), consistent with this.
-
-Today the SAMD21 reset cause is read at boot (`main.cpp` — `PM->RCAUSE.reg`) but only
-logged to the node's **local serial**, which is unattached in field deployments. And
-`RCAUSE` alone can only say *that* the WDT fired, never *what the code was doing* when
-it hung.
-
-## Goals
-
-- Every node boot reports its hardware reset cause (`RCAUSE`: WDT / BOD33 brownout /
-  power-on / external) to the Jetson dashboard.
-- WDT-triggered reboots additionally report which blocking region the firmware was in
-  when it hung ("hang zone"), differentiating I2C-stall from RadioHead-hang.
-- Rollout must not flood the edge decoder with length failures during version skew.
-
-## Non-goals
-
-- Fixing the hangs themselves (that's follow-up work once attribution is known).
-- Base-station reset diagnostics (base has no AWAKEN; defer, mirroring watchdog Phase 2).
-- Exact program-counter capture via the WDT early-warning interrupt (Phase 3, deferred —
-  requires bypassing Adafruit_SleepyDog and driving WDT registers directly).
-
----
-
-## Phase 1 — `reset_cause` through AWAKEN
-
-Smallest useful step: distinguishes WDT from true brownout (BOD33) and power cycles with
-one byte the node already reads.
-
-### Wire change
-
-`AwakenPayload` grows from 4 to 6 bytes; AWAKEN LoRa payload 9 → 11 bytes
-(UART frame data len 10 → 12):
-
-```c
-struct __attribute__((packed)) AwakenPayload {
-    uint32_t uid_hash;
-    uint8_t  reset_cause;   // raw PM->RCAUSE.reg from this boot
-    uint8_t  hang_zone;     // Phase 2; 0 = ZONE_UNKNOWN until then
-};
+AwakenPayload:
+  uid_hash:u32
+  reset_cause:u8
+  hang_zone:u8
 ```
 
-### Touchpoints
+The firmware and Python decoders also accept the legacy 9-byte form (four-byte legacy header, UID hash only, CRC). Legacy events expose no reset/hang values.
 
-| Piece | Location | Change |
-|---|---|---|
-| Payload struct, `static_assert`, `kAwakenLoRaSize`, header comment table | `platformio/include/telemetry/BinaryPacket.h` | 4 → 6 byte payload; size 9 → 11 |
-| Stash `RCAUSE` for later use | `platformio/src/main.cpp` (node section) | already read into a local; move into `ResetDiagnostics` (Phase 2 header) or pass via `SmartFiresNodeApp::Config` |
-| Populate new fields | `SmartFiresNodeApp::sendAwakenHandshake()` (`SmartFiresNodeApp.cpp`) | set `reset_cause`, `hang_zone` |
-| Base decode | `BinaryPacket::decodeAwaken()` | make **length-adaptive**: accept legacy 9-byte payloads, defaulting new fields to 0 — so base/node flash order doesn't matter |
-| Base relay | `SmartFiresBaseApp.cpp` | none beyond recompile (payload relayed opaquely; frame len byte follows automatically) |
-| Edge decode | `edge/edge-receiver/src/smartfires_edge/packet.py` | `AWAKEN_PAYLOAD_FMT = "<IBB"`; `decode_awaken()` length-adaptive (accept old 9-byte payloads, fields → `None`) |
-| Edge surfacing | `ingest_service.py`, `live_state.py`, `web/` | add `reset_cause`/`hang_zone` to the awaken record written to `status.jsonl` and the dashboard's restart indicator (bucket restarts by cause) |
+## Shipped implementation
 
-### Rollout order (avoids length-failure flood)
+- `ResetDiagnostics` reads raw SAMD21 `PM->RCAUSE` at boot.
+- A `.noinit` breadcrumb retains magic, hang zone, inverse-zone guard, and boot count across warm reset.
+- Node targets use `flash_with_bootloader_noinit.ld` and `SMARTFIRES_RESET_DIAG`.
+- `harvest()` trusts the previous hang zone only for a watchdog reset with an intact breadcrumb, then prepares the new boot record.
+- Instrumented zones are boot, radio TX/wait paths, SHT31 I2C, GPS I2C, IMU I2C, SPS30 UART, and normal loop idle.
+- `SmartFiresNodeApp` places reset cause and harvested hang zone in every AWAKEN.
+- The base decodes/logs assignment context and forwards the complete frame.
+- Python maps RCAUSE bits and zone values, persists them in telemetry/status records, and serves reboot events to the dashboard history page.
+- The normal reset system is also shipped: hard/soft node reset, base reset through node ID 0, and session-start base soft reset.
 
-1. Edge first — length-adaptive decode accepts both sizes.
-2. Base and node Feathers together (length-adaptive `decodeAwaken` makes this forgiving,
-   but they share `BinaryPacket.h` so flash both anyway).
+Current architecture and wire-table docs now describe the 12-byte frame; the earlier documentation-update task is complete.
 
----
+## Meaning and limits
 
-## Phase 2 — hang-zone breadcrumb in noinit RAM
+`reset_cause` can include WDT, BOD33/BOD12, external reset, system reset, and power-on bits. Treat it as a bit field, not a single exclusive enum.
 
-SAMD21 SRAM retains contents across a WDT/system reset (not across power loss) — the
-same property the bootloader's double-tap magic relies on. A small struct that crt0
-does **not** zero holds a "zone" byte written before each blocking region:
+`hang_zone` is attribution evidence only when a WDT reset occurred and the retained record passed integrity checks. Otherwise it must be `ZONE_UNKNOWN`. It identifies the last marked blocking region, not an exact line or proven root cause. A stale or overly broad zone can still misattribute the underlying failure.
 
-```c
-// include/platform/ResetDiagnostics.h
-enum HangZone : uint8_t {
-  ZONE_UNKNOWN = 0,   // breadcrumb invalid or WDT fired outside any marked region
-  ZONE_BOOT,          // setup()/begin() phase
-  ZONE_RADIO_TX,      // RadioHeadTdmaDriver send/waitPacketSent path
-  ZONE_I2C_SHT31,
-  ZONE_I2C_GPS,       // PA1010D
-  ZONE_I2C_IMU,       // ICM-20948 / DMP
-  ZONE_UART_SPS30,
-  ZONE_LOOP_IDLE,     // marked region exited normally
-};
+The breadcrumb does not survive a true power loss and is not designed to. Cold-boot SRAM is ignored unless the validity guards and WDT condition agree.
 
-struct ResetBreadcrumb {   // lives in .noinit
-  uint32_t magic;          // validity guard — RAM is garbage on cold power-up
-  uint8_t  zone;
-  uint8_t  zone_inv;       // ~zone, cheap integrity check
-  uint16_t boot_count;
-};
-```
+## Required hardware validation
 
-### Linker script prerequisite
+### Cold boot and ordinary reset
 
-The stock Adafruit `feather_m0` linker script (`flash_with_bootloader.ld`) has **no
-`.noinit` output section** — `__attribute__((section(".noinit")))` would be silently
-placed as an orphan. Add a repo-local copy at `platformio/ldscripts/
-flash_with_bootloader_noinit.ld` with a `.noinit (NOLOAD)` section between `.bss` and
-the heap-start symbols (`end`/`__end__`), and point the node environments at it via
-`board_build.ldscript` in `platformio.ini`. Base env doesn't need it (no breadcrumb yet).
+1. Power-cycle a node and confirm AWAKEN shows a power-on cause with unknown hang zone.
+2. Double-tap into the bootloader and confirm flashing/boot remains reliable with the custom linker script.
+3. Issue soft and hard `CMD_RESET`; confirm the reported cause, new AWAKEN, reassignment, and resumed session are coherent.
+4. Verify a non-WDT reset never reports a trusted prior hang zone.
 
-### Boot-time harvest (in `setup()`, right after reading `RCAUSE`)
+### Watchdog retention
 
-```
-wdt_fired   = RCAUSE & PM_RCAUSE_WDT
-crumb_valid = (magic == kMagic) && (zone_inv == ~zone)
-hang_zone   = (wdt_fired && crumb_valid) ? zone : ZONE_UNKNOWN
-```
+Add a temporary, controlled test hook that stops feeding the watchdog inside one known zone at a time. Do not simulate a WDT by calling `NVIC_SystemReset()`, because that tests a different cause.
 
-Then re-initialize the breadcrumb (write magic, zone = ZONE_BOOT, boot_count++) and
-carry `hang_zone` into the AWAKEN payload. On non-WDT resets the harvested zone is
-deliberately discarded — a brownout mid-I2C-read is not a hang.
+For each available zone:
 
-### Instrumentation points
+1. mark/enter the zone;
+2. induce the hang until hardware WDT reset;
+3. capture local boot log and forwarded AWAKEN;
+4. verify WDT is present in `reset_cause`;
+5. verify `hang_zone` equals the induced region;
+6. verify the dashboard and stored row display the same values;
+7. verify telemetry resumes after assignment.
 
-Single volatile byte store on entry/exit of each blocking region — no measurable
-overhead. Start at the driver level (the actual blocking call sites):
+At minimum test radio TX, one I2C path, SPS30 UART, and loop idle. Repeat enough times to detect intermittent retention/bootloader behavior.
 
-| Zone | Where |
-|---|---|
-| `ZONE_RADIO_TX` | `RadioHeadTdmaDriver.cpp` around send/`waitPacketSent()`/ACK-wait paths |
-| `ZONE_I2C_SHT31` | `AdafruitSht31Driver.cpp` bus transactions |
-| `ZONE_I2C_GPS` | `AdafruitGpsDriver.cpp` bus transactions |
-| `ZONE_I2C_IMU` | `SparkfunIcm20948Driver.cpp` DMP/bus transactions |
-| `ZONE_UART_SPS30` | `SensirionUartSps30Driver.cpp` read/write waits |
-| `ZONE_BOOT` | set at top of `setup()`, cleared to `ZONE_LOOP_IDLE` entering `loop()` |
+### Corruption and compatibility
 
-Exit restores `ZONE_LOOP_IDLE` rather than clearing to 0, so `ZONE_UNKNOWN`
-unambiguously means "breadcrumb invalid," and `ZONE_LOOP_IDLE` means "WDT fired in
-unmarked code" — itself a useful signal that both prime suspects are innocent.
+- Corrupt or invalidate breadcrumb guards in a test build and verify the zone becomes UNKNOWN.
+- Run a legacy AWAKEN fixture through base/edge decode and verify no length-failure flood.
+- Test a diagnostics node against the current base/edge and a legacy fixture against current decoders.
+- Confirm CSV field lists accept reset fields without raising `DictWriter` extras errors.
 
----
+### Standby interaction
 
-## Phase 3 (deferred) — WDT early-warning PC capture
+Timed MCU standby disables the watchdog today. Decide whether to add a dedicated `ZONE_MCU_STANDBY` only together with the work in `STANDBY_WATCHDOG_COVERAGE.md`; a zone without watchdog coverage would not produce the event it claims to diagnose.
 
-If zone granularity proves insufficient: enable the SAMD21 WDT early-warning interrupt,
-and in the ISR copy the stacked return address (exact hung instruction) into the
-breadcrumb for lookup in the build's `.map` file. Requires abandoning Adafruit_SleepyDog
-for direct WDT register control on the node. Hold in reserve.
+## Deferred phase: program-counter capture
 
----
+Exact PC/stack capture would require a WDT early-warning interrupt and likely bypassing part of Adafruit SleepyDog. It adds ISR, retention, stack-unwind, and linker complexity. Do not start it unless zone-level hardware results are insufficient to identify the dominant hang class.
 
-## Validation
+If pursued, specify register capture integrity, nested-fault behavior, symbolization workflow, memory cost, and compatibility with the bootloader/noinit layout before implementation.
 
-- **Native unit tests**: AWAKEN encode/decode at both 9- and 11-byte sizes (node, and a
-  mirrored case in edge tests if any exist for `packet.py`); breadcrumb harvest logic
-  (valid/invalid magic × WDT/non-WDT cause) with the struct in ordinary test memory.
-- **Hardware, induced hang**: temporary debug hook (build-flag-gated) that deliberately
-  spins inside a chosen zone; verify the WDT fires and the next AWAKEN reports
-  `reset_cause` with the WDT bit and the correct zone. Repeat for a radio zone and an
-  I2C zone. (A `CMD_CALIBRATE`-style triggered variant would allow remote testing, but
-  a build flag is enough for bench validation.)
-- **Hardware, cold boot**: power-cycle → AWAKEN shows POR cause and `ZONE_UNKNOWN`
-  (garbage RAM rejected by magic check).
-- **Hardware, regression**: double-tap bootloader entry still works with the custom
-  linker script; RAM watermark (`Samd21RamMonitor`) unchanged apart from the 8-byte
-  breadcrumb.
-- **Field**: rerun the overnight test; dashboard restart counter now buckets by
-  cause/zone. Expected outcome per the 2026-07-14 run: mostly WDT+`ZONE_RADIO_TX`, a
-  minority WDT+I2C zones.
+## Completion criteria
 
-## Docs to update on completion
+Move this document to `Completed_Plans/` when:
 
-- `CLAUDE.md` and `documentation/SOFTWARE_DESIGN.md` wire-protocol tables (AWAKEN 9 → 11
-  bytes, new fields).
-- `Current_Architecture/TDMA_PROTOCOL.md` (boot handshake payload),
-  `BANDWIDTH_SCALING.md` (AWAKEN size), `UART_JETSON_BRIDGE.md` (frame length table).
-- Move this doc to `Completed_Plans/` and update the README index.
-
-## Risks
-
-- **RAM retention is empirical, not guaranteed by datasheet contract** for all reset
-  paths; the magic + inverted-byte check makes corruption fail safe (→ `ZONE_UNKNOWN`).
-- **Bootloader RAM usage** between reset and app start could theoretically clobber the
-  breadcrumb; same mitigation. If it proves flaky in practice, relocate the section to
-  a reserved word just below the bootloader's double-tap address instead.
-- **Version skew**: an un-updated edge counts 11-byte AWAKENs as oversized frames only
-  if it also enforces exact lengths — it doesn't (min/max range check), but
-  `decode_awaken` must be made length-adaptive *before* nodes are reflashed or awaken
-  records silently lose fields. Rollout order above handles this.
-- **Attribution granularity**: breadcrumb reports the last *marked* region. A hang in
-  unmarked code reports `ZONE_LOOP_IDLE` — informative but not a diagnosis; extend the
-  zone set as needed.
+- cold boot, hard/soft reset, and bootloader tests pass;
+- induced WDT resets preserve and report the expected zones;
+- legacy and corruption tests pass;
+- persisted/dashboard values match firmware logs;
+- standby-zone handling is explicitly resolved or deferred;
+- test hooks are removed or isolated behind an off-by-default diagnostic flag.

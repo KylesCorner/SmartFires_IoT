@@ -2,7 +2,6 @@
 // description: Implements ResetDiagnostics — the .noinit breadcrumb, boot-time
 //   harvest of RCAUSE + prior hang zone, and the markZone/accessor API.
 // role: implementation
-// docs: [reset-reason-diagnostics, watchdog-timer]
 // ---
 #include "platform/ResetDiagnostics.h"
 

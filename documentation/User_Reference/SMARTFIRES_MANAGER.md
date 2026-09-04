@@ -1,756 +1,149 @@
-# SmartFires Build Manager
-
-The SmartFires build manager provides a single command-line interface for updating the Jetson software and flashing the SmartFires LoRa gateway boards.
-
-It is intended to reduce friction when deploying updates to SmartFires systems by handling:
-
-* Git branch selection and updates
-* `smartfires-edge` Python package installation
-* `smartfires-edge.service` management
-* Base station firmware flashing
-* LoRa sniffer firmware flashing
-* Full gateway deployments
-* Basic deployment status checks
-
-## Location
-
-The manager script is located at:
-
-```text
-deploy/smartfires-manager.sh
-```
-
-Run commands from anywhere using the full path, or from the repository root:
-
-```bash
-./deploy/smartfires-manager.sh
-```
-
-Make sure the script is executable:
-
-```bash
-chmod +x deploy/smartfires-manager.sh
-```
-
+---
+name: smartfires-manager
+description: Operator reference for the Jetson update, service-management, and gateway flashing script.
+category: reference
+status: current
+last_verified: 2026-09-04
+source_refs:
+  - edge/smartfires-manager.sh
+related_docs:
+  - flashing
+  - jetson-cheatsheet
+  - lora-sniffer
 ---
 
-# Requirements
+# SmartFires build and deployment manager
 
-The Jetson must have:
+`edge/smartfires-manager.sh` updates the Jetson checkout/package, manages `smartfires-edge.service`, and flashes the base and sniffer Feathers. It does not flash sensor nodes.
 
-* Git
-* Python 3
-* Existing SmartFires virtual environment
-* PlatformIO
-* systemd
-* GitHub authentication
-* SmartFires udev rules installed
+Run it from the repository root:
 
-The default Python virtual environment is:
+```bash
+chmod +x edge/smartfires-manager.sh
+./edge/smartfires-manager.sh --help
+```
+
+The script resolves the repository root from its own location, so it may also be invoked by absolute path from another directory.
+
+## Preconditions
+
+- A Git checkout with remote `origin` and the selected remote branch.
+- A clean working tree for commands that call `sync_repo`; the script refuses to switch/update with uncommitted changes.
+- `git`, `systemctl`, and `sudo` on the Jetson.
+- An existing Python virtual environment at `$HOME/.smartfires_venv`, or `SMARTFIRES_VENV` pointing to another one.
+- PlatformIO as `pio` or `$HOME/.platformio/penv/bin/pio` for flash commands.
+- `smartfires-edge.service` installed for any command that restarts it.
+- Stable `/dev/smartfires-base` and `/dev/smartfires-sniffer` symlinks for firmware flashing.
+
+The manager can stop a live service, change branches, install Python packages, and flash connected boards. Review the selected branch and physical USB board identity before running a mutating command.
+
+## Syntax
 
 ```text
-~/.smartfires_venv
+edge/smartfires-manager.sh [--branch BRANCH] COMMAND
 ```
 
-The manager expects the following stable serial device names:
+The branch defaults to `master`. `SMARTFIRES_BRANCH` changes the environment default; `-b` or `--branch` on the command line takes precedence.
+
+Examples:
+
+```bash
+./edge/smartfires-manager.sh status
+./edge/smartfires-manager.sh --branch master sync
+./edge/smartfires-manager.sh -b gps-power update-edge
+```
+
+## Commands
+
+| Command | Actions |
+|---|---|
+| `status` | Show repository branch/commit, Python environment/package, base/sniffer devices, and service state |
+| `sync` | Require a clean tree, verify the remote branch, fetch, switch/create its local tracking branch, then `pull --ff-only` |
+| `update-edge` | Stop service, sync repository, force-reinstall the edge package into the venv, restart/verify service |
+| `flash-base` | Stop service, sync repository, flash `feather_m0_lora_base` to `/dev/smartfires-base`, wait for re-enumeration, restart service |
+| `flash-sniffer` | Same flow using `feather_m0_lora_sniffer` and `/dev/smartfires-sniffer` |
+| `flash-gateway` | Stop, sync, flash base then sniffer, restart |
+| `deploy` | Stop, sync, reinstall edge package, flash base and sniffer, restart, show status |
+
+With no command or with `--help`, the script prints usage and makes no deployment change.
+
+## Common workflows
+
+Inspect only:
+
+```bash
+./edge/smartfires-manager.sh status
+```
+
+Update Jetson software without firmware flashing:
+
+```bash
+./edge/smartfires-manager.sh update-edge
+```
+
+Flash only one gateway board:
+
+```bash
+./edge/smartfires-manager.sh flash-base
+./edge/smartfires-manager.sh flash-sniffer
+```
+
+Full gateway deployment:
+
+```bash
+./edge/smartfires-manager.sh --branch master deploy
+```
+
+## Exact behavior worth knowing
+
+### Git
+
+The script checks the requested branch with `git ls-remote`, fetches `origin`, checks out an existing local branch or creates a tracking branch, and pulls with `--ff-only`. It never commits, stashes, resets, or force-checks-out user changes.
+
+### Edge package
+
+Installation uses the selected venv's Python:
 
 ```text
-/dev/smartfires-base
-/dev/smartfires-sniffer
+python -m pip install --upgrade --force-reinstall <repo>/edge/edge-receiver
 ```
 
-These should be provided by the SmartFires udev rules.
+It verifies `<venv>/bin/smartfires-edge --help` after installation. The venv must already exist; the manager does not create it.
 
-The expected PlatformIO firmware environments are:
+### Service
 
-```text
-feather_m0_lora_base
-feather_m0_lora_sniffer
-```
-
-The expected systemd service is:
-
-```text
-smartfires-edge.service
-```
-
----
-
-# GitHub Authentication
-
-The Jetson must be able to access the SmartFires GitHub repository.
-
-For a fine-grained GitHub Personal Access Token used for both pulling and pushing, configure the token with:
-
-```text
-Repository access:
-    SmartFires_IoT
-
-Repository permissions:
-    Contents: Read and write
-```
-
-Authenticate GitHub CLI:
+Mutating deployment commands stop `smartfires-edge.service` so it releases the USB devices. Restart calls `systemctl daemon-reload`, restarts the service, waits two seconds, and fails if it is not active. An error may leave the service stopped; check it explicitly.
 
 ```bash
-gh auth login --with-token
-```
-
-Paste the token, then configure Git to use the GitHub CLI credentials:
-
-```bash
-gh auth setup-git
-```
-
-Verify authentication:
-
-```bash
-gh auth status
-```
-
-Test Git access:
-
-```bash
-git fetch origin
-```
-
----
-
-# Basic Usage
-
-Show help:
-
-```bash
-./deploy/smartfires-manager.sh --help
-```
-
-or:
-
-```bash
-./deploy/smartfires-manager.sh
-```
-
-The default Git branch is:
-
-```text
-master
-```
-
----
-
-# Branch Selection
-
-Use `-b` or `--branch` to deploy from another GitHub branch.
-
-Production deployment from `master`:
-
-```bash
-./deploy/smartfires-manager.sh deploy
-```
-
-Explicitly select `master`:
-
-```bash
-./deploy/smartfires-manager.sh --branch master deploy
-```
-
-Deploy a feature branch:
-
-```bash
-./deploy/smartfires-manager.sh --branch feature/mcu-duty-cycle deploy
-```
-
-Short form:
-
-```bash
-./deploy/smartfires-manager.sh -b feature/mcu-duty-cycle deploy
-```
-
-The branch option may be placed before or after the command:
-
-```bash
-./deploy/smartfires-manager.sh -b feature/test deploy
-```
-
-or:
-
-```bash
-./deploy/smartfires-manager.sh deploy -b feature/test
-```
-
-Before switching or updating branches, the manager checks for uncommitted Git changes.
-
-If the working tree is dirty, the operation is aborted.
-
----
-
-# Commands
-
-## `status`
-
-Display the current SmartFires deployment state.
-
-```bash
-./deploy/smartfires-manager.sh status
-```
-
-Shows:
-
-* Repository path
-* Current Git branch
-* Selected deployment branch
-* Current commit
-* Python virtual environment
-* Installed `smartfires-edge` version
-* Base station device status
-* Sniffer device status
-* systemd service status
-
-Example:
-
-```text
-==========================================
- SmartFires System Status
-==========================================
-
-Repository:
-  Path: /home/smartfires/repos/smartfires
-  Current branch:  master
-  Selected branch: master
-  Commit: abc1234
-
-Python environment:
-  Venv: /home/smartfires/.smartfires_venv
-  Python: Python 3.x
-  smartfires-edge: 0.1.0
-
-Serial devices:
-  /dev/smartfires-base            [OK]
-  /dev/smartfires-sniffer         [OK]
-
-systemd:
-  smartfires-edge.service: ACTIVE
-```
-
----
-
-## `sync`
-
-Update the local repository from the selected GitHub branch.
-
-```bash
-./deploy/smartfires-manager.sh sync
-```
-
-For another branch:
-
-```bash
-./deploy/smartfires-manager.sh -b feature/mcu-duty-cycle sync
-```
-
-The manager performs a fast-forward-only update.
-
-Conceptually:
-
-```bash
-git fetch origin
-git checkout <branch>
-git pull --ff-only origin <branch>
-```
-
-A merge commit will not be created automatically.
-
----
-
-## `update-edge`
-
-Update only the Jetson-side Python application.
-
-```bash
-./deploy/smartfires-manager.sh update-edge
-```
-
-Sequence:
-
-```text
-stop smartfires-edge.service
-        |
-        v
-pull selected Git branch
-        |
-        v
-reinstall smartfires-edge
-        |
-        v
-restart smartfires-edge.service
-        |
-        v
-verify service
-```
-
-The package is installed into:
-
-```text
-~/.smartfires_venv
-```
-
-from:
-
-```text
-edge/edge-receiver
-```
-
-Use this command when the Python edge application changed but the Feather firmware did not.
-
----
-
-## `flash-base`
-
-Update the LoRa base station firmware.
-
-```bash
-./deploy/smartfires-manager.sh flash-base
-```
-
-The manager:
-
-1. Stops `smartfires-edge.service`
-2. Pulls the selected Git branch
-3. Builds `feather_m0_lora_base`
-4. Flashes `/dev/smartfires-base`
-5. Waits for the USB device to return
-6. Restarts `smartfires-edge.service`
-
-Feature branch example:
-
-```bash
-./deploy/smartfires-manager.sh \
-    -b feature/base-change \
-    flash-base
-```
-
----
-
-## `flash-sniffer`
-
-Update the LoRa sniffer firmware.
-
-```bash
-./deploy/smartfires-manager.sh flash-sniffer
-```
-
-The manager uses:
-
-```text
-PlatformIO environment:
-    feather_m0_lora_sniffer
-
-Serial device:
-    /dev/smartfires-sniffer
-```
-
-Feature branch example:
-
-```bash
-./deploy/smartfires-manager.sh \
-    -b feature/sniffer-change \
-    flash-sniffer
-```
-
----
-
-## `flash-gateway`
-
-Flash both USB-connected LoRa boards.
-
-```bash
-./deploy/smartfires-manager.sh flash-gateway
-```
-
-Sequence:
-
-```text
-stop edge service
-      |
-      v
-pull selected branch
-      |
-      v
-flash base
-      |
-      v
-flash sniffer
-      |
-      v
-restart edge service
-```
-
-This command does not reinstall the Python edge package.
-
----
-
-## `deploy`
-
-Perform a complete SmartFires gateway deployment.
-
-```bash
-./deploy/smartfires-manager.sh deploy
-```
-
-This is the primary deployment command.
-
-Sequence:
-
-```text
-stop smartfires-edge.service
-        |
-        v
-fetch selected Git branch
-        |
-        v
-checkout/update selected branch
-        |
-        v
-reinstall smartfires-edge
-        |
-        v
-flash LoRa base station
-        |
-        v
-flash LoRa sniffer
-        |
-        v
-restart smartfires-edge.service
-        |
-        v
-verify deployment
-```
-
-Production:
-
-```bash
-./deploy/smartfires-manager.sh deploy
-```
-
-Feature testing:
-
-```bash
-./deploy/smartfires-manager.sh \
-    -b feature/mcu-duty-cycle \
-    deploy
-```
-
----
-
-# Virtual Environment
-
-The manager uses the existing SmartFires virtual environment:
-
-```text
-~/.smartfires_venv
-```
-
-It does not create or replace the environment.
-
-The package is installed using the Python interpreter inside that environment.
-
-Conceptually:
-
-```bash
-~/.smartfires_venv/bin/python \
-    -m pip install \
-    --upgrade \
-    --force-reinstall \
-    ./edge/edge-receiver
-```
-
-You do not need to manually activate the environment before running the manager.
-
-This works:
-
-```bash
-./deploy/smartfires-manager.sh deploy
-```
-
-even if the shell prompt does not currently show:
-
-```text
-(.smartfires_venv)
-```
-
----
-
-# Overriding the Virtual Environment
-
-Set `SMARTFIRES_VENV` if a system uses a different environment location.
-
-Example:
-
-```bash
-SMARTFIRES_VENV=/opt/smartfires/venv \
-    ./deploy/smartfires-manager.sh deploy
-```
-
----
-
-# Overriding the Default Branch
-
-The default branch is:
-
-```text
-master
-```
-
-It can also be overridden with an environment variable:
-
-```bash
-SMARTFIRES_BRANCH=feature/test \
-    ./deploy/smartfires-manager.sh deploy
-```
-
-Command-line `--branch` selection is preferred for interactive use:
-
-```bash
-./deploy/smartfires-manager.sh \
-    --branch feature/test \
-    deploy
-```
-
----
-
-# PlatformIO
-
-The manager searches for PlatformIO in this order:
-
-```text
-pio
-```
-
-from the system `PATH`, followed by:
-
-```text
-~/.platformio/penv/bin/pio
-```
-
-The firmware project is expected at:
-
-```text
-platformio/
-```
-
-The base station is built with:
-
-```text
-feather_m0_lora_base
-```
-
-The sniffer is built with:
-
-```text
-feather_m0_lora_sniffer
-```
-
----
-
-# Why the Edge Service Is Stopped During Flashing
-
-`smartfires-edge` normally holds the base and sniffer serial ports open.
-
-These devices are:
-
-```text
-/dev/smartfires-base
-/dev/smartfires-sniffer
-```
-
-PlatformIO also needs access to those devices when programming the Feather boards.
-
-The manager therefore stops:
-
-```text
-smartfires-edge.service
-```
-
-before flashing.
-
-After programming completes and the USB devices re-enumerate, the manager restarts the service.
-
----
-
-# Safety Behavior
-
-The build manager intentionally fails rather than attempting to recover automatically from an uncertain deployment state.
-
-For example, deployment stops if:
-
-* The Git working tree contains uncommitted changes
-* The requested Git branch does not exist
-* `git pull --ff-only` fails
-* The SmartFires virtual environment is missing
-* Python package installation fails
-* PlatformIO is unavailable
-* A required Feather is missing
-* Firmware compilation fails
-* Firmware flashing fails
-* A serial device does not return after programming
-* `smartfires-edge.service` fails to start
-
-If a deployment fails after the service has been stopped, the service may intentionally remain stopped.
-
-Check it with:
-
-```bash
-sudo systemctl status smartfires-edge.service
-```
-
-View recent logs with:
-
-```bash
-journalctl -u smartfires-edge.service -n 100 --no-pager
-```
-
-Follow logs live:
-
-```bash
-journalctl -fu smartfires-edge.service
-```
-
-Restart manually if appropriate:
-
-```bash
+sudo systemctl status smartfires-edge.service --no-pager --full
 sudo systemctl restart smartfires-edge.service
+journalctl -u smartfires-edge.service -f
 ```
 
----
+### Firmware
 
-# Common Workflows
+The manager invokes PlatformIO with an explicit project directory, environment, upload target, and stable device path. After upload it waits two seconds, then up to 30 seconds for the same udev symlink to reappear.
 
-## Update everything from production
+The base and sniffer must be physically distinguishable by their udev serial rules. The script trusts those symlinks; it does not independently detect which firmware role a connected Feather should have. Attach a suitable antenna before radio firmware is run.
+
+## Environment variables
 
 ```bash
-./deploy/smartfires-manager.sh deploy
+export SMARTFIRES_VENV="$HOME/.smartfires_venv"
+export SMARTFIRES_BRANCH=master
 ```
 
-## Test a feature branch on the full gateway
+Avoid pointing `SMARTFIRES_VENV` at a shared/system Python environment. Command-line `--branch` is preferable for a one-off deployment because the selected branch is printed before changes.
 
-```bash
-./deploy/smartfires-manager.sh \
-    -b feature/mcu-duty-cycle \
-    deploy
-```
+## Recovery
 
-## Update only the Jetson Python package
+If a command fails:
 
-```bash
-./deploy/smartfires-manager.sh update-edge
-```
+1. Read the reported failing step and service warning.
+2. Check `git status --short` and the current branch.
+3. Check both stable USB symlinks with `ls -l`.
+4. Check `smartfires-edge.service` and its journal.
+5. Verify the intended venv contains `bin/python`.
+6. Resume with the narrowest command needed; do not automatically rerun full `deploy` if only the service restart failed.
 
-## Update only the base station
-
-```bash
-./deploy/smartfires-manager.sh flash-base
-```
-
-## Update only the sniffer
-
-```bash
-./deploy/smartfires-manager.sh flash-sniffer
-```
-
-## Update both Feathers without reinstalling Python
-
-```bash
-./deploy/smartfires-manager.sh flash-gateway
-```
-
-## Check the system before deployment
-
-```bash
-./deploy/smartfires-manager.sh status
-```
-
----
-
-# Recommended Production Workflow
-
-Before deploying:
-
-```bash
-git status
-```
-
-Then check the gateway:
-
-```bash
-./deploy/smartfires-manager.sh status
-```
-
-Deploy production:
-
-```bash
-./deploy/smartfires-manager.sh deploy
-```
-
-Verify:
-
-```bash
-./deploy/smartfires-manager.sh status
-```
-
-Check the service:
-
-```bash
-sudo systemctl status smartfires-edge.service
-```
-
-For a development branch:
-
-```bash
-./deploy/smartfires-manager.sh \
-    -b feature/my-feature \
-    deploy
-```
-
-After testing, return the gateway to production with:
-
-```bash
-./deploy/smartfires-manager.sh \
-    -b master \
-    deploy
-```
-
----
-
-# Future Work
-
-Planned extensions to the build manager may include:
-
-* Mass flashing SmartFires sensor nodes
-* Automatic USB device discovery
-* Node serial number tracking
-* Firmware version reporting
-* Git commit SHA recording for flashed devices
-* Deployment logs
-* Deployment manifests
-* PyPI-based `smartfires-edge` installation
-* Package publishing workflow
-* Firmware release artifacts
-* Automated health checks after deployment
-
-The long-term goal is for the SmartFires build manager to provide one consistent interface for deploying the complete system:
-
-```text
-GitHub
-   |
-   +---- Jetson software
-   |
-   +---- Base firmware
-   |
-   +---- Sniffer firmware
-   |
-   +---- Node firmware
-            |
-            v
-     SmartFires deployment
-```
-
+The manager does not roll back a package install or a successful first-board flash if a later step fails. Git remains on the branch selected during sync, and the service may remain stopped.

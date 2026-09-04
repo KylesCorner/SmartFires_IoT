@@ -1,6 +1,9 @@
-# Edge Unit
+# Edge unit
 
-Jetson base-station ingest now lives in `edge/edge-receiver`.
+The Jetson package lives in [`edge-receiver/`](edge-receiver/) and supplies `receive`, `summary`, `visualize`, and `web` subcommands. Install it from the repository root with:
 
-- Run receiver: `smartfires-edge receive ...` (after `pip install -e edge/edge-receiver`)
-- Standalone anemometer check remains in `edge/anemometer_read.py`
+```bash
+python3 -m pip install --use-pep517 -e edge/edge-receiver
+```
+
+Use `/dev/smartfires-base` for the udev-managed base connection. [`smartfires-manager.sh`](smartfires-manager.sh) manages the receiver service; [`anemometer_read.py`](anemometer_read.py) remains available as a standalone ES-W302 check.

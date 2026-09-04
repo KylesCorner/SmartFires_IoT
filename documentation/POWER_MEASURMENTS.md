@@ -1,3 +1,16 @@
+---
+name: power-measurements
+description: Hardware setup and per-environment procedure for isolated Feather M0 power measurements.
+category: reference
+status: current
+last_verified: 2026-09-04
+source_refs:
+  - platformio/platformio.ini
+related_docs:
+  - duty-cycling
+  - tunable-parameters
+---
+
 # SmartFires Power Test Environments
 
 This document describes the PlatformIO environments used to measure SmartFires power draw on the Adafruit Feather M0 LoRa sensor node.
@@ -757,4 +770,3 @@ runtime_hours ≈ usable_capacity_mAh / average_current_mA
 ```
 
 Use a usable-capacity factor for LiPo batteries, usually around 70–85% of rated capacity.
-

@@ -1,3 +1,7 @@
+// ---
+// description: Abstract MCU sleep interface returning the elapsed standby duration.
+// role: interface
+// ---
 #pragma once
 
 #include <stdint.h>

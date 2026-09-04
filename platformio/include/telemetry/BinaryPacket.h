@@ -1,7 +1,7 @@
 // ---
 // description: Binary wire-format definitions for SmartFires telemetry — packet structs, CRC-8/MAXIM, and the encode/decode functions for every LoRa and UART frame type.
 // role: implementation
-// docs: [bandwidth-scaling, uart-jetson-bridge, software-design]
+// docs: [bandwidth-scaling, jetson-bridge, software-design]
 // ---
 #pragma once
 
@@ -26,8 +26,9 @@
 //
 // CRC-8/MAXIM (polynomial 0x31) covers all preceding bytes in the LoRa payload.
 //
-// UART TIME_SYNC frame — Jetson -> base (17 bytes):
-//   [0xAA][0x55][len=13][PktHeader(PKT_TIME_SYNC):5][TimeSyncPayload:8][crc8]
+// UART TIME_SYNC frame — Jetson -> base (18 bytes):
+//   [0xAA][0x55][len=14][PktHeader(PKT_TIME_SYNC):5][TimeSyncPayload:8]
+//   [LoRa crc8][UART crc8]
 //
 // UART base frame — base -> Jetson (variable):
 //   [0xAA][0x55][len:u8][rssi:i8][LoRa payload][crc8]
@@ -48,7 +49,7 @@ enum PktType : uint8_t {
     PKT_HEARTBEAT  = 0x02,
     PKT_TIME_SYNC  = 0x03,
     PKT_BUNDLE     = 0x04,
-    PKT_STATUS     = 0x05,  // GPS + battery, sent every 15 min
+    PKT_STATUS     = 0x05,  // GPS/battery/heading/link/power; cadence is build-configured
     PKT_AWAKEN     = 0x06,  // boot handshake — node broadcasts before sensing starts
     PKT_ACK_SUMMARY = 0x07, // base -> node app-layer reliability summary
     // Timed duty-cycle active-window edges. Sent by the node instead of marking
@@ -149,7 +150,8 @@ struct __attribute__((packed)) FullStatePayload {
     uint16_t pm10_ug10;
 };
 
-// Sent every 15 minutes — GPS position + battery level + DMP heading.
+// GPS position, battery level, DMP heading, link totals, and applied TX power.
+// Cadence is supplied by NetworkConfig; active node environments use 15 s.
 // flags bits: STATUS_GPS_VALID=0x01, STATUS_BATT_VALID=0x02, STATUS_IMU_VALID=0x04
 static constexpr uint8_t STATUS_GPS_VALID  = 0x01;
 static constexpr uint8_t STATUS_BATT_VALID = 0x02;
@@ -576,7 +578,7 @@ inline uint8_t encodeBundlePayload(
     return static_cast<uint8_t>(len);
 }
 
-// ---------- encode: TIME_SYNC UART frame (Jetson -> base, 16 bytes) ----------
+// ---------- encode: TIME_SYNC UART frame (Jetson -> base, 18 bytes) ----------
 
 inline size_t encodeTimeSyncFrame(
     uint8_t node_id, uint8_t seq,
@@ -584,7 +586,7 @@ inline size_t encodeTimeSyncFrame(
     uint8_t* buf, size_t buf_size,
     uint8_t flags = 0)
 {
-    static constexpr size_t kDataLen  = sizeof(PktHeader) + sizeof(TimeSyncPayload);
+    static constexpr size_t kDataLen  = kTimeSyncLoRaSize;
     static constexpr size_t kFrameLen = 2 + 1 + kDataLen + 1;
 
     if (buf_size < kFrameLen) return 0;
@@ -593,21 +595,15 @@ inline size_t encodeTimeSyncFrame(
     buf[1] = FRAME_M1;
     buf[2] = static_cast<uint8_t>(kDataLen);
 
-    PktHeader hdr;
-    hdr.magic    = PKT_MAGIC;
-    hdr.pkt_type = PKT_TIME_SYNC;
-    hdr.node_id  = node_id;
-    hdr.seq      = seq;
-    hdr.flags    = flags;
-
-    memcpy(buf + 3,                     &hdr, sizeof(PktHeader));
-    memcpy(buf + 3 + sizeof(PktHeader), &ts,  sizeof(TimeSyncPayload));
+    const uint8_t encoded = encodeTimeSyncPayload(
+        node_id, seq, ts, buf + 3, buf_size - 3, flags);
+    if (encoded != kDataLen) return 0;
 
     buf[3 + kDataLen] = crc8(buf + 2, 1 + kDataLen);
     return kFrameLen;
 }
 
-// ---------- encode: base -> Jetson UART frame (variable length) ----------
+// ---------- encode: base -> Jetson USB-serial frame (variable length) ----------
 
 inline size_t encodeBaseFrame(
     int8_t rssi,

@@ -23,7 +23,7 @@ RadioHeadTdmaDriver baseRadio(baseRadioCfg);
 
 SmartFiresBaseApp::Config baseAppCfg = SmartFiresBaseApp::Config::baseCfg();
 // Jetson link is native USB CDC (Serial), matching the sniffer firmware — see
-// documentation/Current_Architecture/UART_JETSON_BRIDGE.md. Debug logs are
+// documentation/Current_Architecture/JETSON_BRIDGE.md. Debug logs are
 // multiplexed onto that same link as PKT_DEBUG_LOG frames (FramedDebugLogSink)
 // instead of a separate physical UART — Serial1 is unused on this build.
 FramedDebugLogSink baseDebugSink(Serial, baseAppCfg.baseAddr);

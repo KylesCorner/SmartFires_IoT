@@ -21,7 +21,32 @@ DOCS_DIR = REPO_ROOT / "documentation"
 
 # The schema definition describes the rules; it isn't itself a content doc pinned
 # to source_refs, so it's exempt from the "must have frontmatter" check.
-EXEMPT = {DOCS_DIR / "DOC_FRONTMATTER.md"}
+EXEMPT = {
+    DOCS_DIR / "DOC_FRONTMATTER.md",
+    DOCS_DIR / "CODE_FRONTMATTER.md",
+}
+VALID_CATEGORIES = {"architecture", "reference", "plan-pending", "plan-completed", "index"}
+VALID_STATUSES = {"current", "draft", "historical", "superseded"}
+
+
+def expected_category(md_path: Path) -> str | None:
+    """Return the schema category implied by a documentation path."""
+    rel = md_path.relative_to(DOCS_DIR)
+    if rel == Path("README.md"):
+        return "index"
+    if rel in {Path("SOFTWARE_DESIGN.md"), Path("SOFTWARE_DESIGN_DIAGRAM.md")}:
+        return "architecture"
+    if rel == Path("POWER_MEASURMENTS.md"):
+        return "reference"
+    if rel.parts[0] == "Current_Architecture":
+        return "architecture"
+    if rel.parts[0] == "User_Reference":
+        return "reference"
+    if rel.parts[0] == "Pending_Plans":
+        return "plan-pending"
+    if rel.parts[0] in {"Completed_Plans", "Project_Progress"}:
+        return "plan-completed"
+    return None
 
 
 def parse_frontmatter(text: str) -> dict | None:
@@ -72,6 +97,7 @@ def last_commit_date(path: Path) -> date | None:
 def main() -> int:
     problems: list[str] = []
     checked = 0
+    records: list[tuple[Path, dict]] = []
 
     for md_path in sorted(DOCS_DIR.rglob("*.md")):
         if md_path in EXEMPT:
@@ -84,9 +110,46 @@ def main() -> int:
             continue
 
         checked += 1
+        records.append((md_path, fm))
         name = fm.get("name", "<missing name>")
+        category = fm.get("category")
+        status = fm.get("status")
         last_verified_raw = fm.get("last_verified")
         source_refs = fm.get("source_refs", [])
+
+        for required in ("name", "description", "category", "status"):
+            if not fm.get(required):
+                problems.append(f"{rel}: missing required '{required}' field")
+
+        if category not in VALID_CATEGORIES:
+            problems.append(
+                f"{rel} ({name}): category '{category}' is not one of {sorted(VALID_CATEGORIES)}"
+            )
+        expected = expected_category(md_path)
+        if expected is not None and category != expected:
+            problems.append(
+                f"{rel} ({name}): category '{category}' does not match path (expected '{expected}')"
+            )
+        if status not in VALID_STATUSES:
+            problems.append(
+                f"{rel} ({name}): status '{status}' is not one of {sorted(VALID_STATUSES)}"
+            )
+        if category == "plan-pending" and status != "draft":
+            problems.append(f"{rel} ({name}): pending plans must use status 'draft'")
+        if category == "plan-completed" and status not in {"historical", "superseded"}:
+            problems.append(
+                f"{rel} ({name}): completed/history docs must be historical or superseded"
+            )
+        if category in {"architecture", "reference", "index"} and not last_verified_raw:
+            problems.append(
+                f"{rel} ({name}): category '{category}' requires last_verified"
+            )
+        if category == "architecture" and not source_refs:
+            problems.append(f"{rel} ({name}): architecture docs require source_refs")
+        if category in {"plan-pending", "plan-completed"} and source_refs:
+            problems.append(
+                f"{rel} ({name}): plans/history must not declare source_refs"
+            )
 
         if not source_refs:
             continue
@@ -120,6 +183,43 @@ def main() -> int:
                     f"{rel} ({name}): '{ref}' last committed {commit_date}, "
                     f"doc last_verified {last_verified} — review for drift"
                 )
+
+    # Slugs are the foreign keys used by related_docs and superseded_by. Check
+    # them after the per-file pass so forward references are valid.
+    name_paths: dict[str, list[Path]] = {}
+    for md_path, fm in records:
+        name = fm.get("name")
+        if isinstance(name, str) and name:
+            name_paths.setdefault(name, []).append(md_path)
+
+    for name, paths in sorted(name_paths.items()):
+        if len(paths) > 1:
+            joined = ", ".join(str(path.relative_to(REPO_ROOT)) for path in paths)
+            problems.append(f"duplicate name slug '{name}': {joined}")
+
+    known_names = set(name_paths)
+    for md_path, fm in records:
+        rel = md_path.relative_to(REPO_ROOT)
+        name = fm.get("name", "<missing name>")
+        related = fm.get("related_docs", [])
+        if isinstance(related, str):
+            related = [related]
+        if not isinstance(related, list):
+            problems.append(f"{rel} ({name}): related_docs must be a list")
+            related = []
+        for target in related:
+            if target not in known_names:
+                problems.append(
+                    f"{rel} ({name}): related_docs target '{target}' does not exist"
+                )
+
+        superseded_by = fm.get("superseded_by")
+        if superseded_by in {None, "null", "None", "~"}:
+            continue
+        if not isinstance(superseded_by, str) or superseded_by not in known_names:
+            problems.append(
+                f"{rel} ({name}): superseded_by target '{superseded_by}' does not exist"
+            )
 
     print(f"Checked {checked} doc(s) with frontmatter under {DOCS_DIR.relative_to(REPO_ROOT)}/")
     if not problems:

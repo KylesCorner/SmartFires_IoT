@@ -3,7 +3,7 @@ name: duty-cycling
 description: DutyCycleController's wake/sample/sleep state machine and its config/trigger sensor.
 category: architecture
 status: current
-last_verified: 2026-08-17
+last_verified: 2026-09-04
 source_refs:
   - platformio/include/power/DutyCycleController.h
   - platformio/src/power/DutyCycleController.cpp
@@ -12,249 +12,77 @@ related_docs:
   - tunable-parameters
 ---
 
-# Duty Cycling
+# Duty cycling
 
-`DutyCycleController` owns the sensor wake/sample/sleep state machine for every
-node. It gates when sensing is active, runs sensors through a warmup period,
-decides when a telemetry snapshot is ready, and puts sensors back to sleep.
+`DutyCycleController` owns sensor wake, warmup, sampling, and sleep phases. `SmartFiresNodeApp` advances it on each loop, consumes `telemetryReady()`, converts sensor state into `SensorSnapshot`, and then hands the snapshot to `PacketHandler`.
 
-The application loop (`SmartFiresNodeApp::update()`) calls
-`DutyCycleController::update()` each iteration and checks
-`telemetryReady()` to know when to build and enqueue a packet.
+## Modes
 
-## Phases
+| Mode | Wake condition | Sample period | Warmup | Active window | Cycle/standby |
+|---|---|---:|---:|---:|---|
+| Continuous | Never sleeps intentionally | 750 ms | 10 s once | Unbounded | None |
+| SensorTriggered | SHT31 threshold after minimum sleep | 750 ms | 10 s | 30 s | Minimum 3 s sleep |
+| Timed | RTC deadline | 1,000 ms | 10 s | 30 s, up to 15 s overrun | 75 s wake-to-wake, minimum 5 s standby |
+| Hybrid | Trigger or timer | 750 ms | 10 s | 30 s | 5 min + warmup + active; minimum 5 s standby |
 
+Build selection is `SMARTFIRES_DUTY_CYCLE_MODE`: 0 Continuous, 1 SensorTriggered, 2 Timed, 3 Hybrid. Current environments select SensorTriggered for `feather_m0_lora_node`, Timed for `node_debug` and `node_timed`, and Hybrid for `node_hybrid`.
+
+## State flow
+
+```text
+startup / wake
+    -> SensorWarmup
+    -> ActiveSampling
+    -> SensorCooldown
+    -> Sleeping
+    -> SensorWarmup ...
 ```
-NotStarted
-  ↓ begin()
-IdleSleeping ←────────────────────────────────────┐
-  ↓ sleep elapsed or threshold crossed             │
-WarmingUp                                          │
-  ↓ warmupMs elapsed                               │
-ActiveSampling                                     │
-  ↓ activeSampleMs elapsed + markTelemetrySent()   │
-CooldownSleeping ─────────────────────────────────┘
-  (after cooldown → IdleSleeping)
 
-Error (fatal sensor failure, if failOnSampleError = true)
+Continuous remains in `ActiveSampling` after its first warmup. Other modes call each sensor's wake/sleep behavior according to its `SensorDutyClass`. Sampling is globally scheduled by the active profile but each sensor also enforces its own minimum period.
+
+## SensorTriggered
+
+The trigger source is SHT31 temperature/humidity. After at least 3 seconds asleep, the controller polls for up to 1 second per update and wakes when either absolute delta from the reference reaches:
+
+- 1.0 °C
+- 5.0 percentage points relative humidity
+
+There is no timer wake in this mode. Once triggered, sensors warm for 10 seconds, sample for 30 seconds at 750 ms, cool down, and return to trigger monitoring. MCU standby is not entered by the current node application for SensorTriggered mode; sensor/radio power behavior is separate from the Timed MCU-standby path.
+
+## Timed
+
+Timed mode is deliberately aligned to packet boundaries:
+
+```text
+2 bundles * 15 samples/bundle * 1,000 ms = 30,000 ms active
 ```
 
-This is the full state machine as implemented. Whether a build actually
-exercises all of it depends on a compile-time flag — see below.
+The normal window therefore emits 30 samples as two full bundles, with no partial-bundle flush. If blocking sensor work starves sampling, the controller may hold the window open for up to one bundle period (15 seconds). On that ceiling it permits the application to force-encode the partial bundle instead of losing accumulated samples.
 
-When `cfg.enabled = false`, `DutyCycleController::update()` short-circuits to
-a reduced path:
+The fixed 75-second wake-to-wake target is divided into time already spent in warmup, active sampling/overrun, post-window TX drain, and the remaining standby. Nominally this is 10 s warmup + 30 s active + about 35 s standby. Standby never falls below 5 s; if work runs longer, the cycle stretches.
 
-- `begin()` always transitions `NotStarted → WarmingUp` unconditionally.
-- While disabled, `IdleSleeping`'s threshold-trigger logic (`updateSleeping()`)
-  is never invoked — the controller instead treats `IdleSleeping`/`NotStarted`
-  the same as `WarmingUp`, running `updateWakingSensors()` and waiting out the
-  real `warmupMs`.
-- Once `ActiveSampling` is reached, the controller **stays there permanently**,
-  sampling every `samplePeriodMs` — `activeSampleMs` is never checked, so it
-  never transitions to `CooldownSleeping` on its own.
-- If `CooldownSleeping` is ever entered (not reachable in practice while
-  disabled), it jumps straight back to `ActiveSampling`, skipping the real
-  `minSleepMs` wait.
+`WINDOW_BEGIN` is queued after wake and `WINDOW_END` at close. The end marker carries `planned_sleep_ms` and the number of samples in the completed window. The application keeps the radio awake for up to 5 seconds while draining the final telemetry and marker, then enters SAMD21 RTC standby when the remaining duration is at least 250 ms.
 
-Net effect while disabled: one `WarmingUp` delay at boot, then indefinite
-`ActiveSampling` at `samplePeriodMs` — `IdleSleeping` and `CooldownSleeping`
-are never functionally exercised.
+The RTC COUNT32 implementation keeps subsecond time and supports continuing TDMA session time across standby. The watchdog is currently disabled for the actual standby interval; extending watchdog coverage is open work.
 
-## Configuration
+## Hybrid
 
-`DutyCycleConfig` is built by the single factory `DutyCycleConfig::make(...)`
-(`include/power/DutyCycleController.h`). `SensingConfig.h` resolves one complete
-profile into a `kActive*` constant set, and `main.cpp` constructs the config from
-`kActive*` exclusively — it never references a named profile directly.
+Hybrid combines the SensorTriggered thresholds with a scheduled wake. Its nominal cycle is 5 minutes plus the 10-second warmup and 30-second active period. A qualifying trigger may shorten sleep after the three-second minimum. The 750 ms sample period does not divide a bundle cleanly at the 30-second boundary, so Hybrid does not enable Timed's full-bundle overrun behavior.
 
-> **Authoritative values:** `platformio/include/config/SensingConfig.h` — `SensingConfig::DutyCycle` namespace.
-> For the full parameter table see [TUNABLE_PARAMETERS.md](TUNABLE_PARAMETERS.md#sensing--duty-cycle).
+## Sensor timing classes
 
-### Profile selection: `SMARTFIRES_DUTY_CYCLE_MODE`
+| Sensor | Minimum sample period | Wake delay | Duty class |
+|---|---:|---:|---|
+| SHT31 | 100 ms | none | AlwaysOn |
+| Wind Rev C | 10 ms | 10 s | WarmupHeavy |
+| SPS30 | 1,000 ms | 8 s | WarmupHeavy |
+| ICM-20948 | 10 ms | none | DutyCycled |
+| PA1010D GPS continuous | 100 ms | none | GPS-specific modes |
 
-| Value | `DutyCycleMode` | Constant set | Used by |
-|---|---|---|---|
-| `0` | `Continuous` | `kContinuous*` | — |
-| `1` (default if unset) | `SensorTriggered` | `kSensorTriggered*` | `feather_m0_lora_node` |
-| `2` | `Timed` | `kTimed*` | `feather_m0_lora_node_debug`, `feather_m0_lora_node_timed` |
-| `3` | `Hybrid` | `kHybrid*` | `feather_m0_lora_node_hybrid` — **deprecated, not a target for further work** |
+The controller's 10-second warmup covers the slowest normal sensor wake. GPS also exposes periodic and AlwaysLocate power profiles in `SensingConfig.h`; those are distinct sensor-driver choices, not controller modes.
 
-An unrecognised value is a compile error, not a silent fallback.
+## Sample errors and telemetry
 
-Only `Timed` performs real MCU standby: `SmartFiresNodeApp::maybeEnterTimedMcuSleep()`
-returns early unless `DutyCycleController::mode() == DutyCycleMode::Timed`. The other
-modes idle in the sleeping phases with the CPU running.
+All active profiles currently set `failOnSampleError=false`. A failed sensor sample does not abort the entire controller cycle; validity is represented by snapshot flags and downstream packet fields. STATUS emission is handled by `PacketHandler`, not by duty-cycle timing, and current node environments set its interval to 15 seconds.
 
-### `kSensorTriggered*` — real node build
-
-Full state machine, waking early on a temp/humidity threshold crossing. There is no
-scheduled timer wakeup (`kSensorTriggeredTimedSleepMs = 0`).
-
-| Parameter | Value | Meaning |
-|---|---|---|
-| `minSleepMs` | 3 000 ms | Minimum time in `IdleSleeping` before a trigger may wake |
-| `maxWakeMs` | 1 000 ms | Max additional wake delay |
-| `warmupMs` | 10 000 ms | Time in `WarmingUp` — sensor stabilization delay |
-| `activeSampleMs` | 30 000 ms | Duration of the `ActiveSampling` window |
-| `samplePeriodMs` | 750 ms | Sample cadence within `ActiveSampling` |
-| `tempDeltaThresholdC` | 1.0 °C | Threshold to trigger early wake from idle |
-| `humidityDeltaThresholdPct` | 5.0 %RH | Threshold to trigger early wake from idle |
-| `failOnSampleError` | false | Whether sensor errors are fatal |
-
-### `kTimed*` — scheduled wake, MCU standby
-
-Sleeps a fixed interval between active windows; trigger thresholds are ignored.
-
-| Parameter | Value | Meaning |
-|---|---|---|
-| `cyclePeriodMs` | 75 000 ms | Fixed wake-to-wake period — the standby is whatever is left of it |
-| `minStandbyMs` | 5 000 ms | Floor on the derived standby, so a badly overrunning window still sleeps |
-| `activeSampleMs` | 30 000 ms | Nominal `ActiveSampling` duration — derived, see below |
-| `activeOverrunMaxMs` | 15 000 ms | Cap on holding the window open for a partial bundle |
-| `samplePeriodMs` | 1 000 ms | Sample cadence within `ActiveSampling` |
-| `warmupMs` | 10 000 ms | Time in `WarmingUp` after each wake |
-| `minSleepMs` | 0 ms | `CooldownSleeping` hands straight over to `IdleSleeping` |
-| `failOnSampleError` | false | Whether sensor errors are fatal |
-
-10 s warmup + 30 s window + 35 s standby = 75 s. The standby is *derived*, not
-configured: `computePlannedSleepMs()` subtracts the elapsed cycle from
-`cyclePeriodMs` at window close, measuring from `_cycleStartMs` so that warmup
-jitter, window overrun and the post-close TX drain all come out of the sleep
-instead of stretching the cycle. Holding the period fixed rather than the sleep
-keeps the base's return-time prediction meaningful and cycles comparable across
-a session.
-
-`activeSampleMs` is not written by hand — it is
-`kTimedBundlesPerWindow × kSamplesPerBundle × kTimedSamplePeriodMs`
-(2 × 15 × 1 000 = 30 000), with a `static_assert` that it is a whole number of
-bundles. A bare constant silently desynchronises the moment
-`BinaryPacket::kBundleMaxDeltas` or the sample period changes, and a
-desynchronised window ends on a runt bundle every cycle.
-
-### `kContinuous*` — duty-cycle gate disabled
-
-`enabled = false`, so sensors run back-to-back at `samplePeriodMs` (750 ms), skipping
-`IdleSleeping`/`CooldownSleeping` entirely per the disabled-path behavior above. One
-`warmupMs` (10 000 ms) delay at boot, then indefinite `ActiveSampling`. Sleep durations
-and thresholds are unused.
-
-## Trigger Sensor
-
-`DutyCycleController` takes an `ITriggerSensor` reference (the SHT31
-temperature/humidity sensor, per `main.cpp`). When in `IdleSleeping`, the
-trigger sensor is polled each update tick. If the reading crosses
-`tempDeltaThresholdC` or `humidityDeltaThresholdPct` relative to the baseline
-established at the end of the last `ActiveSampling` window, the controller
-wakes early.
-
-This allows the node to respond to rapid environmental change without burning
-power during quiet conditions — **when duty cycling is enabled**. With
-`cfg.enabled = false` (current shipped behavior), `IdleSleeping`'s trigger
-logic is never invoked, so this mechanism is currently dormant.
-
-## Sample Dispatch
-
-During `ActiveSampling`, `serviceAllSensors()` calls
-`ISensor::update()` on every registered sensor each loop iteration. Sensors
-write their readings into a shared `SensorSnapshot` via `fillSnapshot()` when
-the application calls them.
-
-`markTelemetrySent()` must be called by the application after each snapshot is
-consumed. This resets the `telemetryReady` flag so the controller does not
-repeatedly signal readiness before transitioning to `CooldownSleeping`.
-
-## Sensor Sleep / Wake
-
-Duty-cycled sensors implement `ITriggerSensor::wake()` and
-`ITriggerSensor::sleep()`. Calling `sleepDutyCycledSensors()` /
-`wakeDutyCycledSensors()` toggles power or standby states where the hardware
-supports it. Sensors that do not support sleep are left on during the idle
-period.
-
-## Error Handling
-
-If `failOnSampleError = false` (the default), a sensor failure during sampling
-transitions the controller to `CooldownSleeping` without emitting a snapshot
-rather than halting the node. This keeps the node running and transmitting what
-it can while a single sensor is faulty.
-
-Setting `failOnSampleError = true` causes the controller to enter the `Error`
-phase permanently on the first sensor failure, useful during initial bring-up
-to surface problems quickly.
-
-## Active Windows on the Wire (Timed mode)
-
-The controller itself has no notion of a "window" — but in `Timed` mode each
-`ActiveSampling` stretch is one, and `SmartFiresNodeApp::updateWindowMarkers()`
-watches the phase edges to bound it on the wire with its own frames:
-
-| Edge | Effect |
-|---|---|
-| → `WarmingUp` (the wake) | `PKT_WINDOW_BEGIN` enqueued. Tells the base the radio is back, so the `ACK_SUMMARY` deferred at the last `WINDOW_END` is released — during the otherwise-silent warmup, rather than 8 s into it |
-| `ActiveSampling` → sleeping | `PKT_WINDOW_END` enqueued *behind* the window's final bundle, so the last frame before standby is one nobody has to acknowledge |
-
-The window always ends on a bundle boundary, so there is normally nothing to
-flush. `SmartFiresNodeApp::update()` publishes
-`PacketHandler::hasPartialBundle()` to `DutyCycleController::setActiveWindowHold()`
-*before* each `_duty.update()` — the controller decides inside `update()` whether
-this is the closing tick, so a hold published afterwards would always be one
-iteration stale and the window could close mid-bundle. Past `activeSampleMs` the
-window stays open while the hold is set, bounded by `activeOverrunMaxMs`; past
-that cap `PacketHandler::flushWindow()` force-encodes the runt rather than lose
-the samples, and `lastWindowOverran()` says so.
-
-A runt is worth avoiding on two counts: it spends a fresh 20-byte `FullState`
-reference on a handful of samples, and it used to be the frame that could not be
-acked before standby. See
-[WINDOW_MARKER_PACKETS.md](../Completed_Plans/WINDOW_MARKER_PACKETS.md).
-
-`SmartFiresNodeApp::maybeEnterTimedMcuSleep()` holds off standby while
-`TdmaRadioService::queuedCount() > 0`, up to
-`SensingConfig::DutyCycle::kMaxTxDrainBeforeStandbyMs` (5 s ≈ one TDMA frame
-plus slack) — otherwise the window's final bundle and its `WINDOW_END` marker
-would be parked in the queue for the whole sleep. Time spent draining comes out
-of the standby, not the next cycle, because `_plannedSleepMs` was fixed at window
-close against the cycle start.
-
-Draining also requires the radio to stay powered: the phase is already a
-sleeping one at that point, and `TdmaRadioService::update()` returns *before*
-`drainTxQueue()` whenever the radio is duty-slept, so leaving phase-based radio
-sleep to apply would make the queue impossible to empty and guarantee the drain
-burned its full budget every cycle. `SmartFiresNodeApp::radioMustStayAwakeToDrain()`
-suppresses radio duty-sleep for exactly that interval.
-
-### What survives the standby
-
-SAMD21 standby retains SRAM — it is not a reset — so `TdmaTxQueue`,
-`PacketHandler`'s accumulator, and `TdmaRadioService`'s pending window all come
-back byte-identical. Nothing needs to be persisted or pre-flushed for memory
-reasons; the drain gate above exists only so the window's final bundle and its
-`WINDOW_END` marker aren't *delayed* by a whole sleep, not because they would be
-lost.
-
-What does not survive on its own is the acknowledgement loop, since the radio is
-off for the entire sleep. That is handled in two places, both documented in
-[PACKET_RELIABILITY.md](PACKET_RELIABILITY.md#duty-cycled-nodes-timed-mode):
-
-- `TdmaRadioService::notifyMcuStandby()` excludes the sleep from the pending
-  window's age, so unacked bundles survive the sleep. They should not normally
-  need retransmitting: `PKT_WINDOW_BEGIN` releases the base's deferred ack early
-  in `WarmingUp`, and `holdPendingRetriesForAckRoundTrip()` delays the retry gate
-  by two frame periods to let that round trip complete. A `RETX` during warmup
-  now means the `WINDOW_BEGIN` itself was lost, not business as usual.
-- The base defers `ACK_SUMMARY` for a node that just sent `PKT_WINDOW_END`
-  rather than blocking on `sendToWait()` against a radio that is switched off,
-  and releases it on the first slot 0 after that node's `PKT_WINDOW_BEGIN`.
-  Because the marker frames are never retransmitted, the rule is simply "END
-  means asleep, anything else means awake".
-
-## Relationship to TDMA
-
-`DutyCycleController` has no knowledge of TDMA timing. It fires
-`telemetryReady()` based purely on elapsed time and sensor data. The application
-is responsible for calling `enqueueTelemetry()` on `TdmaRadioService`, which
-then gates the actual over-the-air transmission to the correct TDMA slot.
-
-The sensing pipeline and the radio pipeline are fully independent — sensing is
-not paused while the radio transmits.
+Changing a profile requires checking bundle alignment, warmup-heavy sensors, radio drain time, RTC standby, watchdog behavior, and the base's sleep-aware ACK deferral together.

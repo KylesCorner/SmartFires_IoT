@@ -1,7 +1,6 @@
 // ---
 // description: Implements TxPowerController's margin accumulation, step-down/jump-up decision rule, pending-command expiry, and silence probing.
 // role: implementation
-// docs: [dynamic-tx-power]
 // ---
 #include "radio/TxPowerController.h"
 

@@ -1,4 +1,17 @@
+---
+name: network-system-design
+description: Historical development log for the single-board, binary telemetry, TDMA, reliability, RX-gating, and watchdog decisions.
+category: plan-completed
+status: historical
+related_docs:
+  - software-design
+  - packet-reliability
+  - tdma-protocol
+---
+
 # Dev Update Log — Data Transmission & System Design
+
+> Historical development narrative. Values and packet sizes below describe successive implementation stages and are not a current reference; use `SOFTWARE_DESIGN.md` and `Current_Architecture/` for shipped behavior.
 
 ## Issue: Node Architecture (Dual-MCU → Single Board)
 

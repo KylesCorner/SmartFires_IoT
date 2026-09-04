@@ -3,7 +3,7 @@ name: debug-filter
 description: How to use the PlatformIO monitor filter and SFDBG_* env vars to filter structured debug logs by stream and level.
 category: reference
 status: current
-last_verified: 2026-06-23
+last_verified: 2026-09-04
 source_refs:
   - platformio/monitor/filter_smartfires_debug.py
 related_docs:
@@ -11,115 +11,79 @@ related_docs:
   - packet-reliability
 ---
 
-# SmartFires Debug Monitor
+# SmartFires debug monitor
 
-The SmartFires node debug build prints structured debug logs over USB serial.
+The `feather_m0_lora_node_debug` environment enables the `smartfires_debug` and `log2file` monitor filters. Base firmware also emits the same structured `@SFDBG` format, although its environment does not add the filter automatically.
 
-Instead of using a plain serial monitor, we use a PlatformIO monitor filter that formats the logs and lets us filter by stream.
-
-Each log line has a source stream such as:
-
-- base
-- app
-- boot
-- i2c
-- battery
-- gps
-- imu
-- sht31
-- sps30
-- wind
-- tdma
-- radio
-- packet
-- duty
-
-### Log Levels
-| Level | Meaning |
-| ----- | ------- |
-| T     | Trace   |
-| D     | Debug   |
-| I     | Info    |
-| W     | Warning |
-| E     | Error   |
-
----
-
-## Start the debug monitor
-
-From the PlatformIO project folder:
+Run from `SmartFires_IoT/platformio`:
 
 ```bash
-cd ~/SmartFires/code/platformio
 pio device monitor -e feather_m0_lora_node_debug
 ```
 
-You can apply filters by the example below showing a tdma filter with a min level of warning.
+If `pio` is not on `PATH`, use `~/.platformio/penv/bin/pio` or `platformio`.
 
-```bash
-SFDBG_SRC=tdma SFDBG_MIN_LEVEL=W pio device monitor -e feather_m0_lora_node_debug
-SFDBG_SRC=radio,tdma,calibration  pio device monitor -e feather_m0_lora_node_debug
+## Structured record
+
+Firmware emits tab-delimited records similar to:
+
+```text
+@SFDBG  v=1  node=2  src=radio  lvl=I  seq=42  t=123456  msg=...
 ```
 
-You can also apply multiple filter streams
+The monitor filter parses escaped fields, formats the record, and tracks sequence gaps per node. Non-`@SFDBG` text is shown only when raw display is enabled.
+
+Common source names include `base`, `app`, `boot`, `i2c`, `battery`, `gps`, `imu`, `sht31`, `sps30`, `wind`, `tdma`, `radio`, `packet`, `duty`, and `calib`. Source matching is exact and case-sensitive; use names as they appear in the log (`calib`, not `calibration`).
+
+Levels are `T` trace, `D` debug, `I` info, `W` warning, `E` error, and `O` off. The minimum level includes that severity and everything above it.
+
+## Environment filters
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `SFDBG_SRC` | Comma-separated source allowlist | all |
+| `SFDBG_NODE` | Comma-separated node allowlist | all |
+| `SFDBG_MIN_LEVEL` | Minimum severity | `T` |
+| `SFDBG_SHOW_RAW` | Show unstructured/raw serial text | `1` |
+| `SFDBG_HEADER` | Print filter settings at startup | `1` |
+| `SFDBG_LEVEL_NAME` | Expand one-letter level names | `0` |
+
+Examples:
 
 ```bash
-SFDBG_SRC=tdma,i2c,gps SFDBG_MIN_LEVEL=W pio device monitor -e feather_m0_lora_node_debug
-SFDBG_SRC=calib pio device monitor -e feather_m0_lora_node_debug
-SFDBG_SRC=IMU pio device monitor -e feather_m0_lora_node_debug
-SFDBG_SRC=packet SFDBG_MIN_LEVEL=D pio device monitor -e feather_m0_lora_node_debug
-SFDBG_SRC=packet pio device monitor -e feather_m0_lora_node_debug
+SFDBG_SRC=tdma,radio SFDBG_MIN_LEVEL=W \
+  pio device monitor -e feather_m0_lora_node_debug
+
+SFDBG_SRC=radio SFDBG_MIN_LEVEL=I SFDBG_SHOW_RAW=0 \
+  pio device monitor -e feather_m0_lora_node_debug
+
+SFDBG_SRC=base SFDBG_MIN_LEVEL=I SFDBG_SHOW_RAW=0 \
+  pio device monitor -e feather_m0_lora_base
 ```
 
-To watch the exact raw IMU values packed into each STATUS payload, use the
-`packet` stream at debug level. Look for `status_imu_payload`, which prints
-`mag_xyz` in `uT x 10` and `accel_xyz` in `mg`:
+For several nodes on one forwarded/logged stream:
 
 ```bash
-SFDBG_SRC=packet SFDBG_MIN_LEVEL=D pio device monitor -e feather_m0_lora_node_debug
+SFDBG_NODE=2,3 SFDBG_SRC=radio,packet pio device monitor -e feather_m0_lora_node_debug
 ```
 
-For a dedicated IMU troubleshooting stream that is independent of STATUS timing,
-also watch `imu_raw_sample` on the `IMU` stream. This emits on each
-successful IMU sample and prints raw magnetometer (`uT`), accelerometer (`mg`),
-and gyro (`dps`) values:
+## Useful searches
+
+- Base ACK transmission: `SFDBG_SRC=base`, then look for `tx_ack_summary_local`.
+- Node ACK reception: `SFDBG_SRC=radio`, then look for `ack_summary_received`.
+- Join/sync: `SFDBG_SRC=boot,tdma,radio`.
+- Command handling and reset: `SFDBG_SRC=calib,app,base`.
+- TX-power decisions: `SFDBG_SRC=base,radio`.
+
+STATUS contains fused heading/accuracy, not raw magnetometer, accelerometer, or gyro vectors. Use the IMU driver's own debug messages for sensor-level diagnosis; do not expect raw axes in the wire payload.
+
+## Saving output
+
+`node_debug` already enables `log2file`. For an explicit shell capture:
 
 ```bash
-SFDBG_SRC=IMU SFDBG_MIN_LEVEL=D pio device monitor -e feather_m0_lora_node_debug
+SFDBG_SRC=boot,tdma,radio SFDBG_MIN_LEVEL=D SFDBG_SHOW_RAW=0 \
+  pio device monitor -e feather_m0_lora_node_debug | tee /tmp/sf-node-debug.log
 ```
 
-Base station now uses the same structured logger. To follow communication-layer
-traffic on the base station:
-
-```bash
-SFDBG_SRC=base,app,calibration SFDBG_MIN_LEVEL=D pio device monitor -e feather_m0_lora_base
-SFDBG_SRC=base,app,calibration pio device monitor -e feather_m0_lora_base
-```
-
-To confirm whether the base is attempting to send app-layer ACK summaries,
-watch only the `base` stream at info level. Each transmit attempt logs
-`tx_ack_summary_local`:
-
-```bash
-SFDBG_SRC=base SFDBG_MIN_LEVEL=I SFDBG_SHOW_RAW=0 pio device monitor -e feather_m0_lora_base | tee /tmp/sf-base-ack.log
-```
-
-To confirm whether the node is receiving app-layer ACK summaries from the base,
-watch only the `radio` stream at info level. A successful receive logs
-`ack_summary_received`; a failed inbound decode logs `receive_failed`:
-
-```bash
-SFDBG_SRC=radio SFDBG_MIN_LEVEL=I SFDBG_SHOW_RAW=0 pio device monitor -e feather_m0_lora_node_debug | tee /tmp/sf-node-ack.log
-```
-
-If you want the surrounding packet context as well, raise the same stream to
-debug level so you also capture `rx_lora` lines:
-
-```bash
-SFDBG_SRC=radio SFDBG_MIN_LEVEL=D SFDBG_SHOW_RAW=0 pio device monitor -e feather_m0_lora_node_debug | tee /tmp/sf-node-ack.log
-```
-
-
-
-Monitor Node Reliability and Packets:
-SFDBG_SRC=boot,tdma,radio SFDBG_MIN_LEVEL=D SFDBG_SHOW_RAW=0 pio device monitor -e feather_m0_lora_node_debug | tee /tmp/sf-node-debug.log
+Opening a serial monitor takes ownership of the serial device and can conflict with the Jetson receiver or another monitor. Stop the competing process first.

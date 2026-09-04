@@ -1,3 +1,7 @@
+// ---
+// description: SAMD21 stack/heap headroom monitor with warning and reset states.
+// role: implementation
+// ---
 #pragma once
 
 #include <stdint.h>

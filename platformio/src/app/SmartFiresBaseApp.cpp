@@ -1,7 +1,7 @@
 // ---
-// description: Implements SmartFiresBaseApp's LoRa RX dispatch, node/ACK tracking, Jetson UART frame parsing, and reserved-slot-gated TX of TIME_SYNC/ACK_SUMMARY/commands.
+// description: Implements SmartFiresBaseApp's LoRa RX dispatch, node/ACK tracking, Jetson USB-serial frame parsing, and reserved-slot-gated TX of TIME_SYNC/ACK_SUMMARY/commands.
 // role: implementation
-// docs: [packet-reliability, uart-jetson-bridge]
+// docs: [jetson-bridge, packet-reliability]
 // ---
 #include "app/SmartFiresBaseApp.h"
 
@@ -370,8 +370,8 @@ void SmartFiresBaseApp::processIncomingLoRa() {
                syncQueued ? "QUEUED" : "NO_ASSIGNMENT");
 
       // Forward exactly the frame length decodeAwaken validated (legacy 9 or
-      // current 11 bytes), not pkt.len — the radio can deliver trailing bytes
-      // beyond the frame, and pkt.len > 11 would overflow `patched`.
+      // current 12 bytes), not pkt.len — the radio can deliver trailing bytes
+      // beyond the frame, and a larger pkt.len would overflow `patched`.
       const size_t awakenLen = pkt.len >= BinaryPacket::kAwakenLoRaSize
                                    ? BinaryPacket::kAwakenLoRaSize
                                    : BinaryPacket::kAwakenLoRaSizeLegacy;
@@ -435,8 +435,8 @@ void SmartFiresBaseApp::processIncomingLoRa() {
 
         // STATUS is the trigger to *consider* a TX power decision. Whether one
         // is actually made is paced by the controller's own clock, so this
-        // behaves the same on a build sending STATUS every second as on one
-        // sending it every 15 minutes.
+        // stays stable if a future build changes the current 15-second STATUS
+        // interval or falls back to PacketHandler's 15-minute default.
         const TxPowerController::Decision decision = _txPower.onStatus(
             statusHdr.node_id, status.retx_total, status.fail_total,
             status.tx_power_dbm,

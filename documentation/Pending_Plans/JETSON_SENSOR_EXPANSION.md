@@ -4,7 +4,7 @@ description: Plan to add temp/humidity, BMV080, GPS, and ICM-20948 IMU sensors d
 category: plan-pending
 status: draft
 related_docs:
-  - uart-jetson-bridge
+  - jetson-bridge
 ---
 
 # Jetson Sensor Expansion
@@ -101,8 +101,8 @@ Two separable concerns:
   - Once `gpsd` is running, the Python app reads position from gpsd's client socket
     rather than owning the I2C bus directly for GPS.
 
-This also changes the existing design note in `CLAUDE.md` ("TIME_SYNC driven by Jetson NTP,
-not GPS. GPS PPS sync deferred.") — once `chrony` is GPS-disciplined, the Jetson's own clock
+This would also change the current time-source guidance in `AGENTS.md` and
+`Current_Architecture/JETSON_BRIDGE.md`: once `chrony` is GPS-disciplined, the Jetson's clock
 becomes GPS-accurate even offline; the node TIME_SYNC broadcast mechanism itself is unaffected
 since nodes still sync to the Jetson's session clock, but that session clock now has a path to
 absolute-time accuracy without internet.

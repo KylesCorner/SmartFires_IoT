@@ -16,7 +16,7 @@
 // Timed duty cycle's standby length — both real numbers, not arbitrary ones.
 static constexpr uint32_t kMaxAgeMs = 30000;
 static constexpr uint32_t kRetryWaitMs = 8000;  // 4000 ms * 2.0, inside [4500, 10000]
-static constexpr uint32_t kStandbyMs = 35000;   // kTimedSleepMs — deliberately > kMaxAgeMs
+static constexpr uint32_t kStandbyMs = 35000;   // nominal Timed standby — deliberately > kMaxAgeMs
 static constexpr uint32_t kFrameMs = 4 * 900;
 
 static TdmaConfig makeConfig() {

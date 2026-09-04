@@ -1,9 +1,8 @@
 ---
 name: watchdog-timer
-description: Plan to add a hardware watchdog to node firmware (Phase 1) and the base station firmware (Phase 2) so an unrecoverable hang self-heals via reboot instead of requiring a manual power cycle.
-category: plan-pending
-status: draft
-last_verified: 2026-07-13
+description: Historical implementation plan for node and base hardware watchdog recovery.
+category: plan-completed
+status: historical
 related_docs:
   - tdma-protocol
   - reset-system

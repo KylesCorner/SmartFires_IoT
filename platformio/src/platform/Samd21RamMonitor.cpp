@@ -1,3 +1,7 @@
+// ---
+// description: Implements SAMD21 stack-pointer/heap-gap sampling and threshold evaluation.
+// role: implementation
+// ---
 #include "platform/Samd21RamMonitor.h"
 
 #include "logging/DebugLogger.h"

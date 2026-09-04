@@ -1,20 +1,20 @@
 // ---
-// description: Base-station bridge constants (UART-to-Jetson cadence, ACK-summary batching, periodic TIME_SYNC, node/ACK table sizes) — reuses NetworkConfig::kGeometry for TDMA slot geometry.
+// description: Base-station bridge constants (USB-serial cadence, ACK-summary batching, periodic TIME_SYNC, node/ACK table sizes) — reuses NetworkConfig::kGeometry for TDMA slot geometry.
 // role: config
-// docs: [tunable-parameters]
+// docs: [packet-reliability, tunable-parameters]
 // ---
 #pragma once
 
 // Base-bridge domain — single source of truth for the base station's
-// UART-to-Jetson bridge behavior, ACK-summary batching cadence, the
+// USB-serial-to-Jetson bridge behavior, ACK-summary batching cadence, the
 // periodic fallback TIME_SYNC broadcast, and node/ACK-tracking table sizes.
 //
 // Reuses NetworkConfig::kGeometry for TDMA slot geometry instead of
 // hardcoding a second, independent copy — SmartFiresBaseApp::Config::
 // baseCfg() used to default tdmaNumSlots/tdmaSlotWidthMs/tdmaGuardMs on its
 // own (4/900/20), completely disconnected from the node's NUM_SLOTS build
-// flag, and the base build doesn't even receive -DNUM_SLOTS. This file is
-// the fix for that drift.
+// flag. `platformio.ini` now supplies one shared flag to the base and every
+// node, and this file consumes the resulting NetworkConfig geometry.
 //
 // Data only — no logic, no Arduino includes.
 
@@ -51,15 +51,10 @@ constexpr uint8_t kMaxAckSummarySendAttempts = 3;
 // that really did stop responding.
 constexpr uint32_t kAckSummaryNodeSilenceMs = 2u * NetworkConfig::kFramePeriodMs;
 
-// Bounded retry for a queued CMD_CALIBRATE/CMD_RESET before giving up on a
-// node that isn't link-acking it. Each attempt is one sendToWait() call from
-// sendPendingCommand(), which already contains RHReliableDatagram's own
-// link-layer retry burst (kLinkRetries @ kLinkAckTimeoutMs) — this counts
-// base-window attempts on top of that (one per ~frame period), not
-// individual radio transmissions. Without this cap, a node that never
-// link-acks (e.g. it already rebooted and missed the window) would have its
-// queued command retried forever, once per base window, permanently
-// occupying one of the kMaxPendingCommands slots.
+// Bounded retry for a queued command when RadioHead refuses the local send()
+// request. Command delivery is otherwise fire-and-forget and confirmed later
+// by PKT_CMD_ACK; a missing remote response does not keep this queue entry.
+// Without this cap, an unhealthy local radio could retain one entry forever.
 constexpr uint8_t kMaxPendingCommandSendAttempts = 3;
 
 // TDMA geometry: shared with the node builds via NetworkConfig::kGeometry,
@@ -137,13 +132,11 @@ static_assert(kSnrDeadBandDbX10 > static_cast<int16_t>(kTxPowerStepDbm) * 10,
 //
 // This — not STATUS arrival — is what paces the loop, and it is the reason the
 // plan's "what do we do about the debug env" question does not need answering.
-// STATUS interval is a build flag that ranges over three orders of magnitude
-// (1 s on feather_m0_lora_node_debug, 15 s on feather_m0_lora_node, 15 min on
-// PacketHandler's default), so a loop gated purely on STATUS arrival would run
-// at wildly different rates per build with one set of thresholds. Gating on the
-// controller's own clock instead means STATUS is only the trigger to *consider*
-// a decision, and retx/fail deltas are always measured across this fixed
-// window regardless of how many STATUS packets landed inside it.
+// STATUS interval is a build flag. All current node environments select 15 s,
+// while PacketHandler's unconfigured fallback remains 15 min. Pacing this loop
+// with its own clock keeps threshold behavior stable if a future build chooses
+// a different STATUS cadence: STATUS only triggers consideration, and retx/fail
+// deltas are measured across this fixed window.
 constexpr uint32_t kTxPowerMinDecisionIntervalMs = 60000;  // 60 s
 
 // How long to wait for the CMD_ACK confirming a power change before giving up

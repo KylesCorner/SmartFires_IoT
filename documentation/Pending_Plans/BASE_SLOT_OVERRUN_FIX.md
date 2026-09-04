@@ -2,7 +2,7 @@
 name: base-slot-overrun-fix
 description: Removes the last blocking sendToWait() from the base station's slot-0 TX paths and replaces its link-layer retry with a cheap in-slot repeat, adds a deadline-aware transmit gate so no base send can start unless it fits the remainder of the slot, and repeats PKT_WINDOW_END so a single lost marker no longer strands the base's sleep tracking.
 category: plan-pending
-status: draft — 2026-08-21, not implemented
+status: draft
 related_docs:
   - window-marker-packets
   - packet-reliability
@@ -80,15 +80,16 @@ The node side already solved this: `TdmaRadioService::drainTxQueue()` computes
 `estimateTxBudgetMs(payload, len)` before each send, deferring with a `slot_defer` log when
 it will not fit (`src/radio/TdmaRadioService.cpp:528-545`). The base has no equivalent.
 
-There is also a stale invariant. `NetworkConfig.h:221` asserts
+The existing compile-time invariant is narrower than this defect. `NetworkConfig.h` asserts
 
 ```cpp
 static_assert(kSlotWidthMs > kBundleTxBudgetMs + kLinkAckTimeoutMs + 2 * kGuardMs, ...)
 ```
 
-— one TX burst plus **one** ACK timeout. Its own comment says this holds because
-"TdmaRadioService checks budget before each send, so at most one bundle can start in a slot
-regardless of kLinkRetries." That reasoning covers the node and was never true of the base.
+That assertion proves one strict link-ACK transaction fits in a slot. Its current comment
+correctly limits that claim to the node service; it does not bound the base's cumulative
+work or ensure that a send started late in slot 0 will finish before the guard band. B2 is
+the runtime invariant that closes that separate gap.
 
 ---
 
@@ -334,7 +335,7 @@ only if the bake shows it mattering.
 | `include/config/BaseConfig.h` | `kAckSummaryRepeatCount`; re-key the `kMaxAckSummarySendAttempts` comment to "radio refused to queue" |
 | `include/config/SensingConfig.h` | `kWindowEndRepeatCount` |
 | `src/app/SmartFiresNodeApp.cpp` | repeat `PKT_WINDOW_END` |
-| `include/config/NetworkConfig.h` | update the `:221` static_assert comment; add an assert that a small link-ACKed frame fits (`kDefaultTxBudgetMs + kLinkAckTimeoutMs <= kSlotWidthMs - 2*kGuardMs`) if option (b) is chosen |
+| `include/config/NetworkConfig.h` | retain the existing single-transaction invariant; add an assert that a small link-ACKed frame fits (`kDefaultTxBudgetMs + kLinkAckTimeoutMs <= kSlotWidthMs - 2*kGuardMs`) if option (b) is chosen |
 
 ---
 
@@ -372,7 +373,7 @@ the kind of claim that deserves a test, and it is a pure function of `(tracker, 
 cheapest possible thing to cover once a suite exists.
 
 That is a pre-existing gap, not one this plan creates, and closing it is a larger piece of
-work than the fix itself (it needs a `Stream` fake for the Jetson UART on top of the existing
+work than the fix itself (it needs a `Stream` fake for the Jetson USB-serial transport on top of the existing
 `FakeRadio`/`FakeClock`). Flagging it rather than silently accepting it: if the bake below
 turns up anything subtle in the deferral logic, that suite should be built before the next
 change to this file rather than after.
@@ -421,9 +422,9 @@ Node and base must both be reflashed. **The order is not symmetric — flash the
 N1 is node-only and wire-compatible in both directions — `handleWindowMarker()` is idempotent
 for `END`, so an old base simply sets `asleep = true` twice.
 
-This lands on top of an already-unflashed stack (window markers, `NUM_SLOTS=5`, dynamic TX
-power, GPS-disciplined clock step 1, RTC sub-second sleep phase 2). Per `CLAUDE.md`, compile
-and flash are the user's to run.
+This touches the currently deployed window-marker, five-slot, dynamic-TX-power, and RTC
+timebase stack. Per `AGENTS.md`, compile and flash are the user's to run unless explicitly
+requested for the current session.
 
 ---
 
@@ -441,17 +442,13 @@ and flash are the user's to run.
    compute an explicit wake time would make the *detected* sleep case exact instead of
    depending on a `BEGIN` arriving. Deliberately out of scope here; it is a robustness
    improvement to Defect A, and B1/B2 make Defect A much less costly.
-5. **Command deferral to a sleeping node** (rehomed here 2026-08-21 from
-   `rtc-subsecond-sleep`'s T11 and `window-marker-packets`' open items, since this plan is
-   reworking the base's send paths anyway). Queued `CMD_CALIBRATE`/`CMD_RESET` use the same
-   blocking send to the same deaf node, and `kMaxPendingCommandSendAttempts` (3, ≈11 s)
-   expires well inside a 35 s standby — so operator commands to a sleeping `Timed` node are
-   **dropped rather than deferred**. `WINDOW_BEGIN`/`WINDOW_END` and `planned_sleep_ms` now
-   make gating them cheap: the base already knows the node is down and roughly when it
-   returns. The design question is a deferral deadline, so a node that never comes back
-   cannot hold a command slot forever. B1/B2 do not fix this by themselves — they remove the
-   *overrun*, not the drop — but they land in the same functions, so doing both at once is
-   cheaper than doing them separately.
+5. **Command deferral to a sleeping node.** Commands are now a single fire-and-forget send,
+   so the old blocking/retry-overrun problem is fixed. They are still not deferred when the
+   base knows a Timed node is asleep: CALIBRATE/RESET can be missed outright, while the TX
+   power controller eventually re-arms after its 120 s CMD_ACK timeout. `WINDOW_BEGIN`,
+   `WINDOW_END`, and `planned_sleep_ms` make sleep-aware deferral possible. The open design
+   question is a bounded deadline so a node that never returns cannot hold a command slot
+   forever.
 6. **The retry gate races the natural re-ack.** `computeRetryWaitMs()` derives 9000 ms from
    `kExpectedAckIntervalMs` (= `kFramePeriodMs`, i.e. how fast the base *can* ack), with no
    reference to how soon the base will *naturally* re-ack — which is set by the node's own

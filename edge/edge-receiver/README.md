@@ -1,14 +1,18 @@
-# SmartFires Edge Receiver
+# SmartFires edge receiver
 
-Refactored Jetson-side base station ingest service.
+Installable Jetson-side package for USB ingest, durable telemetry, live visualization, and the FastAPI dashboard.
 
-### Install
+## Install
+
+From this directory:
 
 ```bash
-pip install -e .
+python3 -m pip install --use-pep517 -e .
 ```
 
-### Run Receiver
+From the repository root, use `-e edge/edge-receiver` instead.
+
+## Commands
 
 ```bash
 smartfires-edge receive \
@@ -16,82 +20,40 @@ smartfires-edge receive \
   --baud 115200 \
   --data-dir /mnt/nvme_drive/data \
   --sync-interval 600
-```
 
-### Enable Jetson Anemometer Logging
-
-```bash
-smartfires-edge receive \
-  --port /dev/smartfires-base \
-  --anemometer-port /dev/ttyUSB0 \
-  --anemometer-baud 9600 \
-  --anemometer-address 1 \
-  --anemometer-interval 1.0
-```
-
-When enabled, each telemetry row includes:
-
-- `jetson_wind_mps`
-- `jetson_wind_dir_deg`
-
-STATUS packets are also written to the telemetry CSV (in addition to `status/*.jsonl`).
-Those rows use `packet_type=status` and populate:
-
-- `gps_valid`
-- `battery_valid`
-- `battery_mv`
-- `battery_pct`
-
-Standard-packet app-layer reliability is owned by the base station firmware.
-The Jetson receiver only ingests forwarded LoRa traffic and sends `TIME_SYNC`.
-
-### Packet Loss Summary
-
-```bash
 smartfires-edge summary --data-dir /mnt/nvme_drive/data
-```
 
-### Live Visualizer
-
-```bash
 smartfires-edge visualize \
   --port /dev/smartfires-base \
   --baud 115200 \
-  --sync-interval 600 \
   --telemetry-rows 20
-```
 
-`visualize` renders two live terminal tables:
-
-- telemetry samples (sample timestamp + sensor readings)
-- battery/location status (GPS validity, lat/lon, battery)
-
-### Web Dashboard
-
-```bash
 smartfires-edge web \
   --port /dev/smartfires-base \
-  --baud 115200 \
   --host 0.0.0.0 \
-  --http-port 8000
+  --http-port 8080
 ```
 
-Runs the same UART ingest (and, if `--anemometer-port` is given, the anemometer poller) on a
-background thread, and serves a FastAPI/uvicorn dashboard on the main thread: a live map, a
-sniffer view, a debug log view, and a map-history view, backed by a REST API and WebSocket
-streams. Pass `--sniffer-port` (plus optionally `--sniffer-baud` / `--num-slots`) to also feed
-the dashboard's sniffer tab from a passive LoRa sniffer Feather; the sniffer tab stays disabled
-otherwise.
+`web` runs UART ingest in a background thread and serves the live map, sniffer, debug-log, live-log, and map-history views. Add `--sniffer-port /dev/smartfires-sniffer --num-slots 5` to enable the passive-sniffer view.
 
-There is currently no way to send `CMD_CALIBRATE`/`CMD_RESET` to a node from here — the
-dashboard's `/api/command` endpoint is a stub that echoes the request without writing to serial.
-Calibration and reset commands can only be observed passively today, via the sniffer feed
-decoding `CMD_CALIBRATE`/`CMD_RESET`/`CMD_ACK` traffic for monitoring.
+To merge the optional Jetson-connected ES-W302 readings into telemetry rows, add:
 
-### Heading and Calibration
+```bash
+--anemometer-port /dev/ttyUSB0 --anemometer-baud 9600 \
+--anemometer-address 1 --anemometer-interval 1.0
+```
 
-There is no Jetson-side calibration data exchange (`PKT_CALIBRATION_DATA` is reserved and
-unimplemented — no encode/decode exists for it). Heading comes entirely from the node's
-on-chip DMP 9-DOF fusion, which self-calibrates via figure-8 motion at boot; the Jetson just
-reads `heading_deg_x10`/`heading_accuracy` out of each STATUS packet and applies magnetic
-declination correction (via the `geomag` package, given a GPS fix) in `session.py`.
+## Responsibilities
+
+- Parses the base's framed USB stream and mirrors the C++ packet schema.
+- Expands bundles, writes telemetry/status records, maintains session metadata and packet-loss metrics, and serves live state.
+- Sends clock authority to the base at `--sync-interval`; the base rebroadcasts cached session time more frequently over LoRa.
+- Starts a fresh session by issuing a base soft reset through the USB command path.
+- Sends real node reset commands through the dashboard's `/api/node_reset` endpoint.
+- Controls per-node dynamic/static TX power through `/api/tx_power`.
+
+The general `/api/command` route is still an echo stub. There is no implemented calibration workflow: `CMD_CALIBRATE` can traverse the protocol, but node behavior is deliberately log-and-ACK because the ICM-20948 DMP self-calibrates.
+
+STATUS frames are included in telemetry output and contain GPS/battery validity, DMP heading and accuracy, lifetime retransmit/failure counters, and applied TX power. `session.py` can apply magnetic-declination correction when a valid GPS fix is available.
+
+See [`../../documentation/Current_Architecture/JETSON_BRIDGE.md`](../../documentation/Current_Architecture/JETSON_BRIDGE.md) for the framing contract and [`../../documentation/User_Reference/JETSON_CHEATSHEET.md`](../../documentation/User_Reference/JETSON_CHEATSHEET.md) for deployment setup.

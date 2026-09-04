@@ -2,7 +2,7 @@
 name: gps-disciplined-clock
 description: Plan to give each node a continuously-running SAMD21 RTC COUNT32 timebase (replacing Arduino core millis() plus sleep-compensation), then periodically discipline that counter's tick rate using the PA1010D GPS's 1 Hz PPS edge. Two independent steps — Step 1 has no GPS dependency at all.
 category: plan-pending
-status: in-progress — Step 1 (timebase unification) shipped, flashed and baked. Step 2 (GPS PPS discipline) not started.
+status: draft
 related_docs:
   - rtc-subsecond-sleep
   - tdma-protocol
@@ -267,10 +267,11 @@ needs a schematic/pinout check to confirm which pin is free and EIC-capable (ope
 
 ---
 
-## Sequencing vs. in-flight work
+## Historical sequencing record
 
-`[[rtc-subsecond-sleep]]` Phase 2 (T6 + the `PktHeader` flags-byte wire break) is coded but
-**unflashed** as of this writing. It touches the same files this plan needs to build on
+The following sequencing note was written before Step 1 shipped. At that time,
+`[[rtc-subsecond-sleep]]` Phase 2 (T6 + the `PktHeader` flags-byte wire break) was coded but
+unflashed. It touched the same files this plan needed to build on
 (`Samd21RtcSleep`, the sleep/TDMA-resync interaction). Land and bake that first — don't stack an
 unvalidated wire-format break and an unvalidated clock-source change in the same flash cycle, or
 a field problem afterward is much harder to attribute to either change.
@@ -281,12 +282,9 @@ Recommended order:
    baked.
 3. This plan's Step 2 (GPS PPS discipline) — builds on Step 1, its own bake/verification pass.
 
-**Status against that order:** Step 1 is now coded (see its implementation record) while
-`[[rtc-subsecond-sleep]]` Phase 2 is still unflashed, so the recommended order is only intact
-if Phase 2 is flashed and baked *first* and Step 1 is held back for a separate flash cycle.
-Flashing both together is exactly the stacked-unvalidated-change case this section warns
-about — and Step 1's GCLK re-routing raises the stakes, since a clock-domain mistake and a
-wire-format break would present with overlapping symptoms.
+**Resolved status:** RTC subsecond sleep Phase 2 and this plan's Step 1 were subsequently
+flashed and baked. This ordering warning is retained only to explain the rollout history;
+Step 2 now builds on their shipped state.
 
 ---
 

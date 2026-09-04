@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PORT="${1:-/dev/ttyTHS1}"
+PORT="${1:-/dev/smartfires-base}"
 DATA_DIR="${2:-/mnt/nvme_drive/data}"
 
 mkdir -p "$DATA_DIR"

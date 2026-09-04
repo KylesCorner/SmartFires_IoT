@@ -3,7 +3,7 @@ name: edge-refactor-web-dashboard
 description: Plan to make the FastAPI/uvicorn web dashboard the primary interactive Jetson mode (live log streaming, per-node filtering, session metadata), deprecating the old curses CLI.
 category: plan-completed
 status: historical
-superseded_by: uart-jetson-bridge
+superseded_by: jetson-bridge
 related_docs:
   - tdma-sniffer-visualization
 ---

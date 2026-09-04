@@ -35,7 +35,7 @@ PKT_DEBUG_LOG = 0x14
 # documentation/Pending_Plans/DYNAMIC_TX_POWER.md.
 PKT_CMD_SET_TX_POWER = 0x15
 
-# sensor_flags bits (SensorSnapshot.h / CLAUDE.md): which sensors had a valid
+# sensor_flags bits (SensorSnapshot.h / AGENTS.md): which sensors had a valid
 # reading this sample. When a bit is clear the corresponding fields carry a
 # node-side hold-last-good substitute (or, pre-fix firmware, a -1.0 placeholder)
 # — either way they are not real measurements and are nulled on decode.
@@ -224,7 +224,7 @@ def encode_time_sync_frame(session_id: int, session_time_ms: int, seq: int = 0) 
     lora_payload_no_crc = hdr + ts
     lora_crc = crc8(lora_payload_no_crc)
     lora_payload = lora_payload_no_crc + bytes([lora_crc])
-    data_len = len(lora_payload)  # TIME_SYNC_LORA_SIZE = 13
+    data_len = len(lora_payload)  # TIME_SYNC_LORA_SIZE = 14
     frame_crc = crc8(bytes([data_len]) + lora_payload)
     return bytes([FRAME_M0, FRAME_M1, data_len]) + lora_payload + bytes([frame_crc])
 
@@ -241,7 +241,7 @@ def encode_ack_summary_frame(node_id: int, ack_base_seq: int, ack_mask: int, seq
     lora_payload_no_crc = hdr + ack
     lora_crc = crc8(lora_payload_no_crc)
     lora_payload = lora_payload_no_crc + bytes([lora_crc])
-    data_len = len(lora_payload)  # ACK_SUMMARY_LORA_SIZE = 9
+    data_len = len(lora_payload)  # ACK_SUMMARY_LORA_SIZE = 10
     frame_crc = crc8(bytes([data_len]) + lora_payload)
     return bytes([FRAME_M0, FRAME_M1, data_len]) + lora_payload + bytes([frame_crc])
 
@@ -253,7 +253,7 @@ def encode_cmd_calibrate_frame(node_id: int, duration_s: int = 60, seq: int = 0)
     lora_payload_no_crc = hdr + cmd
     lora_crc = crc8(lora_payload_no_crc)
     lora_payload = lora_payload_no_crc + bytes([lora_crc])
-    data_len = len(lora_payload)  # CMD_CALIBRATE_LORA_SIZE = 7
+    data_len = len(lora_payload)  # CMD_CALIBRATE_LORA_SIZE = 8
     frame_crc = crc8(bytes([data_len]) + lora_payload)
     return bytes([FRAME_M0, FRAME_M1, data_len]) + lora_payload + bytes([frame_crc])
 
@@ -265,7 +265,7 @@ def encode_cmd_reset_frame(node_id: int, reset_type: int = 0, seq: int = 0) -> b
     lora_payload_no_crc = hdr + cmd
     lora_crc = crc8(lora_payload_no_crc)
     lora_payload = lora_payload_no_crc + bytes([lora_crc])
-    data_len = len(lora_payload)  # CMD_RESET_LORA_SIZE = 7
+    data_len = len(lora_payload)  # CMD_RESET_LORA_SIZE = 8
     frame_crc = crc8(bytes([data_len]) + lora_payload)
     return bytes([FRAME_M0, FRAME_M1, data_len]) + lora_payload + bytes([frame_crc])
 
@@ -284,7 +284,7 @@ def encode_cmd_set_tx_power_frame(
     level and takes it out of the loop, mode=DYNAMIC hands it back.
 
     tx_power_dbm is always ABSOLUTE, never a delta. The dashboard's
-    increase/decrease buttons resolve to an absolute value client-side from the
+    increase/decrease actions resolve to an absolute value in the web API from the
     node's last reported StatusPayload.tx_power_dbm, so a stale reading can only
     ever produce a slightly-off absolute target — never a runaway. Do not add a
     relative variant; see CmdSetTxPowerPayload in BinaryPacket.h.

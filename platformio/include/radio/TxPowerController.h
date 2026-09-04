@@ -1,7 +1,6 @@
 // ---
 // description: Base-station decision loop for per-node dynamic LoRa TX power — accumulates link margin, decides step-down/jump-up, and tracks pending/silent nodes.
 // role: implementation
-// docs: [dynamic-tx-power]
 // ---
 #pragma once
 

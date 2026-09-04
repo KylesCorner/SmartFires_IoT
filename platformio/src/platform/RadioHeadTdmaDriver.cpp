@@ -1,7 +1,7 @@
 // ---
 // description: RHReliableDatagram/RH_RF95-based LoRa radio driver implementing ITdmaRadioDriver for the TDMA stack.
 // role: implementation
-// docs: [tdma-protocol]
+// docs: [lora-vs-lorawan, packet-reliability, tdma-protocol]
 // ---
 #include "platform/RadioHeadTdmaDriver.h"
 

@@ -1,3 +1,7 @@
+// ---
+// description: RAM-monitor sampling, logging, warning, and reset thresholds.
+// role: config
+// ---
 #pragma once
 
 #include <stdint.h>

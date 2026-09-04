@@ -1,5 +1,5 @@
 // ---
-// description: Top-level base-station application class — LoRa RX/TX, node assignment, ACK_SUMMARY tracking, and Jetson UART bridging, gated by the base's own reserved TDMA slot.
+// description: Top-level base-station application class — LoRa RX/TX, node assignment, ACK_SUMMARY tracking, and Jetson USB-serial bridging, gated by the base's own reserved TDMA slot.
 // role: implementation
 // ---
 #pragma once
@@ -71,12 +71,12 @@ private:
     uint8_t pendingTriggerSeq = 0;
   };
 
-  // CMD_CALIBRATE/CMD_RESET forwards from the Jetson are deferred the same
+  // CMD_CALIBRATE/CMD_RESET/CMD_SET_TX_POWER forwards are deferred the same
   // way — encoded immediately (so the original UART payload doesn't need to
   // be retained) but only transmitted once the base's window opens.
   // Max over every command type that can be queued here — CALIBRATE, RESET,
-  // and SET_TX_POWER (all 8 bytes today, but written as a max so adding a
-  // larger command type can't silently truncate one).
+  // and SET_TX_POWER (8, 8, and 9 bytes respectively; written as a max so a
+  // command type cannot be silently truncated).
   static constexpr size_t kCalibrateOrResetLoRaSize =
       BinaryPacket::kCmdCalibrateLoRaSize > BinaryPacket::kCmdResetLoRaSize
           ? BinaryPacket::kCmdCalibrateLoRaSize
@@ -91,19 +91,14 @@ private:
     uint8_t targetNodeId = 0;
     uint8_t payload[kPendingCommandPayloadSize] = {};
     uint8_t len = 0;
-    // Consecutive sendToWait() failures for this entry — see
+    // Consecutive local fire-and-forget send() refusals for this entry — see
     // BaseConfig::kMaxPendingCommandSendAttempts.
     uint8_t failedSendAttempts = 0;
   };
 
-  // The Jetson's "New Session" flow (ingest_service.py's reset_event handler)
-  // enqueues one CMD_RESET per configured node in a tight loop, so the queue
-  // has to hold a command for every node at once or the extras silently fail
-  // to enqueue (QUEUE_FULL, visible only in the base debug log) and those
-  // nodes never get reset. Sized off kMaxAssignedNodes rather than a literal
-  // so it can no longer be outgrown by a NUM_SLOTS bump: the +1 leaves room
-  // for one operator-triggered per-node command to coexist with a full
-  // network-wide sweep. See documentation/Completed_Plans/RESET_SYSTEM.md.
+  // Allow one queued command per assignable node plus one extra control action.
+  // Sized from the geometry instead of a literal so a NUM_SLOTS change cannot
+  // silently leave the command queue smaller than the deployed fleet.
   static constexpr uint8_t kMaxPendingCommands =
       static_cast<uint8_t>(BaseConfig::kMaxAssignedNodes + 1);
 
@@ -143,8 +138,8 @@ private:
 
     // Timed-mode duty-cycle gating, driven by PKT_WINDOW_END/PKT_WINDOW_BEGIN.
     // A node that just sent WINDOW_END is about to enter MCU standby with its
-    // radio off: every ACK_SUMMARY aimed at it would be a ~1 s blocking
-    // sendToWait (kLinkRetries x kLinkAckTimeoutMs, longer than the base's own
+    // radio off: every ACK_SUMMARY aimed at it could be a ~1 s blocking
+    // sendToWait ((kLinkRetries + 1) x kLinkAckTimeoutMs, longer than the base's own
     // 900 ms slot 0) that cannot possibly be heard, starving TIME_SYNC and
     // commands for other nodes. While `asleep`, the tracker keeps `dirty` set
     // and is simply skipped, so the ack is deferred rather than lost — it goes

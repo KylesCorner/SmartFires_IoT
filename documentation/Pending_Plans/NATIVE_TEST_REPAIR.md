@@ -2,7 +2,7 @@
 name: native-test-repair
 description: Consolidated plan to get `pio test -e native` building and green again — repairs test_config's calls to removed DutyCycleConfig factories, resolves six pre-existing test_duty_cycle_controller assertion failures, and removes the stale test/support/Arduino.cpp shim that conflicts with Arduino.h.
 category: plan-pending
-status: draft — 2026-08-21, not implemented
+status: draft
 related_docs:
   - duty-cycling
   - tunable-parameters
@@ -21,11 +21,18 @@ one), an execution log (`rtc-subsecond-sleep`), and another plan's open items
 (`window-marker-packets`). No single place said "here is why the native suite is red."
 This is that place.
 
+Audit update (2026-09-04): `test_tx_power_controller` included
+`TxPowerController.h`, but the native `build_src_filter` omitted
+`radio/TxPowerController.cpp`, guaranteeing undefined references once earlier compile
+failures were cleared. The source filter has now been corrected. That repair still needs
+verification in the eventual authorized PlatformIO run; the three failure groups below
+remain open.
+
 The failures are independent of each other and can land in any order. None of them touch
 firmware behaviour — this is entirely test-side work, with one config-constant assertion as
 the only thing that could plausibly catch a real regression.
 
-**Guardrail (repo `CLAUDE.md`): do not run `pio run`/`pio test`/flash commands. Print the
+**Guardrail (repo `AGENTS.md`): do not run `pio run`/`pio test`/flash commands. Print the
 exact command for the user to run.**
 
 ---
@@ -142,8 +149,9 @@ errors rather than assertion failures. Failure 2 needs each of the six cases to 
 own merits.
 
 Worth confirming while in here: `native`'s `build_src_filter` gained
-`radio/TdmaRadioService.cpp` and `radio/TdmaTxQueue.cpp` during the RTC work. Check nothing
-else the suites now reference is still missing from it.
+`radio/TdmaRadioService.cpp`, `radio/TdmaTxQueue.cpp`, and
+`radio/TxPowerController.cpp`. Check nothing else the suites now reference is still missing
+from it.
 
 ## Open questions
 
@@ -152,7 +160,5 @@ else the suites now reference is still missing from it.
   raw-constant assertions as a proxy? Not blocking. Only worth it if more natively-testable
   duty-cycle logic accumulates — and note that with four modes, one extra env still leaves
   two branches uncovered, so the raw-constant assertions are the load-bearing part either way.
-- `test/support/Test_Context.md:148` still references the removed `dutyCycleCfg()` factory and
-  describes the real node build as running with "duty cycling disabled", which was already
-  backwards before the mode rename. It needs rewriting against `SMARTFIRES_DUTY_CYCLE_MODE`
-  once the test file itself is settled.
+- `test/support/Test_Context.md` was rewritten during the documentation consolidation to use
+  `SMARTFIRES_DUTY_CYCLE_MODE` and current profiles. Keep it aligned when the test fixes land.

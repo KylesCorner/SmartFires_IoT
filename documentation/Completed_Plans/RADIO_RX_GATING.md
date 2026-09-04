@@ -1,8 +1,8 @@
 ---
 name: radio-rx-gating
-description: Plan to put the node's SX1276 to sleep outside the base's TDMA window, since the base never transmits elsewhere and node telemetry is fire-and-forget.
-category: plan-pending
-status: draft
+description: Historical implementation plan for sleeping the node's SX1276 outside the base's TDMA window.
+category: plan-completed
+status: historical
 related_docs:
   - tdma-protocol
   - packet-reliability

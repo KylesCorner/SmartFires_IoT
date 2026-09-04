@@ -1,9 +1,9 @@
 ---
-name: uart-jetson-bridge
+name: jetson-bridge
 description: Frame format and routing between the base station Feather and the Jetson over USB CDC.
 category: architecture
 status: current
-last_verified: 2026-08-17
+last_verified: 2026-09-04
 source_refs:
   - platformio/include/telemetry/BinaryPacket.h
   - platformio/src/app/SmartFiresBaseApp.cpp
@@ -15,197 +15,87 @@ related_docs:
   - tdma-protocol
 ---
 
-# Jetson Bridge
+# Jetson bridge
 
-The Feather M0 base station and the Jetson Orin Nano communicate over a
-bidirectional link carried on native USB CDC (`Serial` on the Feather — the
-same port used for flashing). A lightweight framing protocol wraps LoRa
-payloads for reliable transport over the serial link.
+The base Feather and Jetson communicate over native USB CDC (`Serial`) at 115200 baud. `/dev/smartfires-base` is the intended udev-managed device name. The link is bidirectional and shares the Feather's programming USB connector; base `Serial1` is not used.
 
-This link was originally a hardware UART (`Serial1` ↔ `/dev/ttyTHS1`); it was
-migrated to USB so the base station matches the sniffer Feather's transport
-(`main_lora_sniffer.cpp`) and to free up `Serial1`'s pins. The on-wire frame
-format below is unchanged by that migration — it's transport-agnostic.
+## Framing
 
-## Physical Setup
+Base to Jetson:
 
-| Side | Port | Baud | Notes |
-|---|---|---|---|
-| Feather M0 base | `Serial` (native USB) | 115 200 | Same USB cable used to flash the board |
-| Jetson Orin Nano | udev symlink, e.g. `/dev/smartfires-base` | 115 200 | See "Disambiguating base vs. sniffer" below |
-
-The Feather's old `Serial1` UART pins are no longer wired to the Jetson and
-carry no debug traffic on the base build — `Serial1` is unused there (it's
-only used on the node build, for the SPS30 driver). Debug logs are already
-multiplexed onto the same USB link as `PKT_DEBUG_LOG` frames: `main.cpp`
-constructs a `FramedDebugLogSink` wrapping `Serial`, and all `LOG_INFO` /
-`LOG_WARN` / etc. calls route through it, so debug text and the binary
-Jetson protocol share one USB stream, distinguished by `PKT_DEBUG_LOG`
-framing.
-
-### Disambiguating base vs. sniffer
-
-Both the base and the sniffer Feathers enumerate as generic USB CDC-ACM
-devices with identical VID/PID, so `/dev/ttyACM0`/`ttyACM1` can swap on
-reboot or reconnect. Add a udev rule keyed on each board's USB serial number
-to get stable symlinks:
-
-```bash
-udevadm info -a -n /dev/ttyACM0 | grep '{serial}'   # run once per board, alone
+```text
+[0xAA][0x55][data_len:u8][rssi:i8][complete LoRa payload][crc8]
 ```
 
-then create `/etc/udev/rules.d/99-smartfires.rules` with one `SYMLINK+=`
-rule per board (matching on `ATTRS{serial}`), producing
-`/dev/smartfires-base` and `/dev/smartfires-sniffer`. See
-`JETSON_CHEATSHEET.md` for the exact invocation using these symlinks.
+Jetson to base:
 
-## Frame Format
-
-All frames in both directions use the same envelope:
-
-```
-[0xAA][0x55][len: u8][... data bytes (len bytes) ...][crc8: u8]
+```text
+[0xAA][0x55][data_len:u8][complete TIME_SYNC/command payload][crc8]
 ```
 
-- `0xAA 0x55` — magic bytes (FRAME_M0, FRAME_M1)
-- `len` — number of data bytes that follow (covers `rssi` + LoRa payload for
-  Feather→Jetson frames; covers the LoRa payload for Jetson→Feather frames)
-- `crc8` — CRC-8/MAXIM (polynomial 0x31) over the `len` byte plus all data bytes
+The outer CRC-8/MAXIM covers `data_len` followed by every data byte. In the receive direction, `data_len` includes RSSI. The carried LoRa-format packet also has its own final CRC, except `PKT_DEBUG_LOG`, whose text relies on the outer USB CRC.
 
-### Feather → Jetson: base UART frame
+`FrameReceiver` scans for `AA 55`, validates the declared length, buffers exactly that many data bytes, checks the outer CRC, extracts RSSI, then dispatches by the inner packet type. A bad length or CRC resets the state machine to magic-byte search without yielding a packet.
 
-Wraps a received LoRa payload with RSSI metadata.
+## Base-to-Jetson traffic
 
-```
-[0xAA][0x55][len][rssi: i8][LoRa payload bytes][crc8]
-```
+The base forwards received `AWAKEN`, `BUNDLE`, `FULL_STATE`, `STATUS`, window markers, and `CMD_ACK` frames with the LoRa RSSI attached. Structured firmware log lines are wrapped as `PKT_DEBUG_LOG` frames so plain debug text cannot corrupt the binary stream.
 
-| Packet type | LoRa payload | `len` | Total frame |
-|---|---|---:|---:|
-| `AWAKEN` | 12 bytes | 13 | 17 bytes |
-| `STATUS` | 27 bytes | 28 | 32 bytes |
-| `BUNDLE` | ≤195 bytes | ≤196 | ≤200 bytes |
-| `CMD_ACK` | 12 bytes | 13 | 17 bytes |
+Before forwarding, the base performs local control duties:
 
-### Jetson → Feather: TIME_SYNC frame (17 bytes)
+- acknowledges `AWAKEN` at the RadioHead link layer;
+- assigns or restores the UID hash's node ID;
+- tracks telemetry sequence numbers and generates `ACK_SUMMARY`;
+- records packet SNR for dynamic TX-power decisions;
+- decodes STATUS retry/failure totals and the node's actual TX power/mode;
+- consumes command acknowledgements for controller state, then also forwards them.
 
-```
-[0xAA][0x55][len=13][PKT_TIME_SYNC payload: 13 bytes][crc8]
-```
+The Jetson is therefore not in the timing-critical ACK or join loop.
 
-The 13-byte payload is `PktHeader (5 bytes) + TimeSyncPayload (8 bytes)`.
+## Jetson-to-base traffic
 
-### Jetson → Feather: ACK_SUMMARY frame (legacy, 14 bytes)
+| Packet | Behavior at the base |
+|---|---|
+| `TIME_SYNC` | Cache session authority; do not immediately relay it. Periodic base broadcasts use the latest cached value. |
+| `CMD_RESET`, node 0 | Reset base state locally: hard or soft according to `reset_type`. |
+| `CMD_RESET`, node 2+ | Queue a fire-and-forget LoRa command for the target. |
+| `CMD_CALIBRATE` | Queue a fire-and-forget LoRa command; node logs and ACKs. |
+| `CMD_SET_TX_POWER` | Queue an absolute dBm and DYNAMIC/STATIC mode for the target. |
 
-```
-[0xAA][0x55][len=10][PKT_ACK_SUMMARY payload: 10 bytes][crc8]
-```
+Base commands are sent in slot 0 without a RadioHead link ACK. Nodes return `CMD_ACK` in their own slots. A hard-reset ACK is the deliberate exception: the node sends it immediately and without link ACK before rebooting, because reset would destroy a queued response.
 
-This frame format is kept here for protocol reference only. Standard-packet
-app reliability is now base-managed, so `SmartFiresBaseApp` rejects Jetson
-`ACK_SUMMARY` frames during normal operation.
+The base's locally generated `ACK_SUMMARY` is never supplied by the Jetson.
 
-### Jetson → Feather: command frames (CMD_CALIBRATE / CMD_RESET, 12 bytes total)
+## Session behavior
 
-```
-[0xAA][0x55][len=8][command payload: 8 bytes][crc8]
-```
+On each serial connection, ingest:
 
-The 8-byte payload is `PktHeader (5 bytes) + CmdCalibratePayload/CmdResetPayload (2 bytes)
-+ crc8 (1 byte)`. Total frame size (2 magic + 1 len + 8 data + 1 crc8) is 12 bytes.
+1. sends a soft `CMD_RESET` to node 0 (the base);
+2. waits briefly for radio reinitialization;
+3. sends a new session ID and session-relative time;
+4. starts a background TIME_SYNC sender at the configured interval (600 seconds by default).
 
-## Jetson-side Frame Parser (uart_receiver.py)
+The base broadcasts its cached time every 50 seconds, using a local fallback if it has no Jetson authority. This shorter radio cadence is intentionally separate from the USB injection cadence.
 
-`FrameReceiver` implements a byte-level state machine that runs on the single
-byte emitted by `ser.read(1)` each iteration:
+## Edge outputs
 
-```
-WAIT_M0 → WAIT_M1 → WAIT_LEN → READ_DATA → CHECK_CRC → (yield event)
-```
+`receive` and `web` use the same reconnecting ingest loop. It expands BUNDLE frames into individual timestamped samples, writes durable telemetry and status data, updates packet-loss/window trackers, persists session metadata, and optionally merges readings from a Jetson-connected ES-W302 anemometer.
 
-- `WAIT_M0 / WAIT_M1`: re-synchronise on magic bytes; any non-magic byte resets to `WAIT_M0`.
-- `WAIT_LEN`: read the `len` byte; reject frames outside `[BASE_FRAME_MIN_DATA_LEN, BASE_FRAME_MAX_DATA_LEN]`.
-- `READ_DATA`: accumulate `len` bytes into a buffer.
-- `CHECK_CRC`: compute CRC-8/MAXIM over `[len byte] + data`; compare against the trailing byte. On mismatch, increment `crc_failures` and reset.
+STATUS supplies GPS and battery validity, DMP heading/accuracy, lifetime retransmit/fail totals, and applied TX power. The edge may apply magnetic-declination correction when GPS is valid; no calibration payload exchange is implemented.
 
-On a valid frame the parser extracts:
-- `rssi` (signed byte at data offset 0)
-- raw LoRa payload (data bytes 1 onward)
-- `pkt_type`, `node_id`, `seq` from the `PktHeader` at the start of the payload
+## Web control surface
 
-It then dispatches to the appropriate decode function (`decode_bundle`,
-`decode_status`, `decode_awaken`, `decode_cmd_ack`) and yields a structured
-event dict.
+- `/api/new_session` signals ingest to create a new session.
+- `/api/node_reset` sends a hard reset to a selected node.
+- `/api/tx_power` resolves set/increase/decrease and DYNAMIC/STATIC choices into an absolute power command, clamped to 5–13 dBm.
+- `/api/command` currently only echoes `{status: queued}` and does not write serial bytes.
 
-## Jetson-side Ingest Loop (ingest_service.py)
+The CLI has `receive`, `summary`, `visualize`, and `web`; there is no separate command-sending CLI.
 
-`run_receive()` in `ingest_service.py` drives the main receive loop:
+## Limits and failure behavior
 
-```python
-for event, receiver, ser in iter_packets(port, baud):
-    # handle AWAKEN: update session, write "awaken" CSV + JSONL row
-    #   (timestamp + uid_hash — marks node boot, e.g. watchdog restarts),
-    #   send immediate TIME_SYNC
-    # handle STATUS: log GPS, battery, heading; write CSV + JSONL
-    # handle BUNDLE/FULL_STATE: expand deltas, write telemetry CSV rows
-    # handle CMD_ACK: record in session
-    # periodic: save packet-loss metrics
-```
-
-### Session ID and TIME_SYNC
-
-At startup `run_receive()` generates a random 32-bit `session_id`. A daemon
-thread (`_time_sync_sender`) sends `TIME_SYNC` frames periodically at
-`sync_interval_s` (default 600 s). An immediate `TIME_SYNC` is also sent:
-- when the first packet arrives from any node (if no sync has been sent yet)
-- whenever a node sends `AWAKEN`
-
-All writes to the serial port are serialised via `write_lock` (a
-`threading.Lock`) shared between the sync thread and the main receive loop.
-
-### ACK Ownership
-
-The Jetson ingest loop does not generate `ACK_SUMMARY` frames for standard
-telemetry. `STATUS`, `BUNDLE`, and `FULL_STATE` are forwarded upward for
-logging and visualization only. Standard-packet acknowledgement is handled
-entirely inside `SmartFiresBaseApp` on the Feather base station.
-
-## Base Station Role (SmartFiresBaseApp)
-
-On the Feather side, `SmartFiresBaseApp` is a **protocol bridge** — it does not
-decode telemetry beyond what is needed for routing:
-
-1. Receives LoRa packets from nodes via `recvfromAck()` (auto-ACKs at the link layer).
-2. Assigns `node_id` from `uid_hash` on the first `AWAKEN` (`findOrCreateNodeAssignment`).
-3. Wraps the LoRa payload with RSSI into a base UART frame and writes it over USB (`Serial`).
-4. Reads incoming Jetson UART frames. A `TIME_SYNC` frame from the Jetson is **not**
-   directly forwarded to LoRa — it's cached (`updateJetsonTimeSource()`), and the base's
-   own `maybeSendPeriodicTimeSync()` later broadcasts a LoRa `TIME_SYNC` derived from that
-   cached value, on its own cadence (`BaseConfig::kPeriodicTimeSyncMs`, separately from
-   whenever the Jetson frame arrived). `CMD_CALIBRATE` / `CMD_RESET` frames are queued
-   (`enqueuePendingCommand()`) and later flushed via a targeted, blocking
-   `_radio.sendToWait(..., targetNodeId)` to the specific node — not a broadcast.
-5. Rejects `ACK_SUMMARY` frames received from the Jetson (`uart_cmd_reject` /
-   `uart_cmd_dropped` warnings logged, frame discarded, no LoRa action taken) — see
-   "ACK Ownership" below.
-6. Logs periodic health counters every `kHealthLogPeriodMs` (5 000 ms) — three
-   `LOG_INFO` lines (link/TX counters, RX-by-type counters, ACK-tracking state) —
-   to the same USB stream used for the Jetson binary protocol, framed separately
-   via `PKT_DEBUG_LOG`/`@SFDBG` (`FramedDebugLogSink`) so the two don't collide
-   on the wire.
-
-The base station has no knowledge of bundle contents or sensor fields, but it
-does own app-layer reliability tracking and `ACK_SUMMARY` emission for
-standard packets.
-
-## SessionManager (session.py)
-
-`SessionManager` persists node identity and status across sessions in
-`~/.smartfires/session.json`. It provides:
-
-- `on_awaken(node_id, uid_hash)`: records node identity; called on every `AWAKEN` event.
-- `on_status(node_id, uid_hash, status)`: stores latest heading, GPS validity, and battery data; optionally applies magnetic declination correction via `geomag` if available.
-- `on_cmd_ack(node_id, uid_hash, cmd_type, status)`: appends to the command audit log.
-- `snapshot()`: returns a deep copy of the current state for the CLI or external tools.
-
-All mutations are protected by a `threading.Lock` and written atomically to disk.
+- One-byte `data_len` bounds the frame; the largest normal base frame carries RSSI plus a 195-byte bundle.
+- The parser counts invalid lengths and outer CRC failures.
+- The ingest service reconnects with bounded backoff after serial errors.
+- A lost command is detected only indirectly by missing `CMD_ACK` or later STATUS state; LoRa command delivery itself is fire-and-forget.
+- USB framing integrity does not replace the inner LoRa CRC or app-layer reliability.
