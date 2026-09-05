@@ -7,11 +7,11 @@
 
 #include "interfaces/IClock.h"
 #include "interfaces/ISensor.h"
-
+#include "power/BatteryMonitor.h"
+#include "sensors/IFirstFixSensor.h"
 #include "sensors/ITriggerSensor.h"
 
-#include "power/BatteryMonitor.h"
-
+#include <math.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -75,8 +75,7 @@ struct DutyCycleConfig {
   bool enabled = true;
 
   static DutyCycleConfig make(
-      DutyCycleMode wakeMode_ =
-          DutyCycleMode::SensorTriggered,
+      DutyCycleMode wakeMode_ = DutyCycleMode::SensorTriggered,
       uint32_t minSleepMs_ = 3000,
       uint32_t maxWakeMs_ = 1000,
       uint32_t activeSampleMs_ = 30000,
@@ -91,7 +90,6 @@ struct DutyCycleConfig {
     DutyCycleConfig cfg;
 
     cfg.wakeMode = wakeMode_;
-
     cfg.minSleepMs = minSleepMs_;
     cfg.maxWakeMs = maxWakeMs_;
     cfg.activeSampleMs = activeSampleMs_;
@@ -100,62 +98,24 @@ struct DutyCycleConfig {
     cfg.cyclePeriodMs = cyclePeriodMs_;
     cfg.minStandbyMs = minStandbyMs_;
     cfg.activeOverrunMaxMs = activeOverrunMaxMs_;
-
-    cfg.tempDeltaThresholdC =
-        tempDeltaThresholdC_;
-    cfg.humidityDeltaThresholdPct =
-        humidityDeltaThresholdPct_;
-
-    cfg.failOnSampleError =
-        failOnSampleError_;
-
-    cfg.enabled =
-        wakeMode_ != DutyCycleMode::Continuous;
+    cfg.tempDeltaThresholdC = tempDeltaThresholdC_;
+    cfg.humidityDeltaThresholdPct = humidityDeltaThresholdPct_;
+    cfg.failOnSampleError = failOnSampleError_;
+    cfg.enabled = wakeMode_ != DutyCycleMode::Continuous;
 
     return cfg;
   }
 };
-// struct DutyCycleConfig {
-//   uint32_t minSleepMs;
-//   uint32_t maxWakeMs;
-//   uint32_t activeSampleMs;
-//   uint32_t samplePeriodMs;
-//   uint32_t warmupMs;
-
-//   float tempDeltaThresholdC;
-//   float humidityDeltaThresholdPct;
-//   bool failOnSampleError;
-//   bool enabled;
-
-//   static DutyCycleConfig make(
-//       bool enabled_ = true,
-//       uint32_t minSleepMs_ = 3000,
-//       uint32_t maxWakeMs_ = 1000,
-//       uint32_t activeSampleMs_ = 30000,
-//       uint32_t samplePeriodMs_ = 750,
-//       uint32_t warmupMs_ = 15000,
-//       float tempDeltaThresholdC_ = 1,
-//       float humidityDeltaThresholdPct_ = 1,
-//       bool failOnSampleError_ = false) {
-//     DutyCycleConfig cfg;
-//     cfg.minSleepMs = minSleepMs_;
-//     cfg.maxWakeMs = maxWakeMs_;
-//     cfg.failOnSampleError = failOnSampleError_;
-//     cfg.activeSampleMs = activeSampleMs_;
-//     cfg.samplePeriodMs = samplePeriodMs_;
-//     cfg.warmupMs = warmupMs_;
-//     cfg.tempDeltaThresholdC = tempDeltaThresholdC_;
-//     cfg.humidityDeltaThresholdPct = humidityDeltaThresholdPct_;
-//     cfg.failOnSampleError = failOnSampleError_;
-//     cfg.enabled = enabled_;
-//     return cfg;
-//   }
-// };
 
 class DutyCycleController {
 public:
-  DutyCycleController(const DutyCycleConfig &cfg, ITriggerSensor &triggerSensor,
-                      ISensor **sensors, size_t sensorCount, IClock &clock, BatteryMonitor &battery);
+  DutyCycleController(const DutyCycleConfig &cfg,
+                      ITriggerSensor &triggerSensor,
+                      IFirstFixSensor &firstFixSensor,
+                      ISensor **sensors,
+                      size_t sensorCount,
+                      IClock &clock,
+                      BatteryMonitor &battery);
 
   bool begin();
   void update();
@@ -174,22 +134,14 @@ public:
   bool sleeping() const;
   uint32_t timedSleepRemainingMs() const;
 
+  // True until the controller has observed at least one valid fix from the
+  // designated first-fix sensor. The normal duty-cycle phase machine is not
+  // changed by this state.
+  bool waitingForFirstFix() const;
+
   // --- Full-bundle active window ---
-  //
-  // Set from PacketHandler::hasPartialBundle() *before* each update(), so the
-  // window never closes mid-bundle. Once activeSampleMs has elapsed the window
-  // stays open while this is true, up to cfg.activeOverrunMaxMs past it; past
-  // that cap it closes anyway and the caller force-encodes the runt.
-  //
-  // Sizing activeSampleMs as a whole number of bundles (SensingConfig's
-  // static_assert) means the accumulator is normally empty exactly when the
-  // window expires, so the hold costs nothing.
   void setActiveWindowHold(bool hold);
 
-  // Set at window close, for PKT_WINDOW_END's payload. plannedSleepMs is the
-  // standby the fixed-period arithmetic arrived at; sampleCount is how many
-  // samples the window just closed actually produced (a direct check that the
-  // window really did land on a bundle boundary).
   uint32_t plannedSleepMs() const;
   uint16_t lastWindowSampleCount() const;
   bool lastWindowOverran() const;
@@ -200,12 +152,14 @@ private:
   size_t _sensorCount;
   IClock &_clock;
   BatteryMonitor &_battery;
+  ITriggerSensor &_triggerSensor;
+  IFirstFixSensor &_firstFixSensor;
+
   bool _freshSampleReady = false;
+  bool _firstFixAcquired = false;
 
   DutyCyclePhase _phase = DutyCyclePhase::NotStarted;
   DutyCycleError _error = DutyCycleError::None;
-
-  ITriggerSensor &_triggerSensor;
 
   float _baselineTempC = NAN;
   float _baselineHumidityPct = NAN;
@@ -216,10 +170,6 @@ private:
   uint32_t _sleepStartMs = 0;
   bool _triggerLatched = false;
 
-  // Start of the current wake-to-wake cycle (the moment sleep ended). The fixed
-  // period is measured from here, so warmup jitter, window overrun and the
-  // post-close TX drain all come out of the standby rather than stretching the
-  // cycle.
   uint32_t _cycleStartMs = 0;
 
   bool _activeWindowHold = false;
@@ -237,6 +187,7 @@ private:
   void updateWakingSensors();
   void updateSampling();
   void updateCooldownSleeping();
+  void updateFirstFixState();
 
   bool beginSensors();
   bool sleepDutyCycledSensors();
@@ -248,6 +199,4 @@ private:
   uint32_t sleepElapsedMs() const;
   void sampleSleepTrigger();
   bool wakeFromSleepIfNeeded();
-
-
 };

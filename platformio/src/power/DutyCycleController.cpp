@@ -7,6 +7,7 @@
 
 #include "logging/DebugLogger.h"
 #include "power/BatteryMonitor.h"
+#include "sensors/IFirstFixSensor.h"
 #include "sensors/ITriggerSensor.h"
 
 #include <Arduino.h>
@@ -54,13 +55,16 @@ const char *dutyClassName(SensorDutyClass dutyClass) {
 
 DutyCycleController::DutyCycleController(const DutyCycleConfig &cfg,
                                          ITriggerSensor &triggerSensor,
+                                         IFirstFixSensor &firstFixSensor,
                                          ISensor **sensors, size_t sensorCount,
                                          IClock &clock, BatteryMonitor &battery)
     : _cfg(cfg), _sensors(sensors), _sensorCount(sensorCount), _clock(clock),
-      _triggerSensor(triggerSensor), _battery(battery) {}
+      _battery(battery), _triggerSensor(triggerSensor),
+      _firstFixSensor(firstFixSensor) {}
 
 bool DutyCycleController::begin() {
   _error = DutyCycleError::None;
+  _firstFixAcquired = false;
 
   LOG_INFO(
       "duty",
@@ -109,6 +113,7 @@ bool DutyCycleController::begin() {
 
 void DutyCycleController::update() {
   serviceAllSensors();
+  updateFirstFixState();
   _battery.sample();
 
   if (!_cfg.enabled) {
@@ -158,6 +163,22 @@ void DutyCycleController::update() {
   default:
     break;
   }
+}
+
+void DutyCycleController::updateFirstFixState() {
+  if (_firstFixAcquired) {
+    return;
+  }
+
+  if (_firstFixSensor.hasFix()) {
+    _firstFixAcquired = true;
+
+    LOG_INFO("duty", "gps_first_fix_acquired");
+  }
+}
+
+bool DutyCycleController::waitingForFirstFix() const {
+  return !_firstFixAcquired;
 }
 
 void DutyCycleController::markTelemetrySent() {
@@ -669,6 +690,11 @@ bool DutyCycleController::sleepDutyCycledSensors() {
       continue;
     }
 
+    if (!_firstFixAcquired && sensor == &_firstFixSensor) {
+      LOG_INFO(sensorName, "sleep_skip reason=waiting_for_first_fix");
+      continue;
+    }
+
     LOG_DEBUG(sensorName, "sleep_start duty_class=%s",
               dutyClassName(sensor->dutyClass()));
 
@@ -697,6 +723,12 @@ bool DutyCycleController::wakeDutyCycledSensors() {
 
     if (sensor->dutyClass() == SensorDutyClass::AlwaysOn) {
       LOG_DEBUG(sensorName, "wake_skip reason=always_on");
+      continue;
+    }
+
+    if (!_firstFixAcquired && sensor == &_firstFixSensor) {
+      LOG_DEBUG(sensorName,
+                "wake_skip reason=already_awake_waiting_for_first_fix");
       continue;
     }
 
@@ -737,6 +769,7 @@ void DutyCycleController::serviceAllSensors() {
 }
 bool DutyCycleController::resetSensors() {
   bool ok = true;
+  _firstFixAcquired = false;
 
   for (size_t i = 0; i < _sensorCount; ++i) {
     ISensor *sensor = _sensors[i];

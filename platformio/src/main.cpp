@@ -280,6 +280,7 @@ DutyCycleConfig dutyCfg =
 DutyCycleController duty(
     dutyCfg,
     sht31,
+    gps,
     sensors,
     sensorCount,
     clock,

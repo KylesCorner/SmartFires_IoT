@@ -332,7 +332,6 @@ bool Pa1010dGpsSensor::sample() {
   _reading.valid = data.fix;
   _reading.timestampMs = _clock.millis();
   _lastSampleMs = _clock.millis();
-
   return true;
 }
 
@@ -370,6 +369,10 @@ bool Pa1010dGpsSensor::reset() {
 
 const Pa1010dGpsSensor::Reading &Pa1010dGpsSensor::reading() const {
   return _reading;
+}
+
+bool Pa1010dGpsSensor::hasFix() const {
+  return _reading.fix;
 }
 
 void Pa1010dGpsSensor::fillSnapshot(SensorSnapshot &snap) const {

@@ -826,7 +826,6 @@ void SmartFiresNodeApp::logWakePhaseErrorOnNextSync() {
            static_cast<long>(errMs),
            static_cast<unsigned long>(NetworkConfig::kGuardMs));
 }
-
 bool SmartFiresNodeApp::maybeEnterTimedMcuSleep() {
   if (_duty.mode() != DutyCycleMode::Timed ||
       !_duty.sleeping()) {
@@ -839,43 +838,74 @@ bool SmartFiresNodeApp::maybeEnterTimedMcuSleep() {
     return false;
   }
 
-  // The window-flush bundle is enqueued the moment the active window closes,
-  // but it still has to wait for this node's TDMA slot to come around. Going
-  // to standby now would park it in the queue for the entire sleep, so stay
-  // awake until the queue drains — bounded, since a slot that never opens
-  // (base offline) must not stall the duty cycle indefinitely.
+  // Give the final telemetry/window marker time to drain before
+  // either entering MCU standby or shutting the radio down while
+  // waiting for the GPS first fix.
   if (_radio.queuedCount() > 0) {
     const uint32_t now = _clock.millis();
 
     if (!_txDrainDeadlineValid) {
       _txDrainDeadlineValid = true;
       _txDrainDeadlineMs =
-          now + SensingConfig::DutyCycle::kMaxTxDrainBeforeStandbyMs;
+          now +
+          SensingConfig::DutyCycle::
+              kMaxTxDrainBeforeStandbyMs;
     }
 
-    if (static_cast<int32_t>(_txDrainDeadlineMs - now) > 0) {
+    if (static_cast<int32_t>(
+            _txDrainDeadlineMs - now) > 0) {
       return false;
     }
 
-    LOG_WARN("sleep",
-             "tx_drain_timeout queued=%u drain_budget_ms=%lu sleeping_anyway=1",
-             static_cast<unsigned int>(_radio.queuedCount()),
-             static_cast<unsigned long>(
-                 SensingConfig::DutyCycle::kMaxTxDrainBeforeStandbyMs));
+    LOG_WARN(
+        "sleep",
+        "tx_drain_timeout queued=%u drain_budget_ms=%lu",
+        static_cast<unsigned int>(
+            _radio.queuedCount()),
+        static_cast<unsigned long>(
+            SensingConfig::DutyCycle::
+                kMaxTxDrainBeforeStandbyMs));
   }
 
   _txDrainDeadlineValid = false;
 
+  // GPS first-fix exception:
+  //
+  // Keep the SAMD21 running so the normal application loop and
+  // DutyCycleController continue to execute. The GPS remains awake
+  // through the controller's sensor-sleep exemption.
+  //
+  // All other sensors and the radio still follow the normal
+  // Timed duty-cycle sleep/wake behavior.
+  if (_duty.waitingForFirstFix()) {
+    // Mark this sleeping interval as handled. This prevents
+    // radioMustStayAwakeToDrain() from forcing the radio awake
+    // for the rest of the sleep phase.
+    //
+    // This DOES NOT mean the MCU actually entered standby.
+    _mcuSleptThisCycle = true;
+
+    // The normal phase logic should already request radio sleep,
+    // but make it explicit here now that TX draining is finished.
+    _radio.setDutySleep(true);
+
+    LOG_INFO(
+        "sleep",
+        "mcu_standby_skipped reason=gps_first_fix "
+        "gps_awake=1 mcu_awake=1 radio_sleep=1");
+
+    return false;
+  }
+
   const uint32_t remainingMs =
       _duty.timedSleepRemainingMs();
 
-  // RTC MODE0 alarms have ~1 ms resolution, so the full remainder can
-  // go to standby — only skip when it's too short to be worth the
-  // enter/exit overhead.
-  const uint32_t standbyMs = remainingMs;
+  const uint32_t standbyMs =
+      remainingMs;
 
   if (standbyMs <
-      SensingConfig::DutyCycle::kMinMcuStandbyMs) {
+      SensingConfig::DutyCycle::
+          kMinMcuStandbyMs) {
     return false;
   }
 
@@ -883,11 +913,13 @@ bool SmartFiresNodeApp::maybeEnterTimedMcuSleep() {
       "sleep",
       "timed_mcu_sleep_start "
       "remaining_ms=%lu standby_ms=%lu",
-      static_cast<unsigned long>(remainingMs),
-      static_cast<unsigned long>(standbyMs));
+      static_cast<unsigned long>(
+          remainingMs),
+      static_cast<unsigned long>(
+          standbyMs));
 
-  // NodeApp owns radio sleep. Put the RFM95 down before
-  // entering SAMD21 standby.
+  // Normal Timed-mode behavior:
+  // put the RFM95 down before entering SAMD21 standby.
   _radio.setDutySleep(true);
 
   const uint32_t elapsedMs =
@@ -895,43 +927,34 @@ bool SmartFiresNodeApp::maybeEnterTimedMcuSleep() {
 
   _mcuSleptThisCycle = true;
 
-  // Standby is not time the base was given to answer — the radio was off, so an
-  // ACK_SUMMARY sent during it could not have been heard. Exclude it from the
-  // pending window's retry/expiry math so the window's unacked bundles (always
-  // including the WINDOW_LAST one, whose ack can only arrive in a slot 0 that
-  // falls after this sleep begins) survive to be retransmitted during the next
-  // warmup instead of being dropped as max_age.
+  // Exclude MCU standby from radio retry/expiry bookkeeping.
   _radio.notifyMcuStandby(elapsedMs);
 
-  // The RTC MODE0 clock carries the session forward across standby to ~1 ms
-  // (rtc-subsecond-sleep Phase 1), well inside the 20 ms guard band, so the
-  // session survives the sleep — no reset(), no unslotted AWAKEN handshake,
-  // no waiting on a fresh TIME_SYNC before telemetry can resume. Cold boot and
-  // genuine lost/stale sync still fall back to AWAKEN via update().
-  //
-  // Instrumentation: the local clock is that same RTC counter, so it simply
-  // never stopped over the standby — sessionNowMs() is already current with
-  // nothing to correct. Storing its offset from the local clock lets the next
-  // naturally received TIME_SYNC be compared against it (wake_phase_err in
-  // update()) without the awake gap polluting the error.
-  if (_syncActive && _tdmaClock.hasSync()) {
+  if (_syncActive &&
+      _tdmaClock.hasSync()) {
     _predictedSessionOffsetMs =
-        _tdmaClock.sessionNowMs() - _clock.millis();
-    _predictedSyncLocalMs = _tdmaClock.syncLocalMs();
+        _tdmaClock.sessionNowMs() -
+        _clock.millis();
+
+    _predictedSyncLocalMs =
+        _tdmaClock.syncLocalMs();
+
     _predictedValid = true;
   }
 
-  // The duty controller is still technically in a sleeping phase until it next
-  // reads the clock and sees how far it advanced. Override phase-based radio
-  // sleep so the radio is listening again before the node's next slot.
+  // The duty controller is technically still in its sleeping
+  // phase immediately after standby. Force the radio awake until
+  // the normal duty-cycle transition catches up.
   _forceRadioAwake = true;
   _radio.setDutySleep(false);
 
   LOG_INFO(
       "sleep",
       "timed_mcu_sleep_complete "
-      "elapsed_ms=%lu sync_preserved=%u radio_override=1",
-      static_cast<unsigned long>(elapsedMs),
+      "elapsed_ms=%lu sync_preserved=%u "
+      "radio_override=1",
+      static_cast<unsigned long>(
+          elapsedMs),
       _tdmaClock.hasSync() ? 1 : 0);
 
   return true;

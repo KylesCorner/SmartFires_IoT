@@ -6,9 +6,9 @@
 
 #include "drivers/IGpsDriver.h"
 #include "interfaces/IClock.h"
-#include "interfaces/ISensor.h"
+#include "sensors/IFirstFixSensor.h"
 
-class Pa1010dGpsSensor final : public ISensor {
+class Pa1010dGpsSensor final : public IFirstFixSensor {
 public:
   struct Config {
     SensorDutyClass dutyClass = SensorDutyClass::DutyCycled;
@@ -17,11 +17,6 @@ public:
     uint32_t minSamplePeriodMs;
     uint32_t wakeDelayMs = 0;
     uint8_t address = 0x10;
-
-    //The gps unit is on its own sub-duty cycle. This config says that the main
-    //duty cycle has no control over the gps and the gps will perodically cycle
-    //itself. The gps needs to have its wake pin (defined in the driver) to
-    //backup its routing info for faster fix when awakened
 
     static Pa1010dGpsSensor::Config make(
         uint32_t runTimeMs = 4000,
@@ -49,14 +44,17 @@ public:
   Pa1010dGpsSensor(const Config &cfg, IGpsDriver &driver, IClock &clock);
 
   const char *name() const override;
+
   bool begin() override;
   bool wake() override;
   bool sleep() override;
   bool service() override;
   bool sample() override;
+  bool reset() override;
+
   bool ready() const override;
   bool healthy() const override;
-  bool reset() override;
+  bool hasFix() const override;
 
   SensorPowerState powerState() const override;
   SensorDutyClass dutyClass() const override;
