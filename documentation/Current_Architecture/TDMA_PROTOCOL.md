@@ -65,7 +65,7 @@ Node slots carry BUNDLE, STATUS, FULL_STATE, queued `CMD_ACK`, window markers, a
 
 Slot 0 carries direct assignment sync, base-to-node commands, `ACK_SUMMARY`, and periodic broadcast sync, in that priority order. The base attempts one pending category per `update()` call, and subsequent loop iterations within the same slot may send more.
 
-Commands are fire-and-forget and acknowledged later by `CMD_ACK`. `ACK_SUMMARY` and direct sync still use blocking `sendToWait()` and can exceed slot 0 in their worst case; this is open work, not a guarantee of perfect collision isolation.
+Commands are fire-and-forget and acknowledged later by `CMD_ACK`. `ACK_SUMMARY` and direct sync still use blocking `sendToWait()` and can exceed slot 0 in their worst case; the possible fix is deferred, so collision isolation is not absolute.
 
 ## TX budget
 

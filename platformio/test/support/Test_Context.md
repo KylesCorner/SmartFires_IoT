@@ -1,6 +1,6 @@
 # SmartFires native-test context
 
-This file is a concise maintainer reference for tests under `platformio/test/`. Current production behavior is documented in `documentation/Current_Architecture/`; known test debt is tracked in `documentation/Pending_Plans/NATIVE_TEST_REPAIR.md`.
+This file is a concise maintainer reference for tests under `platformio/test/`. Current production behavior is documented in `documentation/Current_Architecture/`; known test debt is tracked in `documentation/Possible_Plans/NATIVE_TEST_REPAIR.md`.
 
 ## Rules
 
@@ -91,11 +91,11 @@ Keep setup/teardown local to the suite. Include `<cstdio>`/`<stdio.h>` if a fake
 
 ## Current known failures
 
-As of the documentation audit, do not expect the full environment to pass until `NATIVE_TEST_REPAIR.md` is completed. That plan records:
+As of the documentation audit, do not expect the full environment to pass. `Possible_Plans/NATIVE_TEST_REPAIR.md` records the deferred repair groups:
 
 - `test_config` references removed duty-cycle factories;
 - six duty-controller expectations no longer match the current implementation;
 - `test/support/Arduino.cpp` duplicates inline shim definitions;
 - the TxPowerController source-filter omission was corrected in this consolidation but still needs a PlatformIO verification run.
 
-When execution is authorized, record the exact command, compiler/linker failures, failing assertions, and whether the result was already listed in the repair plan.
+When repair work and execution are authorized, record the exact command, compiler/linker failures, failing assertions, and whether the result was already listed in the possible-plan note.

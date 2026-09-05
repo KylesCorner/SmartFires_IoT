@@ -104,4 +104,4 @@ Replace the example port with the actual device. Disconnect or stop any monitor/
 pio test -e native
 ```
 
-The suite currently has known failures described in `documentation/Pending_Plans/NATIVE_TEST_REPAIR.md`; distinguish those from new build/link failures when reporting results.
+The suite currently has known failures described in `documentation/Possible_Plans/NATIVE_TEST_REPAIR.md`; distinguish those from new build/link failures when reporting results.

@@ -48,4 +48,4 @@ pio device monitor -e feather_m0_lora_node_debug
 pio test -e native
 ```
 
-The native suite currently has known failures documented in [`../documentation/Pending_Plans/NATIVE_TEST_REPAIR.md`](../documentation/Pending_Plans/NATIVE_TEST_REPAIR.md). Treat a red run as known debt until that plan is completed, but record any new compiler or linker failures separately.
+The native suite currently has known failures documented in [`../documentation/Possible_Plans/NATIVE_TEST_REPAIR.md`](../documentation/Possible_Plans/NATIVE_TEST_REPAIR.md). Treat a red run as known debt until that work is resumed, but record any new compiler or linker failures separately.

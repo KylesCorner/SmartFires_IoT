@@ -26,7 +26,7 @@ wind_test_bench/       separate wind-sensor bench project
 
 The node/base binary pipeline, runtime node assignment, TDMA scheduling, app-layer reliability, duty cycling, watchdog recovery, reset coordination, RX power gating, DMP heading, window markers, Jetson-side persistent UID correlation, ingest, and web dashboard are implemented.
 
-Open work is tracked in [`documentation/README.md`](documentation/README.md). The two important validation caveats are that base `ACK_SUMMARY` and direct `TIME_SYNC` still have blocking link-ACK paths that can overrun slot 0, and the native PlatformIO suite has known failures awaiting repair.
+Deferred possibilities are parked in [`documentation/README.md`](documentation/README.md); they are not an active backlog. The two important caveats are that base `ACK_SUMMARY` and direct `TIME_SYNC` still have blocking link-ACK paths that can overrun slot 0, and the native PlatformIO suite has known failures.
 
 ## Commands
 

@@ -72,7 +72,7 @@ The loop caps each update at three sends. A full bundle consumes a conservative 
 
 `ack_base_seq` acknowledges every sequence through that value in modulo-256 order. Bit `i` in the 16-bit `ack_mask` acknowledges `ack_base_seq + 1 + i`. The base coalesces unchanged state, paces summaries by at least 25 ms, and rotates across dirty nodes.
 
-The base uses blocking `sendToWait()` for `ACK_SUMMARY`; the node manually sends the corresponding RadioHead ACK. This is still a known slot-overrun risk because RadioHead may wait through four 250 ms attempts. The planned fix is tracked in `BASE_SLOT_OVERRUN_FIX.md`.
+The base uses blocking `sendToWait()` for `ACK_SUMMARY`; the node manually sends the corresponding RadioHead ACK. This is still a known slot-overrun risk because RadioHead may wait through four 250 ms attempts. A deferred hardening option is recorded in `Possible_Plans/BASE_SLOT_OVERRUN_FIX.md`.
 
 ## Duty-cycled acknowledgement deferral
 

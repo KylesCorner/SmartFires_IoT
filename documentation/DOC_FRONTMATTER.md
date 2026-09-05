@@ -45,16 +45,21 @@ reference them without a path.
 |---|---|---|
 | `architecture` | `Current_Architecture/`, `SOFTWARE_DESIGN.md`, `SOFTWARE_DESIGN_DIAGRAM.md` | Must match code now. `source_refs` required. |
 | `reference` | `User_Reference/`, `POWER_MEASURMENTS.md` | Practical how-to or measurement reference. `source_refs` optional (only if it names specific build files/scripts). |
-| `plan-pending` | `Pending_Plans/` | Describes work not yet built. No `source_refs` (nothing to point at yet), no `last_verified`. |
+| `plan-pending` | `Pending_Plans/` | Scoped proposal awaiting implementation; use `status: draft`. No `source_refs` or `last_verified`. |
+| `plan-possible` | `Possible_Plans/` | Concise restart note for deliberately deferred work. No `source_refs` or `last_verified`. |
 | `plan-completed` | `Completed_Plans/`, `Project_Progress/` | Historical design record; code is authoritative, not this doc. No `last_verified` requirement. Use `superseded_by` if a `Current_Architecture` doc now fully covers what this plan describes. |
 | `index` | `documentation/README.md` | Doc table of contents. `last_verified` meaningful (the list itself can go stale), no `source_refs`. |
 
 ### `status`
 
-`current` (architecture/reference/index docs believed accurate) · `draft` (pending plans) ·
+`current` (architecture/reference/index docs believed accurate) · `draft` (pending plans) · `deferred` (possible plans) ·
 `historical` (completed plans — accurate as a record of intent, not of current code) ·
 `superseded` (anything, of any category, known to be replaced/wrong but not yet deleted or
 rewritten — a deliberate "don't trust this" flag, distinct from simply being old).
+
+The restored `plan-pending` / `draft` metadata is not yet recognized by
+`check_doc_freshness.py`. Updating that validator is recorded in the pending session
+plan; this planning-only change does not modify Python code.
 
 ### `source_refs`
 

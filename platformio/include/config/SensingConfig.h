@@ -21,7 +21,7 @@
 // either a bare factory default or a main.cpp override — this file changes
 // where the value lives, not what the value is. See
 // documentation/Current_Architecture/TUNABLE_PARAMETERS.md for the full
-// table and documentation/Pending_Plans/TUNABLE_PARAMETER_ARCHITECTURE_PLAN.md
+// table and documentation/Completed_Plans/TUNABLE_PARAMETER_ARCHITECTURE_PLAN.md
 // for the consolidation rationale.
 //
 // Data only — no logic, no driver includes.

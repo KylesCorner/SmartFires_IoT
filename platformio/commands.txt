@@ -21,7 +21,7 @@ pio device monitor -e feather_m0_lora_base
 pio device monitor -e feather_m0_lora_node_debug
 pio device monitor -e feather_m0_lora_sniffer
 
-Run native tests (known failures: documentation/Pending_Plans/NATIVE_TEST_REPAIR.md)
+Run native tests (known failures: documentation/Possible_Plans/NATIVE_TEST_REPAIR.md)
 pio test -e native
 pio test -e native -f test_duty_cycle_controller
 pio test -e native -f test_tdma_radio_service

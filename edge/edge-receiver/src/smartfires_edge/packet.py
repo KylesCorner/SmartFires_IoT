@@ -32,7 +32,7 @@ PKT_DEBUG_LOG = 0x14
 # Base -> one node. The base station owns the dynamic TX power decision; the
 # Jetson only encodes these for manual/bench use and passively decodes them for
 # monitoring. It is not a participant in the control loop — see
-# documentation/Pending_Plans/DYNAMIC_TX_POWER.md.
+# documentation/Completed_Plans/DYNAMIC_TX_POWER.md.
 PKT_CMD_SET_TX_POWER = 0x15
 
 # sensor_flags bits (SensorSnapshot.h / AGENTS.md): which sensors had a valid
@@ -279,7 +279,7 @@ def encode_cmd_set_tx_power_frame(
     """Encode a CMD_SET_TX_POWER UART frame for base-station forwarding.
 
     The base station is the decision-maker for dynamic TX power
-    (documentation/Pending_Plans/DYNAMIC_TX_POWER.md). This frame is the
+    (documentation/Completed_Plans/DYNAMIC_TX_POWER.md). This frame is the
     operator override on top of that: sending mode=STATIC pins a node at a
     level and takes it out of the loop, mode=DYNAMIC hands it back.
 

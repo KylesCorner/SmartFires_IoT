@@ -18,7 +18,7 @@ Current architecture and reference docs were consolidated against the source tre
 2. [`SOFTWARE_DESIGN.md`](SOFTWARE_DESIGN.md) for the end-to-end system.
 3. The relevant `Current_Architecture/` deep dive.
 4. A `User_Reference/` guide for operational work.
-5. Pending/completed plans only when investigating future work or design history.
+5. Pending plans for upcoming work; possible/completed plans for deferred work or design history.
 
 If a statement conflicts, shipped code/config wins over current docs; current docs win over plans. Files under `Completed_Plans/` and `Project_Progress/` are intentionally historical and may contain values that were correct only at that stage.
 
@@ -50,17 +50,24 @@ If a statement conflicts, shipped code/config wins over current docs; current do
 
 ## Pending plans
 
-These contain remaining work. A plan may describe already-shipped prerequisites; its status section says what remains.
+Scoped proposals awaiting implementation. The previously parked backlog remains in `Possible_Plans/`.
+
+| Document | Scope |
+|---|---|
+| [`Pending_Plans/MULTI_DAY_SESSION_AND_RESTART_RECOVERY.md`](Pending_Plans/MULTI_DAY_SESSION_AND_RESTART_RECOVERY.md) | Date and time throughout the dashboard; fresh sessions and full edge initialization after Jetson boot or New Session |
+
+## Possible plans (deferred)
+
+These are deliberately parked ideas, risks, and validation tasks. They are concise restart notes, not an active delivery backlog.
 
 | Document | Current state at 2026-09-04 |
 |---|---|
-| [`Pending_Plans/BASE_SLOT_OVERRUN_FIX.md`](Pending_Plans/BASE_SLOT_OVERRUN_FIX.md) | Open: replace blocking base `ACK_SUMMARY` and direct `TIME_SYNC` paths with deadline-safe sending; command sending is already fire-and-forget |
-| [`Pending_Plans/NATIVE_TEST_REPAIR.md`](Pending_Plans/NATIVE_TEST_REPAIR.md) | Open: repair removed duty-config factory references, controller assertions, and stale Arduino shim so `pio test -e native` is green |
-| [`Pending_Plans/STANDBY_WATCHDOG_COVERAGE.md`](Pending_Plans/STANDBY_WATCHDOG_COVERAGE.md) | Open design choice: watchdog is disabled during Timed MCU standby |
-| [`Pending_Plans/DYNAMIC_TX_POWER.md`](Pending_Plans/DYNAMIC_TX_POWER.md) | Control loop, packet, safeguards, and dashboard are shipped; field-tune constants and decide whether to raise the 13 dBm ceiling |
-| [`Pending_Plans/RESET_REASON_DIAGNOSTICS.md`](Pending_Plans/RESET_REASON_DIAGNOSTICS.md) | Reset cause and hang-zone AWAKEN fields are shipped; hardware validation remains, optional early-warning PC capture is deferred |
-| [`Pending_Plans/GPS_DISCIPLINED_CLOCK.md`](Pending_Plans/GPS_DISCIPLINED_CLOCK.md) | RTC COUNT32 timebase is shipped; GPS PPS discipline is not implemented |
-| [`Pending_Plans/JETSON_SENSOR_EXPANSION.md`](Pending_Plans/JETSON_SENSOR_EXPANSION.md) | Direct Jetson temp/humidity, BMV080, GPS, and IMU expansion is not implemented; research spikes remain |
+| [`Possible_Plans/BASE_SLOT_OVERRUN_FIX.md`](Possible_Plans/BASE_SLOT_OVERRUN_FIX.md) | Remove the two remaining blocking base sends and add deadline-safe slot-0 gating |
+| [`Possible_Plans/NATIVE_TEST_REPAIR.md`](Possible_Plans/NATIVE_TEST_REPAIR.md) | Repair stale config tests, review duty-controller failures, and remove the conflicting Arduino shim |
+| [`Possible_Plans/STANDBY_WATCHDOG_COVERAGE.md`](Possible_Plans/STANDBY_WATCHDOG_COVERAGE.md) | Decide whether and how to cover Timed MCU standby with the watchdog |
+| [`Possible_Plans/RESET_REASON_DIAGNOSTICS.md`](Possible_Plans/RESET_REASON_DIAGNOSTICS.md) | Hardware-validate the shipped reset-cause and hang-zone diagnostics |
+| [`Possible_Plans/GPS_DISCIPLINED_CLOCK.md`](Possible_Plans/GPS_DISCIPLINED_CLOCK.md) | Optionally discipline the shipped RTC timebase from node GPS PPS |
+| [`Possible_Plans/JETSON_SENSOR_EXPANSION.md`](Possible_Plans/JETSON_SENSOR_EXPANSION.md) | Optional direct Jetson temperature/humidity, particulate, GPS, and IMU sensors |
 
 ## Completed plans (historical)
 
@@ -71,6 +78,7 @@ These contain remaining work. A plan may describe already-shipped prerequisites;
 | [`Completed_Plans/BOARD_REFACTOR_PLAN.md`](Completed_Plans/BOARD_REFACTOR_PLAN.md) | Firmware directory/class refactor |
 | [`Completed_Plans/DEPLOYMENT_SCHEDULE.md`](Completed_Plans/DEPLOYMENT_SCHEDULE.md) | Heading/CLI deployment phases |
 | [`Completed_Plans/DMP_CLEANUP_PLAN.md`](Completed_Plans/DMP_CLEANUP_PLAN.md) | ICM-20948 DMP heading design |
+| [`Completed_Plans/DYNAMIC_TX_POWER.md`](Completed_Plans/DYNAMIC_TX_POWER.md) | Base-owned per-node TX-power controller and dashboard controls |
 | [`Completed_Plans/EDGE_REFACTOR_WEB_DASHBOARD.md`](Completed_Plans/EDGE_REFACTOR_WEB_DASHBOARD.md) | Edge package/dashboard refactor |
 | [`Completed_Plans/JETSON_CLI_AND_COMMAND_SYSTEM.md`](Completed_Plans/JETSON_CLI_AND_COMMAND_SYSTEM.md) | Earlier CLI/command design (not every proposed command shipped) |
 | [`Completed_Plans/LINK_STATS_PACKET_PLAN.md`](Completed_Plans/LINK_STATS_PACKET_PLAN.md) | STATUS retransmit/failure counters |

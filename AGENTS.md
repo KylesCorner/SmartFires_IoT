@@ -35,8 +35,9 @@ Use sources in this order when statements disagree:
 
 1. Shipped code and `platformio/platformio.ini`.
 2. `documentation/Current_Architecture/`, `documentation/SOFTWARE_DESIGN.md`, and user references marked `status: current`.
-3. `documentation/Pending_Plans/` for proposed work only.
-4. `documentation/Completed_Plans/` and `documentation/Project_Progress/` as historical records, not current behavior.
+3. `documentation/Pending_Plans/` for scoped proposals awaiting implementation.
+4. `documentation/Possible_Plans/` for deferred ideas and validation work only.
+5. `documentation/Completed_Plans/` and `documentation/Project_Progress/` as historical records, not current behavior.
 
 Start at `documentation/README.md`. Current architecture docs use YAML frontmatter defined by `documentation/DOC_FRONTMATTER.md`; firmware files use the reciprocal header format in `documentation/CODE_FRONTMATTER.md`.
 
@@ -59,7 +60,7 @@ When changing behavior:
 - `CMD_RESET` is implemented end-to-end, including `node_id=0` base reset and the dashboard `/api/node_reset` endpoint. `CMD_CALIBRATE` is intentionally log-and-ACK because the DMP self-calibrates. The generic `/api/command` route is still an echo stub.
 - Per-node TX power control is shipped. The base uses received SNR and STATUS retry/failure counters, while `/api/tx_power` supplies dynamic/static operator control. Thresholds are still untuned; the node clamps commands to 5–13 dBm.
 - The Jetson CLI subcommands are `receive`, `summary`, `visualize`, and `web`; the web default is port 8080. The stable base device is `/dev/smartfires-base`.
-- Known open work is indexed in `documentation/README.md`. In particular, blocking `sendToWait()` remains on base `ACK_SUMMARY` and direct `TIME_SYNC` paths, and the native PlatformIO suite has known failures described in `Pending_Plans/NATIVE_TEST_REPAIR.md`.
+- Possible future work is indexed in `documentation/README.md`. In particular, blocking `sendToWait()` remains on base `ACK_SUMMARY` and direct `TIME_SYNC` paths, and the native PlatformIO suite has known failures described in `Possible_Plans/NATIVE_TEST_REPAIR.md`.
 
 ## Repository map
 
