@@ -25,8 +25,8 @@ EXEMPT = {
     DOCS_DIR / "DOC_FRONTMATTER.md",
     DOCS_DIR / "CODE_FRONTMATTER.md",
 }
-VALID_CATEGORIES = {"architecture", "reference", "plan-pending", "plan-completed", "index"}
-VALID_STATUSES = {"current", "draft", "historical", "superseded"}
+VALID_CATEGORIES = {"architecture", "reference", "plan-possible", "plan-completed", "index"}
+VALID_STATUSES = {"current", "deferred", "historical", "superseded"}
 
 
 def expected_category(md_path: Path) -> str | None:
@@ -42,8 +42,8 @@ def expected_category(md_path: Path) -> str | None:
         return "architecture"
     if rel.parts[0] == "User_Reference":
         return "reference"
-    if rel.parts[0] == "Pending_Plans":
-        return "plan-pending"
+    if rel.parts[0] == "Possible_Plans":
+        return "plan-possible"
     if rel.parts[0] in {"Completed_Plans", "Project_Progress"}:
         return "plan-completed"
     return None
@@ -134,8 +134,8 @@ def main() -> int:
             problems.append(
                 f"{rel} ({name}): status '{status}' is not one of {sorted(VALID_STATUSES)}"
             )
-        if category == "plan-pending" and status != "draft":
-            problems.append(f"{rel} ({name}): pending plans must use status 'draft'")
+        if category == "plan-possible" and status != "deferred":
+            problems.append(f"{rel} ({name}): possible plans must use status 'deferred'")
         if category == "plan-completed" and status not in {"historical", "superseded"}:
             problems.append(
                 f"{rel} ({name}): completed/history docs must be historical or superseded"
@@ -146,7 +146,7 @@ def main() -> int:
             )
         if category == "architecture" and not source_refs:
             problems.append(f"{rel} ({name}): architecture docs require source_refs")
-        if category in {"plan-pending", "plan-completed"} and source_refs:
+        if category in {"plan-possible", "plan-completed"} and source_refs:
             problems.append(
                 f"{rel} ({name}): plans/history must not declare source_refs"
             )

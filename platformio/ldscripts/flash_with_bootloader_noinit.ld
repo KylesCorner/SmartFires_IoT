@@ -6,7 +6,7 @@
   NOT zeroed by the C runtime at startup, so they retain their value across a
   warm (watchdog/system) reset. Used by platform/ResetDiagnostics.cpp to carry a
   hang-zone breadcrumb through a WDT reboot. See
-  documentation/Pending_Plans/RESET_REASON_DIAGNOSTICS.md.
+  documentation/Possible_Plans/RESET_REASON_DIAGNOSTICS.md.
 
   Only the node environments point board_build.ldscript here; the stock script
   is unchanged for base/other builds.

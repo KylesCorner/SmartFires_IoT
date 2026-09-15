@@ -12,7 +12,7 @@
 // across TdmaConfig::tdmaCfg()'s positional-default factory, a manual
 // override block in main.cpp's makeNodeTdmaCfg(), RadioHeadTdmaDriver's own
 // factory defaults, and hardcoded literals inside TdmaRadioService.cpp. See
-// documentation/Pending_Plans/TUNABLE_PARAMETER_ARCHITECTURE_PLAN.md and
+// documentation/Completed_Plans/TUNABLE_PARAMETER_ARCHITECTURE_PLAN.md and
 // documentation/Current_Architecture/TUNABLE_PARAMETERS.md for the full
 // rationale and the operating-value governance process (profiles, change
 // classes, rollback criteria).
@@ -112,7 +112,7 @@ constexpr int8_t kRadioTxPowerDbm = 13;
 
 // Bounds a node clamps an incoming PKT_CMD_SET_TX_POWER to before applying it.
 // The base station is the decision-maker for dynamic TX power
-// (documentation/Pending_Plans/DYNAMIC_TX_POWER.md), but "the base decides" is
+// (documentation/Completed_Plans/DYNAMIC_TX_POWER.md), but "the base decides" is
 // not the same as "the node obeys anything" — a corrupted-but-CRC-valid frame,
 // or a base running mismatched firmware, must not be able to push the radio
 // somewhere the hardware cannot go.
@@ -177,7 +177,7 @@ constexpr TdmaReliabilityMode kReliabilityMode =
     tdmaReliabilityModeFromValue(SMARTFIRES_TDMA_RELIABILITY_MODE);
 
 // --- ACK-paced retry gate (APP_ACK_SUMMARY mode) ----------------------------
-// See documentation/Pending_Plans/TUNABLE_PARAMETER_ARCHITECTURE_PLAN.md
+// See documentation/Completed_Plans/TUNABLE_PARAMETER_ARCHITECTURE_PLAN.md
 // Appendix B for the retry-wait derivation, implementation status, and the
 // open decision on whether expectedAckIntervalMs should instead be derived
 // from the base's ackSummaryMinIntervalMs (BaseConfig.h).

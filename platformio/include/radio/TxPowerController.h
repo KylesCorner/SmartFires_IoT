@@ -18,7 +18,7 @@
 // without a fake radio, and it keeps the "who decides" boundary literal — this
 // class decides, SmartFiresBaseApp transmits.
 //
-// The controlling ideas (documentation/Pending_Plans/DYNAMIC_TX_POWER.md):
+// The controlling ideas (documentation/Completed_Plans/DYNAMIC_TX_POWER.md):
 //
 //   * Every failure mode is owned by whichever side still has a working link.
 //     This class owns the two the *base* can act on — a linked node whose

@@ -63,7 +63,7 @@ The fixed 75-second wake-to-wake target is divided into time already spent in wa
 
 `WINDOW_BEGIN` is queued after wake and `WINDOW_END` at close. The end marker carries `planned_sleep_ms` and the number of samples in the completed window. The application keeps the radio awake for up to 5 seconds while draining the final telemetry and marker, then enters SAMD21 RTC standby when the remaining duration is at least 250 ms.
 
-The RTC COUNT32 implementation keeps subsecond time and supports continuing TDMA session time across standby. The watchdog is currently disabled for the actual standby interval; extending watchdog coverage is open work.
+The RTC COUNT32 implementation keeps subsecond time and supports continuing TDMA session time across standby. The watchdog is currently disabled for the actual standby interval; extending coverage is a documented, deferred possibility.
 
 ## Hybrid
 

@@ -129,7 +129,7 @@ private:
     // link quality and never picks a level, it only drops an instruction it can
     // no longer trust. Because the baseline is the *ceiling* in this design,
     // the revert is always a step up or a no-op — monotonic, terminal, and
-    // impossible to oscillate. See documentation/Pending_Plans/DYNAMIC_TX_POWER.md.
+    // impossible to oscillate. See documentation/Completed_Plans/DYNAMIC_TX_POWER.md.
     void revertTxPowerToBaseline(const char *reason);
     bool maybeEnterTimedMcuSleep();
     bool radioMustStayAwakeToDrain() const;

@@ -68,7 +68,7 @@ enum PktType : uint8_t {
     // it end-to-end on this single hop.
     PKT_DEBUG_LOG        = 0x14,
     // Base -> one node. The base station is the sole authority on node TX
-    // power (see documentation/Pending_Plans/DYNAMIC_TX_POWER.md): the node
+    // power (see documentation/Completed_Plans/DYNAMIC_TX_POWER.md): the node
     // never decides its own level, it only applies what it is told, clamps it
     // to the locally-known-safe range, and reports the applied value back in
     // StatusPayload::tx_power_dbm. Acked with the existing PKT_CMD_ACK.

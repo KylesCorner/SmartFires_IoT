@@ -1294,7 +1294,7 @@ bool SmartFiresBaseApp::handleJetsonCommandPayload(const uint8_t *payload, uint8
 
     // node_id 0 is "the base itself" for CMD_RESET, but the base's own TX
     // power is a separate static config decision, not something to be changed
-    // at runtime — see DYNAMIC_TX_POWER.md's "Base station TX power ceiling".
+    // at runtime; only assigned sensor nodes participate in dynamic control.
     if (cmd.node_id == 0) {
       LOG_WARN("base",
                "uart_cmd_reject type=CMD_SET_TX_POWER reason=base_self_not_supported seq=%u",

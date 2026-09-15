@@ -38,7 +38,7 @@ uint32_t Samd21RtcSleep::sleepFor(
       static_cast<unsigned long>(startTicks),
       static_cast<unsigned long>(targetTicks));
 
-  // The normal watchdog cannot span a five-minute standby.
+  // The configured watchdog cannot span the current Timed standby interval.
   Watchdog.disable();
 
   Serial.flush();

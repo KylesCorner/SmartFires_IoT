@@ -18,7 +18,7 @@ related_docs:
 
 ## Scope and authority
 
-This document describes the system that the current source tree builds. `platformio/platformio.ini`, firmware config headers, `BinaryPacket.h`, and the Python edge package remain authoritative for exact values. Pending plans describe possible changes; completed plans preserve design history.
+This document describes the system that the current source tree builds. `platformio/platformio.ini`, firmware config headers, `BinaryPacket.h`, and the Python edge package remain authoritative for exact values. Possible plans preserve deferred ideas; completed plans preserve design history.
 
 ## System topology
 
@@ -88,7 +88,7 @@ The deployed link uses raw LoRa at 915 MHz with RadioHead, nominally 13 dBm. TDM
 
 Current node targets use app-layer reliability. Telemetry goes over the RadioHead link without waiting for a link ACK. The node keeps up to eight pending telemetry frames, while the base sends cumulative `ACK_SUMMARY` bitmaps. A pending frame expires after 30 seconds or three total attempts. `AWAKEN`, direct assignment sync, and `ACK_SUMMARY` retain selected link-ACK behavior; commands use fire-and-forget LoRa plus `CMD_ACK` at the application layer.
 
-Two base paths remain known timing debt: `ACK_SUMMARY` and direct `TIME_SYNC` use blocking `sendToWait()` inside slot 0. See `Pending_Plans/BASE_SLOT_OVERRUN_FIX.md`.
+Two base paths remain known timing debt: `ACK_SUMMARY` and direct `TIME_SYNC` use blocking `sendToWait()` inside slot 0. See `Possible_Plans/BASE_SLOT_OVERRUN_FIX.md`.
 
 ## Wire protocol
 
@@ -150,4 +150,4 @@ The edge default is `/dev/smartfires-base`, 115200 baud, `/mnt/nvme_drive/data`,
 
 Network targets are `feather_m0_lora_base`, `feather_m0_lora_node`, `feather_m0_lora_node_debug`, `feather_m0_lora_node_timed`, `feather_m0_lora_node_hybrid`, and `feather_m0_lora_sniffer`. Isolated `feather_m0_power_*` targets cover power measurements. Removed dummy-node and sensor-probe targets are not valid commands.
 
-`native` contains host Unity tests, but the suite has known failures documented in `Pending_Plans/NATIVE_TEST_REPAIR.md`. Hardware execution, uploading, serial monitoring, and PlatformIO tests require an explicit operator decision and suitable connected hardware.
+`native` contains host Unity tests, but the suite has known failures documented in `Possible_Plans/NATIVE_TEST_REPAIR.md`. Hardware execution, uploading, serial monitoring, and PlatformIO tests require an explicit operator decision and suitable connected hardware.

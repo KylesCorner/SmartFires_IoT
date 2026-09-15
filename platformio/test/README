@@ -25,7 +25,7 @@ pio test -e native -f test_packet_handler
 pio test -e native -f test_tx_power_controller
 ```
 
-The full suite is currently known to be red. `documentation/Pending_Plans/NATIVE_TEST_REPAIR.md` is the consolidated source of truth for removed config-factory calls, duty-controller assertion drift, and the stale Arduino shim. Do not reinterpret failing tests as desired production behavior merely to make them green.
+The full suite is currently known to be red. `documentation/Possible_Plans/NATIVE_TEST_REPAIR.md` is the consolidated source of truth for removed config-factory calls, duty-controller assertion drift, and the stale Arduino shim. Do not reinterpret failing tests as desired production behavior merely to make them green.
 
 `platformio.ini`'s native source filter includes production `power/`, `sensors/`, TDMA clock/service/queue, PacketHandler, and TxPowerController code. Add a production source explicitly when a new native suite needs it; a test file including a header is not enough to link its implementation.
 
