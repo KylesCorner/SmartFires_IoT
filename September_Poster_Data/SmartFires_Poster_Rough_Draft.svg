@@ -1,0 +1,910 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="48in"
+   height="36in"
+   viewBox="0 0 4800 3600"
+   version="1.1"
+   id="svg81"
+   sodipodi:docname="SmartFires_Poster_Rough_Draft.svg"
+   inkscape:version="1.4.4 (dcaf3e7d9e, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview81"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="in"
+     showgrid="false"
+     inkscape:zoom="0.16782407"
+     inkscape:cx="1555.2"
+     inkscape:cy="2633.7103"
+     inkscape:window-width="2560"
+     inkscape:window-height="1371"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="burn-data" />
+  <defs
+     id="defs1">
+    <style
+       id="style1"><![CDATA[
+      .title { font-family: "DejaVu Sans", Arial, sans-serif; font-size: 156px; font-weight: 700; fill: #ffffff; }
+      .subtitle { font-family: "DejaVu Sans", Arial, sans-serif; font-size: 54px; font-weight: 400; fill: #dce8f2; }
+      .section-title { font-family: "DejaVu Sans", Arial, sans-serif; font-size: 70px; font-weight: 700; fill: #17324d; }
+      .body { font-family: "DejaVu Sans", Arial, sans-serif; font-size: 42px; fill: #263746; }
+      .small { font-family: "DejaVu Sans", Arial, sans-serif; font-size: 34px; fill: #455564; }
+      .caption { font-family: "DejaVu Sans", Arial, sans-serif; font-size: 30px; fill: #5e6e7a; }
+      .box { fill: #ffffff; stroke: #cbd5df; stroke-width: 6; rx: 24; ry: 24; }
+      .accent-box { fill: #fff7ef; stroke: #e67e22; stroke-width: 7; rx: 24; ry: 24; }
+      .placeholder { fill: #f5f7fa; stroke: #b8c5d0; stroke-width: 5; stroke-dasharray: 24 18; rx: 20; ry: 20; }
+      .axis { stroke: #7c8c98; stroke-width: 5; fill: none; }
+      .grid { stroke: #d9e1e7; stroke-width: 3; fill: none; }
+      .line1 { stroke: #e67e22; stroke-width: 12; fill: none; }
+      .line2 { stroke: #2d6a8a; stroke-width: 12; fill: none; }
+      .line3 { stroke: #688c5f; stroke-width: 12; fill: none; }
+      .line4 { stroke: #8d5a97; stroke-width: 12; fill: none; }
+      .arrow { stroke: #17324d; stroke-width: 16; fill: none; marker-end: url(#arrowhead); }
+      .icon-line { stroke: #17324d; stroke-width: 15; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+      .icon-fill { fill: #17324d; }
+      .accent-fill { fill: #e67e22; }
+    ]]></style>
+    <marker
+       id="arrowhead"
+       markerWidth="14"
+       markerHeight="14"
+       refX="10"
+       refY="7"
+       orient="auto"
+       markerUnits="strokeWidth"
+       viewBox="0 0 14 14"
+       preserveAspectRatio="xMidYMid">
+      <path
+         d="M0,0 L14,7 L0,14 z"
+         fill="#17324d"
+         id="path1" />
+    </marker>
+  </defs>
+  <!-- ONE Inkscape layer only -->
+  <g
+     inkscape:groupmode="layer"
+     inkscape:label="SmartFires Poster"
+     id="poster-layer">
+    <!-- Background -->
+    <rect
+       x="0"
+       y="0"
+       width="4800"
+       height="3600"
+       fill="#eef2f5"
+       id="rect1" />
+    <!-- Header -->
+    <rect
+       x="0"
+       y="0"
+       width="4800"
+       height="500"
+       fill="#17324d"
+       id="rect2" />
+    <rect
+       x="0"
+       y="470"
+       width="4800"
+       height="30"
+       fill="#e67e22"
+       id="rect3" />
+    <text
+       x="190"
+       y="215"
+       class="title"
+       id="text3">SMARTFIRES Title!</text>
+    <text
+       x="195"
+       y="315"
+       class="subtitle"
+       id="text4">A Distributed Edge System for Collecting Wildfire Data</text>
+    <text
+       x="195"
+       y="405"
+       class="subtitle"
+       id="text5">LoRa field nodes • Jetson edge processing • live dashboard • burn validation</text>
+    <!-- LEFT COLUMN: goal + node -->
+    <g
+       id="goal-and-node">
+      <rect
+         class="box"
+         x="120"
+         y="620"
+         width="1400"
+         height="560"
+         id="rect5" />
+      <text
+         x="190"
+         y="720"
+         class="section-title"
+         id="text6">Project Goal</text>
+      <text
+         x="190"
+         y="805"
+         class="body"
+         id="text8"><tspan
+           x="190"
+           dy="0"
+           id="tspan6">Build a deployable sensing network that can</tspan><tspan
+           x="190"
+           dy="58"
+           id="tspan7">collect synchronized environmental and smoke</tspan><tspan
+           x="190"
+           dy="58"
+           id="tspan8">measurements around active or controlled fires.</tspan></text>
+      <text
+         x="190"
+         y="1025"
+         class="small"
+         id="text11"><tspan
+           x="190"
+           dy="0"
+           id="tspan9">Key priorities: low-power field sensing, long-range</tspan><tspan
+           x="190"
+           dy="48"
+           id="tspan10">wireless communication, resilient edge collection,</tspan><tspan
+           x="190"
+           dy="48"
+           id="tspan11">and rapid visualization during burn experiments.</tspan></text>
+      <rect
+         class="box"
+         x="120"
+         y="1240"
+         width="1400"
+         height="1080"
+         id="rect11"
+         style="display:inline" />
+      <circle
+         style="fill:#263746;fill-opacity:1;stroke:none;stroke-width:0.996063;stroke-linecap:butt;stroke-dasharray:none;stroke-opacity:1"
+         id="path103-9-7-6"
+         cx="806.58344"
+         cy="1527.4167"
+         r="6.5834084" />
+      <circle
+         style="fill:#263746;fill-opacity:1;stroke:none;stroke-width:0.996063;stroke-linecap:butt;stroke-dasharray:none;stroke-opacity:1"
+         id="path103-9-7-3"
+         cx="806.58344"
+         cy="1468.0417"
+         r="6.5834084" />
+      <circle
+         style="fill:#263746;fill-opacity:1;stroke:none;stroke-width:0.996063;stroke-linecap:butt;stroke-dasharray:none;stroke-opacity:1"
+         id="path103-9-7"
+         cx="806.58344"
+         cy="1412.8335"
+         r="6.5834084" />
+      <circle
+         style="fill:#263746;fill-opacity:1;stroke:none;stroke-width:0.996063;stroke-linecap:butt;stroke-dasharray:none;stroke-opacity:1"
+         id="path103-9"
+         cx="806.58344"
+         cy="1352.4169"
+         r="6.5834084" />
+      <text
+         x="270.68967"
+         y="1439.3103"
+         class="section-title"
+         id="text12">Field Node</text>
+      <!-- Node icon / board -->
+      <rect
+         x="250"
+         y="1480"
+         width="470"
+         height="520"
+         rx="34"
+         fill="#f4f8fb"
+         stroke="#17324d"
+         stroke-width="12"
+         id="rect12"
+         style="display:none" />
+      <rect
+         x="345"
+         y="1560"
+         width="280"
+         height="180"
+         rx="18"
+         fill="#ffffff"
+         stroke="#17324d"
+         stroke-width="10"
+         id="rect13"
+         style="display:none" />
+      <text
+         x="385"
+         y="1660"
+         class="small"
+         id="text13"
+         style="display:none">Feather M0</text>
+      <text
+         x="410"
+         y="1710"
+         class="caption"
+         id="text14"
+         style="display:none">LoRa</text>
+      <!-- antenna -->
+      <line
+         x1="485"
+         y1="1480"
+         x2="485"
+         y2="1385"
+         class="icon-line"
+         id="line14"
+         style="display:none" />
+      <path
+         d="m 420,1425 q 65,-65 130,0"
+         class="icon-line"
+         id="path14"
+         style="display:none" />
+      <path
+         d="m 385,1380 q 100,-100 200,0"
+         class="icon-line"
+         id="path15"
+         style="display:none" />
+      <!-- sensor blocks -->
+      <rect
+         x="285"
+         y="1790"
+         width="165"
+         height="95"
+         rx="15"
+         fill="#fff7ef"
+         stroke="#e67e22"
+         stroke-width="7"
+         id="rect15"
+         style="display:none" />
+      <rect
+         x="520"
+         y="1790"
+         width="165"
+         height="95"
+         rx="15"
+         fill="#fff7ef"
+         stroke="#e67e22"
+         stroke-width="7"
+         id="rect16"
+         style="display:none" />
+      <rect
+         x="285"
+         y="1910"
+         width="165"
+         height="60"
+         rx="12"
+         fill="#edf5f1"
+         stroke="#688c5f"
+         stroke-width="6"
+         id="rect17"
+         style="display:none" />
+      <rect
+         x="520"
+         y="1910"
+         width="165"
+         height="60"
+         rx="12"
+         fill="#edf5f1"
+         stroke="#688c5f"
+         stroke-width="6"
+         id="rect18"
+         style="display:none" />
+      <text
+         x="320"
+         y="1850"
+         class="caption"
+         id="text18"
+         style="display:none">SHT31</text>
+      <text
+         x="548"
+         y="1850"
+         class="caption"
+         id="text19"
+         style="display:none">SPS30</text>
+      <text
+         x="310"
+         y="1953"
+         class="caption"
+         id="text20"
+         style="display:none">Wind</text>
+      <text
+         x="545"
+         y="1953"
+         class="caption"
+         id="text21"
+         style="display:none">GPS/IMU</text>
+      <!-- Node callouts -->
+      <rect
+         class="placeholder"
+         x="204.61882"
+         y="1619.4463"
+         width="1225.9348"
+         height="626.62445"
+         id="rect25" />
+      <text
+         x="505"
+         y="2145"
+         class="small"
+         id="text26"
+         style="display:inline">PLACEHOLDER: field node photo / PCB / enclosure</text>
+      <text
+         xml:space="preserve"
+         style="font-size:41.6667px;writing-mode:lr-tb;direction:ltr;fill:#263746;fill-opacity:1;stroke:none;stroke-width:0.996063;stroke-linecap:butt;stroke-dasharray:none;stroke-opacity:1"
+         x="823.47974"
+         y="1310.085"
+         id="text99"><tspan
+           sodipodi:role="line"
+           id="tspan99"
+           style="font-size:41.6667px;fill:#263746;fill-opacity:1;stroke:none;stroke-width:0.996063;stroke-dasharray:none"
+           x="823.47974"
+           y="1310.085">Temperature / humidity</tspan><tspan
+           sodipodi:role="line"
+           style="font-size:41.6667px;fill:#263746;fill-opacity:1;stroke:none;stroke-width:0.996063;stroke-dasharray:none"
+           x="823.47974"
+           y="1367.7644"
+           id="tspan100">PM1, PM2.5, PM4, PM10</tspan><tspan
+           sodipodi:role="line"
+           style="font-size:41.6667px;fill:#263746;fill-opacity:1;stroke:none;stroke-width:0.996063;stroke-dasharray:none"
+           x="823.47974"
+           y="1425.444"
+           id="tspan101">Wind intensity</tspan><tspan
+           sodipodi:role="line"
+           style="font-size:41.6667px;fill:#263746;fill-opacity:1;stroke:none;stroke-width:0.996063;stroke-dasharray:none"
+           x="823.47974"
+           y="1483.1234"
+           id="tspan102">Position and motion context</tspan><tspan
+           sodipodi:role="line"
+           style="font-size:41.6667px;fill:#263746;fill-opacity:1;stroke:none;stroke-width:0.996063;stroke-dasharray:none"
+           x="823.47974"
+           y="1540.803"
+           id="tspan103">LoRa uplink to base station</tspan></text>
+      <circle
+         style="fill:#263746;fill-opacity:1;stroke:none;stroke-width:0.996063;stroke-linecap:butt;stroke-dasharray:none;stroke-opacity:1"
+         id="path103"
+         cx="806.58344"
+         cy="1296.9314"
+         r="6.5834084" />
+    </g>
+    <!-- CENTER TOP: Architecture / LoRa -->
+    <g
+       id="system-architecture">
+      <rect
+         class="accent-box"
+         x="1600"
+         y="620"
+         width="3080"
+         height="920"
+         id="rect27" />
+      <text
+         x="1680"
+         y="720"
+         class="section-title"
+         id="text28">System Architecture &amp; LoRa Networking</text>
+      <text
+         x="1680"
+         y="790"
+         class="small"
+         id="text29">Multiple battery-powered nodes transmit data to a centralized edge receiver during field deployment.</text>
+      <!-- 4 Nodes -->
+      <g
+         id="network-nodes">
+        <circle
+           cx="1880"
+           cy="1050"
+           r="105"
+           fill="#ffffff"
+           stroke="#17324d"
+           stroke-width="10"
+           id="circle29" />
+        <circle
+           cx="2190"
+           cy="930"
+           r="105"
+           fill="#ffffff"
+           stroke="#17324d"
+           stroke-width="10"
+           id="circle30" />
+        <circle
+           cx="2190"
+           cy="1180"
+           r="105"
+           fill="#ffffff"
+           stroke="#17324d"
+           stroke-width="10"
+           id="circle31" />
+        <circle
+           cx="1880"
+           cy="1300"
+           r="105"
+           fill="#ffffff"
+           stroke="#17324d"
+           stroke-width="10"
+           id="circle32" />
+        <text
+           x="1858.75"
+           y="1061.181"
+           class="small"
+           id="text32">N1</text>
+        <text
+           x="2167.917"
+           y="931.63873"
+           class="small"
+           id="text33">N2</text>
+        <text
+           x="2169.0142"
+           y="1189.3193"
+           class="small"
+           id="text34">N3</text>
+        <text
+           x="1855.2587"
+           y="1312.3448"
+           class="small"
+           id="text35">N4</text>
+      </g>
+      <!-- LoRa arcs -->
+      <text
+         x="2460"
+         y="900"
+         class="small"
+         id="text38">LoRa</text>
+      <!-- Edge box -->
+      <rect
+         x="2980"
+         y="875"
+         width="660"
+         height="390"
+         rx="34"
+         fill="#ffffff"
+         stroke="#17324d"
+         stroke-width="12"
+         id="rect38" />
+      <text
+         x="3105"
+         y="970"
+         class="section-title"
+         style="font-size:58px"
+         id="text39">Jetson Edge</text>
+      <text
+         x="3050"
+         y="1050"
+         class="small"
+         id="text42"><tspan
+           x="3050"
+           dy="0"
+           id="tspan39">• LoRa receiver</tspan><tspan
+           x="3050"
+           dy="48"
+           id="tspan40">• data validation</tspan><tspan
+           x="3050"
+           dy="48"
+           id="tspan41">• timestamping / storage</tspan><tspan
+           x="3050"
+           dy="48"
+           id="tspan42">• local sensor fusion</tspan></text>
+      <!-- Dashboard -->
+      <path
+         d="m 3645,1070 h 255"
+         class="arrow"
+         id="path42"
+         style="stroke-width:13.77952756;stroke-dasharray:none" />
+      <rect
+         x="3950"
+         y="865"
+         width="580"
+         height="410"
+         rx="28"
+         fill="#ffffff"
+         stroke="#17324d"
+         stroke-width="12"
+         id="rect42" />
+      <rect
+         x="4020"
+         y="930"
+         width="440"
+         height="250"
+         rx="14"
+         fill="#f5f7fa"
+         stroke="#7c8c98"
+         stroke-width="6"
+         id="rect43" />
+      <polyline
+         points="4060,1120 4130,1080 4190,1100 4250,1015 4320,1050 4380,995 4420,1035"
+         class="line1"
+         id="polyline43" />
+      <text
+         x="4055"
+         y="1245"
+         class="small"
+         id="text43">Live Dashboard</text>
+      <path
+         style="fill:none;fill-opacity:1;stroke:#17324d;stroke-width:13.4007;stroke-linecap:butt;stroke-dasharray:none;stroke-opacity:1"
+         d="m 2296.6622,942.20953 c 228.8409,-21.30289 372.6097,69.84327 543.4097,125.25957"
+         id="path85"
+         sodipodi:nodetypes="cc" />
+      <path
+         style="fill:none;fill-opacity:1;stroke:#17324d;stroke-width:13.5037;stroke-linecap:butt;stroke-dasharray:none;stroke-opacity:1;marker-end:url(#arrowhead)"
+         d="m 1980.5505,1059.6328 c 379.4718,-22.0944 679.8079,-14.4002 946.9515,5.7886"
+         id="path86"
+         sodipodi:nodetypes="cc" />
+      <path
+         style="fill:none;fill-opacity:1;stroke:#17324d;stroke-width:13.77952756;stroke-linecap:butt;stroke-dasharray:none;stroke-opacity:1"
+         d="m 2293.9804,1188.1384 c 179.8506,6.0843 372.1652,-81.322 563.8137,-163.731"
+         id="path87"
+         sodipodi:nodetypes="cc" />
+      <path
+         style="fill:none;fill-opacity:1;stroke:#17324d;stroke-width:13.7696;stroke-linecap:butt;stroke-dasharray:none;stroke-opacity:1"
+         d="m 1960.464,1367.4206 c 286.781,-54.6637 569.6724,-133.3959 824.7674,-316.4857"
+         id="path88"
+         sodipodi:nodetypes="cc" />
+    </g>
+    <!-- CENTER BOTTOM: Edge + Dashboard -->
+    <g
+       id="edge-dashboard">
+      <rect
+         class="box"
+         x="1600"
+         y="1600"
+         width="1475"
+         height="720"
+         id="rect44" />
+      <text
+         x="1649.2775"
+         y="1741.6949"
+         class="section-title"
+         id="text45">Jetson Edge Unit</text>
+      <text
+         x="2283.4792"
+         y="1649.554"
+         class="body"
+         id="text48"><tspan
+           x="2283.4792"
+           dy="0"
+           id="tspan45">The Jetson acts as the field gateway:</tspan><tspan
+           x="2283.4792"
+           dy="62"
+           id="tspan46">receiving LoRa packets, coordinating local</tspan><tspan
+           x="2283.4792"
+           dy="62"
+           id="tspan47">sensors, writing per-sensor CSV logs, and</tspan><tspan
+           x="2283.4792"
+           dy="62"
+           id="tspan48">serving the browser-based dashboard.</tspan></text>
+      <rect
+         class="placeholder"
+         x="1681.2069"
+         y="1858.3434"
+         width="1312.5863"
+         height="385.4498"
+         id="rect48" />
+      <text
+         x="1910"
+         y="2160"
+         class="small"
+         id="text49">PLACEHOLDER: Jetson / base station photo</text>
+      <rect
+         class="box"
+         x="3205"
+         y="1600"
+         width="1475"
+         height="720"
+         id="rect49" />
+      <rect
+         class="placeholder"
+         x="3288.6567"
+         y="1852.6578"
+         width="1312.5863"
+         height="385.4498"
+         id="rect48-5"
+         style="fill:#f5f7fa;stroke:#b8c5d0;stroke-width:7.41372;stroke-dasharray:35.5858, 26.6894" />
+      <text
+         x="3315.7227"
+         y="1737.306"
+         class="section-title"
+         id="text50">Dashboard</text>
+      <text
+         x="3795.095"
+         y="1666.004"
+         class="body"
+         id="text52"><tspan
+           x="3795.095"
+           dy="0"
+           id="tspan50">The edge-hosted dashboard provides quick</tspan><tspan
+           x="3795.095"
+           dy="62"
+           id="tspan51">field feedback on node health, incoming</tspan><tspan
+           x="3795.095"
+           dy="62"
+           id="tspan52">measurements, and burn progression.</tspan></text>
+      <text
+         x="3576.8589"
+         y="2048.0779"
+         class="small"
+         id="text49-7"
+         style="font-size:34px;font-family:'DejaVu Sans', Arial, sans-serif;fill:#455564">PLACEHOLDER:Dashboard Photo</text>
+    </g>
+    <!-- DATA SECTION -->
+    <g
+       id="burn-data">
+      <rect
+         class="box"
+         x="120"
+         y="2400"
+         width="4560"
+         height="1040"
+         id="rect57" />
+      <text
+         x="200"
+         y="2505"
+         class="section-title"
+         id="text58">Controlled Burn Data</text>
+      <text
+         x="200"
+         y="2575"
+         class="small"
+         id="text59"
+         style="display:none">Reserved for validation data from the burn study. Keep all plots on a synchronized time axis so fire events can be compared across sensors.</text>
+      <text
+         x="1777.0959"
+         y="2525.7217"
+         class="small"
+         id="text49-1"
+         style="font-size:34px;font-family:'DejaVu Sans', Arial, sans-serif;fill:#455564">PLACEHOLDER:Real Burn Data</text>
+      <!-- Graph helper grids -->
+      <g
+         id="plot-temp-rh">
+        <rect
+           x="200"
+           y="2660"
+           width="1040"
+           height="620"
+           rx="20"
+           fill="#fbfcfd"
+           stroke="#cbd5df"
+           stroke-width="5"
+           id="rect59" />
+        <text
+           x="245"
+           y="2730"
+           class="small"
+           id="text60">Temperature &amp; Relative Humidity</text>
+        <line
+           x1="305"
+           y1="3180"
+           x2="1160"
+           y2="3180"
+           class="axis"
+           id="line60" />
+        <line
+           x1="305"
+           y1="2800"
+           x2="305"
+           y2="3180"
+           class="axis"
+           id="line61" />
+        <line
+           x1="305"
+           y1="3050"
+           x2="1160"
+           y2="3050"
+           class="grid"
+           id="line62" />
+        <line
+           x1="305"
+           y1="2920"
+           x2="1160"
+           y2="2920"
+           class="grid"
+           id="line63" />
+        <polyline
+           points="320,3070 420,3030 520,3020 620,2920 720,2860 820,2900 920,2960 1020,3000 1140,3040"
+           class="line1"
+           id="polyline63" />
+        <polyline
+           points="320,2890 420,2910 520,2940 620,3040 720,3080 820,3060 920,3010 1020,2980 1140,2940"
+           class="line2"
+           id="polyline64" />
+        <text
+           x="310"
+           y="3240"
+           class="caption"
+           id="text64">time →</text>
+        <text
+           x="870"
+           y="2790"
+           class="caption"
+           id="text65">placeholder lines</text>
+      </g>
+      <g
+         id="plot-wind">
+        <rect
+           x="1320"
+           y="2660"
+           width="1040"
+           height="620"
+           rx="20"
+           fill="#fbfcfd"
+           stroke="#cbd5df"
+           stroke-width="5"
+           id="rect65" />
+        <text
+           x="1365"
+           y="2730"
+           class="small"
+           id="text66">Wind Intensity</text>
+        <line
+           x1="1425"
+           y1="3180"
+           x2="2280"
+           y2="3180"
+           class="axis"
+           id="line66" />
+        <line
+           x1="1425"
+           y1="2800"
+           x2="1425"
+           y2="3180"
+           class="axis"
+           id="line67" />
+        <line
+           x1="1425"
+           y1="3050"
+           x2="2280"
+           y2="3050"
+           class="grid"
+           id="line68" />
+        <line
+           x1="1425"
+           y1="2920"
+           x2="2280"
+           y2="2920"
+           class="grid"
+           id="line69" />
+        <polyline
+           points="1440,3115 1530,3090 1620,3030 1710,3070 1800,2940 1890,2990 1980,2870 2070,3010 2160,2960 2260,3050"
+           class="line3"
+           id="polyline69" />
+        <text
+           x="1430"
+           y="3240"
+           class="caption"
+           id="text69">time →</text>
+      </g>
+      <g
+         id="plot-pm-low">
+        <rect
+           x="2440"
+           y="2660"
+           width="1040"
+           height="620"
+           rx="20"
+           fill="#fbfcfd"
+           stroke="#cbd5df"
+           stroke-width="5"
+           id="rect69" />
+        <text
+           x="2485"
+           y="2730"
+           class="small"
+           id="text70">Particulate Matter: PM1 &amp; PM2.5</text>
+        <line
+           x1="2545"
+           y1="3180"
+           x2="3400"
+           y2="3180"
+           class="axis"
+           id="line70" />
+        <line
+           x1="2545"
+           y1="2800"
+           x2="2545"
+           y2="3180"
+           class="axis"
+           id="line71" />
+        <line
+           x1="2545"
+           y1="3050"
+           x2="3400"
+           y2="3050"
+           class="grid"
+           id="line72" />
+        <line
+           x1="2545"
+           y1="2920"
+           x2="3400"
+           y2="2920"
+           class="grid"
+           id="line73" />
+        <polyline
+           points="2560,3120 2660,3110 2760,3050 2860,2860 2960,2980 3060,2820 3160,2950 3260,3020 3380,3080"
+           class="line1"
+           id="polyline73" />
+        <polyline
+           points="2560,3135 2660,3125 2760,3090 2860,2930 2960,3020 3060,2880 3160,3000 3260,3060 3380,3105"
+           class="line2"
+           id="polyline74" />
+        <text
+           x="2550"
+           y="3240"
+           class="caption"
+           id="text74">time →</text>
+      </g>
+      <g
+         id="plot-pm-high">
+        <rect
+           x="3560"
+           y="2660"
+           width="1040"
+           height="620"
+           rx="20"
+           fill="#fbfcfd"
+           stroke="#cbd5df"
+           stroke-width="5"
+           id="rect74" />
+        <text
+           x="3605"
+           y="2730"
+           class="small"
+           id="text75">Particulate Matter: PM4 &amp; PM10</text>
+        <line
+           x1="3665"
+           y1="3180"
+           x2="4520"
+           y2="3180"
+           class="axis"
+           id="line75" />
+        <line
+           x1="3665"
+           y1="2800"
+           x2="3665"
+           y2="3180"
+           class="axis"
+           id="line76" />
+        <line
+           x1="3665"
+           y1="3050"
+           x2="4520"
+           y2="3050"
+           class="grid"
+           id="line77" />
+        <line
+           x1="3665"
+           y1="2920"
+           x2="4520"
+           y2="2920"
+           class="grid"
+           id="line78" />
+        <polyline
+           points="3680,3130 3780,3125 3880,3060 3980,2900 4080,3000 4180,2860 4280,2960 4380,3040 4500,3100"
+           class="line3"
+           id="polyline78" />
+        <polyline
+           points="3680,3145 3780,3140 3880,3110 3980,2980 4080,3060 4180,2940 4280,3020 4380,3090 4500,3125"
+           class="line4"
+           id="polyline79" />
+        <text
+           x="3670"
+           y="3240"
+           class="caption"
+           id="text79">time →</text>
+      </g>
+    </g>
+    <!-- Footer -->
+    <rect
+       x="0"
+       y="3470"
+       width="4800"
+       height="130"
+       fill="#17324d"
+       id="rect79" />
+    <text
+       x="150"
+       y="3555"
+       class="subtitle"
+       style="font-size:34px"
+       id="text80">University of Montana • SmartFires Project • [names/ lab / collaborators]</text>
+  </g>
+</svg>

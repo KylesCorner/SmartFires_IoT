@@ -1,0 +1,7 @@
+{
+  "baud": 115200,
+  "node_registry": {},
+  "port": "/dev/smartfires-base",
+  "session_id": "0x28BC871A",
+  "started_at": "2026-09-03T23:10:38.419+00:00"
+}

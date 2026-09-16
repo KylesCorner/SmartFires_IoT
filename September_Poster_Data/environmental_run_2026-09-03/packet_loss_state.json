@@ -1,0 +1,49 @@
+{
+  "crc_failures": 17,
+  "length_failures": 7093,
+  "nodes": {
+    "1": {
+      "crc_valid_packets": 0,
+      "duplicates": 0,
+      "first_seq": null,
+      "last_rssi": null,
+      "last_seq": null,
+      "missing": 0,
+      "node_id": 1,
+      "received": 0
+    },
+    "2": {
+      "crc_valid_packets": 2851,
+      "duplicates": 67,
+      "first_seq": 3,
+      "last_rssi": -53,
+      "last_seq": 241,
+      "missing": 15,
+      "node_id": 2,
+      "received": 2784
+    },
+    "3": {
+      "crc_valid_packets": 22,
+      "duplicates": 5,
+      "first_seq": 17,
+      "last_rssi": -124,
+      "last_seq": 22,
+      "missing": 0,
+      "node_id": 3,
+      "received": 17
+    },
+    "4": {
+      "crc_valid_packets": 2817,
+      "duplicates": 14,
+      "first_seq": 16,
+      "last_rssi": -44,
+      "last_seq": 244,
+      "missing": 0,
+      "node_id": 4,
+      "received": 2803
+    }
+  },
+  "total_decoded": 5690,
+  "untracked_packets": 0,
+  "updated_at": "2026-09-04T13:49:59.049463+00:00"
+}
