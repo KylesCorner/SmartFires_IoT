@@ -15,6 +15,7 @@ is configured to keep text as SVG text so labels can be edited in Inkscape.
 Example:
     python generate_burn_plots.py
     python generate_burn_plots.py --pm-scale linear --aggregation-seconds 30
+    python generate_burn_plots.py --nodes 2 3 4 5
     python generate_burn_plots.py --event-labels major --also-png
 """
 
@@ -44,31 +45,41 @@ WORKSPACE_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_BURN_DIR = WORKSPACE_DIR / "analysis and scripts" / "data" / "2026-09-15_last_burn"
 DEFAULT_TELEMETRY = DEFAULT_BURN_DIR / "wireless_nodes" / "telemetry.csv"
 DEFAULT_BASE_ENVIRONMENT = DEFAULT_BURN_DIR / "jetson" / "bme688.csv"
+DEFAULT_ANEMOMETER = DEFAULT_BURN_DIR / "jetson" / "anemometer.csv"
 DEFAULT_TIMELINE = DEFAULT_BURN_DIR / "BURN_TIMELINE.txt"
 DEFAULT_OUTPUT_DIR = SCRIPT_DIR / "generated_plots"
 
-NODE_IDS = (2, 3, 4, 5)
+AVAILABLE_NODE_IDS = (2, 3, 4, 5)
+DEFAULT_NODE_IDS = (4, 5)
 NODE_COLORS = {
     2: "#2D6A8A",  # poster blue
-    3: "#E67E22",  # poster orange
-    4: "#66885D",  # poster green
-    5: "#8D5A97",  # poster purple
+    3: "#8D5A97",  # poster purple
+    4: "#B33A3A",  # temperature / generic node red
+    5: "#E67E22",  # temperature / generic node orange
 }
-BASE_COLOR = "#455564"
+HUMIDITY_COLORS = {
+    2: "#5E88A3",
+    3: "#7A9A70",
+    4: "#2D6A8A",  # poster blue
+    5: "#66885D",  # poster green
+}
+BASE_COLOR = "#000000"
 TEXT_COLOR = "#17324D"
 MUTED_TEXT = "#647683"
 GRID_COLOR = "#DCE3E8"
 AXIS_COLOR = "#758793"
 PANEL_COLOR = "#FBFCFD"
+DATA_LINE_WIDTH = 0.6
+BASE_LINE_WIDTH = 0.72
 
 EVENT_STYLES = {
-    "run": {"color": "#17324D", "linestyle": "-", "linewidth": 1.25, "alpha": 0.72},
-    "ignition": {"color": "#D96D12", "linestyle": "-", "linewidth": 1.8, "alpha": 0.95},
-    "fuel": {"color": "#8A2637", "linestyle": "--", "linewidth": 1.1, "alpha": 0.75},
-    "last_wood": {"color": "#8A2637", "linestyle": "-", "linewidth": 2.0, "alpha": 0.95},
-    "fire": {"color": "#D96D12", "linestyle": ":", "linewidth": 1.2, "alpha": 0.78},
-    "equipment": {"color": "#7D8C97", "linestyle": ":", "linewidth": 1.0, "alpha": 0.72},
-    "environment": {"color": "#66885D", "linestyle": ":", "linewidth": 1.1, "alpha": 0.78},
+    "run": {"color": "#17324D", "linestyle": "-", "linewidth": 0.85, "alpha": 0.72},
+    "ignition": {"color": "#D96D12", "linestyle": "-", "linewidth": 1.2, "alpha": 0.95},
+    "fuel": {"color": "#8A2637", "linestyle": (0, (2.2, 1.6)), "linewidth": 0.8, "alpha": 0.75},
+    "last_wood": {"color": "#8A2637", "linestyle": "-", "linewidth": 1.3, "alpha": 0.95},
+    "fire": {"color": "#D96D12", "linestyle": (0, (1.0, 1.5)), "linewidth": 0.8, "alpha": 0.78},
+    "equipment": {"color": "#7D8C97", "linestyle": (0, (1.0, 1.5)), "linewidth": 0.7, "alpha": 0.72},
+    "environment": {"color": "#66885D", "linestyle": (0, (1.0, 1.5)), "linewidth": 0.75, "alpha": 0.78},
 }
 
 
@@ -77,7 +88,11 @@ class PlotSettings:
     timezone: ZoneInfo
     start: pd.Timestamp
     end: pd.Timestamp
+    node_ids: tuple[int, ...]
     aggregation_seconds: int
+    max_connected_gap_seconds: int
+    wind_rolling_window: int
+    pm_max_ug_m3: float
     pm_scale: str
     event_labels: str
 
@@ -182,7 +197,7 @@ def load_events(
     return [BurnEvent(*event) for event in raw_events]
 
 
-def load_node_telemetry(path: Path, node_ids: Sequence[int] = NODE_IDS) -> pd.DataFrame:
+def load_node_telemetry(path: Path, node_ids: Sequence[int] = DEFAULT_NODE_IDS) -> pd.DataFrame:
     """Load, filter, and de-duplicate node sensor samples."""
     frame = pd.read_csv(path, low_memory=False)
     frame = frame.loc[frame["packet_type"].eq("telemetry")].copy()
@@ -192,7 +207,19 @@ def load_node_telemetry(path: Path, node_ids: Sequence[int] = NODE_IDS) -> pd.Da
     frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True, errors="coerce")
     frame = frame.dropna(subset=["timestamp"])
 
-    numeric_columns = ["session_time_ms", "rssi", "temp_c", "humidity_pct", "pm2_5_ug_m3", "wind_mps"]
+    numeric_columns = [
+        "session_time_ms",
+        "rssi",
+        "sensor_flags",
+        "delta_flags",
+        "temp_c",
+        "humidity_pct",
+        "pm1_0_ug_m3",
+        "pm2_5_ug_m3",
+        "pm4_0_ug_m3",
+        "pm10_ug_m3",
+        "wind_mps",
+    ]
     for column in numeric_columns:
         frame[column] = pd.to_numeric(frame[column], errors="coerce")
 
@@ -205,6 +232,33 @@ def load_node_telemetry(path: Path, node_ids: Sequence[int] = NODE_IDS) -> pd.Da
     return frame
 
 
+def filter_pm25_readings(
+    frame: pd.DataFrame,
+    max_ug_m3: float,
+) -> tuple[pd.DataFrame, dict[str, int]]:
+    """Mask PM2.5 samples that fail transport, range, or nesting checks."""
+    filtered = frame.copy()
+    pm25 = filtered["pm2_5_ug_m3"]
+    pm10 = filtered["pm10_ug_m3"]
+    delta_flags = filtered["delta_flags"].fillna(0).astype("int64")
+
+    negative = pm25 < 0
+    over_range = pm25 > max_ug_m3
+    delta_clamped = (delta_flags & 0x10) != 0
+    inconsistent = pm25.notna() & pm10.notna() & (pm25 > pm10 + 0.2)
+    rejected = negative | over_range | delta_clamped | inconsistent
+
+    stats = {
+        "total": int(rejected.sum()),
+        "negative": int(negative.sum()),
+        "over_range": int(over_range.sum()),
+        "delta_clamped": int(delta_clamped.sum()),
+        "inconsistent": int(inconsistent.sum()),
+    }
+    filtered.loc[rejected, "pm2_5_ug_m3"] = float("nan")
+    return filtered, stats
+
+
 def load_base_environment(path: Path) -> pd.DataFrame:
     """Load the Jetson BME688 stream used as the environmental reference."""
     frame = pd.read_csv(path)
@@ -214,12 +268,20 @@ def load_base_environment(path: Path) -> pd.DataFrame:
     return frame.sort_values("timestamp").reset_index(drop=True)
 
 
+def load_anemometer(path: Path) -> pd.DataFrame:
+    """Load the Jetson anemometer stream used on the wind panel."""
+    frame = pd.read_csv(path)
+    frame["timestamp"] = pd.to_datetime(frame["host_epoch_ms"], unit="ms", utc=True)
+    frame["speed_mps"] = pd.to_numeric(frame["speed_mps"], errors="coerce")
+    return frame.sort_values("timestamp").reset_index(drop=True)
+
+
 def aggregate_nodes(frame: pd.DataFrame, settings: PlotSettings) -> dict[int, pd.DataFrame]:
     """Aggregate each node with medians and leave empty bins as NaN gaps."""
     rule = f"{settings.aggregation_seconds}s"
     columns = ["temp_c", "humidity_pct", "pm2_5_ug_m3", "wind_mps"]
     result: dict[int, pd.DataFrame] = {}
-    for node_id in NODE_IDS:
+    for node_id in settings.node_ids:
         node = frame.loc[frame["node_id"].eq(node_id), ["timestamp", *columns]].copy()
         node["timestamp"] = node["timestamp"].dt.tz_convert(settings.timezone)
         node = node.set_index("timestamp").sort_index()
@@ -236,6 +298,44 @@ def aggregate_base(frame: pd.DataFrame, settings: PlotSettings) -> pd.DataFrame:
     base["timestamp"] = base["timestamp"].dt.tz_convert(settings.timezone)
     base = base.set_index("timestamp").sort_index().resample(rule).median()
     return base.loc[(base.index >= settings.start) & (base.index <= settings.end)]
+
+
+def aggregate_anemometer(frame: pd.DataFrame, settings: PlotSettings) -> pd.DataFrame:
+    rule = f"{settings.aggregation_seconds}s"
+    anemometer = frame[["timestamp", "speed_mps"]].copy()
+    anemometer["timestamp"] = anemometer["timestamp"].dt.tz_convert(settings.timezone)
+    anemometer = anemometer.set_index("timestamp").sort_index().resample(rule).median()
+    return anemometer.loc[
+        (anemometer.index >= settings.start) & (anemometer.index <= settings.end)
+    ]
+
+
+def rolling_point_mean(series: pd.Series, window: int) -> pd.Series:
+    """Apply a centered rolling mean to recorded points without filling gaps."""
+    recorded = series.dropna().sort_index()
+    return recorded.rolling(window=window, center=True, min_periods=1).mean()
+
+
+def connect_short_gaps(series: pd.Series, max_gap_seconds: int) -> pd.Series:
+    """Connect recorded values across routine pauses but retain long blank gaps."""
+    recorded = series.dropna().sort_index()
+    if recorded.empty:
+        return recorded
+
+    timestamps: list[pd.Timestamp] = [recorded.index[0]]
+    values: list[float] = [float(recorded.iloc[0])]
+    for previous_time, current_time, value in zip(
+        recorded.index[:-1],
+        recorded.index[1:],
+        recorded.iloc[1:],
+    ):
+        gap_seconds = (current_time - previous_time).total_seconds()
+        if gap_seconds > max_gap_seconds:
+            timestamps.append(previous_time + (current_time - previous_time) / 2)
+            values.append(float("nan"))
+        timestamps.append(current_time)
+        values.append(float(value))
+    return pd.Series(values, index=pd.DatetimeIndex(timestamps), name=series.name)
 
 
 def style_axis(ax: Axes, ylabel: str | None = None) -> None:
@@ -265,22 +365,43 @@ def apply_time_axis(ax: Axes, settings: PlotSettings, show_labels: bool = True) 
         ax.set_xlabel("")
 
 
-def node_legend_handles(include_base: bool = False) -> list[Line2D]:
+def node_legend_handles(node_ids: Sequence[int], include_base: bool = False) -> list[Line2D]:
     handles = [
-        Line2D([0], [0], color=NODE_COLORS[node_id], lw=2.2, label=f"Node {node_id}")
-        for node_id in NODE_IDS
+        Line2D(
+            [0],
+            [0],
+            color=NODE_COLORS[node_id],
+            linewidth=1.2,
+            linestyle="-",
+            label=f"Node {node_id}",
+        )
+        for node_id in node_ids
     ]
     if include_base:
-        handles.append(Line2D([0], [0], color=BASE_COLOR, lw=2.5, label="Base station"))
+        handles.append(
+            Line2D(
+                [0],
+                [0],
+                color=BASE_COLOR,
+                linewidth=1.25,
+                linestyle="-",
+                label="Base station",
+            )
+        )
     return handles
 
 
-def add_figure_legend(fig: Figure, include_base: bool, include_variables: bool = False) -> None:
+def add_figure_legend(
+    fig: Figure,
+    node_ids: Sequence[int],
+    include_base: bool,
+    include_variables: bool = False,
+) -> None:
     node_legend = fig.legend(
-        handles=node_legend_handles(include_base),
+        handles=node_legend_handles(node_ids, include_base),
         loc="upper center",
         bbox_to_anchor=(0.5, 0.935),
-        ncol=5 if include_base else 4,
+        ncol=len(node_ids) + int(include_base),
         frameon=False,
         fontsize=8.5,
         handlelength=2.6,
@@ -288,27 +409,105 @@ def add_figure_legend(fig: Figure, include_base: bool, include_variables: bool =
     )
     node_legend.set_gid("legend-nodes")
     if include_variables:
-        variable_handles = [
-            Line2D([0], [0], color=BASE_COLOR, lw=1.8, linestyle="-", label="Temperature"),
-            Line2D([0], [0], color=BASE_COLOR, lw=1.8, linestyle="--", label="Relative humidity"),
+        temperature_handles = [
+            Line2D(
+                [0],
+                [0],
+                color=NODE_COLORS[node_id],
+                linewidth=1.2,
+                linestyle="-",
+                label=f"Node {node_id} temperature",
+            )
+            for node_id in node_ids
         ]
-        variable_legend = fig.legend(
-            handles=variable_handles,
+        if include_base:
+            temperature_handles.append(
+                Line2D(
+                    [0],
+                    [0],
+                    color=BASE_COLOR,
+                    linewidth=1.25,
+                    linestyle="-",
+                    label="Base temperature",
+                )
+            )
+        node_legend.remove()
+        temperature_legend = fig.legend(
+            handles=temperature_handles,
+            loc="upper center",
+            bbox_to_anchor=(0.5, 0.935),
+            ncol=len(temperature_handles),
+            frameon=False,
+            fontsize=8.5,
+            handlelength=2.6,
+            columnspacing=1.3,
+        )
+        temperature_legend.set_gid("legend-temperature")
+
+        humidity_handles = [
+            Line2D(
+                [0],
+                [0],
+                color=HUMIDITY_COLORS[node_id],
+                linewidth=1.2,
+                linestyle="-",
+                label=f"Node {node_id} humidity",
+            )
+            for node_id in node_ids
+        ]
+        if include_base:
+            humidity_handles.append(
+                Line2D(
+                    [0],
+                    [0],
+                    color=BASE_COLOR,
+                    linewidth=1.1,
+                    linestyle=(0, (2.0, 1.5)),
+                    label="Base humidity",
+                )
+            )
+        humidity_legend = fig.legend(
+            handles=humidity_handles,
             loc="upper center",
             bbox_to_anchor=(0.5, 0.895),
-            ncol=2,
+            ncol=len(humidity_handles),
             frameon=False,
             fontsize=8.2,
             handlelength=2.8,
             columnspacing=1.5,
         )
-        variable_legend.set_gid("legend-variables")
+        humidity_legend.set_gid("legend-humidity")
+
+
+def add_wind_figure_legend(fig: Figure, node_ids: Sequence[int]) -> None:
+    handles = node_legend_handles(node_ids, include_base=False)
+    handles.append(
+        Line2D(
+            [0],
+            [0],
+            color=BASE_COLOR,
+            linewidth=1.25,
+            linestyle="-",
+            label="Jetson anemometer",
+        )
+    )
+    legend = fig.legend(
+        handles=handles,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.935),
+        ncol=len(handles),
+        frameon=False,
+        fontsize=8.5,
+        handlelength=2.6,
+        columnspacing=1.3,
+    )
+    legend.set_gid("legend-wind-sources")
 
 
 def add_method_note(fig: Figure, settings: PlotSettings, extra: str = "") -> None:
     note = (
-        f"Traces show {settings.aggregation_seconds}-second medians; "
-        "gaps indicate unavailable recorded data."
+        f"Lines connect {settings.aggregation_seconds}-second medians; "
+        f"gaps longer than {settings.max_connected_gap_seconds} seconds remain blank."
     )
     if extra:
         note = f"{note} {extra}"
@@ -330,6 +529,8 @@ def add_events(
     settings: PlotSettings,
     label_axis: Axes,
     id_prefix: str,
+    label_rotation: float = 90.0,
+    label_stagger_levels: int = 2,
 ) -> None:
     """Draw identical event markers and optional editable labels."""
     visible_events = [event for event in events if settings.start <= event.timestamp <= settings.end]
@@ -348,11 +549,14 @@ def add_events(
                 event.label,
                 xy=(event.timestamp, 1.0),
                 xycoords=("data", "axes fraction"),
-                xytext=(0, 7 + 8 * (event_index % 2)),
+                xytext=(
+                    2 if label_rotation != 90.0 else 0,
+                    7 + 9 * (event_index % label_stagger_levels),
+                ),
                 textcoords="offset points",
                 ha="left",
                 va="bottom",
-                rotation=90,
+                rotation=label_rotation,
                 rotation_mode="anchor",
                 fontsize=6.2,
                 color=style["color"],
@@ -380,44 +584,56 @@ def draw_temperature_humidity(
     humidity_ax.patch.set_visible(False)
 
     for node_id, frame in nodes.items():
+        temperature = connect_short_gaps(
+            frame["temp_c"], settings.max_connected_gap_seconds
+        )
         temperature_line, = ax.plot(
-            frame.index,
-            frame["temp_c"],
+            temperature.index,
+            temperature,
             color=NODE_COLORS[node_id],
-            linewidth=1.55,
+            linewidth=DATA_LINE_WIDTH,
             linestyle="-",
+            alpha=0.88,
             zorder=3,
         )
         temperature_line.set_gid(f"{prefix}-node-{node_id}-temperature")
+        humidity = connect_short_gaps(
+            frame["humidity_pct"], settings.max_connected_gap_seconds
+        )
         humidity_line, = humidity_ax.plot(
-            frame.index,
-            frame["humidity_pct"],
-            color=NODE_COLORS[node_id],
-            linewidth=1.35,
-            linestyle="--",
-            dashes=(5, 2.4),
-            alpha=0.9,
+            humidity.index,
+            humidity,
+            color=HUMIDITY_COLORS[node_id],
+            linewidth=DATA_LINE_WIDTH,
+            linestyle="-",
+            alpha=0.85,
             zorder=2.8,
         )
         humidity_line.set_gid(f"{prefix}-node-{node_id}-humidity")
 
+    base_temperature_values = connect_short_gaps(
+        base["temperature_c"], settings.max_connected_gap_seconds
+    )
     base_temperature, = ax.plot(
-        base.index,
-        base["temperature_c"],
+        base_temperature_values.index,
+        base_temperature_values,
         color=BASE_COLOR,
-        linewidth=2.25,
+        linewidth=BASE_LINE_WIDTH,
         linestyle="-",
+        alpha=0.86,
         zorder=3.3,
     )
     base_temperature.set_gid(f"{prefix}-base-temperature")
+    base_humidity_values = connect_short_gaps(
+        base["humidity_percent"], settings.max_connected_gap_seconds
+    )
     base_humidity, = humidity_ax.plot(
-        base.index,
-        base["humidity_percent"],
+        base_humidity_values.index,
+        base_humidity_values,
         color=BASE_COLOR,
-        linewidth=2.0,
-        linestyle="--",
-        dashes=(5, 2.4),
-        alpha=0.92,
+        linewidth=BASE_LINE_WIDTH,
+        linestyle=(0, (2.0, 1.5)),
+        alpha=0.72,
         zorder=3.1,
     )
     base_humidity.set_gid(f"{prefix}-base-humidity")
@@ -435,11 +651,14 @@ def draw_pm25(
     style_axis(ax, f"PM2.5 (µg/m³; {scale_label})")
     for node_id, frame in nodes.items():
         values = frame["pm2_5_ug_m3"].where(frame["pm2_5_ug_m3"] > 0)
+        values = connect_short_gaps(values, settings.max_connected_gap_seconds)
         line, = ax.plot(
-            frame.index,
+            values.index,
             values,
             color=NODE_COLORS[node_id],
-            linewidth=1.65,
+            linewidth=DATA_LINE_WIDTH,
+            linestyle="-",
+            alpha=0.88,
             zorder=3,
         )
         line.set_gid(f"{prefix}-node-{node_id}-pm25")
@@ -457,21 +676,59 @@ def draw_pm25(
 def draw_wind(
     ax: Axes,
     nodes: dict[int, pd.DataFrame],
+    anemometer: pd.DataFrame,
     settings: PlotSettings,
     prefix: str,
-) -> None:
+) -> Axes:
     style_axis(ax, "Node wind intensity (m/s)")
     for node_id, frame in nodes.items():
+        values = rolling_point_mean(frame["wind_mps"], settings.wind_rolling_window)
+        values = connect_short_gaps(values, settings.max_connected_gap_seconds)
         line, = ax.plot(
-            frame.index,
-            frame["wind_mps"],
+            values.index,
+            values,
             color=NODE_COLORS[node_id],
-            linewidth=1.55,
+            linewidth=DATA_LINE_WIDTH,
+            linestyle="-",
+            alpha=0.88,
             zorder=3,
         )
         line.set_gid(f"{prefix}-node-{node_id}-wind")
     ax.set_ylim(bottom=0)
+
+    anemometer_ax = ax.twinx()
+    anemometer_ax.spines["top"].set_visible(False)
+    anemometer_ax.spines["left"].set_visible(False)
+    anemometer_ax.spines["right"].set_color(BASE_COLOR)
+    anemometer_ax.tick_params(
+        axis="y", colors=BASE_COLOR, labelsize=8.5, length=3, width=0.7
+    )
+    anemometer_ax.set_ylabel(
+        "Anemometer wind speed (m/s)",
+        fontweight="bold",
+        color=BASE_COLOR,
+        labelpad=8,
+    )
+    anemometer_ax.patch.set_visible(False)
+    anemometer_values = rolling_point_mean(
+        anemometer["speed_mps"], settings.wind_rolling_window
+    )
+    anemometer_values = connect_short_gaps(
+        anemometer_values, settings.max_connected_gap_seconds
+    )
+    anemometer_line, = anemometer_ax.plot(
+        anemometer_values.index,
+        anemometer_values,
+        color=BASE_COLOR,
+        linewidth=0.25,
+        linestyle="-",
+        alpha=0.9,
+        zorder=3.2,
+    )
+    anemometer_line.set_gid(f"{prefix}-jetson-anemometer")
+    anemometer_ax.set_ylim(bottom=0)
     apply_time_axis(ax, settings)
+    return anemometer_ax
 
 
 def calculate_deviations(
@@ -516,7 +773,7 @@ def plot_temperature_humidity(
     fig.suptitle("Temperature and Relative Humidity", fontsize=15, fontweight="bold", y=0.985)
     draw_temperature_humidity(ax, nodes, base, settings, "temperature-humidity")
     add_events([ax], events, settings, ax, "temperature-humidity")
-    add_figure_legend(fig, include_base=True, include_variables=True)
+    add_figure_legend(fig, settings.node_ids, include_base=True, include_variables=True)
     add_method_note(fig, settings)
     fig.subplots_adjust(left=0.075, right=0.925, bottom=0.15, top=0.67)
     return save_figure(fig, output_dir / "temperature_humidity.svg", also_png)
@@ -534,26 +791,37 @@ def plot_pm25(
     fig.suptitle(f"PM2.5 Concentration ({scale_name})", fontsize=15, fontweight="bold", y=0.985)
     draw_pm25(ax, nodes, settings, "pm25")
     add_events([ax], events, settings, ax, "pm25")
-    add_figure_legend(fig, include_base=False)
-    add_method_note(fig, settings)
+    add_figure_legend(fig, settings.node_ids, include_base=False)
+    add_method_note(
+        fig,
+        settings,
+        f"PM2.5 QC masks values above {settings.pm_max_ug_m3:g} µg/m³, "
+        "PM2.5-clamped deltas, and PM2.5 > PM10 inconsistencies.",
+    )
     fig.subplots_adjust(left=0.075, right=0.975, bottom=0.16, top=0.68)
     return save_figure(fig, output_dir / "pm25.svg", also_png)
 
 
 def plot_wind_intensity(
     nodes: dict[int, pd.DataFrame],
+    anemometer: pd.DataFrame,
     events: Sequence[BurnEvent],
     settings: PlotSettings,
     output_dir: Path,
     also_png: bool,
 ) -> list[Path]:
     fig, ax = plt.subplots(figsize=(13.36, 4.8))
-    fig.suptitle("Node Wind Intensity", fontsize=15, fontweight="bold", y=0.985)
-    draw_wind(ax, nodes, settings, "wind")
+    fig.suptitle("Node and Anemometer Wind Intensity", fontsize=15, fontweight="bold", y=0.985)
+    draw_wind(ax, nodes, anemometer, settings, "wind")
     add_events([ax], events, settings, ax, "wind")
-    add_figure_legend(fig, include_base=False)
-    add_method_note(fig, settings, "Node wind values are shown as reported.")
-    fig.subplots_adjust(left=0.075, right=0.975, bottom=0.16, top=0.68)
+    add_wind_figure_legend(fig, settings.node_ids)
+    add_method_note(
+        fig,
+        settings,
+        f"Wind series use a centered {settings.wind_rolling_window}-point rolling mean; "
+        "node values are shown as reported.",
+    )
+    fig.subplots_adjust(left=0.075, right=0.925, bottom=0.16, top=0.68)
     return save_figure(fig, output_dir / "wind_intensity.svg", also_png)
 
 
@@ -574,21 +842,28 @@ def plot_environmental_deviation(
     ]
     for ax, (ylabel, column, variable_name) in zip(axes, labels_and_columns):
         style_axis(ax, ylabel)
-        zero_line = ax.axhline(0, color=BASE_COLOR, linewidth=1.0, alpha=0.8, zorder=2)
+        zero_line = ax.axhline(0, color=BASE_COLOR, linewidth=0.75, alpha=0.8, zorder=2)
         zero_line.set_gid(f"deviation-{variable_name}-zero-reference")
         for node_id, frame in deviations.items():
+            values = connect_short_gaps(frame[column], settings.max_connected_gap_seconds)
             line, = ax.plot(
-                frame.index,
-                frame[column],
-                color=NODE_COLORS[node_id],
-                linewidth=1.6,
+                values.index,
+                values,
+                color=(
+                    NODE_COLORS[node_id]
+                    if variable_name == "temperature"
+                    else HUMIDITY_COLORS[node_id]
+                ),
+                linewidth=DATA_LINE_WIDTH,
+                linestyle="-",
+                alpha=0.88,
                 zorder=3,
             )
             line.set_gid(f"deviation-node-{node_id}-{variable_name}")
     apply_time_axis(axes[0], settings, show_labels=False)
     apply_time_axis(axes[1], settings, show_labels=True)
     add_events(axes, events, settings, axes[0], "deviation")
-    add_figure_legend(fig, include_base=False)
+    add_figure_legend(fig, settings.node_ids, include_base=False, include_variables=True)
     add_method_note(fig, settings, "Differences use the aligned Jetson BME688 base-station record.")
     fig.subplots_adjust(left=0.09, right=0.975, bottom=0.11, top=0.76, hspace=0.16)
     return save_figure(fig, output_dir / "environmental_deviation.svg", also_png)
@@ -597,6 +872,7 @@ def plot_environmental_deviation(
 def plot_synchronized_stack(
     nodes: dict[int, pd.DataFrame],
     base: pd.DataFrame,
+    anemometer: pd.DataFrame,
     events: Sequence[BurnEvent],
     settings: PlotSettings,
     output_dir: Path,
@@ -605,21 +881,35 @@ def plot_synchronized_stack(
     fig, axes = plt.subplots(
         3,
         1,
-        figsize=(13.36, 12.4),
+        figsize=(13.36, 10.4),
         sharex=True,
-        gridspec_kw={"height_ratios": [1.28, 1.0, 1.0]},
+        gridspec_kw={"height_ratios": [2.4, 1.0, 1.0]},
     )
     fig.suptitle("Synchronized Sensor Response", fontsize=16, fontweight="bold", y=0.992)
     draw_temperature_humidity(axes[0], nodes, base, settings, "stack-temperature-humidity")
-    draw_wind(axes[1], nodes, settings, "stack-wind")
+    draw_wind(axes[1], nodes, anemometer, settings, "stack-wind")
     draw_pm25(axes[2], nodes, settings, "stack-pm25")
     apply_time_axis(axes[0], settings, show_labels=False)
     apply_time_axis(axes[1], settings, show_labels=False)
     apply_time_axis(axes[2], settings, show_labels=True)
-    add_events(axes, events, settings, axes[0], "stack")
-    add_figure_legend(fig, include_base=True, include_variables=True)
-    add_method_note(fig, settings, "Node wind values are shown as reported.")
-    fig.subplots_adjust(left=0.077, right=0.925, bottom=0.075, top=0.79, hspace=0.14)
+    add_events(
+        axes,
+        events,
+        settings,
+        axes[0],
+        "stack",
+        label_rotation=45.0,
+        label_stagger_levels=4,
+    )
+    add_figure_legend(fig, settings.node_ids, include_base=True, include_variables=True)
+    add_method_note(
+        fig,
+        settings,
+        f"Wind series use a centered {settings.wind_rolling_window}-point rolling mean; "
+        f"node values are shown as reported. PM2.5 QC masks values above "
+        f"{settings.pm_max_ug_m3:g} µg/m³ and flagged/inconsistent samples.",
+    )
+    fig.subplots_adjust(left=0.077, right=0.925, bottom=0.082, top=0.765, hspace=0.16)
     return save_figure(fig, output_dir / "synchronized_sensor_response.svg", also_png)
 
 
@@ -630,10 +920,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--telemetry", type=Path, default=DEFAULT_TELEMETRY)
     parser.add_argument("--base-environment", type=Path, default=DEFAULT_BASE_ENVIRONMENT)
+    parser.add_argument("--anemometer", type=Path, default=DEFAULT_ANEMOMETER)
     parser.add_argument("--timeline", type=Path, default=DEFAULT_TIMELINE)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--burn-date", type=date.fromisoformat, default=date(2026, 9, 15))
     parser.add_argument("--timezone", default="America/Denver")
+    parser.add_argument(
+        "--nodes",
+        type=int,
+        nargs="+",
+        default=list(DEFAULT_NODE_IDS),
+        metavar="NODE_ID",
+        help="node IDs to include in every figure",
+    )
     parser.add_argument("--start", type=parse_clock, default=time(16, 10), help="24-hour local HH:MM")
     parser.add_argument("--end", type=parse_clock, default=time(20, 30), help="24-hour local HH:MM")
     parser.add_argument(
@@ -641,6 +940,24 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=15,
         help="median aggregation window; empty windows remain gaps",
+    )
+    parser.add_argument(
+        "--max-connected-gap-seconds",
+        type=int,
+        default=120,
+        help="connect normal sampling pauses up to this duration; preserve longer gaps",
+    )
+    parser.add_argument(
+        "--wind-rolling-window",
+        type=int,
+        default=5,
+        help="number of plotted wind samples in the centered rolling mean",
+    )
+    parser.add_argument(
+        "--pm-max-ug-m3",
+        type=float,
+        default=1000.0,
+        help="maximum in-range SPS30 PM2.5 value; larger readings are masked",
     )
     parser.add_argument("--pm-scale", choices=("log", "linear"), default="log")
     parser.add_argument(
@@ -656,7 +973,20 @@ def build_parser() -> argparse.ArgumentParser:
 def validate_args(args: argparse.Namespace) -> None:
     if args.aggregation_seconds <= 0:
         raise ValueError("--aggregation-seconds must be greater than zero")
-    for path in (args.telemetry, args.base_environment, args.timeline):
+    if args.max_connected_gap_seconds <= 0:
+        raise ValueError("--max-connected-gap-seconds must be greater than zero")
+    if args.wind_rolling_window <= 0:
+        raise ValueError("--wind-rolling-window must be greater than zero")
+    if args.pm_max_ug_m3 <= 0:
+        raise ValueError("--pm-max-ug-m3 must be greater than zero")
+    if len(set(args.nodes)) != len(args.nodes):
+        raise ValueError("--nodes must not contain duplicates")
+    unsupported_nodes = sorted(set(args.nodes) - set(AVAILABLE_NODE_IDS))
+    if unsupported_nodes:
+        raise ValueError(f"unsupported node IDs: {unsupported_nodes}")
+    if not args.nodes:
+        raise ValueError("--nodes requires at least one node ID")
+    for path in (args.telemetry, args.base_environment, args.anemometer, args.timeline):
         if not path.is_file():
             raise FileNotFoundError(path)
 
@@ -669,7 +999,11 @@ def main() -> int:
         timezone=timezone,
         start=local_timestamp(args.burn_date, args.start, timezone),
         end=local_timestamp(args.burn_date, args.end, timezone),
+        node_ids=tuple(args.nodes),
         aggregation_seconds=args.aggregation_seconds,
+        max_connected_gap_seconds=args.max_connected_gap_seconds,
+        wind_rolling_window=args.wind_rolling_window,
+        pm_max_ug_m3=args.pm_max_ug_m3,
         pm_scale=args.pm_scale,
         event_labels=args.event_labels,
     )
@@ -677,22 +1011,42 @@ def main() -> int:
         raise ValueError("--end must be later than --start")
 
     configure_matplotlib()
-    telemetry = load_node_telemetry(args.telemetry)
+    telemetry = load_node_telemetry(args.telemetry, settings.node_ids)
+    telemetry, pm25_qc = filter_pm25_readings(telemetry, settings.pm_max_ug_m3)
     base_environment = load_base_environment(args.base_environment)
+    anemometer_readings = load_anemometer(args.anemometer)
     events = load_events(args.timeline, args.burn_date, timezone)
     nodes = aggregate_nodes(telemetry, settings)
     base = aggregate_base(base_environment, settings)
+    anemometer = aggregate_anemometer(anemometer_readings, settings)
 
     written: list[Path] = []
     written.extend(plot_temperature_humidity(nodes, base, events, settings, args.output_dir, args.also_png))
     written.extend(plot_pm25(nodes, events, settings, args.output_dir, args.also_png))
-    written.extend(plot_wind_intensity(nodes, events, settings, args.output_dir, args.also_png))
+    written.extend(
+        plot_wind_intensity(
+            nodes, anemometer, events, settings, args.output_dir, args.also_png
+        )
+    )
     written.extend(plot_environmental_deviation(nodes, base, events, settings, args.output_dir, args.also_png))
-    written.extend(plot_synchronized_stack(nodes, base, events, settings, args.output_dir, args.also_png))
+    written.extend(
+        plot_synchronized_stack(
+            nodes, base, anemometer, events, settings, args.output_dir, args.also_png
+        )
+    )
 
     print(
         f"Generated {len(written)} file(s) with {settings.aggregation_seconds}-second medians "
-        f"and PM2.5 {settings.pm_scale} scale:"
+        f"and PM2.5 {settings.pm_scale} scale for nodes "
+        f"{', '.join(str(node_id) for node_id in settings.node_ids)}:"
+    )
+    print(
+        "PM2.5 QC masked "
+        f"{pm25_qc['total']} raw sample(s): "
+        f"over_range={pm25_qc['over_range']}, "
+        f"delta_clamped={pm25_qc['delta_clamped']}, "
+        f"inconsistent={pm25_qc['inconsistent']}, "
+        f"negative={pm25_qc['negative']}"
     )
     for path in written:
         print(f"  {path}")
