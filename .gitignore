@@ -11,3 +11,6 @@ platformio/logs/
 .venv-dashboard/
 
 data/
+
+# FLIR thermal image data
+/September_Poster_Data/Burn1ThermalStills/
