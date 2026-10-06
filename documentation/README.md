@@ -52,7 +52,7 @@ If a statement conflicts, shipped code/config wins over current docs; current do
 
 | Tool | Purpose |
 |---|---|
-| [`Tools/lora_tdma_calculator.html`](Tools/lora_tdma_calculator.html) | Interactive LoRa airtime, effective-bandwidth, TDMA-capacity, node-count, and energy calculator with current SF7 and proposed SF12 presets |
+| [`Tools/lora_tdma_calculator.html`](Tools/lora_tdma_calculator.html) | Interactive LoRa airtime, effective-bandwidth, TDMA-capacity, node-count, and energy calculator with SF comparison presets |
 
 ## Pending plans
 
@@ -61,7 +61,7 @@ Scoped work awaiting implementation and/or acceptance. The previously parked bac
 | Document | Scope |
 |---|---|
 | [`Pending_Plans/MULTI_DAY_SESSION_AND_RESTART_RECOVERY.md`](Pending_Plans/MULTI_DAY_SESSION_AND_RESTART_RECOVERY.md) | Host implementation is complete; deployed-Jetson boot, power-cycle, USB-delay, and long-run acceptance remain |
-| [`Pending_Plans/SF12_MAX_RANGE_TRIAL.md`](Pending_Plans/SF12_MAX_RANGE_TRIAL.md) | SF12 maximum-range experiment with recalculated airtime, TDMA, bundle, reliability, cadence, power, and validation requirements |
+| [`Pending_Plans/MULTI_SF_NETWORK_PROFILES.md`](Pending_Plans/MULTI_SF_NETWORK_PROFILES.md) | Shared SF7/SF9/SF10/SF12 build profiles covering modem, TDMA, bundle, sensing, reliability, edge synchronization, and validation |
 
 ## Possible plans (deferred)
 

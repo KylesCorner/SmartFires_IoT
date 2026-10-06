@@ -3,7 +3,7 @@ name: lora-sniffer
 description: Flashing and operating the passive LoRa sniffer with the Jetson dashboard.
 category: reference
 status: current
-last_verified: 2026-09-04
+last_verified: 2026-10-06
 source_refs:
   - platformio/platformio.ini
   - platformio/src/main_lora_sniffer.cpp
@@ -44,6 +44,11 @@ smartfires-edge web \
 ```
 
 Open `http://<jetson-ip>:8080/sniffer`. The sniffer thread parses NDJSON and derives packet counts, RSSI/SNR, TDMA slot position, timing jitter, and guard-window violations.
+
+The sniffer is optional: a missing or failed sniffer reports an error without
+taking down core base-station ingest. During a graceful **New Session** restart,
+the worker observes the shared shutdown event, releases its serial handle, and
+is recreated with a fresh timing anchor in the replacement process.
 
 `--num-slots` must equal the firmware's compiled `NUM_SLOTS`. A wrong value does not affect normal base ingest, but it makes the sniffer's frame/slot timing analysis wrong. Current firmware uses five slots.
 

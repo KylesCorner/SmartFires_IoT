@@ -1,6 +1,6 @@
 ---
 name: multi-day-session-and-restart-recovery
-description: Plan for dated dashboard timestamps and complete edge restart with a fresh session on Jetson boot or New Session.
+description: Implemented multi-day timestamps and restart recovery awaiting deployed-Jetson field acceptance.
 category: plan-pending
 status: draft
 related_docs:
@@ -115,21 +115,29 @@ The historical `Completed_Plans/RESET_SYSTEM.md` records that New Session hardwa
 
 ## Acceptance and completion
 
-| Test | Required result |
-|---|---|
-| At least 72 hours of synthetic telemetry crossing midnight and a month/year boundary | Every absolute timestamp on every page, chart, tooltip, and log includes the correct date; history stays ordered and accessible. |
-| Two browser timezones and a daylight-saving repeated hour | Same underlying instants, correct local dates, explicit timezone/offset; UTC exports retain their meaning. |
-| Debug filtering, reconnect, and export | A record's wall timestamp never changes when rerendered. |
-| Cold boot with base immediately available, delayed, and initially silent | Service starts automatically, creates a new session, and sends initialization without waiting for traffic. |
-| Jetson power removal/restoration and ordinary reboot | New process/session, preserved previous files, recovered ingest without manual intervention; capture journal evidence. |
-| New Session during traffic, silence, and reconnect backoff | One full restart and fresh session; no leftover workers, serial owners, queued commands, old UI data, or old parser epoch. |
-| Rapid repeated requests and multiple browser tabs | One accepted restart at a time; all tabs converge on the new session; no directory reuse. |
-| Base-only USB reconnect; optional sensor/sniffer absent | Core ingest recovers; ordinary USB reconnect retains its session; missing optional hardware does not cause a restart storm. |
-| Required worker exits unexpectedly; explicit operator service stop | Failure triggers supervised recovery; deliberate service stop remains stopped. |
-| Data mount unavailable; clock changes after offline boot | Failure is visible and recoverable; no accidental fallback storage, overwritten sessions, or silently misdated data. |
+| Test | Required result | Status / evidence |
+|---|---|---|
+| At least 72 hours of synthetic telemetry crossing midnight and a month/year boundary | Every absolute timestamp on every page, chart, tooltip, and log includes the correct date; history stays ordered and accessible. | **Host passed:** `test_seventy_two_hour_history_crossing_year_remains_ordered`; dashboard formatter audit completed. |
+| Two browser timezones and a daylight-saving repeated hour | Same underlying instants, correct local dates, explicit timezone/offset; UTC exports retain their meaning. | **Host passed:** America/New_York repeated-hour offsets and Asia/Tokyo year rollover verified with Node; legacy UTC parsing has regression coverage. |
+| Debug filtering, reconnect, and export | A record's wall timestamp never changes when rerendered. | **Host passed:** server stamps immutable `wall_t`; rendering and UTC export reuse it. Browser reconnect smoke test remains part of field acceptance. |
+| Cold boot with base immediately available, delayed, and initially silent | Service starts automatically, creates a new session, and sends initialization without waiting for traffic. | **Partial:** silent fake-serial bootstrap passed; installed-service cold boot and delayed physical USB remain pending. |
+| Jetson power removal/restoration and ordinary reboot | New process/session, preserved previous files, recovered ingest without manual intervention; capture journal evidence. | **Field pending.** |
+| New Session during traffic, silence, and reconnect backoff | One full restart and fresh session; no leftover workers, serial owners, queued commands, old UI data, or old parser epoch. | **Partial:** host acknowledgement/coalescing, silent shutdown, worker supervision, and session collision tests passed; deployed supervisor and hardware traffic/reconnect runs remain pending. |
+| Rapid repeated requests and multiple browser tabs | One accepted restart at a time; all tabs converge on the new session; no directory reuse. | **Partial:** server coalescing, changed-session browser reload, and collision-safe directories are covered; real multi-tab acceptance remains pending. |
+| Base-only USB reconnect; optional sensor/sniffer absent | Core ingest recovers; ordinary USB reconnect retains its session; missing optional hardware does not cause a restart storm. | **Field pending.** |
+| Required worker exits unexpectedly; explicit operator service stop | Failure triggers supervised recovery; deliberate service stop remains stopped. | **Partial:** required-worker host test passed; installed systemd stop/restart behavior remains pending. |
+| Data mount unavailable; clock changes after offline boot | Failure is visible and recoverable; no accidental fallback storage, overwritten sessions, or silently misdated data. | **Partial:** unit/manual mount guards and collision-safe directories are implemented; deployed mount failure and offline-clock recovery remain pending. |
 
-Implement in order: timestamp formatting and regression coverage; process lifecycle and serial bootstrap; service packaging and deployment guidance; browser restart recovery; host tests and Jetson acceptance run. No firmware change is assumed. Hardware tests and deployment are future execution steps, not performed by this planning pass.
+The documentation validator work is complete: `plan-pending` / `draft`,
+directory/category validation, and the no-`source_refs` rule are implemented.
+The Jetson bridge and operator references describe the new behavior. No
+firmware change was required.
 
-At implementation time, also add `plan-pending` / `draft` support, directory/category validation, and the existing no-`source_refs` rule to `documentation/check_doc_freshness.py`. The documented metadata is restored now; the validator update is deferred to honor the documentation-only request.
+### Completion gate
 
-After validation, update the current Jetson bridge and operator references to describe the shipped behavior, record test evidence and any residual limitations, and move this plan to `Completed_Plans/`. Do not mark complete from a service “active” status alone.
+Keep this document in `Pending_Plans/` until the field-pending and partial rows
+above have deployed-Jetson evidence, including current/previous-boot journals
+and confirmation that recordings landed on the intended mounted volume. A
+service reporting only `active` is insufficient. Once that evidence is added,
+change the metadata to `category: plan-completed`, `status: historical`, move
+the file to `Completed_Plans/`, and update the documentation index.
