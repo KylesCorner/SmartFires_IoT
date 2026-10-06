@@ -3,7 +3,7 @@ name: documentation-index
 description: Table of contents and implementation-status ledger for documentation/.
 category: index
 status: current
-last_verified: 2026-09-30
+last_verified: 2026-10-06
 related_docs:
   - software-design
 ---
@@ -56,11 +56,11 @@ If a statement conflicts, shipped code/config wins over current docs; current do
 
 ## Pending plans
 
-Scoped proposals awaiting implementation. The previously parked backlog remains in `Possible_Plans/`.
+Scoped work awaiting implementation and/or acceptance. The previously parked backlog remains in `Possible_Plans/`.
 
 | Document | Scope |
 |---|---|
-| [`Pending_Plans/MULTI_DAY_SESSION_AND_RESTART_RECOVERY.md`](Pending_Plans/MULTI_DAY_SESSION_AND_RESTART_RECOVERY.md) | Date and time throughout the dashboard; fresh sessions and full edge initialization after Jetson boot or New Session |
+| [`Pending_Plans/MULTI_DAY_SESSION_AND_RESTART_RECOVERY.md`](Pending_Plans/MULTI_DAY_SESSION_AND_RESTART_RECOVERY.md) | Host implementation is complete; deployed-Jetson boot, power-cycle, USB-delay, and long-run acceptance remain |
 | [`Pending_Plans/SF12_MAX_RANGE_TRIAL.md`](Pending_Plans/SF12_MAX_RANGE_TRIAL.md) | SF12 maximum-range experiment with recalculated airtime, TDMA, bundle, reliability, cadence, power, and validation requirements |
 
 ## Possible plans (deferred)

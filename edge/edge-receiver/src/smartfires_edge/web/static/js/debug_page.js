@@ -74,8 +74,8 @@ function renderSrcTabs() {
 }
 
 function formatEntry(e) {
-  const wall = new Date().toLocaleTimeString();
-  return `${wall} [${e.lvl}] node=${e.node} src=${e.src} seq=${e.seq} t=${e.t}  ${e.msg}`;
+  const wall = formatTimestamp(e.wall_t, "iso", { milliseconds: true });
+  return `${wall} [${e.lvl}] node=${e.node} src=${e.src} seq=${e.seq} uptime_ms=${e.t}  ${e.msg}`;
 }
 
 function renderOutput() {
@@ -148,7 +148,10 @@ function downloadTextFile(filename, text) {
 function wireExportButton() {
   document.getElementById("debug-export-btn").addEventListener("click", () => {
     const visible = state.entries.filter(entryMatchesFilters);
-    const text = visible.map(formatEntry).join("\n") + "\n";
+    const text = visible.map((e) => {
+      const wallUtc = timestampDate(e.wall_t, "iso").toISOString();
+      return `${wallUtc} [${e.lvl}] node=${e.node} src=${e.src} seq=${e.seq} uptime_ms=${e.t}  ${e.msg}`;
+    }).join("\n") + "\n";
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
     downloadTextFile(`smartfires-debug-log-${stamp}.txt`, text);
   });

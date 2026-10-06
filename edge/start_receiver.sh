@@ -4,8 +4,6 @@ set -euo pipefail
 PORT="${1:-/dev/smartfires-base}"
 DATA_DIR="${2:-/mnt/nvme_drive/data}"
 
-mkdir -p "$DATA_DIR"
-
-smartfires-edge receive \
-    --port "$PORT" \
-    --data-dir "$DATA_DIR"
+# Compatibility entrypoint retained for older field notes. The dashboard is
+# now the deployment contract, and the wrapper supplies New Session recovery.
+exec "$(dirname -- "$0")/run_web_forever.sh" "$PORT" "$DATA_DIR"

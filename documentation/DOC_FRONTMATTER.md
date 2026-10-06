@@ -57,9 +57,9 @@ reference them without a path.
 `superseded` (anything, of any category, known to be replaced/wrong but not yet deleted or
 rewritten — a deliberate "don't trust this" flag, distinct from simply being old).
 
-The restored `plan-pending` / `draft` metadata is not yet recognized by
-`check_doc_freshness.py`. Updating that validator is recorded in the pending session
-plan; this planning-only change does not modify Python code.
+`check_doc_freshness.py` recognizes `plan-pending` / `draft`, validates each
+documentation directory's category, and enforces the no-`source_refs` rule for
+plans/history and the index.
 
 ### `source_refs`
 

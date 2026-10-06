@@ -3,9 +3,11 @@ name: smartfires-manager
 description: Operator reference for the Jetson update, service-management, and gateway flashing script.
 category: reference
 status: current
-last_verified: 2026-09-04
+last_verified: 2026-10-06
 source_refs:
   - edge/smartfires-manager.sh
+  - edge/smartfires-edge.service.in
+  - edge/install-smartfires-service.sh
 related_docs:
   - flashing
   - jetson-cheatsheet
@@ -32,7 +34,9 @@ The script resolves the repository root from its own location, so it may also be
 - `git`, `systemctl`, and `sudo` on the Jetson.
 - An existing Python virtual environment at `$HOME/.smartfires_venv`, or `SMARTFIRES_VENV` pointing to another one.
 - PlatformIO as `pio` or `$HOME/.platformio/penv/bin/pio` for flash commands.
-- `smartfires-edge.service` installed for any command that restarts it.
+- `smartfires-edge.service` installed for any command that restarts it. Use the
+  repository template/installer described in `JETSON_CHEATSHEET.md`; the manager
+  deliberately does not install or rewrite the unit.
 - Stable `/dev/smartfires-base` and `/dev/smartfires-sniffer` symlinks for firmware flashing.
 
 The manager can stop a live service, change branches, install Python packages, and flash connected boards. Review the selected branch and physical USB board identity before running a mutating command.
@@ -119,6 +123,12 @@ sudo systemctl status smartfires-edge.service --no-pager --full
 sudo systemctl restart smartfires-edge.service
 journalctl -u smartfires-edge.service -f
 ```
+
+The repository unit launches `smartfires-edge web`, guards the NVMe data mount,
+and restarts after both failures and an intentional dashboard **New Session**
+exit. `active` only proves that the process survived the manager's two-second
+check; also confirm the journal shows a fresh session, the base link becomes
+ready, and data is being written to the intended mounted path.
 
 ### Firmware
 

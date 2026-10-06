@@ -45,12 +45,38 @@ const Api = {
     ).json();
   },
   async newSession() {
-    return (
-      await fetch("/api/new_session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      })
-    ).json();
+    const response = await fetch("/api/new_session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.detail || `HTTP ${response.status}`);
+    }
+    return response.json();
+  },
+  async waitForSessionChange(previousSessionId, timeoutMs = 90_000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 3000);
+      try {
+        const response = await fetch("/api/session", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (response.ok) {
+          const current = await response.json();
+          if (current.session_id && current.session_id !== previousSessionId) return current;
+        }
+      } catch (_) {
+        // An outage is expected while the service supervisor relaunches the process.
+      } finally {
+        clearTimeout(timer);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    throw new Error("The edge service did not return with a new session within 90 seconds");
   },
   async snifferStats() {
     return (await fetch("/api/sniffer/stats")).json();
@@ -98,7 +124,7 @@ function fmt(value) {
 // Formats an epoch-seconds timestamp (e.g. live_state's "last_seen" fields)
 // as a local clock time, consistent across every page that shows one.
 function fmtTime(epochSeconds) {
-  return epochSeconds ? new Date(epochSeconds * 1000).toLocaleTimeString() : "—";
+  return epochSeconds ? formatTimestamp(epochSeconds, "epoch-seconds") : "—";
 }
 
 // Formats a node's hardware serial (SAMD21 uid_hash) the same way it's shown

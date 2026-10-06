@@ -26,3 +26,15 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["smartfires_edge*"]
+
+[tool.setuptools.package-data]
+smartfires_edge = [
+  "web/static/*.html",
+  "web/static/css/*.css",
+  "web/static/js/*.js",
+  "web/static/vendor/*.js",
+  "web/static/vendor/leaflet/*.css",
+  "web/static/vendor/leaflet/*.js",
+  "web/static/vendor/leaflet/images/*.png",
+  "web/tiles/*.md",
+]

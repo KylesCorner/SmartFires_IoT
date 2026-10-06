@@ -542,7 +542,7 @@ function renderPlaybackUI() {
     const start = new Date(sniffer.pausedViewEndMs - sniffer.windowMs);
     const end = new Date(sniffer.pausedViewEndMs);
     indicator.innerHTML =
-      `<span class="conn-dot offline"></span> Viewing ${start.toLocaleTimeString()} – ${end.toLocaleTimeString()}`;
+      `<span class="conn-dot offline"></span> Viewing ${formatTimestamp(start)} – ${formatTimestamp(end)}`;
   }
 }
 
@@ -691,7 +691,7 @@ const DETAIL_FIELDS = [
     (ev) => (ev.rh_owner_node_id != null ? (ev.rh_owner_node_id === 0 ? "Base Station" : `Node ${ev.rh_owner_node_id}`) : undefined),
     false,
   ],
-  ["Wall time", (ev) => ev.wall_t, false],
+  ["Wall time", (ev) => formatTimestamp(ev.wall_t, "iso", { milliseconds: true }), false],
   ["Sniffer t (ms)", (ev) => ev.sniffer_t_ms, false],
   ["Payload length", (ev) => (ev.payload_hex ? ev.payload_hex.length / 2 : 0), false],
   ["Payload (hex)", (ev) => fmtPayloadHex(ev.payload_hex), false],
@@ -923,7 +923,7 @@ function plotScales() {
     x: {
       type: "linear",
       ticks: {
-        callback: (value) => new Date(value).toLocaleTimeString(),
+        callback: (value) => formatTimestamp(value, "epoch-milliseconds"),
         color: "#aab4c0",
         maxTicksLimit: 8,
       },
@@ -940,6 +940,13 @@ let rssiChart = null;
 let jitterChart = null;
 
 function initPlots() {
+  const datedTooltip = {
+    callbacks: {
+      title: (items) => items.length
+        ? formatTimestamp(items[0].parsed.x, "epoch-milliseconds", { milliseconds: true })
+        : "",
+    },
+  };
   rssiChart = new Chart(document.getElementById("sniffer-rssi-chart").getContext("2d"), {
     type: "scatter",
     data: { datasets: [] },
@@ -947,7 +954,7 @@ function initPlots() {
       animation: false,
       maintainAspectRatio: false,
       scales: plotScales(),
-      plugins: { legend: { labels: { color: "#e6e6e6" } } },
+      plugins: { legend: { labels: { color: "#e6e6e6" } }, tooltip: datedTooltip },
     },
   });
 
@@ -958,7 +965,7 @@ function initPlots() {
       animation: false,
       maintainAspectRatio: false,
       scales: plotScales(),
-      plugins: { legend: { labels: { color: "#e6e6e6" } } },
+      plugins: { legend: { labels: { color: "#e6e6e6" } }, tooltip: datedTooltip },
     },
   });
 }

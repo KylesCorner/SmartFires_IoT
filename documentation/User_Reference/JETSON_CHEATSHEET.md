@@ -3,10 +3,13 @@ name: jetson-cheatsheet
 description: Common Jetson-side commands — installing edge-receiver, pulling data, the web dashboard, and one-time udev setup for stable base/sniffer device paths.
 category: reference
 status: current
-last_verified: 2026-09-04
+last_verified: 2026-10-06
 source_refs:
   - util/udev/99-smartfires.rules
   - edge/edge-receiver/src/smartfires_edge/main.py
+  - edge/smartfires-edge.service.in
+  - edge/install-smartfires-service.sh
+  - edge/run_web_forever.sh
 related_docs:
   - jetson-bridge
 ---
@@ -91,6 +94,39 @@ From the repo root:
 ```
 
 Read `SMARTFIRES_MANAGER.md` before using flash/deploy actions.
+
+### Boot service and restart recovery
+
+The repository-owned unit template and installer are under `edge/`. Install the
+package into a venv first, then render the unit with the actual unprivileged
+account and NVMe mount (the defaults below match the edge configuration):
+
+```bash
+sudo SMARTFIRES_USER=smartfires \
+  SMARTFIRES_VENV=/home/smartfires/.smartfires_venv \
+  SMARTFIRES_DATA_DIR=/mnt/nvme_drive/data \
+  SMARTFIRES_DATA_MOUNT=/mnt/nvme_drive \
+  SMARTFIRES_INSTALL_ROOT=/opt/smartfires/SmartFires_IoT \
+  ./edge/install-smartfires-service.sh
+sudo systemctl start smartfires-edge.service
+```
+
+The unit runs `smartfires-edge web`, waits for the data mount, and retries both
+failure and intentional graceful application exits with bounded backoff. It is
+enabled for boot by the installer. Check `journalctl -u smartfires-edge.service
+-b` after boot; a missing mount is a visible pre-start failure and must not be
+worked around by creating `/mnt/nvme_drive/data` on the root filesystem.
+
+Keep `/dev/smartfires-base` and `/dev/smartfires-sniffer` as udev-managed paths.
+The core base receiver retries delayed USB enumeration; optional sniffer and
+anemometer paths may be absent without blocking core ingest. Do not run a second
+receiver against the base port while the service owns it.
+
+For a non-systemd session, `./edge/run_web_forever.sh` provides equivalent
+restart-on-exit behavior with bounded backoff and the same default-mount guard;
+Ctrl-C/TERM stops it. A direct `smartfires-edge web` command is a one-process
+launch and requires manual restart after an intentional graceful New Session
+exit.
 
 ## Data transfer
 

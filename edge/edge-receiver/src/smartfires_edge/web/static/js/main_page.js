@@ -164,8 +164,8 @@ function renderPlaybackUI() {
     toggleBtn.textContent = "▶ Go Live";
     const end = new Date(state.pausedViewEndMs);
     indicator.innerHTML = state.timeRangeMs
-      ? `<span class="conn-dot offline"></span> Viewing ${new Date(state.pausedViewEndMs - state.timeRangeMs).toLocaleTimeString()} – ${end.toLocaleTimeString()}`
-      : `<span class="conn-dot offline"></span> Viewing up to ${end.toLocaleTimeString()}`;
+      ? `<span class="conn-dot offline"></span> Viewing ${formatTimestamp(state.pausedViewEndMs - state.timeRangeMs, "epoch-milliseconds")} – ${formatTimestamp(end)}`
+      : `<span class="conn-dot offline"></span> Viewing up to ${formatTimestamp(end)}`;
   }
   // Stepping needs a finite window size to step by — disable while "All time" is selected.
   document.getElementById("chart-step-back").disabled = state.timeRangeMs === null;
@@ -202,7 +202,7 @@ function buildBaseScales() {
     x: {
       type: "linear",
       ticks: {
-        callback: (value) => new Date(value).toLocaleTimeString(),
+        callback: (value) => formatTimestamp(value, "epoch-milliseconds"),
         color: "#aab4c0",
         maxTicksLimit: 8,
       },
@@ -225,6 +225,9 @@ function initChart() {
         legend: { labels: { color: "#e6e6e6" } },
         tooltip: {
           callbacks: {
+            title: (items) => items.length
+              ? formatTimestamp(items[0].parsed.x, "epoch-milliseconds")
+              : "",
             label: (ctx) => `${ctx.dataset.label}: ${_fmtVal(ctx.raw.y)}`,
           },
         },
@@ -438,7 +441,7 @@ async function refreshTimeline() {
   const rangeEl = document.getElementById("timeline-range");
   const spanMs = Math.max(data.end_ms - data.start_ms, 1);
   rangeEl.textContent =
-    `${new Date(data.start_ms).toLocaleTimeString()} – ${new Date(data.end_ms).toLocaleTimeString()}`;
+    `${formatTimestamp(data.start_ms, "epoch-milliseconds")} – ${formatTimestamp(data.end_ms, "epoch-milliseconds")}`;
 
   const nodeIds = Object.keys(data.nodes).map(Number).sort((a, b) => a - b);
   container.innerHTML = "";
@@ -470,8 +473,8 @@ async function refreshTimeline() {
       seg.style.width = `${Math.max(((j - i) / counts.length) * 100, 0.2)}%`;
       const fill = Math.min(total / ((j - i) * expectedPerBucket), 1);
       seg.style.opacity = (0.35 + 0.65 * fill).toFixed(2);
-      const t0 = new Date(data.start_ms + i * data.bucket_ms).toLocaleTimeString();
-      const t1 = new Date(data.start_ms + j * data.bucket_ms).toLocaleTimeString();
+      const t0 = formatTimestamp(data.start_ms + i * data.bucket_ms, "epoch-milliseconds");
+      const t1 = formatTimestamp(data.start_ms + j * data.bucket_ms, "epoch-milliseconds");
       seg.title = `Node ${nodeId}: active ${t0} – ${t1}`;
       track.appendChild(seg);
       i = j;
@@ -482,7 +485,7 @@ async function refreshTimeline() {
       const tick = document.createElement("div");
       tick.className = "timeline-awaken";
       tick.style.left = `${((t - data.start_ms) / spanMs) * 100}%`;
-      tick.title = `Node ${nodeId} boot (AWAKEN) at ${new Date(t).toLocaleTimeString()}`;
+      tick.title = `Node ${nodeId} boot (AWAKEN) at ${formatTimestamp(t, "epoch-milliseconds")}`;
       track.appendChild(tick);
     }
 
@@ -606,37 +609,17 @@ function wireNewSessionButton() {
       return;
     }
     btn.disabled = true;
-    btn.textContent = "Resetting…";
+    btn.textContent = "Restarting…";
     try {
+      const previous = await Api.session();
+      if (!previous.session_id) throw new Error("The current session is not ready yet");
       await Api.newSession();
-
-      historyCache.clear();
-      state.chart.data.datasets = [];
-      state.chart.options.scales = buildBaseScales();
-      state.chart.update();
-
-      state.live = true;
-      state.pausedViewEndMs = null;
-      renderPlaybackUI();
-
-      state.knownNodes.clear();
-      state.selectedNodes.clear();
-      document.getElementById("node-checkboxes").innerHTML = "";
-
-      for (const marker of Object.values(state.markers)) {
-        marker.remove();
-      }
-      state.markers = {};
-      state.mapFitted = false;
-      if (state.baseMarker) {
-        state.baseMarker.remove();
-        state.baseMarker = null;
-      }
+      await Api.waitForSessionChange(previous.session_id);
+      window.location.reload();
     } catch (e) {
-      alert("Failed to start new session: " + (e.message || e));
-    } finally {
       btn.disabled = false;
       btn.textContent = "New Session";
+      alert("Failed to restart with a new session: " + (e.message || e));
     }
   });
 }

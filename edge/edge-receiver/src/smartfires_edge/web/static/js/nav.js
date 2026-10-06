@@ -11,6 +11,39 @@ let _baseLinkDot = null;
 let _clockEl = null;
 let _sessionEl = null;
 let _clockOffsetMs = 0; // Jetson epoch_s*1000 - Date.now(), resynced periodically
+let _observedSessionId = null;
+let _sessionReloadStarted = false;
+
+try {
+  _observedSessionId = window.sessionStorage.getItem("smartfires-session-id");
+} catch (_) {}
+
+// Absolute timestamps are local, dated, and carry a numeric UTC offset.
+// Input units are explicit; timezone-less ISO values are historical UTC.
+function timestampDate(value, inputType = "iso") {
+  if (value === null || value === undefined || value === "") return null;
+  if (inputType === "epoch-seconds") return new Date(Number(value) * 1000);
+  if (inputType === "epoch-milliseconds") return new Date(Number(value));
+  if (inputType !== "iso") throw new Error(`Unsupported timestamp input type: ${inputType}`);
+  const text = String(value);
+  return new Date(/(?:Z|[+-]\d\d:?\d\d)$/.test(text) ? text : `${text}Z`);
+}
+
+function formatTimestamp(value, inputType = "iso", options = {}) {
+  const date = value instanceof Date ? value : timestampDate(value, inputType);
+  if (!date || Number.isNaN(date.getTime())) return "—";
+  // Keep the calendar portion ISO-like regardless of browser locale so it is
+  // unambiguous in screenshots, exports, and DST investigations.
+  const datePart = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  const timePart = date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  const milliseconds = options.milliseconds ? `.${String(date.getMilliseconds()).padStart(3, "0")}` : "";
+  const offsetMinutes = -date.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? "+" : "-";
+  const absoluteOffset = Math.abs(offsetMinutes);
+  const offset = `UTC${sign}${String(Math.floor(absoluteOffset / 60)).padStart(2, "0")}:${String(absoluteOffset % 60).padStart(2, "0")}`;
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || "local";
+  return `${datePart} ${timePart}${milliseconds} ${zone} (${offset})`;
+}
 
 function renderNav(activePath) {
   const nav = document.createElement("nav");
@@ -76,11 +109,13 @@ async function _pollConnectivity() {
 async function _pollBaseLink() {
   try {
     const resp = await fetch("/api/base_link");
-    const { connected, error } = await resp.json();
+    const { connected, ready, error } = await resp.json();
     if (_baseLinkDot) {
-      _baseLinkDot.className = "base-link-dot " + (connected ? "online" : "offline");
-      _baseLinkDot.title = connected
-        ? "Base station USB link: connected — the Jetson is receiving telemetry from the base station Feather"
+      _baseLinkDot.className = "base-link-dot " + (ready ? "online" : "offline");
+      _baseLinkDot.title = ready
+        ? "Base station USB link: ready — the port is open and startup reset/time synchronization completed"
+        : connected
+          ? "Base station USB link: connected — startup reset/time synchronization is still in progress"
         : "Base station USB link: disconnected — the Jetson cannot reach the base station Feather over serial" + (error ? ` (${error})` : "");
     }
   } catch (_) {}
@@ -97,16 +132,28 @@ async function _pollServerTime() {
 
 function _tickClock() {
   if (_clockEl) {
-    _clockEl.textContent = new Date(Date.now() + _clockOffsetMs).toLocaleTimeString();
+    _clockEl.textContent = formatTimestamp(Date.now() + _clockOffsetMs, "epoch-milliseconds");
   }
 }
 
 async function _pollSession() {
   try {
-    const resp = await fetch("/api/session");
+    const resp = await fetch("/api/session", { cache: "no-store" });
     const { session_id } = await resp.json();
     if (_sessionEl) {
       _sessionEl.textContent = session_id ? `session ${session_id}` : "session —";
+    }
+    if (session_id && _observedSessionId === null) {
+      _observedSessionId = session_id;
+      try { window.sessionStorage.setItem("smartfires-session-id", session_id); } catch (_) {}
+    } else if (session_id && session_id !== _observedSessionId && !_sessionReloadStarted) {
+      // Reloading is the common reset path for every page and every tab. It
+      // discards charts, websocket rings, sniffer anchors, filters, and caches
+      // even when this tab did not submit the New Session request itself.
+      _sessionReloadStarted = true;
+      _observedSessionId = session_id;
+      try { window.sessionStorage.setItem("smartfires-session-id", session_id); } catch (_) {}
+      window.location.reload();
     }
   } catch (_) {}
 }

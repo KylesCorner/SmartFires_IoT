@@ -3,13 +3,17 @@ name: jetson-bridge
 description: Frame format and routing between the base station Feather and the Jetson over USB CDC.
 category: architecture
 status: current
-last_verified: 2026-09-04
+last_verified: 2026-10-06
 source_refs:
   - platformio/include/telemetry/BinaryPacket.h
   - platformio/src/app/SmartFiresBaseApp.cpp
   - platformio/include/logging/FramedDebugLogSink.h
   - edge/edge-receiver/src/smartfires_edge/uart_receiver.py
   - edge/edge-receiver/src/smartfires_edge/ingest_service.py
+  - edge/edge-receiver/src/smartfires_edge/live_state.py
+  - edge/edge-receiver/src/smartfires_edge/web/app.py
+  - edge/edge-receiver/src/smartfires_edge/web_service.py
+  - edge/smartfires-edge.service.in
 related_docs:
   - packet-reliability
   - tdma-protocol
@@ -68,12 +72,20 @@ The base's locally generated `ACK_SUMMARY` is never supplied by the Jetson.
 
 ## Session behavior
 
-On each serial connection, ingest:
+The process creates one session ID and a collision-safe session directory before
+waiting for the base. On each serial connection within that process, ingest:
 
 1. sends a soft `CMD_RESET` to node 0 (the base);
 2. waits briefly for radio reinitialization;
-3. sends a new session ID and session-relative time;
+3. sends that process session ID and the current session-relative time;
 4. starts a background TIME_SYNC sender at the configured interval (600 seconds by default).
+
+Opening and bootstrap are separate from packet iteration, so reset and initial
+TIME_SYNC do not wait for inbound traffic. The dashboard reports an open USB
+connection separately from bootstrap readiness. An ordinary USB reconnect keeps
+the same recording session; **New Session** requests graceful whole-process
+shutdown so the supervisor rebuilds every parser, queue, worker, cache, and
+session object.
 
 The base broadcasts its cached time every 50 seconds, using a local fallback if it has no Jetson authority. This shorter radio cadence is intentionally separate from the USB injection cadence.
 
@@ -85,7 +97,7 @@ STATUS supplies GPS and battery validity, DMP heading/accuracy, lifetime retrans
 
 ## Web control surface
 
-- `/api/new_session` signals ingest to create a new session.
+- `/api/new_session` acknowledges and coalesces a whole-application restart request; the service supervisor then launches a fresh process/session.
 - `/api/node_reset` sends a hard reset to a selected node.
 - `/api/tx_power` resolves set/increase/decrease and DYNAMIC/STATIC choices into an absolute power command, clamped to 5–13 dBm.
 - `/api/command` currently only echoes `{status: queued}` and does not write serial bytes.
@@ -97,5 +109,11 @@ The CLI has `receive`, `summary`, `visualize`, and `web`; there is no separate c
 - One-byte `data_len` bounds the frame; the largest normal base frame carries RSSI plus a 195-byte bundle.
 - The parser counts invalid lengths and outer CRC failures.
 - The ingest service reconnects with bounded backoff after serial errors.
+- The repository-owned `edge/smartfires-edge.service.in` launches the `web`
+  entrypoint, requires the configured data mount before recording, and retries
+  both failure and intentional graceful application exits with bounded backoff.
+  Stable `/dev/smartfires-base` udev naming is required; optional USB workers do
+  not gate core ingest. See the Jetson cheatsheet for rendering/installing the
+  unit and for the equivalent manual supervisor.
 - A lost command is detected only indirectly by missing `CMD_ACK` or later STATUS state; LoRa command delivery itself is fire-and-forget.
 - USB framing integrity does not replace the inner LoRa CRC or app-layer reliability.

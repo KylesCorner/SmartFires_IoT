@@ -316,11 +316,14 @@ def run_sniffer(
     cfg: SnifferConfig,
     live_state: LiveState,
     log_fn: Callable[..., None] | None = None,
+    stop_event: threading.Event | None = None,
 ) -> int:
     """Run the sniffer ingest loop. Intended to be run in a daemon thread
     alongside the base-station ingest loop (see web_service.run_web)."""
     if log_fn is None:
         log_fn = lambda msg, node_id=None, source="sniffer", kind="other": print(msg)  # noqa: E731
+    if stop_event is None:
+        stop_event = threading.Event()
 
     # Every log line from this loop is tagged source="sniffer" so the Live
     # Log page can filter to just sniffer activity, the same way it filters
@@ -333,7 +336,7 @@ def run_sniffer(
 
     try:
         with serial.Serial(cfg.port, cfg.baud, timeout=1.0) as ser:
-            while True:
+            while not stop_event.is_set():
                 line = ser.readline()
                 if not line:
                     continue
@@ -371,6 +374,8 @@ def run_sniffer(
                     kind=rx_kind,
                 )
     except serial.SerialException as exc:
+        if stop_event.is_set():
+            return 0
         print(f"[SNIFFER][FATAL] {exc}", file=sys.stderr)
         slog(f"[SNIFFER] serial error: {exc}")
         return 1

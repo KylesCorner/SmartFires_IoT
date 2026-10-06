@@ -1,11 +1,22 @@
-from setuptools import setup, find_packages
+from setuptools import find_packages, setup
 
-setup( 
-    name="smartfires-edge", 
-    version="0.1.0", 
+setup(
+    name="smartfires-edge",
+    version="0.1.0",
     description="Edge telemetry ingest and packet-loss monitoring for SmartFires",
-    package_dir={"":"src"},
+    package_dir={"": "src"},
     packages=find_packages(where="src"),
-    install_requires=["pyserial>=3.5", "minimalmodbus>=2.1", "numpy>=1.24", "geomag>=0.9.2015"],
-    entry_points={ "console_scripts": [
-            "smartfires-edge=smartfires_edge.main:main", ] },)
+    package_data={"smartfires_edge": [
+        "web/static/*.html", "web/static/css/*.css", "web/static/js/*.js",
+        "web/static/vendor/*.js", "web/static/vendor/leaflet/*.css",
+        "web/static/vendor/leaflet/*.js",
+        "web/static/vendor/leaflet/images/*.png", "web/tiles/*.md",
+    ]},
+    install_requires=[
+        "pyserial>=3.5", "minimalmodbus>=2.1", "numpy>=1.24",
+        "geomag>=0.9.2015", "fastapi>=0.110", "uvicorn>=0.29",
+    ],
+    entry_points={
+        "console_scripts": ["smartfires-edge=smartfires_edge.main:main"],
+    },
+)

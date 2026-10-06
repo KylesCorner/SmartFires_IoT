@@ -34,7 +34,12 @@ smartfires-edge web \
   --http-port 8080
 ```
 
-`web` runs UART ingest in a background thread and serves the live map, sniffer, debug-log, live-log, and map-history views. Add `--sniffer-port /dev/smartfires-sniffer --num-slots 5` to enable the passive-sniffer view.
+`web` runs supervised UART ingest alongside the live map, sniffer, debug-log,
+live-log, and map-history views. Add `--sniffer-port /dev/smartfires-sniffer
+--num-slots 5` to enable the passive-sniffer view. The dashboard's **New
+Session** action exits the whole application after acknowledging the request;
+run it under the repository-owned systemd unit or `../run_web_forever.sh` so a
+fresh process and recording session are started automatically.
 
 To merge the optional Jetson-connected ES-W302 readings into telemetry rows, add:
 
@@ -49,6 +54,11 @@ To merge the optional Jetson-connected ES-W302 readings into telemetry rows, add
 - Expands bundles, writes telemetry/status records, maintains session metadata and packet-loss metrics, and serves live state.
 - Sends clock authority to the base at `--sync-interval`; the base rebroadcasts cached session time more frequently over LoRa.
 - Starts a fresh session by issuing a base soft reset through the USB command path.
+- Performs reset and initial TIME_SYNC as soon as the base port opens, without
+  waiting for an inbound frame; an ordinary USB reconnect retains the process's
+  recording session.
+- Displays every absolute dashboard time with a local calendar date, timezone,
+  and UTC offset while keeping stored/exported machine timestamps in UTC.
 - Sends real node reset commands through the dashboard's `/api/node_reset` endpoint.
 - Controls per-node dynamic/static TX power through `/api/tx_power`.
 

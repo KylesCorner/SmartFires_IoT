@@ -7,8 +7,9 @@ the file: it remembers its byte offset and parses only the bytes appended
 since the previous request. Switching to a different session file (or the
 file shrinking, i.e. being rewritten) resets the cache.
 
-All timestamps in telemetry.csv are UTC; telemetry rows carry a trailing "Z"
-while status/awaken rows don't. Everything here is epoch milliseconds.
+All timestamps in telemetry.csv are UTC. New rows carry an explicit UTC suffix;
+older status/awaken rows may be timezone-naive but were also written in UTC.
+Everything here is epoch milliseconds.
 """
 
 import csv
@@ -37,10 +38,17 @@ ACTIVITY_BUCKET_MS = 15_000
 
 def _ts_ms(raw: str) -> Optional[int]:
     try:
-        d = datetime.fromisoformat(raw.rstrip("Z"))
+        d = datetime.fromisoformat(raw[:-1] + "+00:00" if raw.endswith("Z") else raw)
     except ValueError:
         return None
-    return int(d.replace(tzinfo=timezone.utc).timestamp() * 1000)
+    # Older SmartFires CSV rows omitted the suffix but were always written as
+    # UTC. Keep that historical meaning instead of letting the host timezone
+    # reinterpret them; newer offset-aware values are converted normally.
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=timezone.utc)
+    else:
+        d = d.astimezone(timezone.utc)
+    return int(d.timestamp() * 1000)
 
 
 def _int_or_none(raw: str) -> Optional[int]:

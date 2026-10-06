@@ -1,0 +1,29 @@
+# SmartFires edge dashboard service template.
+# Render the @...@ values during installation; do not install this file verbatim.
+[Unit]
+Description=SmartFires edge receiver and dashboard
+Wants=network-online.target
+After=network-online.target
+RequiresMountsFor=@SMARTFIRES_DATA_DIR@
+StartLimitIntervalSec=120s
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=@SMARTFIRES_USER@
+Group=@SMARTFIRES_GROUP@
+WorkingDirectory=@SMARTFIRES_INSTALL_ROOT@
+Environment=PYTHONUNBUFFERED=1
+# Refuse to record against a plain root-filesystem directory when the data
+# volume is absent.  The mountpoint check is intentionally before the process.
+ExecStartPre=/usr/bin/mountpoint -q @SMARTFIRES_DATA_MOUNT@
+ExecStartPre=/usr/bin/test -d @SMARTFIRES_DATA_DIR@
+ExecStart=@SMARTFIRES_VENV@/bin/smartfires-edge web --port /dev/smartfires-base --data-dir @SMARTFIRES_DATA_DIR@ --host 0.0.0.0 --http-port 8080
+Restart=always
+RestartSec=5s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+SyslogIdentifier=smartfires-edge
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,790 @@
+import json
+import queue
+import random
+import sys
+import threading
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Callable
+
+import serial
+
+from smartfires_edge.anemometer import AnemometerPoller
+from smartfires_edge.config import IngestConfig
+from smartfires_edge.csv_logger import DurableCsvLogger
+from smartfires_edge.debug_log import parse_sfdbg_line
+from smartfires_edge.live_state import LiveState
+from smartfires_edge.packet import (
+    PKT_AWAKEN,
+    PKT_BUNDLE,
+    PKT_CMD_ACK,
+    PKT_DEBUG_LOG,
+    PKT_FULL_STATE,
+    PKT_STATUS,
+    PKT_WINDOW_BEGIN,
+    PKT_WINDOW_END,
+    TX_POWER_MODE_STATIC,
+    encode_cmd_reset_frame,
+    encode_cmd_set_tx_power_frame,
+    encode_time_sync_frame,
+)
+from smartfires_edge.packet_loss import PacketLossTracker
+from smartfires_edge.session import SessionManager
+from smartfires_edge.session_meta import SessionMetaLogger
+from smartfires_edge.uart_receiver import iter_packets
+from smartfires_edge.window_state import WindowTracker
+
+
+def _fmt_field(value, spec: str) -> str:
+    # Telemetry fields are None when the sensor's validity flag was clear.
+    if value is None:
+        return "--"
+    return format(value, spec)
+
+
+def _append_jsonl(path: Path, payload: dict) -> None:
+    # flush() (not fsync()) deliberately: this runs inline in the same loop
+    # that drains the base station's serial port one byte at a time
+    # (uart_receiver.iter_packets). fsync() blocks until the write physically
+    # lands on disk; on a slow/busy disk that stall can outlast the OS's
+    # serial input buffer, dropping bytes and desyncing FrameReceiver's frame
+    # parser for the rest of the session. flush() just hands the bytes to the
+    # OS and returns immediately, matching DurableCsvLogger's default
+    # (fsync_every_row=False) for the same reason.
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(payload, sort_keys=True) + "\n")
+        f.flush()
+
+
+def _pkt_type_name(pkt_type: int | None) -> str:
+    if pkt_type == PKT_AWAKEN:
+        return "AWAKEN"
+    if pkt_type == PKT_FULL_STATE:
+        return "FULL_STATE"
+    if pkt_type == PKT_BUNDLE:
+        return "BUNDLE"
+    if pkt_type == PKT_STATUS:
+        return "STATUS"
+    if pkt_type == PKT_CMD_ACK:
+        return "CMD_ACK"
+    return f"0x{(pkt_type or 0):02x}"
+
+
+def _make_session_stamp(ts: float) -> str:
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d_%H%M%S")
+
+
+def _create_session_dir(data_dir: Path, session_start: float, session_id: int) -> Path:
+    """Create a new session directory without ever reusing a prior one."""
+    data_dir.mkdir(parents=True, exist_ok=True)
+    if not data_dir.is_dir():
+        raise NotADirectoryError(data_dir)
+    base = data_dir / _make_session_stamp(session_start)
+    candidate = base
+    suffix = 0
+    while True:
+        try:
+            candidate.mkdir(parents=True, exist_ok=False)
+            return candidate
+        except FileExistsError:
+            suffix += 1
+            candidate = data_dir / f"{base.name}_{session_id:08x}_{suffix}"
+
+
+def _send_time_sync(
+    ser: serial.Serial,
+    write_lock: threading.Lock,
+    sync_state: dict,
+    session_ctx: dict,
+    reason: str,
+    log_fn: Callable[[str, int | None], None],
+    trigger_node: int | None = None,
+    trigger_seq: int | None = None,
+) -> bool:
+    session_id = session_ctx["session_id"]
+    session_start = session_ctx["session_start"]
+    session_ms = int((time.time() - session_start) * 1000) & 0xFFFFFFFF
+    with write_lock:
+        seq = int(sync_state.setdefault("next_seq", 0)) & 0xFF
+        frame = encode_time_sync_frame(session_id, session_ms, seq)
+        try:
+            ser.write(frame)
+        except serial.SerialException as exc:
+            print(f"[EDGE][SYNC] write error reason={reason}: {exc}", file=sys.stderr)
+            return False
+        sync_state["next_seq"] = (seq + 1) & 0xFF
+
+    msg = (
+        f"[EDGE][SYNC-TX#{seq:03d}] reason={reason} session_id=0x{session_id:08x} "
+        f"session_ms={session_ms} bytes={len(frame)}"
+    )
+    if trigger_node is not None:
+        msg += f" trigger_node={trigger_node}"
+    if trigger_seq is not None:
+        msg += f" trigger_seq={trigger_seq}"
+    log_fn(msg, None)
+    return True
+
+
+def _send_cmd_set_tx_power(
+    ser,
+    write_lock: threading.Lock,
+    cmd_seq_state: dict,
+    node_id: int,
+    tx_power_dbm: int,
+    mode: int,
+    log_fn=None,
+) -> None:
+    """Send a CMD_SET_TX_POWER frame for the base to relay to one node.
+
+    The value is absolute. The dashboard API resolves increase/decrease into
+    an absolute target from the node's last reported power, so a
+    stale reading can only produce a slightly-wrong level, never a runaway —
+    see encode_cmd_set_tx_power_frame().
+    """
+    with write_lock:
+        seq = int(cmd_seq_state.setdefault("next_seq", 0)) & 0xFF
+        frame = encode_cmd_set_tx_power_frame(
+            node_id=node_id, tx_power_dbm=tx_power_dbm, mode=mode, seq=seq
+        )
+        try:
+            ser.write(frame)
+        except Exception as exc:  # noqa: BLE001 - surfaced to the operator, not fatal
+            if log_fn is not None:
+                log_fn(f"[CMD] set_tx_power node={node_id} FAILED: {exc}", node_id, kind="cmd")
+            return
+        cmd_seq_state["next_seq"] = (seq + 1) & 0xFF
+
+    if log_fn is not None:
+        mode_name = "STATIC" if mode == TX_POWER_MODE_STATIC else "DYNAMIC"
+        log_fn(
+            f"[CMD] set_tx_power node={node_id} tx_power_dbm={tx_power_dbm} "
+            f"mode={mode_name} seq={seq}",
+            node_id,
+            kind="cmd",
+        )
+
+
+def _send_cmd_reset(
+    ser: serial.Serial,
+    write_lock: threading.Lock,
+    cmd_seq_state: dict,
+    node_id: int,
+    reset_type: int,
+    log_fn: Callable[[str, int | None], None],
+) -> bool:
+    """Send a CMD_RESET frame. node_id=0 means "reset the base station itself"."""
+    with write_lock:
+        seq = int(cmd_seq_state.setdefault("next_seq", 0)) & 0xFF
+        frame = encode_cmd_reset_frame(node_id=node_id, reset_type=reset_type, seq=seq)
+        try:
+            ser.write(frame)
+        except serial.SerialException as exc:
+            print(f"[EDGE][CMD-RESET] write error: {exc}", file=sys.stderr)
+            return False
+        cmd_seq_state["next_seq"] = (seq + 1) & 0xFF
+    kind = "hard" if reset_type == 0x01 else "soft"
+    log_fn(f"[EDGE][CMD-RESET] node={node_id} seq={seq:03d} reset_type={kind} bytes={len(frame)}", node_id or None)
+    return True
+
+
+def _time_sync_sender(
+    ser: serial.Serial,
+    write_lock: threading.Lock,
+    sync_state: dict,
+    session_ctx: dict,
+    interval_s: int,
+    log_fn: Callable[[str, int | None], None],
+    stop_event: threading.Event,
+) -> None:
+    # stop_event is per-connection: when the serial link drops and the ingest
+    # loop reconnects, it gets a fresh `ser` and must stop this thread rather
+    # than let it keep writing to the now-dead handle forever in the background.
+    while not stop_event.wait(interval_s):
+        _send_time_sync(
+            ser=ser,
+            write_lock=write_lock,
+            sync_state=sync_state,
+            session_ctx=session_ctx,
+            reason="periodic",
+            log_fn=log_fn,
+        )
+
+
+def run_receive(
+    cfg: IngestConfig,
+    live_state: LiveState | None = None,
+    log_fn: Callable[[str, int | None], None] | None = None,
+    reset_event: threading.Event | None = None,
+    tx_power_queue: "queue.Queue[dict] | None" = None,
+    node_reset_queue: "queue.Queue[int] | None" = None,
+    stop_event: threading.Event | None = None,
+) -> int:
+    """Run the UART ingest loop.
+
+    Args:
+        cfg: All ingest settings sourced from :class:`~smartfires_edge.config.IngestConfig`
+             (single source of truth — no more 10-parameter call sites).
+        live_state: Optional shared state object injected by ``web`` subcommand
+                    for live dashboard updates.
+        log_fn: Optional log callback ``(msg, node_id)`` injected by ``web`` subcommand
+                to stream log lines to the browser. Defaults to plain ``print``.
+        reset_event: Optional threading.Event set by the web API to request a
+                    graceful application shutdown/restart.
+        tx_power_queue: Optional queue of TX power commands from the web API. Each item is
+                        {node_id, tx_power_dbm, mode} and is relayed verbatim — the API
+                        layer, not this loop, resolves increase/decrease into an absolute
+                        level from the node's last reported power.
+        node_reset_queue: Optional queue of node_ids, populated by the web API's
+                           per-node "Reset" button. Drained once per loop tick —
+                           each entry triggers a hard CMD_RESET to that node.
+    """
+    if log_fn is None:
+        log_fn = lambda msg, node_id=None, source="ingest", kind="other": print(msg)  # noqa: E731
+
+    tracker = PacketLossTracker(cfg.nodes)
+    window_tracker = WindowTracker()
+    if live_state is not None:
+        live_state.tracker = tracker
+    sync_state = {"next_seq": 0}
+    cmd_seq_state = {"next_seq": 0}
+    session_manager = SessionManager()
+    if live_state is not None:
+        # Carry forward node serials (uid_hash) learned in prior runs — they're
+        # persisted in session.json by SessionManager and tied to hardware, not
+        # to this particular ingest session, so the dashboard shouldn't have to
+        # wait for a fresh AWAKEN before showing them.
+        for node_id in cfg.nodes:
+            uid_hash = session_manager.get_uid_hash_for_node(node_id)
+            if uid_hash is not None:
+                live_state.set_uid_hash(node_id, uid_hash)
+
+    session_id = random.randint(1, 0xFFFFFFFF)
+    session_start = time.time()
+    session_stamp = _make_session_stamp(session_start)
+    session_ctx = {"session_id": session_id, "session_start": session_start}
+    if live_state is not None:
+        live_state.set_session(session_id, session_start)
+
+    session_dir = _create_session_dir(cfg.data_dir, session_start, session_id)
+    state_path = session_dir / "packet_loss_state.json"
+    status_path = session_dir / "status.jsonl"
+    if live_state is not None:
+        live_state.set_log_dir(session_dir)
+
+    logger = DurableCsvLogger(session_dir, fsync_every_row=cfg.fsync_every_row)
+
+    session_meta = SessionMetaLogger(
+        session_id=session_id,
+        session_start=session_start,
+        port=cfg.port,
+        baud=cfg.baud,
+        data_dir=session_dir,
+    )
+
+    anemometer: AnemometerPoller | None = None
+    if cfg.anemometer.enabled:
+        anemometer = AnemometerPoller(
+            port=cfg.anemometer.port,
+            baud=cfg.anemometer.baud,
+            address=cfg.anemometer.address,
+            interval_s=cfg.anemometer.interval_s,
+        )
+        anemometer.start()
+
+    last_metrics_write = 0.0
+
+    log_fn(f"SmartFires edge receive", None)
+    log_fn(f"Port: {cfg.port}  Baud: {cfg.baud}", None)
+    log_fn(f"Data dir: {cfg.data_dir}", None)
+    log_fn(f"Tracked nodes: {cfg.nodes}", None)
+    log_fn(f"Session ID: 0x{session_id:08x}  Stamp: {session_stamp}  TIME_SYNC interval: {cfg.sync_interval_s}s", None)
+    if cfg.anemometer.enabled:
+        log_fn(
+            "Anemometer: "
+            f"{cfg.anemometer.port} @ {cfg.anemometer.baud} addr={cfg.anemometer.address} "
+            f"interval={cfg.anemometer.interval_s}s",
+            None,
+        )
+    log_fn("", None)
+
+    write_lock = threading.Lock()
+    reconnect_delay_s = 1.0
+    max_reconnect_delay_s = 10.0
+
+    if stop_event is None:
+        stop_event = reset_event if reset_event is not None else threading.Event()
+
+    try:
+        while not stop_event.is_set():
+            sync_stop_event = threading.Event()
+
+            try:
+                def bootstrap(ser) -> None:
+                    nonlocal sync_thread, reconnect_delay_s
+                    if live_state is not None:
+                        # Connected means the OS opened the base port; readiness
+                        # is established after this callback completes.
+                        live_state.set_link_connected(True)
+                        set_ready = getattr(live_state, "set_link_ready", None)
+                        if set_ready is not None:
+                            set_ready(False)
+                    reset_sent = _send_cmd_reset(
+                        ser, write_lock, cmd_seq_state, node_id=0,
+                        reset_type=0, log_fn=log_fn,
+                    )
+                    if not reset_sent:
+                        raise serial.SerialException("base soft reset write failed")
+                    # Give the base's RH_RF95.begin() time to reinitialize, but
+                    # let a shutdown interrupt the delay.
+                    if stop_event.wait(0.5):
+                        return
+                    sync_sent = _send_time_sync(
+                        ser=ser,
+                        write_lock=write_lock,
+                        sync_state=sync_state,
+                        session_ctx=session_ctx,
+                        reason="session_start",
+                        log_fn=log_fn,
+                    )
+                    if not sync_sent:
+                        raise serial.SerialException("initial TIME_SYNC write failed")
+                    if live_state is not None:
+                        set_ready = getattr(live_state, "set_link_ready", None)
+                        if set_ready is not None:
+                            set_ready(True)
+                    sync_thread = threading.Thread(
+                        target=_time_sync_sender,
+                        args=(
+                            ser, write_lock, sync_state, session_ctx,
+                            cfg.sync_interval_s, log_fn, sync_stop_event,
+                        ),
+                        daemon=True,
+                    )
+                    sync_thread.start()
+                    reconnect_delay_s = 1.0
+
+                sync_thread = None
+                for event, receiver, ser in iter_packets(
+                    cfg.port, cfg.baud, session_start,
+                    stop_event=stop_event, on_open=bootstrap,
+                ):
+                    # A legacy caller may still provide reset_event.  Treat it
+                    # as the same graceful process shutdown request; never
+                    # rotate a live session in-place on a packet boundary.
+                    if reset_event is not None and reset_event.is_set():
+                        stop_event.set()
+                    if stop_event.is_set():
+                        break
+
+                    tracker.crc_failures = receiver.crc_failures
+                    tracker.length_failures = receiver.length_failures
+
+                    hdr_node = event.get("node_id")
+                    hdr_seq = event.get("seq")
+                    pkt_type = event.get("pkt_type")
+
+                    # Base-originated debug log line (FramedDebugLogSink), never a
+                    # LoRa packet from a real node — handled entirely separately from
+                    # telemetry/loss-tracking below, then skip the rest of the loop
+                    # body for this iteration.
+                    if pkt_type == PKT_DEBUG_LOG:
+                        debug_text = event.get("debug_log")
+                        if live_state is not None and debug_text is not None:
+                            record = parse_sfdbg_line(debug_text) or {
+                                "v": "?",
+                                "node": "?",
+                                "src": "?",
+                                "lvl": "?",
+                                "seq": "-",
+                                "t": "-",
+                                "msg": debug_text,
+                                "raw": debug_text,
+                            }
+                            live_state.push_base_debug(record)
+                        continue
+
+                    log_fn(
+                        f"[EDGE][LORA-RX] type={_pkt_type_name(pkt_type)} node={hdr_node} "
+                        f"seq={hdr_seq} rssi={event.get('rssi')}",
+                        int(hdr_node) if hdr_node is not None else None,
+                    )
+
+                    if hdr_node is not None and pkt_type == PKT_AWAKEN:
+                        # Node rebooted, so its wire seq counter restarted from 0 —
+                        # reset the loss-tracking baseline before observing this
+                        # packet, or the gap since the old session's last seq gets
+                        # miscounted as missing. The window counter restarted with
+                        # it, and a node that rebooted mid-sleep never sent the END
+                        # for the window it was in.
+                        tracker.reset_node(int(hdr_node))
+                        window_tracker.on_reboot(int(hdr_node))
+
+                    is_window_marker = pkt_type in (PKT_WINDOW_BEGIN, PKT_WINDOW_END)
+
+                    # Observe every packet that carries a telemetry seq (they all
+                    # share one rolling counter). Done once per LoRa packet here so
+                    # that STATUS/AWAKEN seqs are counted and bundle samples don't
+                    # inflate crc_valid_packets.
+                    #
+                    # Window markers are excluded deliberately: they carry seq=0 as
+                    # a placeholder, are never retransmitted, and are identified by
+                    # window_id instead. Feeding them in would register a phantom
+                    # seq-0 packet every duty cycle and read as a huge backwards
+                    # sequence jump.
+                    if (
+                        hdr_node is not None
+                        and hdr_seq is not None
+                        and event.get("rssi") is not None
+                        and not is_window_marker
+                    ):
+                        tracker.observe_packet(
+                            node_id=int(hdr_node),
+                            seq=int(hdr_seq),
+                            rssi=int(event["rssi"]),
+                        )
+
+                    marker = event.get("window_marker")
+                    if marker is not None:
+                        marker_node = int(marker["node_id"])
+                        window_id = int(marker["window_id"])
+                        is_end = bool(marker["is_end"])
+
+                        if is_end:
+                            window_tracker.on_window_end(marker_node, window_id)
+                        else:
+                            window_tracker.on_window_begin(marker_node, window_id)
+
+                        marker_row = {
+                            "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+                            "packet_type": "window_end" if is_end else "window_begin",
+                            "node_id": marker_node,
+                            "session_time_ms": marker["session_time_ms"],
+                            "uptime_ms": marker["session_time_ms"],
+                            "rssi": marker.get("rssi"),
+                            "pkt_flags": marker.get("pkt_flags"),
+                            "window_id": window_id,
+                            "window_first": 1 if not is_end else 0,
+                            # The END frame *is* the window's last packet, and its
+                            # timestamp is the only record of the close instant —
+                            # the final bundle's last sample is taken before it.
+                            "window_last": 1 if is_end else 0,
+                            "planned_sleep_ms": marker.get("planned_sleep_ms"),
+                            "window_sample_count": marker.get("sample_count"),
+                        }
+                        logger.write_row(marker_row)
+                        log_fn(
+                            f"[EDGE][WINDOW] node={marker_node} "
+                            f"{'end' if is_end else 'begin'} id={window_id} "
+                            f"session_ms={marker['session_time_ms']}"
+                            + (
+                                f" samples={marker['sample_count']}"
+                                f" planned_sleep_ms={marker['planned_sleep_ms']}"
+                                if is_end
+                                else ""
+                            ),
+                            marker_node,
+                        )
+                        continue
+
+                    if hdr_node is not None and hdr_seq is not None and pkt_type == PKT_AWAKEN:
+                        awaken = event.get("awaken") or {}
+                        uid_hash = awaken.get("uid_hash")
+                        if uid_hash is not None:
+                            aw = session_manager.on_awaken(int(hdr_node), int(uid_hash))
+                            session_meta.on_awaken(int(hdr_node), int(uid_hash))
+                            if live_state is not None:
+                                live_state.set_uid_hash(int(hdr_node), int(uid_hash))
+                            log_fn(
+                                f"[EDGE][AWAKEN] node={aw['node_id']} uid=0x{aw['uid_hash']:08x}",
+                                int(hdr_node),
+                            )
+                        # Log every AWAKEN as a CSV row so node reboots (e.g.
+                        # watchdog-triggered restarts) are visible in telemetry.csv.
+                        # A booting node re-broadcasts AWAKEN every 5 s until it
+                        # receives TIME_SYNC, so one reboot may produce several rows.
+                        # reset_cause / hang_zone are present on nodes flashed with
+                        # the reset diagnostics build and None on legacy (9-byte
+                        # AWAKEN) nodes — see packet.decode_awaken.
+                        reset_cause = awaken.get("reset_cause")
+                        hang_zone = awaken.get("hang_zone")
+                        reset_cause_names = awaken.get("reset_cause_names")
+                        awaken_row = {
+                            "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+                            "packet_type": "awaken",
+                            "node_id": hdr_node,
+                            "seq": hdr_seq,
+                            "rssi": event.get("rssi"),
+                            "uid_hash": f"0x{uid_hash:08x}" if isinstance(uid_hash, int) else "",
+                            "reset_cause": reset_cause,
+                            "reset_cause_names": reset_cause_names,
+                            "hang_zone": hang_zone,
+                            "hang_zone_name": awaken.get("hang_zone_name"),
+                        }
+                        # CSV cells can't hold a list — reset_cause_names is
+                        # multi-valued (e.g. ["WDT"]) — so the CSV row gets a
+                        # "|"-joined string while status.jsonl keeps the list.
+                        logger.write_row({
+                            **awaken_row,
+                            "reset_cause_names": "|".join(reset_cause_names) if reset_cause_names else "",
+                        })
+                        _append_jsonl(status_path, awaken_row)
+                        cause_str = (
+                            f" reset_cause=0x{reset_cause:02x}"
+                            f"({','.join(awaken.get('reset_cause_names') or [])})"
+                            f" hang_zone={awaken.get('hang_zone_name')}"
+                            if reset_cause is not None else ""
+                        )
+                        log_fn(
+                            f"[EDGE][AWAKEN] node={hdr_node} seq={hdr_seq}"
+                            f"{cause_str} action=send_time_sync",
+                            int(hdr_node),
+                        )
+                        _send_time_sync(
+                            ser=ser,
+                            write_lock=write_lock,
+                            sync_state=sync_state,
+                            session_ctx=session_ctx,
+                            reason="awaken",
+                            log_fn=log_fn,
+                            trigger_node=int(hdr_node),
+                            trigger_seq=int(hdr_seq),
+                        )
+                    elif hdr_node is not None and hdr_seq is not None and pkt_type is not None:
+                        _send_time_sync(
+                            ser=ser,
+                            write_lock=write_lock,
+                            sync_state=sync_state,
+                            session_ctx=session_ctx,
+                            reason="receiver_start",
+                            log_fn=log_fn,
+                            trigger_node=int(hdr_node),
+                            trigger_seq=int(hdr_seq),
+                        ) if sync_state["next_seq"] == 0 else None
+
+                    status = event.get("status")
+                    if status:
+                        uid_hash = session_manager.get_uid_hash_for_node(int(status.get("node_id")))
+                        heading = session_manager.on_status(
+                            node_id=int(status.get("node_id")),
+                            uid_hash=uid_hash,
+                            status=status,
+                        )
+                        status_row = {
+                            "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+                            "packet_type": "status",
+                            "node_id": status.get("node_id"),
+                            "seq": status.get("seq"),
+                            "session_time_ms": "",
+                            "uptime_ms": "",
+                            "sensor_flags": "",
+                            "wind_mps": "",
+                            "temp_c": "",
+                            "humidity_pct": "",
+                            "pm1_0_ug_m3": "",
+                            "pm2_5_ug_m3": "",
+                            "pm4_0_ug_m3": "",
+                            "pm10_ug_m3": "",
+                            "lat": status.get("lat"),
+                            "lon": status.get("lon"),
+                            "gps_valid": status.get("gps_valid"),
+                            "battery_valid": status.get("battery_valid"),
+                            "rssi": status.get("rssi"),
+                            "flags": status.get("flags"),
+                            "battery_mv": status.get("battery_mv"),
+                            "battery_pct": status.get("battery_pct"),
+                            "uid_hash": f"0x{uid_hash:08x}" if isinstance(uid_hash, int) else "",
+                            "heading_true_deg": heading.get("heading_true_deg") if heading.get("computed") else "",
+                            "location_corrected_heading": (
+                                heading.get("location_corrected_heading")
+                                if heading.get("computed") and heading.get("location_corrected_heading") is not None
+                                else ""
+                            ),
+                            "jetson_wind_mps": "",
+                            "jetson_wind_dir_deg": "",
+                            "retx_total": status.get("retx_total") if status.get("retx_total") is not None else "",
+                            "fail_total": status.get("fail_total") if status.get("fail_total") is not None else "",
+                            # Node's applied radio TX power. Empty on firmware
+                            # predating dynamic-tx-power. Reaches the JSONL
+                            # status stream, the log line, and the CSV; the
+                            # web dashboard also exposes both fields in its
+                            # node state and controls.
+                            "tx_power_dbm": status.get("tx_power_dbm") if status.get("tx_power_dbm") is not None else "",
+                            "tx_power_mode": status.get("tx_power_mode") or "",
+                        }
+                        _append_jsonl(status_path, status_row)
+                        logger.write_row(status_row)
+                        if live_state is not None:
+                            live_state.record_status(status)
+                        log_fn(
+                            f"[STATUS] node={status_row['node_id']} seq={status_row['seq']} "
+                            f"lat={status_row['lat']} lon={status_row['lon']} "
+                            f"gps_valid={status_row['gps_valid']} batt_valid={status_row['battery_valid']} "
+                            f"batt_mv={status_row['battery_mv']} batt_pct={status_row['battery_pct']} "
+                            f"rssi={status_row['rssi']} "
+                            f"heading={status_row['heading_true_deg']} "
+                            f"location_corrected_heading={status_row['location_corrected_heading']} "
+                            f"retx_total={status_row['retx_total']} fail_total={status_row['fail_total']} "
+                            f"tx_power_dbm={status_row['tx_power_dbm']} "
+                            f"tx_power_mode={status_row['tx_power_mode']}",
+                            int(status_row["node_id"]) if status_row["node_id"] is not None else None,
+                            kind="status",
+                        )
+
+                    cmd_ack = event.get("cmd_ack")
+                    if cmd_ack:
+                        session_manager.on_cmd_ack(
+                            node_id=int(cmd_ack.get("node_id")),
+                            uid_hash=int(cmd_ack.get("uid_hash")),
+                            cmd_type=int(cmd_ack.get("cmd_type")),
+                            status=int(cmd_ack.get("status")),
+                        )
+                        cmd_ack_row = {
+                            "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+                            "packet_type": "cmd_ack",
+                            "node_id": cmd_ack.get("node_id"),
+                            "seq": cmd_ack.get("seq"),
+                            "cmd_type": cmd_ack.get("cmd_type"),
+                            "uid_hash": cmd_ack.get("uid_hash"),
+                            "status": cmd_ack.get("status"),
+                            "rssi": cmd_ack.get("rssi"),
+                        }
+                        _append_jsonl(status_path, cmd_ack_row)
+                        log_fn(
+                            "[CMD_ACK] "
+                            f"node={cmd_ack_row['node_id']} seq={cmd_ack_row['seq']} "
+                            f"cmd=0x{int(cmd_ack_row['cmd_type']):02x} "
+                            f"uid=0x{int(cmd_ack_row['uid_hash']):08x} "
+                            f"status={cmd_ack_row['status']} rssi={cmd_ack_row['rssi']}",
+                            int(cmd_ack_row["node_id"]) if cmd_ack_row["node_id"] is not None else None,
+                        )
+
+                    for pkt in event.get("packets", []):
+                        pkt["packet_type"] = "telemetry"
+                        pkt["gps_valid"] = ""
+                        pkt["battery_valid"] = ""
+                        pkt["battery_mv"] = ""
+                        pkt["battery_pct"] = ""
+                        # GPS is logged only on status rows as it arrives; telemetry
+                        # rows carry no position so the CSV never contains inferred
+                        # data. Join telemetry to the latest status row downstream.
+                        pkt["lat"] = ""
+                        pkt["lon"] = ""
+
+                        if anemometer is not None:
+                            jetson_speed, jetson_dir = anemometer.latest()
+                            pkt["jetson_wind_mps"] = jetson_speed if jetson_speed is not None else ""
+                            pkt["jetson_wind_dir_deg"] = jetson_dir if jetson_dir is not None else ""
+                        else:
+                            pkt["jetson_wind_mps"] = ""
+                            pkt["jetson_wind_dir_deg"] = ""
+
+                        # Attribute the sample to the duty-cycle window that is
+                        # currently open for this node (no-op in Continuous mode,
+                        # which never sends markers).
+                        window_tracker.annotate(int(pkt["node_id"]), pkt)
+
+                        logger.write_row(pkt)
+                        if live_state is not None:
+                            live_state.record_telemetry(pkt)
+
+                        if cfg.raw_log:
+                            _append_jsonl(session_dir / "frames.jsonl", pkt)
+
+                        log_fn(
+                            f"[RX] node={pkt['node_id']} seq={pkt['seq']:3d} "
+                            f"sample_utc={pkt['timestamp']} "
+                            f"T={_fmt_field(pkt['temp_c'], '5.1f')}C "
+                            f"H={_fmt_field(pkt['humidity_pct'], '4.1f')}% "
+                            f"wind={_fmt_field(pkt['wind_mps'], '.2f')} "
+                            f"PM1.0={_fmt_field(pkt['pm1_0_ug_m3'], '.1f')} "
+                            f"PM2.5={_fmt_field(pkt['pm2_5_ug_m3'], '.1f')} "
+                            f"PM4.0={_fmt_field(pkt['pm4_0_ug_m3'], '.1f')} "
+                            f"PM10={_fmt_field(pkt['pm10_ug_m3'], '.1f')} "
+                            f"rssi={pkt['rssi']:4d}",
+                            int(pkt["node_id"]),
+                            kind="bundle",
+                        )
+
+                    now = time.monotonic()
+                    if now - last_metrics_write >= cfg.metrics_interval_s:
+                        tracker.save(state_path)
+                        last_metrics_write = now
+
+                    # Drain any per-node hard-reset requests queued by the web API's
+                    # "Reset" button (one request per click; non-blocking).
+                    if node_reset_queue is not None:
+                        while True:
+                            try:
+                                target_node_id = node_reset_queue.get_nowait()
+                            except queue.Empty:
+                                break
+                            _send_cmd_reset(
+                                ser, write_lock, cmd_seq_state,
+                                node_id=target_node_id, reset_type=0x01, log_fn=log_fn,
+                            )
+
+                    # Drain TX power commands queued by the web API's per-node
+                    # dynamic/static and power-level controls.
+                    if tx_power_queue is not None:
+                        while True:
+                            try:
+                                cmd = tx_power_queue.get_nowait()
+                            except queue.Empty:
+                                break
+                            _send_cmd_set_tx_power(
+                                ser, write_lock, cmd_seq_state,
+                                node_id=int(cmd["node_id"]),
+                                tx_power_dbm=int(cmd["tx_power_dbm"]),
+                                mode=int(cmd["mode"]),
+                                log_fn=log_fn,
+                            )
+
+                    # Session rotation is a whole-process restart.  The
+                    # supervisor owns the HTTP acknowledgement and process exit.
+                sync_stop_event.set()
+                if sync_thread is not None:
+                    sync_thread.join(timeout=1.0)
+
+            except (serial.SerialException, OSError) as exc:
+                sync_stop_event.set()
+                if sync_thread is not None:
+                    sync_thread.join(timeout=1.0)
+                if live_state is not None:
+                    live_state.set_link_connected(False, error=str(exc))
+                    set_ready = getattr(live_state, "set_link_ready", None)
+                    if set_ready is not None:
+                        set_ready(False)
+                if stop_event.is_set():
+                    break
+                log_fn(
+                    f"[EDGE][LINK] base station serial link lost ({exc}) — "
+                    f"retrying in {reconnect_delay_s:.0f}s",
+                    None,
+                    kind="error",
+                )
+                if stop_event.wait(reconnect_delay_s):
+                    break
+                reconnect_delay_s = min(reconnect_delay_s * 2, max_reconnect_delay_s)
+
+    except KeyboardInterrupt:
+        log_fn("\nStopped by user.", None)
+    except Exception as exc:
+        print(f"\n[FATAL] {exc}", file=sys.stderr)
+        if live_state is not None:
+            live_state.set_link_connected(False, error=str(exc))
+        tracker.save(state_path)
+        logger.close()
+        if anemometer is not None:
+            anemometer.stop()
+        return 1
+
+    if live_state is not None:
+        live_state.set_link_connected(False)
+    tracker.save(state_path)
+    logger.close()
+    if anemometer is not None:
+        anemometer.stop()
+    return 0

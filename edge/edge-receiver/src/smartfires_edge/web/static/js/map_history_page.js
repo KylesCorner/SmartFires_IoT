@@ -299,7 +299,7 @@ function updateAwakenTable(events) {
         ? `raw reset_cause=0x${Number(ev.reset_cause).toString(16).padStart(2, "0")}`
         : "legacy AWAKEN frame — node not flashed with reset diagnostics";
     tr.innerHTML = `
-      <td>${new Date(ev.t_ms).toLocaleString()}</td>
+      <td>${formatTimestamp(ev.t_ms, "epoch-milliseconds")}</td>
       <td>${ev.node_id}</td>
       <td class="${causeClass}" title="${causeTitle}">${formatResetCause(ev)}</td>
       <td>${fmt(ev.hang_zone_name)}</td>

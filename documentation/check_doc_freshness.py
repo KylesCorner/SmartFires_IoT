@@ -25,8 +25,11 @@ EXEMPT = {
     DOCS_DIR / "DOC_FRONTMATTER.md",
     DOCS_DIR / "CODE_FRONTMATTER.md",
 }
-VALID_CATEGORIES = {"architecture", "reference", "plan-possible", "plan-completed", "index"}
-VALID_STATUSES = {"current", "deferred", "historical", "superseded"}
+VALID_CATEGORIES = {
+    "architecture", "reference", "plan-pending", "plan-possible",
+    "plan-completed", "index",
+}
+VALID_STATUSES = {"current", "draft", "deferred", "historical", "superseded"}
 
 
 def expected_category(md_path: Path) -> str | None:
@@ -44,9 +47,14 @@ def expected_category(md_path: Path) -> str | None:
         return "reference"
     if rel.parts[0] == "Possible_Plans":
         return "plan-possible"
+    if rel.parts[0] == "Pending_Plans":
+        return "plan-pending"
     if rel.parts[0] in {"Completed_Plans", "Project_Progress"}:
         return "plan-completed"
-    return None
+    # Every documentation file belongs to one of the documented schema
+    # locations.  Returning a sentinel lets the caller report an actionable
+    # path/category error instead of silently accepting a new directory.
+    return "<unknown>"
 
 
 def parse_frontmatter(text: str) -> dict | None:
@@ -126,7 +134,11 @@ def main() -> int:
                 f"{rel} ({name}): category '{category}' is not one of {sorted(VALID_CATEGORIES)}"
             )
         expected = expected_category(md_path)
-        if expected is not None and category != expected:
+        if expected == "<unknown>":
+            problems.append(
+                f"{rel} ({name}): documentation path is not a recognized schema directory"
+            )
+        elif category != expected:
             problems.append(
                 f"{rel} ({name}): category '{category}' does not match path (expected '{expected}')"
             )
@@ -134,6 +146,8 @@ def main() -> int:
             problems.append(
                 f"{rel} ({name}): status '{status}' is not one of {sorted(VALID_STATUSES)}"
             )
+        if category == "plan-pending" and status != "draft":
+            problems.append(f"{rel} ({name}): pending plans must use status 'draft'")
         if category == "plan-possible" and status != "deferred":
             problems.append(f"{rel} ({name}): possible plans must use status 'deferred'")
         if category == "plan-completed" and status not in {"historical", "superseded"}:
@@ -146,9 +160,13 @@ def main() -> int:
             )
         if category == "architecture" and not source_refs:
             problems.append(f"{rel} ({name}): architecture docs require source_refs")
-        if category in {"plan-possible", "plan-completed"} and source_refs:
+        if category in {"plan-pending", "plan-possible", "plan-completed", "index"} and source_refs:
             problems.append(
                 f"{rel} ({name}): plans/history must not declare source_refs"
+            )
+        if category in {"plan-pending", "plan-possible"} and last_verified_raw:
+            problems.append(
+                f"{rel} ({name}): pending/possible plans must not declare last_verified"
             )
 
         if not source_refs:

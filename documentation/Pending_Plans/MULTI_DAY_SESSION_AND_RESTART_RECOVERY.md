@@ -13,7 +13,10 @@ related_docs:
 
 # Multi-day sessions and Jetson restart recovery
 
-Requested 2026-09-04; planning review completed 2026-09-05. Implementation and hardware verification remain pending.
+Requested 2026-09-04; planning review completed 2026-09-05. Host-side
+implementation completed 2026-10-06. The 72-hour, power-cycle, delayed-device,
+and deployed-Jetson acceptance runs remain pending, so this plan intentionally
+stays in `Pending_Plans/` and is not yet marked complete.
 
 ## Required behavior
 
@@ -23,9 +26,12 @@ Requested 2026-09-04; planning review completed 2026-09-05. Implementation and h
 
 Preserve prior session files, configured node identities, base coordinates, configuration, and map tile cache. A full edge reset is not a factory reset or a request to hard-reset every sensor node. Ordinary base USB reconnection within a running process should retain the current recording session.
 
-## Findings from the current source
+## Findings from the planning review source
 
-Paths below are relative to `edge/edge-receiver/src/smartfires_edge/` unless stated otherwise.
+These were the 2026-09-05 pre-implementation gaps and are retained as design
+context; the host-side items are resolved in the implementation record below.
+Paths are relative to `edge/edge-receiver/src/smartfires_edge/` unless stated
+otherwise.
 
 | Area | Observed gap |
 |---|---|
@@ -40,6 +46,35 @@ Paths below are relative to `edge/edge-receiver/src/smartfires_edge/` unless sta
 | Deployment | No systemd unit is tracked in the repository. `edge/smartfires-manager.sh` assumes one is installed; `edge/start_receiver.sh` invokes `receive`, not `web`. The deployed unit and boot journal must be inspected before attributing the reported power-cycle failure to a specific cause. |
 
 `run_receive()` already creates a new session ID on entry. The work is to ensure the service actually reaches full initialization, and to make New Session follow that same lifecycle. The startup ordering is a source-level finding; it has not been proven to be the sole cause on the deployed Jetson.
+
+## Implementation record (2026-10-06)
+
+The host-side implementation now includes:
+
+- one shared, explicitly typed dashboard timestamp formatter with full local
+  dates, IANA timezone names, and numeric UTC offsets; stable server-stamped
+  debug wall times; explicit-UTC machine exports; and legacy naive-UTC reads;
+- serial open/bootstrap before packet iteration, buffered-input discard,
+  connection/readiness states, interruptible reconnect/shutdown waits, and
+  bounded worker cleanup;
+- whole-process New Session shutdown after the HTTP acknowledgement, duplicate
+  request coalescing, required-ingest supervision, collision-safe session
+  directories, and browser convergence/reload after a changed session ID;
+- a repository-owned systemd template, installer, manual supervisor, stable
+  device guidance, and a data-mount guard; and
+- host tests for a silent base, silent shutdown, restart acknowledgement,
+  session collisions, old UTC timestamps, DST offsets, two browser timezones,
+  and 72 hours of history crossing a year boundary.
+
+The source files that this plan originally described were accidentally deleted
+by commit `9bb76cc`; they were restored from its parent before applying these
+changes. No firmware behavior or all-node reset sequence was added.
+
+The remaining work requires the deployed Jetson and hardware: inspect the
+effective existing unit and journals, install the rendered unit, exercise cold
+boot/power loss/delayed USB/sleeping nodes, and complete the multi-tab and
+72-hour field acceptance matrix below. Those results must be recorded before
+moving this document to `Completed_Plans/`.
 
 ## Workstream 1 — dates throughout the dashboard
 

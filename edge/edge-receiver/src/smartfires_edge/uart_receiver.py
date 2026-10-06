@@ -1,5 +1,6 @@
 import datetime
 import struct
+import time
 from typing import Optional
 
 import serial
@@ -147,11 +148,30 @@ class FrameReceiver:
         return None
 
 
-def iter_packets(port: str, baud: int, session_start: float):
-    receiver = FrameReceiver(session_start)
+def iter_packets(
+    port: str,
+    baud: int,
+    session_start: float | None = None,
+    stop_event=None,
+    on_open=None,
+):
+    """Yield decoded frames from one serial connection.
 
-    with serial.Serial(port, baud, timeout=0.25) as ser:
-        while True:
+    Opening the port is deliberately separate from receiving a frame: callers
+    can use ``on_open`` to bootstrap the base station while it is silent.  The
+    short read timeout and ``stop_event`` also make shutdown/reconnect waits
+    observable without requiring a byte from the device.
+    """
+    receiver = FrameReceiver(time.time() if session_start is None else session_start)
+    ser = serial.Serial(port, baud, timeout=0.25)
+    try:
+        # Bytes buffered before this session belong to the old parser epoch.
+        reset_input = getattr(ser, "reset_input_buffer", None)
+        if reset_input is not None:
+            reset_input()
+        if on_open is not None:
+            on_open(ser)
+        while stop_event is None or not stop_event.is_set():
             raw = ser.read(1)
             if not raw:
                 continue
@@ -159,3 +179,8 @@ def iter_packets(port: str, baud: int, session_start: float):
             event = receiver.push_byte(raw[0])
             if event is not None:
                 yield event, receiver, ser
+    finally:
+        try:
+            ser.close()
+        except Exception:
+            pass

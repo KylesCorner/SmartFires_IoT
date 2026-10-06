@@ -159,7 +159,7 @@ function renderOutput() {
   const el = document.getElementById("log-output");
   const visible = state.entries.filter(entryMatchesFilters);
   const atBottom = el.scrollHeight - el.scrollTop <= el.clientHeight + 4;
-  el.textContent = visible.map((e) => `${e.t.slice(11, 23)}  ${e.msg}`).join("\n");
+  el.textContent = visible.map((e) => `${formatTimestamp(e.t, "iso", { milliseconds: true })}  ${e.msg}`).join("\n");
   if (atBottom) {
     el.scrollTop = el.scrollHeight;
   }
@@ -193,7 +193,7 @@ function onLogEntry(entry) {
   if (entryMatchesFilters(entry)) {
     const el = document.getElementById("log-output");
     const atBottom = el.scrollHeight - el.scrollTop <= el.clientHeight + 4;
-    el.textContent += `${entry.t.slice(11, 23)}  ${entry.msg}\n`;
+    el.textContent += `${formatTimestamp(entry.t, "iso", { milliseconds: true })}  ${entry.msg}\n`;
     if (atBottom) {
       el.scrollTop = el.scrollHeight;
     }
