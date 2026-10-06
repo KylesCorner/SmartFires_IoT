@@ -11,6 +11,7 @@ plays for the base-station UART link.
 import json
 import struct
 import sys
+import threading
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
