@@ -12,4 +12,4 @@
 #   3. Verify: ls -l /dev/smartfires-base /dev/smartfires-sniffer
 
 SUBSYSTEM=="tty", ATTRS{serial}=="4B1C501150314C57552E3120FF0E2730", SYMLINK+="smartfires-base"
-SUBSYSTEM=="tty", ATTRS{serial}=="08D8C68E50315943532E3120FF040F0D", SYMLINK+="smartfires-sniffer"
+SUBSYSTEM=="tty", ATTRS{serial}=="0E76DB5250314C57552E3120FF110A34", SYMLINK+="smartfires-sniffer"

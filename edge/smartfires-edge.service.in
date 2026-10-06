@@ -18,7 +18,7 @@ Environment=PYTHONUNBUFFERED=1
 # volume is absent.  The mountpoint check is intentionally before the process.
 ExecStartPre=/usr/bin/mountpoint -q @SMARTFIRES_DATA_MOUNT@
 ExecStartPre=/usr/bin/test -d @SMARTFIRES_DATA_DIR@
-ExecStart=@SMARTFIRES_VENV@/bin/smartfires-edge web --port /dev/smartfires-base --data-dir @SMARTFIRES_DATA_DIR@ --host 0.0.0.0 --http-port 8080
+ExecStart=@SMARTFIRES_VENV@/bin/smartfires-edge web --port /dev/smartfires-base --sniffer-port /dev/smartfires-sniffer --data-dir @SMARTFIRES_DATA_DIR@ --host 0.0.0.0 --http-port 8080
 Restart=always
 RestartSec=5s
 TimeoutStopSec=30s
