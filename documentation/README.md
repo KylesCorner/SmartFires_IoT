@@ -3,7 +3,7 @@ name: documentation-index
 description: Table of contents and implementation-status ledger for documentation/.
 category: index
 status: current
-last_verified: 2026-09-04
+last_verified: 2026-09-30
 related_docs:
   - software-design
 ---
@@ -48,6 +48,12 @@ If a statement conflicts, shipped code/config wins over current docs; current do
 | [`User_Reference/SMARTFIRES_MANAGER.md`](User_Reference/SMARTFIRES_MANAGER.md) | Jetson update/service/gateway-flashing manager |
 | [`POWER_MEASURMENTS.md`](POWER_MEASURMENTS.md) | Isolated power-test environments and measurement setup |
 
+## Design tools
+
+| Tool | Purpose |
+|---|---|
+| [`Tools/lora_tdma_calculator.html`](Tools/lora_tdma_calculator.html) | Interactive LoRa airtime, effective-bandwidth, TDMA-capacity, node-count, and energy calculator with current SF7 and proposed SF12 presets |
+
 ## Pending plans
 
 Scoped proposals awaiting implementation. The previously parked backlog remains in `Possible_Plans/`.
@@ -55,6 +61,7 @@ Scoped proposals awaiting implementation. The previously parked backlog remains 
 | Document | Scope |
 |---|---|
 | [`Pending_Plans/MULTI_DAY_SESSION_AND_RESTART_RECOVERY.md`](Pending_Plans/MULTI_DAY_SESSION_AND_RESTART_RECOVERY.md) | Date and time throughout the dashboard; fresh sessions and full edge initialization after Jetson boot or New Session |
+| [`Pending_Plans/SF12_MAX_RANGE_TRIAL.md`](Pending_Plans/SF12_MAX_RANGE_TRIAL.md) | SF12 maximum-range experiment with recalculated airtime, TDMA, bundle, reliability, cadence, power, and validation requirements |
 
 ## Possible plans (deferred)
 
