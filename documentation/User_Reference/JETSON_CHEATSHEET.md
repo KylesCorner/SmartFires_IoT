@@ -89,9 +89,11 @@ From the repo root:
 
 ```bash
 ./edge/smartfires-manager.sh status
-./edge/smartfires-manager.sh update-edge
+./edge/update-jetson.sh
 ./edge/smartfires-manager.sh deploy
 ```
+
+`update-jetson.sh` fast-forwards the selected Git branch, preserves untracked runtime files, reinstalls the edge package and repository-owned systemd unit, and restarts/verifies the service. It refuses tracked local modifications and may prompt for the Jetson user's sudo password.
 
 Read `SMARTFIRES_MANAGER.md` before using flash/deploy actions.
 

@@ -11,6 +11,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 PLATFORMIO_DIR="$REPO_ROOT/platformio"
 EDGE_DIR="$REPO_ROOT/edge/edge-receiver"
+SERVICE_INSTALLER="$REPO_ROOT/edge/install-smartfires-service.sh"
 
 # Existing SmartFires Python virtual environment
 VENV="${SMARTFIRES_VENV:-$HOME/.smartfires_venv}"
@@ -19,6 +20,11 @@ SMARTFIRES_EDGE="$VENV/bin/smartfires-edge"
 
 # systemd
 SERVICE="smartfires-edge.service"
+SERVICE_USER="${SMARTFIRES_USER:-$(id -un)}"
+SERVICE_GROUP="${SMARTFIRES_GROUP:-$SERVICE_USER}"
+DATA_DIR="${SMARTFIRES_DATA_DIR:-/mnt/nvme_drive/data}"
+DATA_MOUNT="${SMARTFIRES_DATA_MOUNT:-/mnt/nvme_drive}"
+INSTALL_ROOT="${SMARTFIRES_INSTALL_ROOT:-$REPO_ROOT}"
 
 # Stable udev device names
 BASE_PORT="/dev/smartfires-base"
@@ -166,7 +172,11 @@ check_git_tree()
 {
     local dirty
 
-    dirty="$(git -C "$REPO_ROOT" status --porcelain)"
+    # Runtime captures, Python caches, and local operator files may be
+    # intentionally untracked on the Jetson. They do not make a fast-forward
+    # pull unsafe unless Git itself reports a path collision. Tracked edits,
+    # however, must never be overwritten or silently carried into a deploy.
+    dirty="$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no)"
 
     if [[ -n "$dirty" ]]; then
         echo
@@ -286,6 +296,26 @@ install_edge()
     echo
     "$PYTHON" -m pip show smartfires-edge |
         grep -E '^(Name|Version|Location):' || true
+}
+
+
+install_service()
+{
+    [[ -x "$SERVICE_INSTALLER" ]] ||
+        die "Service installer is missing or not executable: $SERVICE_INSTALLER"
+
+    log "Installing the repository-owned systemd service..."
+
+    sudo env \
+        SMARTFIRES_USER="$SERVICE_USER" \
+        SMARTFIRES_GROUP="$SERVICE_GROUP" \
+        SMARTFIRES_VENV="$VENV" \
+        SMARTFIRES_DATA_DIR="$DATA_DIR" \
+        SMARTFIRES_DATA_MOUNT="$DATA_MOUNT" \
+        SMARTFIRES_INSTALL_ROOT="$INSTALL_ROOT" \
+        "$SERVICE_INSTALLER"
+
+    success "$SERVICE installed and enabled."
 }
 
 
@@ -474,10 +504,11 @@ update_edge()
 
     log "Beginning SmartFires edge update."
 
-    stop_service
-
     sync_repo
+
+    stop_service
     install_edge
+    install_service
 
     start_service
 
@@ -708,9 +739,10 @@ Commands:
 
     update-edge
 
-        Stop smartfires-edge.service
         Pull selected GitHub branch
+        Stop smartfires-edge.service
         Reinstall smartfires-edge
+        Reinstall and enable the systemd unit
         Restart service
 
 
@@ -780,6 +812,21 @@ Environment variables:
 
         Default:
             master
+
+
+    SMARTFIRES_USER / SMARTFIRES_GROUP
+
+        Override the account used by the installed systemd unit.
+
+
+    SMARTFIRES_DATA_DIR / SMARTFIRES_DATA_MOUNT
+
+        Override the telemetry directory and required mountpoint.
+
+
+    SMARTFIRES_INSTALL_ROOT
+
+        Override the service working directory. Default: repository root.
 
 EOF
 }

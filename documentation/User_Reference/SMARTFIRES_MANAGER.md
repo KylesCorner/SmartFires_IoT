@@ -3,9 +3,10 @@ name: smartfires-manager
 description: Operator reference for the Jetson update, service-management, and gateway flashing script.
 category: reference
 status: current
-last_verified: 2026-10-06
+last_verified: 2026-10-07
 source_refs:
   - edge/smartfires-manager.sh
+  - edge/update-jetson.sh
   - edge/smartfires-edge.service.in
   - edge/install-smartfires-service.sh
 related_docs:
@@ -27,16 +28,22 @@ chmod +x edge/smartfires-manager.sh
 
 The script resolves the repository root from its own location, so it may also be invoked by absolute path from another directory.
 
+For the normal Jetson software-only update, use the convenience wrapper:
+
+```bash
+./edge/update-jetson.sh
+```
+
+It runs the manager's `update-edge` workflow and accepts the same options, such as `--branch master`.
+
 ## Preconditions
 
 - A Git checkout with remote `origin` and the selected remote branch.
-- A clean working tree for commands that call `sync_repo`; the script refuses to switch/update with uncommitted changes.
+- No modifications to tracked files for commands that call `sync_repo`; the script refuses to switch/update with tracked changes. Untracked runtime captures, caches, and operator files are preserved, although Git will still reject a pull if an incoming tracked path collides with one.
 - `git`, `systemctl`, and `sudo` on the Jetson.
 - An existing Python virtual environment at `$HOME/.smartfires_venv`, or `SMARTFIRES_VENV` pointing to another one.
 - PlatformIO as `pio` or `$HOME/.platformio/penv/bin/pio` for flash commands.
-- `smartfires-edge.service` installed for any command that restarts it. Use the
-  repository template/installer described in `JETSON_CHEATSHEET.md`; the manager
-  deliberately does not install or rewrite the unit.
+- `update-edge` installs or refreshes `smartfires-edge.service` from the repository template. Other commands that only restart the service still require it to exist.
 - Stable `/dev/smartfires-base` and `/dev/smartfires-sniffer` symlinks for firmware flashing.
 
 The manager can stop a live service, change branches, install Python packages, and flash connected boards. Review the selected branch and physical USB board identity before running a mutating command.
@@ -63,7 +70,7 @@ Examples:
 |---|---|
 | `status` | Show repository branch/commit, Python environment/package, base/sniffer devices, and service state |
 | `sync` | Require a clean tree, verify the remote branch, fetch, switch/create its local tracking branch, then `pull --ff-only` |
-| `update-edge` | Stop service, sync repository, force-reinstall the edge package into the venv, restart/verify service |
+| `update-edge` | Sync repository, stop service, force-reinstall the edge package into the venv, reinstall/enable the systemd unit, then restart/verify it |
 | `flash-base` | Stop service, sync repository, flash `feather_m0_lora_base` to `/dev/smartfires-base`, wait for re-enumeration, restart service |
 | `flash-sniffer` | Same flow using `feather_m0_lora_sniffer` and `/dev/smartfires-sniffer` |
 | `flash-gateway` | Stop, sync, flash base then sniffer, restart |
@@ -82,7 +89,7 @@ Inspect only:
 Update Jetson software without firmware flashing:
 
 ```bash
-./edge/smartfires-manager.sh update-edge
+./edge/update-jetson.sh
 ```
 
 Flash only one gateway board:
@@ -102,7 +109,7 @@ Full gateway deployment:
 
 ### Git
 
-The script checks the requested branch with `git ls-remote`, fetches `origin`, checks out an existing local branch or creates a tracking branch, and pulls with `--ff-only`. It never commits, stashes, resets, or force-checks-out user changes.
+The script checks the requested branch with `git ls-remote`, fetches `origin`, checks out an existing local branch or creates a tracking branch, and pulls with `--ff-only`. It never commits, stashes, resets, or force-checks-out user changes. Tracked modifications block the update; untracked runtime files are left untouched.
 
 ### Edge package
 
@@ -116,7 +123,7 @@ It verifies `<venv>/bin/smartfires-edge --help` after installation. The venv mus
 
 ### Service
 
-Mutating deployment commands stop `smartfires-edge.service` so it releases the USB devices. Restart calls `systemctl daemon-reload`, restarts the service, waits two seconds, and fails if it is not active. An error may leave the service stopped; check it explicitly.
+The software-only update pulls first so a Git failure does not stop a healthy service. It then stops `smartfires-edge.service`, reinstalls the package and repository unit with the configured user/venv/data paths, and restarts it. Existing systemd drop-ins are preserved. Restart calls `systemctl daemon-reload`, waits two seconds, and fails if the service is not active. An installation error may leave the service stopped; check it explicitly.
 
 ```bash
 sudo systemctl status smartfires-edge.service --no-pager --full
@@ -141,6 +148,8 @@ The base and sniffer must be physically distinguishable by their udev serial rul
 ```bash
 export SMARTFIRES_VENV="$HOME/.smartfires_venv"
 export SMARTFIRES_BRANCH=master
+export SMARTFIRES_DATA_DIR=/mnt/nvme_drive/data
+export SMARTFIRES_DATA_MOUNT=/mnt/nvme_drive
 ```
 
 Avoid pointing `SMARTFIRES_VENV` at a shared/system Python environment. Command-line `--branch` is preferable for a one-off deployment because the selected branch is printed before changes.
