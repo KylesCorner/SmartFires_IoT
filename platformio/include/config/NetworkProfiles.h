@@ -124,59 +124,116 @@ constexpr bool requiresLowDataRateOptimization(
 // Count generated BUNDLE and STATUS frames against that opportunity and round
 // each contribution upward. Profiles reserve at least 10% for retries/control.
 constexpr uint32_t offeredLoadPermille(const NetworkProfile &profile) {
-  const uint32_t bundleIntervalMs =
-      samplesPerBundle(profile) * profile.continuousSamplePeriodMs;
   return LoRaAirtime::ceilDiv(framePeriodMs(profile) * 1000u,
-                             bundleIntervalMs) +
+                             samplesPerBundle(profile) *
+                                 profile.continuousSamplePeriodMs) +
          LoRaAirtime::ceilDiv(framePeriodMs(profile) * 1000u,
                              profile.statusIntervalMs);
 }
 
-constexpr uint32_t fingerprintMix(uint32_t hash, uint32_t value) {
-  for (uint8_t shift = 0; shift < 32; shift += 8) {
-    hash ^= static_cast<uint8_t>(value >> shift);
-    hash *= 16777619u;
-  }
-  return hash;
+constexpr uint32_t fingerprintMix(uint32_t hash,
+                                  uint32_t value,
+                                  uint8_t remainingBytes = 4u) {
+  return remainingBytes == 0u
+             ? hash
+             : fingerprintMix(
+                   (hash ^ static_cast<uint8_t>(value)) * 16777619u,
+                   value >> 8u,
+                   static_cast<uint8_t>(remainingBytes - 1u));
+}
+
+constexpr uint32_t fingerprintRadioFields(const NetworkProfile &profile,
+                                          uint32_t hash) {
+  return fingerprintMix(
+      fingerprintMix(
+          fingerprintMix(
+              fingerprintMix(
+                  fingerprintMix(
+                      fingerprintMix(
+                          fingerprintMix(
+                              fingerprintMix(
+                                  fingerprintMix(
+                                      hash,
+                                      static_cast<uint8_t>(profile.id)),
+                                  profile.spreadingFactor),
+                              profile.bandwidthHz),
+                          profile.codingRateDenominator),
+                      profile.preambleSymbols),
+                  profile.explicitHeader ? 1u : 0u),
+              profile.payloadCrc ? 1u : 0u),
+          profile.lowDataRateOptimization ? 1u : 0u),
+      static_cast<uint16_t>(profile.snrDemodFloorDbX10));
+}
+
+constexpr uint32_t fingerprintGeometryFields(const NetworkProfile &profile,
+                                             uint32_t hash) {
+  return fingerprintMix(
+      fingerprintMix(
+          fingerprintMix(
+              fingerprintMix(
+                  fingerprintMix(hash, profile.totalSlots),
+                  profile.slotWidthMs),
+              profile.guardMs),
+          profile.syncStaleMs),
+      profile.rxWakeAheadMs);
+}
+
+constexpr uint32_t fingerprintTrafficFields(const NetworkProfile &profile,
+                                            uint32_t hash) {
+  return fingerprintMix(
+      fingerprintMix(
+          fingerprintMix(
+              fingerprintMix(
+                  fingerprintMix(
+                      fingerprintMix(
+                          fingerprintMix(hash, profile.maxBundleDeltas),
+                          profile.maxOperationalApplicationBytes),
+                      profile.maxBundleAirtimeMs),
+                  profile.txCompletionMarginMs),
+              profile.continuousSamplePeriodMs),
+          profile.timedSamplePeriodMs),
+      profile.statusIntervalMs);
+}
+
+constexpr uint32_t fingerprintReliabilityFields(
+    const NetworkProfile &profile,
+    uint32_t hash) {
+  return fingerprintMix(
+      fingerprintMix(
+          fingerprintMix(
+              fingerprintMix(
+                  fingerprintMix(
+                      fingerprintMix(
+                          fingerprintMix(hash,
+                                         profile.useAppAckSummary ? 1u : 0u),
+                          profile.reliabilityMaxAttempts),
+                      profile.retryWaitMs),
+                  profile.reliabilityMaxAgeMs),
+              profile.awakenIntervalMs),
+          profile.periodicTimeSyncMs),
+      profile.commandAckTimeoutMs);
+}
+
+constexpr uint32_t fingerprintDutyFields(const NetworkProfile &profile,
+                                         uint32_t hash) {
+  return fingerprintMix(
+      fingerprintMix(
+          fingerprintMix(hash, profile.maxTxDrainBeforeStandbyMs),
+          profile.timedActiveSampleMs),
+      profile.timedCyclePeriodMs);
 }
 
 // Stable FNV-1a fingerprint over the fields that affect over-air
 // compatibility, scheduling, offered load, or deployment interpretation.
 constexpr uint32_t fingerprint(const NetworkProfile &profile) {
-  uint32_t hash = 2166136261u;
-  hash = fingerprintMix(hash, static_cast<uint8_t>(profile.id));
-  hash = fingerprintMix(hash, profile.spreadingFactor);
-  hash = fingerprintMix(hash, profile.bandwidthHz);
-  hash = fingerprintMix(hash, profile.codingRateDenominator);
-  hash = fingerprintMix(hash, profile.preambleSymbols);
-  hash = fingerprintMix(hash, profile.explicitHeader ? 1u : 0u);
-  hash = fingerprintMix(hash, profile.payloadCrc ? 1u : 0u);
-  hash = fingerprintMix(hash, profile.lowDataRateOptimization ? 1u : 0u);
-  hash = fingerprintMix(hash,
-                        static_cast<uint16_t>(profile.snrDemodFloorDbX10));
-  hash = fingerprintMix(hash, profile.totalSlots);
-  hash = fingerprintMix(hash, profile.slotWidthMs);
-  hash = fingerprintMix(hash, profile.guardMs);
-  hash = fingerprintMix(hash, profile.syncStaleMs);
-  hash = fingerprintMix(hash, profile.rxWakeAheadMs);
-  hash = fingerprintMix(hash, profile.maxBundleDeltas);
-  hash = fingerprintMix(hash, profile.maxOperationalApplicationBytes);
-  hash = fingerprintMix(hash, profile.maxBundleAirtimeMs);
-  hash = fingerprintMix(hash, profile.txCompletionMarginMs);
-  hash = fingerprintMix(hash, profile.continuousSamplePeriodMs);
-  hash = fingerprintMix(hash, profile.timedSamplePeriodMs);
-  hash = fingerprintMix(hash, profile.statusIntervalMs);
-  hash = fingerprintMix(hash, profile.useAppAckSummary ? 1u : 0u);
-  hash = fingerprintMix(hash, profile.reliabilityMaxAttempts);
-  hash = fingerprintMix(hash, profile.retryWaitMs);
-  hash = fingerprintMix(hash, profile.reliabilityMaxAgeMs);
-  hash = fingerprintMix(hash, profile.awakenIntervalMs);
-  hash = fingerprintMix(hash, profile.periodicTimeSyncMs);
-  hash = fingerprintMix(hash, profile.commandAckTimeoutMs);
-  hash = fingerprintMix(hash, profile.maxTxDrainBeforeStandbyMs);
-  hash = fingerprintMix(hash, profile.timedActiveSampleMs);
-  hash = fingerprintMix(hash, profile.timedCyclePeriodMs);
-  return hash;
+  return fingerprintDutyFields(
+      profile,
+      fingerprintReliabilityFields(
+          profile,
+          fingerprintTrafficFields(
+              profile,
+              fingerprintGeometryFields(
+                  profile, fingerprintRadioFields(profile, 2166136261u)))));
 }
 
 constexpr bool isValid(const NetworkProfile &profile) {
@@ -288,7 +345,7 @@ constexpr const NetworkProfile &profileForSelector(uint8_t selector) {
 
 namespace NetworkProfiles {
 constexpr uint8_t kSelectedProfileSelector = SMARTFIRES_NETWORK_PROFILE;
-constexpr const NetworkProfile &kActiveProfile =
+static constexpr const NetworkProfile &kActiveProfile =
     profileForSelector(kSelectedProfileSelector);
 constexpr uint32_t kActiveProfileFingerprint = fingerprint(kActiveProfile);
 }  // namespace NetworkProfiles

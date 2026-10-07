@@ -23,31 +23,55 @@ constexpr uint32_t ceilDiv(uint32_t numerator, uint32_t denominator) {
   return denominator == 0 ? 0 : (numerator + denominator - 1u) / denominator;
 }
 
+// These small helpers intentionally use C++11's single-return constexpr form.
+// The SAMD Arduino toolchain injects -std=gnu++11 after project flags in some
+// PlatformIO releases, and profile validation must remain a constant
+// expression there as well as in the native C++17 tests.
+constexpr uint32_t symbolMicroseconds(const Modem &modem) {
+  return ceilDiv((1u << modem.spreadingFactor) * 1000000u,
+                 modem.bandwidthHz);
+}
+
+constexpr int32_t payloadNumerator(uint16_t bytes, const Modem &modem) {
+  return 8 * static_cast<int32_t>(bytes) -
+         4 * static_cast<int32_t>(modem.spreadingFactor) + 28 +
+         (modem.payloadCrc ? 16 : 0) -
+         (modem.explicitHeader ? 0 : 20);
+}
+
+constexpr uint32_t payloadDenominator(const Modem &modem) {
+  return 4u * static_cast<uint32_t>(
+                  modem.spreadingFactor -
+                  (modem.lowDataRateOptimize ? 2u : 0u));
+}
+
+constexpr uint32_t codedBlocks(uint16_t bytes, const Modem &modem) {
+  return payloadNumerator(bytes, modem) > 0
+             ? ceilDiv(static_cast<uint32_t>(payloadNumerator(bytes, modem)),
+                       payloadDenominator(modem))
+             : 0u;
+}
+
+constexpr uint32_t payloadSymbols(uint16_t bytes, const Modem &modem) {
+  return 8u + codedBlocks(bytes, modem) *
+                  static_cast<uint32_t>(modem.codingRateDenominator);
+}
+
+// Preamble includes the fixed 4.25-symbol tail. Work in quarter-symbols to
+// avoid floating point: preamble*4 + 17 + payload*4.
+constexpr uint32_t totalQuarterSymbols(uint16_t bytes, const Modem &modem) {
+  return static_cast<uint32_t>(modem.preambleSymbols) * 4u + 17u +
+         payloadSymbols(bytes, modem) * 4u;
+}
+
 // Returns worst-case on-air microseconds for one RadioHead datagram. `bytes`
 // is the complete radio payload length, including RadioHead's four-byte
 // addressing header. The formula is Semtech's explicit LoRa packet airtime
 // equation, evaluated with integers so it is usable in static_asserts.
 constexpr uint32_t microseconds(uint16_t bytes, const Modem &modem) {
-  const uint32_t symbolUs =
-      ceilDiv((1u << modem.spreadingFactor) * 1000000u, modem.bandwidthHz);
-  const int32_t numerator =
-      8 * static_cast<int32_t>(bytes) -
-      4 * static_cast<int32_t>(modem.spreadingFactor) + 28 +
-      (modem.payloadCrc ? 16 : 0) - (modem.explicitHeader ? 0 : 20);
-  const uint32_t denominator =
-      4u * static_cast<uint32_t>(modem.spreadingFactor -
-                                 (modem.lowDataRateOptimize ? 2u : 0u));
-  const uint32_t codedBlocks =
-      numerator > 0 ? ceilDiv(static_cast<uint32_t>(numerator), denominator) : 0u;
-  const uint32_t payloadSymbols =
-      8u + codedBlocks * static_cast<uint32_t>(modem.codingRateDenominator);
-
-  // Preamble includes the fixed 4.25-symbol tail. Work in quarter-symbols to
-  // avoid floating point: preamble*4 + 17 + payload*4.
-  const uint32_t totalQuarterSymbols =
-      static_cast<uint32_t>(modem.preambleSymbols) * 4u + 17u +
-      payloadSymbols * 4u;
-  return ceilDiv(totalQuarterSymbols * symbolUs, 4u);
+  return ceilDiv(totalQuarterSymbols(bytes, modem) *
+                     symbolMicroseconds(modem),
+                 4u);
 }
 
 constexpr uint32_t milliseconds(uint16_t bytes, const Modem &modem) {

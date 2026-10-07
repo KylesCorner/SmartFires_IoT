@@ -57,7 +57,7 @@ struct Geometry {
   uint32_t syncStaleMs;
 };
 
-constexpr const NetworkProfiles::NetworkProfile &kProfile =
+static constexpr const NetworkProfiles::NetworkProfile &kProfile =
     NetworkProfiles::kActiveProfile;
 constexpr uint8_t kProfileId = static_cast<uint8_t>(kProfile.id);
 constexpr uint32_t kProfileFingerprint =

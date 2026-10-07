@@ -3,7 +3,7 @@ name: jetson-cheatsheet
 description: Common Jetson-side commands — installing edge-receiver, pulling data, the web dashboard, and one-time udev setup for stable base/sniffer device paths.
 category: reference
 status: current
-last_verified: 2026-10-06
+last_verified: 2026-10-07
 source_refs:
   - util/udev/99-smartfires.rules
   - edge/edge-receiver/src/smartfires_edge/main.py
@@ -47,7 +47,7 @@ smartfires-edge web --port /dev/smartfires-base \
 smartfires-edge summary --data-dir /mnt/nvme_drive/data
 ```
 
-Open `http://<jetson-ip>:8080`. `--num-slots` affects only sniffer alignment and must match firmware `NUM_SLOTS`; omit it to use the edge default.
+Open `http://<jetson-ip>:8080`. The base-announced network profile normally supplies sniffer slot geometry. `--num-slots` is only a recovery fallback before that announcement arrives; omit it to use the edge default. `receive` and `web` also accept `--network-profile-override PATH` for recovery-only JSON profile metadata, and any disagreement with the observed base remains visible as a mismatch.
 
 The dashboard can issue a real per-node reset and DYNAMIC/STATIC TX-power commands. The generic `/api/command` endpoint remains an echo stub, and there is no calibration CLI.
 
