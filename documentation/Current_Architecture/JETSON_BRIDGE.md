@@ -110,9 +110,12 @@ STATUS supplies GPS and battery validity, DMP heading/accuracy, lifetime retrans
 - `/api/node_reset` sends a hard reset to a selected node.
 - `/api/tx_power` resolves set/increase/decrease and DYNAMIC/STATIC choices into an absolute power command, clamped to 5–13 dBm.
 - `/api/network_profile` returns the unknown/active/mismatch envelope, active source, base and override copies, mismatch fields, transition history, and sniffer identity when present.
+- `GET /api/system_update` reports whether a systemd-managed web update is available and its current state. Confirmed `POST /api/system_update` requests the fixed rootless `dashboard-update` workflow; no branch or shell text is accepted from the browser. It fast-forwards the configured branch, reinstalls the edge package, and only then requests a graceful process restart.
 - `/api/command` currently only echoes `{status: queued}` and does not write serial bytes.
 
-The dashboard header persistently shows `SF · bandwidth · coding rate · source`, shows unknown before the first announcement, and highlights override or mismatch state. Main-page density expectations use the announced Continuous cadence; the sniffer visualization uses announced slot count, width, and guards.
+The dashboard header persistently shows `SF · bandwidth · coding rate · source`, shows unknown before the first announcement, and highlights override or mismatch state. It also exposes an **Update Jetson** button when running under systemd. The button requires browser confirmation, disables while an update is active, and shows failures; a successful restart is observed through the normal session-change reload. Main-page density expectations use the announced Continuous cadence; the sniffer visualization uses announced slot count, width, and guards.
+
+The dashboard currently binds without application authentication. Browser confirmation prevents accidental clicks but is not an authorization boundary, so the web interface and its update endpoint must remain limited to the trusted operations network. Systemd-unit installation remains exclusive to the interactive `update-jetson.sh` workflow because it requires sudo; the web path updates only Git/package state and uses the already-installed unit's restart policy.
 
 The CLI has `receive`, `summary`, `visualize`, and `web`; there is no separate command-sending CLI.
 

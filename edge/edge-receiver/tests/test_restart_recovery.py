@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
-from fastapi import BackgroundTasks
+from fastapi import BackgroundTasks, HTTPException
 
 from smartfires_edge.base_station_store import BaseStationStore
 from smartfires_edge.config import EdgeConfig, IngestConfig
@@ -17,7 +17,7 @@ from smartfires_edge.ingest_service import _create_session_dir, run_receive
 from smartfires_edge.live_state import LiveState
 from smartfires_edge.telemetry_cache import SessionTelemetryCache, _ts_ms
 from smartfires_edge.uart_receiver import iter_packets
-from smartfires_edge.web.app import create_app
+from smartfires_edge.web.app import SystemUpdatePayload, create_app
 from smartfires_edge.web_service import run_web
 
 
@@ -139,6 +139,93 @@ class RestartRecoveryTests(unittest.TestCase):
             self.assertEqual(
                 endpoint(duplicate_tasks), {"status": "restart_already_requested"}
             )
+
+    def test_system_update_requires_confirmation_and_restarts_after_install(self):
+        with tempfile.TemporaryDirectory() as td:
+            stop = threading.Event()
+            app = create_app(
+                LiveState([2]),
+                Path(td),
+                reset_event=stop,
+                tile_cache_dir=Path(td) / "tiles",
+                system_update_command=Path("/usr/bin/true"),
+            )
+            status_endpoint = next(
+                route.endpoint for route in app.routes
+                if getattr(route, "path", None) == "/api/system_update"
+                and "GET" in getattr(route, "methods", set())
+            )
+            update_endpoint = next(
+                route.endpoint for route in app.routes
+                if getattr(route, "path", None) == "/api/system_update"
+                and "POST" in getattr(route, "methods", set())
+            )
+            self.assertTrue(status_endpoint()["enabled"])
+
+            with self.assertRaises(HTTPException) as bad_confirmation:
+                update_endpoint(SystemUpdatePayload(confirmation="yes"), BackgroundTasks())
+            self.assertEqual(bad_confirmation.exception.status_code, 400)
+
+            tasks = BackgroundTasks()
+            accepted = update_endpoint(
+                SystemUpdatePayload(confirmation="UPDATE JETSON"), tasks
+            )
+            self.assertEqual(accepted["status"], "update_requested")
+            self.assertFalse(stop.is_set(), "shutdown was signaled before response completion")
+
+            with self.assertRaises(HTTPException) as duplicate:
+                update_endpoint(
+                    SystemUpdatePayload(confirmation="UPDATE JETSON"),
+                    BackgroundTasks(),
+                )
+            self.assertEqual(duplicate.exception.status_code, 409)
+
+            asyncio.run(tasks())
+            self.assertTrue(stop.is_set())
+            finished = status_endpoint()
+            self.assertEqual(finished["state"], "restarting")
+            self.assertEqual(finished["request_id"], accepted["request_id"])
+
+    def test_system_update_is_disabled_outside_managed_service(self):
+        with tempfile.TemporaryDirectory() as td:
+            app = create_app(
+                LiveState([2]),
+                Path(td),
+                reset_event=threading.Event(),
+                tile_cache_dir=Path(td) / "tiles",
+            )
+            status_endpoint = next(
+                route.endpoint for route in app.routes
+                if getattr(route, "path", None) == "/api/system_update"
+                and "GET" in getattr(route, "methods", set())
+            )
+            self.assertFalse(status_endpoint()["enabled"])
+
+    def test_failed_system_update_keeps_current_service_running(self):
+        with tempfile.TemporaryDirectory() as td:
+            stop = threading.Event()
+            app = create_app(
+                LiveState([2]),
+                Path(td),
+                reset_event=stop,
+                tile_cache_dir=Path(td) / "tiles",
+                system_update_command=Path("/usr/bin/false"),
+            )
+            status_endpoint = next(
+                route.endpoint for route in app.routes
+                if getattr(route, "path", None) == "/api/system_update"
+                and "GET" in getattr(route, "methods", set())
+            )
+            update_endpoint = next(
+                route.endpoint for route in app.routes
+                if getattr(route, "path", None) == "/api/system_update"
+                and "POST" in getattr(route, "methods", set())
+            )
+            tasks = BackgroundTasks()
+            update_endpoint(SystemUpdatePayload(confirmation="UPDATE JETSON"), tasks)
+            asyncio.run(tasks())
+            self.assertFalse(stop.is_set())
+            self.assertEqual(status_endpoint()["state"], "failed")
 
     def test_required_ingest_exit_takes_down_web_process(self):
         class FakeServer:

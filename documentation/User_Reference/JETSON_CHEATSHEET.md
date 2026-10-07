@@ -51,6 +51,10 @@ Open `http://<jetson-ip>:8080`. The base-announced network profile normally supp
 
 The dashboard can issue a real per-node reset and DYNAMIC/STATIC TX-power commands. The generic `/api/command` endpoint remains an echo stub, and there is no calibration CLI.
 
+When launched by `smartfires-edge.service`, the shared dashboard header also shows **Update Jetson**. After confirmation it fast-forwards the current configured branch, reinstalls the edge package, and gracefully restarts into a new session. The button is disabled for direct/manual web launches because those lack a guaranteed restart supervisor. Update failures leave the current process running and are shown in the browser.
+
+The dashboard has no application login. Confirmation protects against accidental clicks, not unauthorized clients; expose port 8080 only on the trusted operations network. Use the interactive `./edge/update-jetson.sh` when the repository-owned systemd unit itself also needs to be reinstalled.
+
 ## Optional Jetson anemometer
 
 Add these arguments to `receive` or `web`:

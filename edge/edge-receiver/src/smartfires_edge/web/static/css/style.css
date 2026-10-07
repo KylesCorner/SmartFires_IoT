@@ -21,6 +21,27 @@ nav.topnav {
   z-index: 1000;
 }
 
+.system-update-btn {
+  border: 1px solid #9a5a24;
+  border-radius: 4px;
+  padding: 0.28rem 0.65rem;
+  background: #4a2d18;
+  color: #ffd1a8;
+  font: 700 0.78rem system-ui, sans-serif;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.system-update-btn:hover:not(:disabled) {
+  background: #75451f;
+  color: #fff;
+}
+
+.system-update-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 nav.topnav a {
   color: #aab4c0;
   text-decoration: none;

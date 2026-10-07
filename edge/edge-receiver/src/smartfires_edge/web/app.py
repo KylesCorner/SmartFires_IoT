@@ -1,9 +1,13 @@
 import asyncio
 import json
+import os
 import queue
 import socket
+import subprocess
+import sys
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -46,6 +50,10 @@ class NodeResetPayload(BaseModel):
     node_id: int
 
 
+class SystemUpdatePayload(BaseModel):
+    confirmation: str
+
+
 class TxPowerPayload(BaseModel):
     node_id: int
     # "set" | "increase" | "decrease" | "dynamic" | "static"
@@ -80,6 +88,7 @@ def create_app(
     tx_power_queue: "Optional[queue.Queue[dict]]" = None,
     tile_cache_dir: Optional[Path] = None,
     sniffer_enabled: bool = False,
+    system_update_command: Optional[Path] = None,
 ) -> FastAPI:
     app = FastAPI(title="SmartFires Dashboard")
     store = base_station_store or BaseStationStore()
@@ -87,6 +96,102 @@ def create_app(
     telemetry_cache = SessionTelemetryCache()
     restart_lock = threading.Lock()
     restart_pending = threading.Event()
+    system_update_lock = threading.Lock()
+    system_update_pending = threading.Event()
+    update_command = (
+        system_update_command.resolve()
+        if system_update_command is not None
+        else None
+    )
+    system_update_enabled = bool(
+        reset_event is not None
+        and update_command is not None
+        and update_command.is_file()
+        and os.access(update_command, os.X_OK)
+    )
+    system_update_state: dict = {
+        "enabled": system_update_enabled,
+        "state": "idle",
+        "request_id": None,
+        "started_at": None,
+        "finished_at": None,
+        "message": (
+            "Ready"
+            if system_update_enabled
+            else "Web updates require the systemd-managed Jetson service"
+        ),
+        "output": None,
+    }
+
+    def _system_update_snapshot() -> dict:
+        with system_update_lock:
+            return dict(system_update_state)
+
+    def _system_update_output(completed: subprocess.CompletedProcess[str]) -> str:
+        combined = "\n".join(
+            part.strip() for part in (completed.stdout, completed.stderr) if part.strip()
+        )
+        # Enough context for an operator without returning an unbounded pip log.
+        return combined[-8000:] if combined else ""
+
+    def _perform_system_update(request_id: str) -> None:
+        assert update_command is not None
+        try:
+            env = os.environ.copy()
+            # Always reinstall into the interpreter environment that is
+            # currently serving the dashboard, regardless of HOME defaults.
+            env["SMARTFIRES_VENV"] = sys.prefix
+            completed = subprocess.run(
+                [str(update_command), "dashboard-update"],
+                cwd=update_command.parent.parent,
+                env=env,
+                text=True,
+                capture_output=True,
+                timeout=900,
+                check=False,
+            )
+            output = _system_update_output(completed)
+            if completed.returncode != 0:
+                with system_update_lock:
+                    system_update_state.update(
+                        state="failed",
+                        finished_at=time.time(),
+                        message=f"Update failed with exit code {completed.returncode}",
+                        output=output,
+                    )
+                system_update_pending.clear()
+                return
+
+            with system_update_lock:
+                system_update_state.update(
+                    state="restarting",
+                    finished_at=time.time(),
+                    message="Update installed; restarting the edge service",
+                    output=output,
+                )
+            # The command is complete before shutdown begins. The normal web
+            # supervisor exits cleanly and systemd's Restart=always launches
+            # the newly installed package in a fresh process/session.
+            assert reset_event is not None
+            reset_event.set()
+        except subprocess.TimeoutExpired as exc:
+            with system_update_lock:
+                system_update_state.update(
+                    state="failed",
+                    finished_at=time.time(),
+                    message="Update timed out after 15 minutes",
+                    output=str(exc),
+                )
+            system_update_pending.clear()
+        except Exception as exc:
+            with system_update_lock:
+                system_update_state.update(
+                    state="failed",
+                    finished_at=time.time(),
+                    message=f"Update could not start: {exc}",
+                    output=None,
+                )
+            system_update_pending.clear()
 
     def _current_session_csv() -> Optional[Path]:
         """The active session's CSV, if it has been written to yet.
@@ -280,6 +385,8 @@ def create_app(
         # parser/session/worker graph.  Event.set() is idempotent, but the lock
         # makes the accepted/coalesced status deterministic across browser tabs.
         with restart_lock:
+            if system_update_pending.is_set():
+                raise HTTPException(status_code=409, detail="A Jetson update is in progress")
             if restart_pending.is_set():
                 return {"status": "restart_already_requested"}
             restart_pending.set()
@@ -288,6 +395,45 @@ def create_app(
             # uvicorn begins its graceful shutdown.
             background_tasks.add_task(reset_event.set)
             return {"status": "restart_requested"}
+
+    @app.get("/api/system_update")
+    def system_update_status() -> dict:
+        return _system_update_snapshot()
+
+    @app.post("/api/system_update", status_code=202)
+    def system_update(
+        payload: SystemUpdatePayload,
+        background_tasks: BackgroundTasks,
+    ) -> dict:
+        if not system_update_enabled:
+            raise HTTPException(status_code=501, detail=system_update_state["message"])
+        if payload.confirmation != "UPDATE JETSON":
+            raise HTTPException(
+                status_code=400,
+                detail="Confirmation must exactly match UPDATE JETSON",
+            )
+
+        # Share the restart lock with New Session so two browser tabs cannot
+        # win opposing checks and schedule both operations concurrently.
+        with restart_lock, system_update_lock:
+            if restart_pending.is_set():
+                raise HTTPException(status_code=409, detail="A restart is already pending")
+            if system_update_pending.is_set():
+                raise HTTPException(status_code=409, detail="A Jetson update is already in progress")
+            request_id = uuid.uuid4().hex
+            system_update_pending.set()
+            system_update_state.update(
+                enabled=True,
+                state="updating",
+                request_id=request_id,
+                started_at=time.time(),
+                finished_at=None,
+                message="Pulling and reinstalling SmartFires edge software",
+                output=None,
+            )
+            background_tasks.add_task(_perform_system_update, request_id)
+
+        return {"status": "update_requested", "request_id": request_id}
 
     @app.post("/api/node_reset")
     def node_reset(payload: NodeResetPayload) -> dict:

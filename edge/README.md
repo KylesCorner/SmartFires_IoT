@@ -8,6 +8,8 @@ python3 -m pip install --use-pep517 -e edge/edge-receiver
 
 Use `/dev/smartfires-base` for the udev-managed base connection. [`smartfires-manager.sh`](smartfires-manager.sh) manages the receiver service; [`anemometer_read.py`](anemometer_read.py) remains available as a standalone ES-W302 check.
 
+Under the systemd-managed launch, the dashboard's **Update Jetson** control runs the manager's fixed rootless `dashboard-update` subset, then requests a graceful service restart. It cannot reinstall the systemd unit; use [`update-jetson.sh`](update-jetson.sh) interactively for the full Git/package/unit/restart workflow. Keep the unauthenticated dashboard restricted to the trusted operations network.
+
 ## Service installation
 
 [`smartfires-edge.service.in`](smartfires-edge.service.in) is the checked-in

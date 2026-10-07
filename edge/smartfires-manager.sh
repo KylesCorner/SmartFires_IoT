@@ -164,6 +164,14 @@ preflight()
 }
 
 
+dashboard_update_preflight()
+{
+    require_command git
+    require_repo
+    require_venv
+}
+
+
 # ============================================================
 # Git
 # ============================================================
@@ -516,6 +524,24 @@ update_edge()
 }
 
 
+# Rootless subset used by the dashboard. The web process requests its own
+# graceful restart only after this command returns successfully, so the
+# package cannot be killed halfway through installation. Systemd-unit updates
+# remain exclusive to the interactive update-edge command because they need
+# sudo and must never be exposed through the web process.
+dashboard_update()
+{
+    dashboard_update_preflight
+
+    log "Beginning dashboard-requested SmartFires edge update."
+
+    sync_repo
+    install_edge
+
+    success "Dashboard-requested edge update is ready for restart."
+}
+
+
 flash_base_command()
 {
     preflight
@@ -746,6 +772,14 @@ Commands:
         Restart service
 
 
+    dashboard-update
+
+        Rootless internal workflow used by the dashboard:
+          - pull selected GitHub branch
+          - reinstall smartfires-edge
+          - leave restart signaling to the running web supervisor
+
+
     flash-base
 
         Stop service
@@ -869,7 +903,7 @@ while [[ $# -gt 0 ]]; do
             ;;
 
 
-        status|sync|update-edge|flash-base|flash-sniffer|flash-gateway|deploy)
+        status|sync|update-edge|dashboard-update|flash-base|flash-sniffer|flash-gateway|deploy)
 
             if [[ -n "$COMMAND" ]]; then
                 die "Only one command may be specified."
@@ -913,6 +947,10 @@ case "$COMMAND" in
 
     update-edge)
         update_edge
+        ;;
+
+    dashboard-update)
+        dashboard_update
         ;;
 
     flash-base)

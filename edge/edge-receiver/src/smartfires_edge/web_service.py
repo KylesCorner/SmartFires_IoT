@@ -1,5 +1,7 @@
+import os
 import queue
 import threading
+from pathlib import Path
 
 import uvicorn
 
@@ -85,6 +87,14 @@ def run_web(cfg: EdgeConfig) -> int:
         # source change instead of relying on a manual cache purge.
         tile_cache_dir=cfg.ingest.data_dir / "tiles" / "carto-voyager",
         sniffer_enabled=cfg.ingest.sniffer.enabled,
+        # A dashboard-triggered update is enabled only under systemd, where a
+        # clean process exit is guaranteed to launch the newly installed
+        # package again. Direct development launches remain read-only.
+        system_update_command=(
+            Path.cwd() / "edge" / "smartfires-manager.sh"
+            if os.environ.get("INVOCATION_ID")
+            else None
+        ),
     )
     config = uvicorn.Config(
         app, host=cfg.web_host, port=cfg.web_http_port, log_level="info"

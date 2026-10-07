@@ -71,12 +71,15 @@ Examples:
 | `status` | Show repository branch/commit, Python environment/package, base/sniffer devices, and service state |
 | `sync` | Require a clean tree, verify the remote branch, fetch, switch/create its local tracking branch, then `pull --ff-only` |
 | `update-edge` | Sync repository, stop service, force-reinstall the edge package into the venv, reinstall/enable the systemd unit, then restart/verify it |
+| `dashboard-update` | Internal rootless subset used by the web UI: sync and reinstall the package, leaving graceful restart signaling to the running web supervisor |
 | `flash-base` | Stop service, sync repository, flash `feather_m0_lora_base` to `/dev/smartfires-base`, wait for re-enumeration, restart service |
 | `flash-sniffer` | Same flow using `feather_m0_lora_sniffer` and `/dev/smartfires-sniffer` |
 | `flash-gateway` | Stop, sync, flash base then sniffer, restart |
 | `deploy` | Stop, sync, reinstall edge package, flash base and sniffer, restart, show status |
 
 With no command or with `--help`, the script prints usage and makes no deployment change.
+
+`dashboard-update` is not the normal shell workflow. It exists so the systemd-managed dashboard can finish Git and package work before asking its own supervisor to restart. It does not invoke sudo or reinstall the unit.
 
 ## Common workflows
 

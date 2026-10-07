@@ -12,6 +12,9 @@ let _clockEl = null;
 let _sessionEl = null;
 let _networkProfileButton = null;
 let _networkProfilePanel = null;
+let _systemUpdateButton = null;
+let _systemUpdateRequestId = null;
+let _systemUpdateFailureShown = null;
 let _clockOffsetMs = 0; // Jetson epoch_s*1000 - Date.now(), resynced periodically
 let _observedSessionId = null;
 let _sessionReloadStarted = false;
@@ -124,6 +127,78 @@ function renderNav(activePath) {
   setInterval(_pollSession, 5_000);
   _pollNetworkProfile();
   setInterval(_pollNetworkProfile, 5_000);
+
+  // Updating is intentionally a home-page operation beside New Session, not
+  // a global navigation control. Other pages do not poll the update endpoint.
+  _systemUpdateButton = document.getElementById("system-update-btn");
+  if (_systemUpdateButton) {
+    _systemUpdateButton.title = "Checking whether system-managed updates are available";
+    _systemUpdateButton.addEventListener("click", _requestSystemUpdate);
+    _pollSystemUpdate();
+    setInterval(_pollSystemUpdate, 5_000);
+  }
+}
+
+function _renderSystemUpdateStatus(status) {
+  if (!_systemUpdateButton) return;
+  const enabled = Boolean(status?.enabled);
+  const busy = status?.state === "updating" || status?.state === "restarting";
+  _systemUpdateButton.disabled = !enabled || busy;
+  _systemUpdateButton.textContent = status?.state === "updating"
+    ? "Updating…"
+    : status?.state === "restarting"
+      ? "Restarting…"
+      : "Update Jetson";
+  _systemUpdateButton.title = enabled
+    ? status?.message || "Pull and reinstall SmartFires edge software"
+    : status?.message || "Web updates are unavailable";
+}
+
+async function _pollSystemUpdate() {
+  try {
+    const response = await fetch("/api/system_update", { cache: "no-store" });
+    if (!response.ok) return;
+    const status = await response.json();
+    if (status.state === "failed" && status.request_id && status.request_id !== _systemUpdateFailureShown) {
+      _systemUpdateFailureShown = status.request_id;
+      _systemUpdateRequestId = null;
+      const details = status.output ? `\n\n${status.output.slice(-1200)}` : "";
+      alert(`Jetson update failed: ${status.message || "unknown error"}${details}`);
+    }
+    _renderSystemUpdateStatus(status);
+  } catch (_) {
+    // A brief outage is expected after a successful update while systemd
+    // launches the newly installed process.
+  }
+}
+
+async function _requestSystemUpdate() {
+  if (!_systemUpdateButton) return;
+  if (!confirm(
+    "Update the Jetson software now?\n\n" +
+    "This will fast-forward the Git checkout, reinstall smartfires-edge, and restart the dashboard. " +
+    "Telemetry will be briefly unavailable."
+  )) {
+    return;
+  }
+
+  _systemUpdateButton.disabled = true;
+  _systemUpdateButton.textContent = "Starting…";
+  try {
+    const response = await fetch("/api/system_update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirmation: "UPDATE JETSON" }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.detail || `HTTP ${response.status}`);
+    _systemUpdateRequestId = body.request_id;
+    _systemUpdateButton.textContent = "Updating…";
+  } catch (error) {
+    _systemUpdateButton.disabled = false;
+    _systemUpdateButton.textContent = "Update Jetson";
+    alert("Could not start the Jetson update: " + (error.message || error));
+  }
 }
 
 function _profileCodingRate(profile) {
