@@ -54,6 +54,22 @@ function formatTimestamp(value, inputType = "iso", options = {}) {
   return `${datePart} ${timePart}${milliseconds} ${zone} (${offset})`;
 }
 
+// Chart.js renders an array as a multiline tick label. Keep the clock as the
+// prominent first line and retain the calendar date underneath without
+// repeating the verbose timezone text at every tick.
+function formatChartTimestamp(value, inputType = "epoch-milliseconds") {
+  const date = value instanceof Date ? value : timestampDate(value, inputType);
+  if (!date || Number.isNaN(date.getTime())) return ["—", ""];
+  const timePart = date.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+  const datePart = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  return [timePart, datePart];
+}
+
 function renderNav(activePath) {
   const nav = document.createElement("nav");
   nav.className = "topnav";

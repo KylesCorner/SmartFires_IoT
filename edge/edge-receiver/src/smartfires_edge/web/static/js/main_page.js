@@ -214,7 +214,7 @@ function buildBaseScales() {
     x: {
       type: "linear",
       ticks: {
-        callback: (value) => formatTimestamp(value, "epoch-milliseconds"),
+        callback: (value) => formatChartTimestamp(value),
         color: "#aab4c0",
         maxTicksLimit: 8,
       },
