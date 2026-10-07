@@ -3,7 +3,7 @@ name: software-design-diagram
 description: Diagram-form companion to SOFTWARE_DESIGN.md — system, control-flow, and packet diagrams.
 category: architecture
 status: current
-last_verified: 2026-09-04
+last_verified: 2026-10-07
 source_refs:
   - platformio/platformio.ini
 related_docs:
@@ -16,6 +16,7 @@ related_docs:
 
 ```mermaid
 flowchart LR
+    Profile[SMARTFIRES_NETWORK_PROFILE\nSF7 / SF9 / SF10 / SF12]
     subgraph Node[Feather M0 sensor node]
         Sensors[SHT31 / wind / GPS / SPS30 / ICM-20948]
         Duty[DutyCycleController]
@@ -45,6 +46,9 @@ flowchart LR
 
     Tdma <-->|915 MHz LoRa / TDMA| BaseApp
     BaseApp <-->|native USB CDC / 115200| Ingest
+    Profile --> Node
+    Profile --> Base
+    Profile -->|base announcement| Jetson
 ```
 
 ## Join and steady state
@@ -56,17 +60,15 @@ sequenceDiagram
     participant J as Jetson
 
     N->>B: AWAKEN(uid_hash, reset_cause, hang_zone)
-    B-->>N: RadioHead link ACK
     B->>B: find/create session-local node ID
     B->>N: direct TIME_SYNC(assigned node ID)
-    N-->>B: RadioHead link ACK
     N->>N: adopt ID and start sensing
     N->>B: BUNDLE / STATUS (node slot, no link ACK)
     B->>J: framed packet with RSSI
     B->>N: ACK_SUMMARY (slot 0)
-    N-->>B: RadioHead link ACK
+    B->>J: NETWORK_PROFILE (startup + periodic)
     J->>B: session TIME_SYNC (default 600 s)
-    B->>N: broadcast TIME_SYNC (50 s)
+    B->>N: profile-paced broadcast TIME_SYNC
 ```
 
 ## Timed node cycle
@@ -76,13 +78,13 @@ stateDiagram-v2
     [*] --> AwaitSync
     AwaitSync --> Warmup: assigned TIME_SYNC
     Warmup --> Active: sensors ready
-    Active --> Drain: 30 samples / two bundles
+    Active --> Drain: two operational bundles
     Drain --> Standby: WINDOW_END queued and TX drained or timeout
     Standby --> Warmup: RTC wake
     Warmup --> Active: WINDOW_BEGIN
 ```
 
-The nominal Timed period is 75 seconds: 10 seconds warmup, 30 seconds active sampling, and about 35 seconds standby. A five-second minimum standby and 15-second overrun ceiling protect the cycle when work runs late.
+Timed profile periods are 75/80/90/150 seconds for SF7/SF9/SF10/SF12. The active window is two complete operational bundles: 30 samples at the shorter profiles and 16 samples at SF12. Profile-scaled overrun and final-drain limits protect the cycle when work runs late.
 
 ## Command paths
 
@@ -110,9 +112,10 @@ LoRa packet:
 
 Base -> Jetson USB frame:
   [AA 55][len][RSSI:i8][complete LoRa packet][CRC-8]
+  NETWORK_PROFILE uses the same envelope with a fixed control payload and RSSI=0.
 
 Jetson -> Base USB frame:
   [AA 55][len][complete command or TIME_SYNC packet][CRC-8]
 ```
 
-The base owns assignment, ACK summaries, and dynamic TX power. The Jetson owns persistence, wall-clock/session mapping, operator requests, and visualization.
+The base owns assignment, ACK summaries, the authoritative active-profile announcement, and dynamic TX power. The Jetson owns persistence, wall-clock/session mapping, operator requests, and profile-driven visualization.

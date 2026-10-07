@@ -79,7 +79,7 @@ private:
     bool     _initialized    = false;
     bool     _syncActive     = false;
     bool     _awakenOnlyNotified = false;
-    uint32_t _awakenLastSentMs = 0;
+    uint32_t _awakenNextDueMs = 0;
     uint8_t  _awakenSeq        = 0;
     uint8_t _cmdSeq = 0;
 
@@ -87,8 +87,11 @@ private:
     // decision-maker; this only records which mode an operator put the node in
     // so it can be reported in STATUS and so the stale-sync revert can log what
     // it discarded. Defaults to DYNAMIC on every boot — nothing persists it,
-    // deliberately (see revertTxPowerToBaseline).
-    uint8_t _txPowerMode = BinaryPacket::TX_POWER_MODE_DYNAMIC;
+    // deliberately (see revertTxPowerToBaseline). SF7 defaults DYNAMIC;
+    // higher-SF acceptance profiles default STATIC at the 13 dBm baseline.
+    uint8_t _txPowerMode = NetworkConfig::kDynamicTxPowerDefaultEnabled
+                               ? BinaryPacket::TX_POWER_MODE_DYNAMIC
+                               : BinaryPacket::TX_POWER_MODE_STATIC;
 
     bool _forceRadioAwake = false;
     bool _mcuSleptThisCycle = false;
@@ -118,6 +121,8 @@ private:
     bool _predictedValid = false;
 
     void sendAwakenHandshake();
+    uint32_t awakenJitterMs(uint8_t sequence) const;
+    void scheduleNextAwaken(uint32_t nowMs, bool retryInterval = true);
     SensorSnapshot buildSnapshot() const;
     void handleIncomingCommands();
     bool sendCmdAck(uint8_t cmdType, uint8_t status);

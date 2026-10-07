@@ -18,6 +18,7 @@ from smartfires_edge.packet import (
     PKT_FULL_STATE,
     PKT_GPS,
     PKT_MAGIC,
+    PKT_NETWORK_PROFILE,
     PKT_STATUS,
     PKT_WINDOW_BEGIN,
     PKT_WINDOW_END,
@@ -28,6 +29,7 @@ from smartfires_edge.packet import (
     decode_debug_log,
     decode_full_state,
     decode_gps,
+    decode_network_profile,
     decode_status,
     decode_window_marker,
 )
@@ -103,6 +105,7 @@ class FrameReceiver:
             awaken = None
             cmd_ack = None
             debug_log = None
+            network_profile = None
             window_marker = None
             packets: list[dict] = []
             if pkt_type == PKT_AWAKEN:
@@ -120,6 +123,8 @@ class FrameReceiver:
                 cmd_ack = decode_cmd_ack(raw_payload, rssi)
             elif pkt_type == PKT_DEBUG_LOG:
                 debug_log = decode_debug_log(raw_payload)
+            elif pkt_type == PKT_NETWORK_PROFILE:
+                network_profile = decode_network_profile(raw_payload)
             elif pkt_type in (PKT_WINDOW_BEGIN, PKT_WINDOW_END):
                 window_marker = decode_window_marker(raw_payload, rssi)
 
@@ -139,6 +144,7 @@ class FrameReceiver:
                 "status": status,
                 "cmd_ack": cmd_ack,
                 "debug_log": debug_log,
+                "network_profile": network_profile,
                 "window_marker": window_marker,
                 "packets": packets,
             }

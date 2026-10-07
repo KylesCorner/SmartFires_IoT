@@ -49,8 +49,20 @@ const GAP_BREAK_MS = 60 * 1000;
 // Session timeline strip below the chart.
 const TIMELINE_BUCKETS = 300;
 const TIMELINE_REFRESH_MS = 10 * 1000;
-// Full-rate telemetry is one sample per 750 ms; used to shade activity.
-const SAMPLE_PERIOD_MS = 750;
+// Supplied by the base-announced network profile. Unknown stays null so a
+// pre-announcement dashboard never silently applies SF7's cadence to another
+// profile.
+let samplePeriodMs = null;
+
+function applyNetworkProfile(status) {
+  const period = status?.active?.continuous_sample_period_ms;
+  samplePeriodMs = Number.isFinite(period) && period > 0 ? period : null;
+}
+
+window.addEventListener("smartfires:network-profile", (event) => {
+  applyNetworkProfile(event.detail);
+  refreshTimeline();
+});
 
 const historyCache = new Map(); // "node|metric" -> {fetchedAt, startMs, endMs, points, bucketMs}
 
@@ -450,7 +462,7 @@ async function refreshTimeline() {
     return;
   }
 
-  const expectedPerBucket = data.bucket_ms / SAMPLE_PERIOD_MS;
+  const expectedPerBucket = samplePeriodMs ? data.bucket_ms / samplePeriodMs : null;
   for (const nodeId of nodeIds) {
     const counts = data.nodes[String(nodeId)];
     const row = document.createElement("div");
@@ -471,11 +483,14 @@ async function refreshTimeline() {
       seg.className = "timeline-seg";
       seg.style.left = `${(i / counts.length) * 100}%`;
       seg.style.width = `${Math.max(((j - i) / counts.length) * 100, 0.2)}%`;
-      const fill = Math.min(total / ((j - i) * expectedPerBucket), 1);
-      seg.style.opacity = (0.35 + 0.65 * fill).toFixed(2);
+      const fill = expectedPerBucket
+        ? Math.min(total / ((j - i) * expectedPerBucket), 1)
+        : null;
+      seg.style.opacity = fill === null ? "0.75" : (0.35 + 0.65 * fill).toFixed(2);
       const t0 = formatTimestamp(data.start_ms + i * data.bucket_ms, "epoch-milliseconds");
       const t1 = formatTimestamp(data.start_ms + j * data.bucket_ms, "epoch-milliseconds");
-      seg.title = `Node ${nodeId}: active ${t0} – ${t1}`;
+      const cadence = samplePeriodMs ? `; expected sample period ${samplePeriodMs} ms` : "; sample cadence unknown";
+      seg.title = `Node ${nodeId}: active ${t0} – ${t1}${cadence}`;
       track.appendChild(seg);
       i = j;
     }
@@ -630,6 +645,7 @@ function wireNewSessionButton() {
 
 async function init() {
   renderNav(window.location.pathname);
+  applyNetworkProfile(window.smartfiresNetworkProfile);
   buildMetricCheckboxes();
   buildTimeRangeButtons();
   initChart();

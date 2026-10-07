@@ -3,7 +3,7 @@ name: network-test
 description: End-to-end LoRa-to-base-to-Jetson integration test procedure using current sensor-node firmware.
 category: reference
 status: current
-last_verified: 2026-09-04
+last_verified: 2026-10-07
 source_refs:
   - platformio/platformio.ini
 related_docs:
@@ -33,7 +33,7 @@ pio run -e feather_m0_lora_base --target upload
 pio run -e feather_m0_lora_node_debug --target upload
 ```
 
-Use `feather_m0_lora_node` instead when validating the production SensorTriggered profile. Confirm every network Feather was built with the same `NUM_SLOTS` (currently 5).
+Use `feather_m0_lora_node` instead when validating the production Continuous mode. Confirm the base, every node, and the optional sniffer were built with the same `SMARTFIRES_NETWORK_PROFILE`; matching `NUM_SLOTS=5` alone is not sufficient.
 
 If using a sniffer:
 
@@ -64,17 +64,17 @@ SFDBG_SRC=boot,tdma,radio,packet,duty SFDBG_MIN_LEVEL=I \
 
 ## Expected join sequence
 
-1. The node emits a 12-byte `AWAKEN` and retries every five seconds until it receives assignment.
-2. The base acknowledges `AWAKEN`, assigns a node ID beginning at 2, and sends direct `TIME_SYNC`.
+1. The node emits a 12-byte fire-and-forget `AWAKEN` and retries at the selected 5/7/12/27-second cadence plus bounded jitter until it receives assignment.
+2. The base assigns a node ID beginning at 2 and sends fire-and-forget direct `TIME_SYNC`.
 3. The node adopts the ID and starts its duty cycle.
 4. The base forwards `AWAKEN` to the Jetson; the dashboard records the UID/reset diagnostics.
 5. The node produces telemetry in its assigned slot. The base forwards it and later sends `ACK_SUMMARY` in slot 0.
 
 Useful node log messages include `time_sync_received`, telemetry enqueue/TX events, and `ack_summary_received`. Useful base logs include `awaken_rx`, assignment/sync, `rx_lora`, and `tx_ack_summary_local`.
 
-## Timed-profile expectations
+## Timed-mode expectations
 
-`node_debug` has a nominal 75-second cycle:
+At SF7, `node_debug` has a nominal 75-second cycle:
 
 - 10 seconds sensor warmup;
 - 30 samples at 1-second intervals;
@@ -82,20 +82,23 @@ Useful node log messages include `time_sync_received`, telemetry enqueue/TX even
 - `WINDOW_END`, final TX drain, then roughly 35 seconds standby;
 - `WINDOW_BEGIN` on the next wake.
 
-STATUS is compiled at 15-second cadence, though sleep and queue scheduling affect when it appears on air. A four-node-capacity frame is 4.5 seconds, and the app-layer retry gate is currently 9 seconds.
+SF9/SF10 retain the 30-sample window with 80/90-second cycles. SF12 uses 16 samples as two eight-sample bundles over a 64-second active window and a 150-second cycle. STATUS cadence is 15/30/120/300 seconds, frame length is 4.5/6.5/11/25 seconds, and the app-layer retry gate is 9/13/22/50 seconds for SF7/SF9/SF10/SF12.
 
 ## Validate
 
 Check all of the following:
 
 - Dashboard/base link reports connected.
+- Before the first announcement, the header shows `SF unknown`; within the base's five-second announcement interval it shows the selected identity, including `SF12 · 250 kHz · 4/5 · base` for the SF12 trial.
+- `/api/network_profile` reports the selected ID/fingerprint, `source: base`, and no mismatches. If a sniffer is present, its fingerprint agrees.
 - Node ID is 2 or greater and the same UID keeps its assignment across a new session.
 - BUNDLE rows contain plausible sensor values and increasing session timestamps.
 - STATUS shows GPS/battery validity, heading if valid, retry/fail totals, and TX power.
 - Packet-loss counters stabilize rather than growing continuously.
 - Timed window begin/end state changes match node wake/sleep behavior.
 - Sniffer slot assignment and guard-jitter views match `NUM_SLOTS=5` if enabled.
-- Session data appears beneath the chosen data directory.
+- Sniffer slot width and guards match the selected profile if enabled.
+- `session.json` records the full `network_profile` object and source beside the session data.
 
 ## Control tests
 
@@ -113,11 +116,11 @@ Calibration is not an end-to-end operator test: the generic `/api/command` route
 | Symptom | Check |
 |---|---|
 | No `/dev/smartfires-base` | udev serial match, USB cable, service ownership |
-| Node repeats AWAKEN forever | base powered, antenna/frequency, assignment capacity, matching `NUM_SLOTS` |
+| Node repeats AWAKEN forever | base powered, antenna/frequency, assignment capacity, matching network profile |
 | Assignment but no telemetry | sensor initialization, duty phase, queue logs, sync freshness |
 | Base sees packets but dashboard does not | USB ownership, framing CRC/length failures, edge process logs |
-| Retransmissions grow | base ACK logs, node slot-0 RX, 150 ms wake-ahead, RF conditions |
-| Sniffer timing looks wrong | match `--num-slots` and modem settings; remember RSSI is local to sniffer |
+| Retransmissions grow | base ACK logs, node slot-0 RX, selected wake-ahead, RF conditions |
+| Sniffer timing looks wrong | confirm base/sniffer fingerprints match; remember RSSI is local to sniffer |
 | Reset command appears lost | command is LoRa fire-and-forget; inspect `CMD_ACK`, reboot AWAKEN, and STATUS |
 
-Known limitations during this test are the blocking base `ACK_SUMMARY`/direct-sync slot-overrun risk and the separate native-test repair backlog. Record whether a failure is reproducible on hardware rather than assuming those known items explain it.
+For the SF12 trial, begin at STATIC 13 dBm and record maximum-BUNDLE timing, slot/guard violations, join time, delivery ratio, latency, retries/failures, watchdog resets, and queue behavior before drawing range conclusions. The SF9/SF10/SF12 timing margins are provisional until measured, and a successful one-node test does not replace the planned four-node soak. Record whether every failure is reproducible on hardware.

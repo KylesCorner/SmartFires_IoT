@@ -3,11 +3,12 @@ name: lora-sniffer
 description: Flashing and operating the passive LoRa sniffer with the Jetson dashboard.
 category: reference
 status: current
-last_verified: 2026-10-06
+last_verified: 2026-10-07
 source_refs:
   - platformio/platformio.ini
   - platformio/src/main_lora_sniffer.cpp
   - edge/edge-receiver/src/smartfires_edge/sniffer_service.py
+  - edge/edge-receiver/src/smartfires_edge/web/static/js/sniffer_page.js
 related_docs:
   - jetson-cheatsheet
   - tdma-protocol
@@ -15,7 +16,7 @@ related_docs:
 
 # LoRa sniffer
 
-The `feather_m0_lora_sniffer` target passively receives SmartFires LoRa traffic and writes one NDJSON record per event over native USB at 115200 baud. It does not join the network, transmit acknowledgements, assign nodes, or replace the base.
+The `feather_m0_lora_sniffer` target passively receives SmartFires LoRa traffic and writes one NDJSON record per event over native USB at 115200 baud. It compiles the same `SMARTFIRES_NETWORK_PROFILE` as the base and nodes, explicitly applies that modem tuple, and announces its profile ID/fingerprint and TDMA geometry in the startup `config` event. It does not join, transmit, assign nodes, or replace the base.
 
 ## Flash and inspect
 
@@ -50,12 +51,13 @@ taking down core base-station ingest. During a graceful **New Session** restart,
 the worker observes the shared shutdown event, releases its serial handle, and
 is recreated with a fresh timing anchor in the replacement process.
 
-`--num-slots` must equal the firmware's compiled `NUM_SLOTS`. A wrong value does not affect normal base ingest, but it makes the sniffer's frame/slot timing analysis wrong. Current firmware uses five slots.
+The dashboard normally takes slot count, width, and guards from the base-announced profile. `--num-slots` remains a pre-announcement/legacy fallback. The sniffer's own fingerprint is compared with the active base/override profile; disagreement appears as a profile mismatch and its timing statistics should not be trusted until the fleet is rebuilt consistently.
 
 ## Expected limitations
 
 - A passive receiver can miss frames because of RF conditions, USB interruption, or its own startup; absence in sniffer output is not proof that a transmitter did not send.
 - The sniffer observes over-the-air packets but cannot see USB-only `PKT_DEBUG_LOG` frames.
+- The sniffer cannot observe USB-only `PKT_NETWORK_PROFILE`; it reports its independently compiled identity through NDJSON instead.
 - It does not decrypt or reassemble another protocol; it understands the SmartFires binary header and known packet types.
 - It must use the same frequency and RadioHead modem settings as the deployment.
 - RSSI/SNR are measurements at the sniffer location, not at the base.

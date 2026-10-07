@@ -1,9 +1,9 @@
 // TDMA sniffer timeline: swim-lane canvas + stats table + packet detail.
 //
-// Slot boundaries are derived purely from the most recently anchored event's
-// (wall-clock-ms, session_ms) pair plus the fixed 900ms slot width — see
-// sniffer_service.py for why that's sufficient (every slot boundary repeats
-// every slot_width_ms, so num_slots isn't needed client-side for the grid).
+// Slot boundaries are derived from the most recently anchored event's
+// (wall-clock-ms, session_ms) pair plus the active base-announced profile.
+// Every boundary repeats at slot_width_ms; num_slots is used for frame/owner
+// labels while guard_ms controls the shaded no-transmit bands.
 //
 // The full packet log (including sniffer activity) lives on the main
 // dashboard's Live Log panel now, filterable via the "Sniffer" tab — see
@@ -25,8 +25,6 @@ const MAX_RETAIN_MS = 30 * 60_000;
 // Each step button press moves the view by half the current window.
 const STEP_FRACTION = 0.5;
 
-const SLOT_WIDTH_MS = 900;
-const GUARD_MS = 20;
 const LANE_HEIGHT = 36;
 const HEADER_HEIGHT = 24;
 const SLOT_LABEL_HEIGHT = 20;
@@ -200,6 +198,9 @@ const sniffer = {
   laneOrder: [],         // node_ids in lane order
   lastAnchor: null,      // {wallMs, sessionMs}
   numSlots: null,
+  slotWidthMs: null,
+  guardMs: null,
+  profileKnown: false,
   ws: null,
   notConfigured: false,
   idCounter: 0,
@@ -209,6 +210,22 @@ const sniffer = {
   live: true,
   pausedViewEndMs: null, // set when paused; the timestamp at the canvas's right edge
 };
+
+function applyNetworkProfile(status) {
+  const profile = status?.active;
+  const positiveNumber = (value) => Number.isFinite(value) && value > 0 ? value : null;
+  sniffer.profileKnown = Boolean(profile);
+  sniffer.numSlots = positiveNumber(profile?.num_slots);
+  sniffer.slotWidthMs = positiveNumber(profile?.slot_width_ms);
+  sniffer.guardMs = Number.isFinite(profile?.guard_ms) && profile.guard_ms >= 0
+    ? profile.guard_ms
+    : null;
+}
+
+window.addEventListener("smartfires:network-profile", (event) => {
+  applyNetworkProfile(event.detail);
+  if (snifferActiveTab === "activity") refreshActivityTable();
+});
 
 // The timestamp at the canvas's right edge for this frame/action.
 function currentViewEndMs() {
@@ -327,15 +344,15 @@ function draw() {
   // Also collect each gridline's wall-ms so the label row below can derive
   // which node is expected to transmit in that interval.
   const gridlineWallMs = [];
-  if (sniffer.lastAnchor) {
+  if (sniffer.lastAnchor && sniffer.slotWidthMs !== null && sniffer.guardMs !== null) {
     const { wallMs, sessionMs } = sniffer.lastAnchor;
-    const phaseAnchor = ((wallMs - sessionMs) % SLOT_WIDTH_MS + SLOT_WIDTH_MS) % SLOT_WIDTH_MS;
+    const phaseAnchor = ((wallMs - sessionMs) % sniffer.slotWidthMs + sniffer.slotWidthMs) % sniffer.slotWidthMs;
     const earliest = viewEndMs - windowMs;
-    let t = phaseAnchor + Math.ceil((earliest - phaseAnchor) / SLOT_WIDTH_MS) * SLOT_WIDTH_MS;
-    const guardWidthPx = (GUARD_MS / windowMs) * widthCss;
+    let t = phaseAnchor + Math.ceil((earliest - phaseAnchor) / sniffer.slotWidthMs) * sniffer.slotWidthMs;
+    const guardWidthPx = (sniffer.guardMs / windowMs) * widthCss;
     ctx.strokeStyle = "#3a4049";
     ctx.setLineDash([4, 4]);
-    for (; t <= viewEndMs + SLOT_WIDTH_MS; t += SLOT_WIDTH_MS) {
+    for (; t <= viewEndMs + sniffer.slotWidthMs; t += sniffer.slotWidthMs) {
       gridlineWallMs.push(t);
       const x = xForWallMs(widthCss, viewEndMs, windowMs, t);
       ctx.fillStyle = "rgba(122,130,140,0.08)";
@@ -454,15 +471,15 @@ function draw() {
   // firmware's compile-time slot=(node_id-1)%num_slots assignment.
   ctx.fillStyle = "#15191e";
   ctx.fillRect(0, lanesBottom, widthCss, SLOT_LABEL_HEIGHT);
-  if (sniffer.lastAnchor && sniffer.numSlots) {
+  if (sniffer.lastAnchor && sniffer.numSlots && sniffer.slotWidthMs) {
     const { wallMs, sessionMs } = sniffer.lastAnchor;
-    const pixelsPerSlot = (SLOT_WIDTH_MS / windowMs) * widthCss;
+    const pixelsPerSlot = (sniffer.slotWidthMs / windowMs) * widthCss;
     ctx.fillStyle = "#7a828c";
     ctx.font = "11px sans-serif";
     ctx.textAlign = "center";
     for (const t of gridlineWallMs) {
       const sessionMsAtT = sessionMs + (t - wallMs);
-      const slotIndex = Math.round(sessionMsAtT / SLOT_WIDTH_MS);
+      const slotIndex = Math.round(sessionMsAtT / sniffer.slotWidthMs);
       const slotNumber = ((slotIndex % sniffer.numSlots) + sniffer.numSlots) % sniffer.numSlots;
       const expectedLabel = slotNumber === 0 ? "0" : `${slotNumber + 1}`;
       const x = xForWallMs(widthCss, viewEndMs, windowMs, t) + pixelsPerSlot / 2;
@@ -497,8 +514,17 @@ function onSnifferEvent(ev) {
   if (ev.pkt_type === "TIME_SYNC" && ev.session_ms != null) {
     sniffer.lastAnchor = { wallMs: ev._wallMs, sessionMs: ev.session_ms };
   }
-  if (ev.num_slots) {
+  // Profile authority wins once present. Event fields remain a compatibility
+  // fallback for a staged deployment where the websocket learns geometry
+  // before /api/network_profile becomes available.
+  if (!sniffer.profileKnown && ev.num_slots) {
     sniffer.numSlots = ev.num_slots;
+  }
+  if (!sniffer.profileKnown && ev.slot_width_ms) {
+    sniffer.slotWidthMs = ev.slot_width_ms;
+  }
+  if (!sniffer.profileKnown && ev.guard_ms !== undefined && ev.guard_ms !== null) {
+    sniffer.guardMs = ev.guard_ms;
   }
 }
 
@@ -764,11 +790,12 @@ function initSubnav() {
 // (session_ms, num_slots, node_id) — no new wire data needed.
 
 function frameAndSlotFor(sessionMs, numSlots) {
-  const framePeriodMs = numSlots * SLOT_WIDTH_MS;
+  if (!sniffer.slotWidthMs) return null;
+  const framePeriodMs = numSlots * sniffer.slotWidthMs;
   const framePhase = ((sessionMs % framePeriodMs) + framePeriodMs) % framePeriodMs;
   return {
     frame: Math.floor(sessionMs / framePeriodMs),
-    slot: Math.floor(framePhase / SLOT_WIDTH_MS),
+    slot: Math.floor(framePhase / sniffer.slotWidthMs),
   };
 }
 
@@ -780,10 +807,12 @@ function expectedNodeForSlot(slot) {
 // itself, bare RadioHead frames carry no SmartFires node_id, or we haven't
 // heard a TIME_SYNC yet (no num_slots).
 function slotInfoFor(ev) {
-  if (ev.pkt_type === "TIME_SYNC" || ev.node_id == null || ev.session_ms == null || !sniffer.numSlots) {
+  if (ev.pkt_type === "TIME_SYNC" || ev.node_id == null || ev.session_ms == null || !sniffer.numSlots || !sniffer.slotWidthMs) {
     return null;
   }
-  const { frame, slot } = frameAndSlotFor(ev.session_ms, sniffer.numSlots);
+  const position = frameAndSlotFor(ev.session_ms, sniffer.numSlots);
+  if (!position) return null;
+  const { frame, slot } = position;
   const expected = expectedNodeForSlot(slot);
   return { frame, slot, expected, match: ev.node_id === expected };
 }
@@ -1067,6 +1096,7 @@ async function pollStats() {
 
 function init() {
   renderNav(window.location.pathname);
+  applyNetworkProfile(window.smartfiresNetworkProfile);
   renderLegend();
   resizeCanvas();
   window.addEventListener("resize", resizeCanvas);

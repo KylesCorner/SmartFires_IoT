@@ -6,11 +6,11 @@ This PlatformIO project builds every Feather M0 firmware role and the native Uni
 
 | Environment | Purpose | Important build settings |
 |---|---|---|
-| `feather_m0_lora_base` | LoRa base and native-USB bridge to the Jetson | `LORA_BASE=1`, `NUM_SLOTS=5` |
-| `feather_m0_lora_node` | Production sensor node | SensorTriggered duty cycle, app-layer ACK summary, 15 s STATUS |
-| `feather_m0_lora_node_debug` | Default debug node with log filters | Timed duty cycle, app-layer ACK summary, 15 s STATUS |
-| `feather_m0_lora_node_timed` | Explicit Timed node profile | Timed duty cycle, app-layer ACK summary, 15 s STATUS |
-| `feather_m0_lora_node_hybrid` | Hybrid duty-cycle profile | Hybrid duty cycle, app-layer ACK summary, 15 s STATUS |
+| `feather_m0_lora_base` | LoRa base and native-USB bridge to the Jetson | `LORA_BASE=1`, shared network profile |
+| `feather_m0_lora_node` | Production sensor node | Continuous duty cycle, profile cadence, app-layer ACK summary |
+| `feather_m0_lora_node_debug` | Default debug node with log filters | Timed duty cycle, profile cadence, app-layer ACK summary |
+| `feather_m0_lora_node_timed` | Explicit Timed node profile | Timed duty cycle, profile cadence, app-layer ACK summary |
+| `feather_m0_lora_node_hybrid` | Legacy Hybrid development profile | Hybrid duty cycle; not a supported higher-SF deployment mode |
 | `feather_m0_lora_sniffer` | Passive LoRa sniffer emitting NDJSON over USB | Sniffer-only entrypoint |
 | `native` | Host-side Unity tests | No Arduino hardware |
 
@@ -18,9 +18,9 @@ The project also has isolated `feather_m0_power_*` environments for MCU, I2C, ra
 
 ## Network model
 
-`NUM_SLOTS=5` is shared by the base and all node targets. Slot 0 is the base; the remaining four slots are assignable to nodes. Nodes start unassigned, broadcast `AWAKEN` with a SAMD21 UID hash, then adopt the node ID returned by the base in direct `TIME_SYNC`. The base is node ID/address 1, so assigned sensor IDs begin at 2.
+`SMARTFIRES_NETWORK_PROFILE` is shared by the base, all node targets, and the sniffer. Supported values are 7, 9, 10, and 12; the default is 7. It selects explicit modem registers, five-slot geometry, operational bundle size, sensing/STATUS cadence, reliability timers, and duty timing together. Slot 0 is the base; the remaining four slots are assignable to nodes. Nodes start unassigned, broadcast jittered `AWAKEN` with a SAMD21 UID hash, then adopt the node ID returned by the base in direct `TIME_SYNC`.
 
-Changing `NUM_SLOTS` requires reflashing every network Feather and updating the edge receiver's `DEFAULT_NUM_SLOTS`. Mismatched frame geometry causes collisions and can prevent later nodes from receiving an assignment.
+Changing the selector requires rebuilding and reflashing every network Feather in one maintenance operation. The base announces the active profile to the edge/dashboard; mixed profiles on one carrier are unsupported.
 
 The base talks to the Jetson through native USB CDC (`Serial`) at 115200 baud. A node uses `Serial1` for its SPS30 sensor.
 

@@ -321,10 +321,9 @@ void test_inbound_command_is_not_link_acked() {
   TEST_ASSERT_EQUAL_UINT8(len, got.len);
 }
 
-// The counterpart: ACK_SUMMARY is still acked, because the base does block on
-// it via sendToWait(). Guards against "stop acking commands" being over-applied
-// to every inbound unicast.
-void test_ack_summary_is_still_link_acked() {
+// ACK_SUMMARY is cumulative application state and is never link-acked. At high
+// SF even the RadioHead ACK cannot safely fit inside the scheduled base slot.
+void test_ack_summary_is_not_link_acked() {
   Rig rig;
 
   BinaryPacket::AckSummaryPayload ack = {};
@@ -343,9 +342,7 @@ void test_ack_summary_is_still_link_acked() {
   advanceIntoBaseRxWindow(rig.clock, rig.tdma);
   rig.svc.update();
 
-  TEST_ASSERT_EQUAL_UINT8(1, rig.driver.ackCount);
-  TEST_ASSERT_EQUAL_UINT8(rig.cfg.baseAddr, rig.driver.lastAckTo);
-  TEST_ASSERT_EQUAL_UINT8(11, rig.driver.lastAckId);
+  TEST_ASSERT_EQUAL_UINT8(0, rig.driver.ackCount);
 }
 
 int main() {
@@ -358,7 +355,7 @@ int main() {
   RUN_TEST(test_window_begin_holds_off_a_due_retransmit);
   RUN_TEST(test_repeated_retransmits_are_byte_identical);
   RUN_TEST(test_inbound_command_is_not_link_acked);
-  RUN_TEST(test_ack_summary_is_still_link_acked);
+  RUN_TEST(test_ack_summary_is_not_link_acked);
 
   UNITY_END();
   return 0;

@@ -27,7 +27,7 @@ Jetson Orin Nano running `smartfires-edge`
 
 Each remote unit uses one Feather; there is no ESP32-to-Feather UART split. `Serial1` on a node is used by the SPS30. The base-to-Jetson link uses native USB CDC, not `Serial1`.
 
-The current deployed network geometry is defined once in `platformio/platformio.ini`: `NUM_SLOTS=5`. Slot 0 belongs to the base, so this supports four assigned node IDs. Nodes boot from an identity derived from the SAMD21 UID, broadcast `AWAKEN`, and receive a runtime node ID from the base. Real assigned IDs therefore start at 2; address 1 is the base.
+The fleet-wide radio/timing selection is defined once in `platformio/platformio.ini`: `SMARTFIRES_NETWORK_PROFILE=7` by default, with supported values 7, 9, 10, and 12. All profiles use `NUM_SLOTS=5`; slot 0 belongs to the base, so this supports four assigned node IDs. Nodes boot from an identity derived from the SAMD21 UID, broadcast jittered `AWAKEN`, and receive a runtime node ID from the base. Real assigned IDs therefore start at 2; address 1 is the base.
 
 ## Authority and documentation
 
@@ -51,22 +51,22 @@ When changing behavior:
 
 ## Current runtime facts
 
-- LoRa: 915 MHz, base address/node ID 1, nominal TX power 13 dBm.
-- TDMA: 900 ms slots, 20 ms guard at each edge, 150 ms node RX wake-ahead, and a 22-minute stale-sync timeout.
+- LoRa: 915 MHz, base address/node ID 1, nominal TX power 13 dBm. SF7/SF9/SF10 use 125 kHz; SF12 uses 250 kHz; all use CR 4/5.
+- The default SF7 TDMA geometry is 900 ms slots, 20 ms guards, and 150 ms RX wake-ahead. SF9/SF10/SF12 select progressively longer geometry from `NetworkProfiles.h`; all retain a 22-minute stale-sync timeout.
 - Reliability: node builds use app-layer `ACK_SUMMARY`, an eight-packet pending window, at most three attempts, and 30-second maximum pending age. Steady telemetry is fire-and-forget at the RadioHead link layer; selected control paths still use link ACKs.
 - Packet sizes include the embedded CRC: `AWAKEN` 12 bytes (legacy 9 accepted), `TIME_SYNC` 14, `ACK_SUMMARY` 10, `WINDOW_BEGIN/END` 17, `STATUS` 27, `CMD_CALIBRATE/RESET` 8, `CMD_SET_TX_POWER` 9, `CMD_ACK` 12, and `BUNDLE` up to 195.
-- Active node builds emit `STATUS` every 15 seconds because all current node environments override the 15-minute header fallback.
-- The production node uses SensorTriggered duty cycling. `node_debug` and `node_timed` use Timed duty cycling; `node_hybrid` remains available. A Timed 30-second active window at a 1-second sample interval produces 30 samples, or two complete 15-sample bundles.
+- STATUS cadence is profile-derived: 15/30/120/300 seconds for SF7/SF9/SF10/SF12.
+- The production node uses Continuous duty cycling. `node_debug` and `node_timed` use Timed duty cycling; `node_hybrid` remains a legacy development option. Timed windows always contain two operational bundles: 30 samples at SF7/9/10 and 16 samples at SF12.
 - `CMD_RESET` is implemented end-to-end, including `node_id=0` base reset and the dashboard `/api/node_reset` endpoint. `CMD_CALIBRATE` is intentionally log-and-ACK because the DMP self-calibrates. The generic `/api/command` route is still an echo stub.
 - Per-node TX power control is shipped. The base uses received SNR and STATUS retry/failure counters, while `/api/tx_power` supplies dynamic/static operator control. Thresholds are still untuned; the node clamps commands to 5–13 dBm.
 - The Jetson CLI subcommands are `receive`, `summary`, `visualize`, and `web`; the web default is port 8080. The stable base device is `/dev/smartfires-base`.
-- Possible future work is indexed in `documentation/README.md`. In particular, blocking `sendToWait()` remains on base `ACK_SUMMARY` and direct `TIME_SYNC` paths, and the native PlatformIO suite has known failures described in `Possible_Plans/NATIVE_TEST_REPAIR.md`.
+- Scheduled deployment traffic is fire-and-forget at the RadioHead link layer; assignment/reliability/commands recover through repeated `AWAKEN`/`TIME_SYNC`, cumulative `ACK_SUMMARY`, and `CMD_ACK`. The native PlatformIO suite still has known unrelated failures described in `Possible_Plans/NATIVE_TEST_REPAIR.md`.
 
 ## Repository map
 
 ```text
 platformio/                     Feather firmware and native Unity tests
-  include/config/              authoritative firmware tunables
+  include/config/              authoritative firmware tunables and network profiles
   include/telemetry/           C++ wire format
   src/main.cpp                 role composition and power-test entrypoints
   src/app/                     node/base coordinators
@@ -84,7 +84,7 @@ wind_test_bench/               separate wind-sensor bench firmware
 
 - `native`: host Unity tests.
 - `feather_m0_lora_base`: Feather connected to the Jetson.
-- `feather_m0_lora_node`: production SensorTriggered node.
+- `feather_m0_lora_node`: production Continuous node.
 - `feather_m0_lora_node_debug`: default environment, Timed node with structured monitor filters.
 - `feather_m0_lora_node_timed`, `feather_m0_lora_node_hybrid`: alternate duty-cycle profiles.
 - `feather_m0_lora_sniffer`: passive NDJSON sniffer.
@@ -92,7 +92,7 @@ wind_test_bench/               separate wind-sensor bench firmware
 
 There is no current dummy-node or sensor-probe environment.
 
-Changing `NUM_SLOTS` requires rebuilding and reflashing the base and every node, then matching `DEFAULT_NUM_SLOTS` in the edge config. A mismatch changes the frame period and can prevent additional nodes from ever receiving an assignment.
+Changing `SMARTFIRES_NETWORK_PROFILE` requires rebuilding and reflashing the base, every node, and the passive sniffer as one fleet. The base announcement normally supplies edge/dashboard timing; `DEFAULT_NUM_SLOTS` is only a pre-announcement recovery fallback. Mixed profiles on one carrier are unsupported.
 
 ## Useful non-hardware checks
 

@@ -34,6 +34,10 @@ PKT_DEBUG_LOG = 0x14
 # monitoring. It is not a participant in the control loop — see
 # documentation/Completed_Plans/DYNAMIC_TX_POWER.md.
 PKT_CMD_SET_TX_POWER = 0x15
+# Base -> Jetson only, never sent over LoRa.  This fixed binary announcement
+# lets the edge learn the complete build profile without maintaining a second
+# hardcoded SF table.  Like PKT_DEBUG_LOG it relies on the outer USB frame CRC.
+PKT_NETWORK_PROFILE = 0x16
 
 # sensor_flags bits (SensorSnapshot.h / AGENTS.md): which sensors had a valid
 # reading this sample. When a bit is clear the corresponding fields carry a
@@ -178,6 +182,17 @@ ACK_SUMMARY_PAYLOAD_SIZE = struct.calcsize(ACK_SUMMARY_PAYLOAD_FMT)  # 4
 # planned_sleep_ms and sample_count are only populated on PKT_WINDOW_END.
 WINDOW_MARKER_PAYLOAD_FMT  = "<IIHB"
 WINDOW_MARKER_PAYLOAD_SIZE = struct.calcsize(WINDOW_MARKER_PAYLOAD_FMT)  # 11
+
+# NetworkProfilePayload (base -> Jetson control channel only):
+#   schema_version(u8), profile_id(u8), spreading_factor(u8),
+#   coding_rate_denominator(u8), bandwidth_hz(u32), num_slots(u8),
+#   slot_width_ms(u32), guard_ms(u16), max_bundle_deltas(u8),
+#   continuous_sample_period_ms(u32), timed_sample_period_ms(u32),
+#   status_interval_ms(u32), fingerprint(u32)
+NETWORK_PROFILE_SCHEMA_VERSION = 1
+NETWORK_PROFILE_PAYLOAD_FMT = "<BBBBIBIHBIIII"
+NETWORK_PROFILE_PAYLOAD_SIZE = struct.calcsize(NETWORK_PROFILE_PAYLOAD_FMT)  # 32
+NETWORK_PROFILE_FRAME_PAYLOAD_SIZE = HEADER_SIZE + NETWORK_PROFILE_PAYLOAD_SIZE  # 37
 
 STATUS_LORA_SIZE      = HEADER_SIZE + STATUS_PAYLOAD_SIZE + 1
 LORA_PAYLOAD_SIZE     = HEADER_SIZE + FULL_STATE_SIZE + 1
@@ -686,6 +701,73 @@ def decode_debug_log(raw_lora_payload: bytes) -> Optional[str]:
         return None
 
     return raw_lora_payload[HEADER_SIZE:].decode("utf-8", errors="replace")
+
+
+def decode_network_profile(raw_payload: bytes) -> Optional[dict]:
+    """Decode a base-originated network-profile control announcement.
+
+    This control packet is exactly ``PktHeader + NetworkProfilePayload``.  It
+    has no trailing LoRa CRC because it never goes over LoRa; the enclosing
+    ``AA 55`` USB frame already authenticates every byte with CRC-8.
+    """
+    if len(raw_payload) != NETWORK_PROFILE_FRAME_PAYLOAD_SIZE:
+        return None
+
+    magic, pkt_type, _node_id, _seq, _hdr_flags = struct.unpack_from(
+        HEADER_FMT, raw_payload, 0
+    )
+    if magic != PKT_MAGIC or pkt_type != PKT_NETWORK_PROFILE:
+        return None
+
+    (
+        schema_version,
+        profile_selector,
+        spreading_factor,
+        coding_rate_denominator,
+        bandwidth_hz,
+        num_slots,
+        slot_width_ms,
+        guard_ms,
+        max_bundle_deltas,
+        continuous_sample_period_ms,
+        timed_sample_period_ms,
+        status_interval_ms,
+        fingerprint,
+    ) = struct.unpack_from(NETWORK_PROFILE_PAYLOAD_FMT, raw_payload, HEADER_SIZE)
+
+    if schema_version != NETWORK_PROFILE_SCHEMA_VERSION:
+        return None
+    if profile_selector not in (7, 9, 10, 12) or spreading_factor != profile_selector:
+        return None
+    expected_bandwidth_hz = 250_000 if profile_selector == 12 else 125_000
+    if (
+        bandwidth_hz != expected_bandwidth_hz
+        or coding_rate_denominator != 5
+        or num_slots != 5
+        or slot_width_ms <= 2 * guard_ms
+        or guard_ms <= 0
+        or not 0 < max_bundle_deltas <= BUNDLE_MAX_DELTAS
+        or continuous_sample_period_ms <= 0
+        or timed_sample_period_ms <= 0
+        or status_interval_ms <= 0
+    ):
+        return None
+
+    return {
+        "profile_id": f"sf{profile_selector}",
+        "spreading_factor": spreading_factor,
+        "bandwidth_hz": bandwidth_hz,
+        "coding_rate": f"4/{coding_rate_denominator}",
+        "coding_rate_denominator": coding_rate_denominator,
+        "num_slots": num_slots,
+        "slot_width_ms": slot_width_ms,
+        "guard_ms": guard_ms,
+        "max_bundle_deltas": max_bundle_deltas,
+        "continuous_sample_period_ms": continuous_sample_period_ms,
+        "timed_sample_period_ms": timed_sample_period_ms,
+        "status_interval_ms": status_interval_ms,
+        "fingerprint": f"{fingerprint:08x}",
+    }
 
 
 def decode_full_state(raw_lora_payload: bytes, rssi: Optional[int] = None) -> Optional[dict]:

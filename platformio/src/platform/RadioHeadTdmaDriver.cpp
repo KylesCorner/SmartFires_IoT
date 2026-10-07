@@ -42,6 +42,20 @@ bool RadioHeadTdmaDriver::begin() {
     return false;
   }
 
+  // Program the complete modem tuple explicitly. RadioHead's SF12 canned
+  // choice uses BW125 and CR 4/8, which does not match the selected SF12
+  // profile. RegModemConfig1: selected bandwidth + CR4/5 +
+  // explicit header. RegModemConfig2: selected SF + payload CRC. Config3:
+  // low-data-rate optimization only for the profiles that require it.
+  const RH_RF95::ModemConfig modem = {
+      NetworkProfiles::sx127xModemConfig1(NetworkProfiles::kActiveProfile),
+      static_cast<uint8_t>((NetworkConfig::kSpreadingFactor << 4) |
+                           (NetworkConfig::kPayloadCrc ? 0x04u : 0x00u)),
+      static_cast<uint8_t>(NetworkConfig::kLowDataRateOptimization ? 0x08u
+                                                                   : 0x00u)};
+  _rf95.setModemRegisters(&modem);
+  _rf95.setPreambleLength(NetworkConfig::kPreambleSymbols);
+
   _rf95.setTxPower(_cfg.txPowerDbm, false);
   _manager.setRetries(_cfg.retries);
   _manager.setTimeout(_cfg.timeoutMs);
@@ -96,10 +110,11 @@ bool RadioHeadTdmaDriver::send(const uint8_t *data,
   // may well have finished transmitting despite a missed TX-done interrupt —
   // so it's logged, not treated as send failure; `queued` (whether RadioHead
   // accepted the packet for transmission at all) is the return value.
-  if (queued && !_manager.waitPacketSent(NetworkConfig::kSendTxWaitMs)) {
+  const uint16_t waitMs = NetworkConfig::txBudgetMs(len);
+  if (queued && !_manager.waitPacketSent(waitMs)) {
     LOG_WARN("radio", "send_tx_timeout to=%u len=%u timeout_ms=%u",
              static_cast<unsigned int>(to), static_cast<unsigned int>(len),
-             static_cast<unsigned int>(NetworkConfig::kSendTxWaitMs));
+             static_cast<unsigned int>(waitMs));
   }
 
   return queued;

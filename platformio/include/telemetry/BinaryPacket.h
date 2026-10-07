@@ -32,6 +32,9 @@
 //
 // UART base frame — base -> Jetson (variable):
 //   [0xAA][0x55][len:u8][rssi:i8][LoRa payload][crc8]
+//   PKT_NETWORK_PROFILE uses this same envelope with rssi=0 and a 37-byte
+//   [PktHeader:5][NetworkProfilePayload:32] control payload. It has no inner
+//   CRC because it never traverses LoRa; the outer UART CRC covers it.
 //
 // CRC: CRC-8/MAXIM (polynomial 0x31), covers len byte + all data bytes.
 
@@ -73,6 +76,10 @@ enum PktType : uint8_t {
     // to the locally-known-safe range, and reports the applied value back in
     // StatusPayload::tx_power_dbm. Acked with the existing PKT_CMD_ACK.
     PKT_CMD_SET_TX_POWER = 0x15,
+    // Base -> Jetson only, never sent over LoRa. Announces the complete
+    // compile-time network profile used by the radio fleet. Like DEBUG_LOG,
+    // the outer UART frame supplies integrity, so there is no inner CRC.
+    PKT_NETWORK_PROFILE  = 0x16,
 };
 
 struct __attribute__((packed)) PktHeader {
@@ -109,6 +116,26 @@ struct __attribute__((packed)) AwakenPayload {
     uint8_t  reset_cause;   // raw PM->RCAUSE.reg from this boot (WDT/BOD/POR/...)
     uint8_t  hang_zone;     // HangZone breadcrumb (platform/ResetDiagnostics.h);
                             // 0 = ZONE_UNKNOWN when not a WDT reset or breadcrumb invalid
+};
+
+// Versioned base -> Jetson network identity. Keep this data-only and explicit:
+// the Jetson must learn timing/cadence from the flashed base rather than from a
+// second hardcoded SF table. Multi-byte fields are little-endian on the current
+// SAMD21 target and in the Python decoder's packed format.
+struct __attribute__((packed)) NetworkProfilePayload {
+    uint8_t  schema_version;
+    uint8_t  profile_id;
+    uint8_t  spreading_factor;
+    uint8_t  coding_rate_denominator;  // 5 means 4/5
+    uint32_t bandwidth_hz;
+    uint8_t  num_slots;
+    uint32_t slot_width_ms;
+    uint16_t guard_ms;
+    uint8_t  max_bundle_deltas;
+    uint32_t continuous_sample_period_ms;
+    uint32_t timed_sample_period_ms;
+    uint32_t status_interval_ms;
+    uint32_t fingerprint;
 };
 
 // Carried by PKT_WINDOW_BEGIN and PKT_WINDOW_END — the Timed duty-cycle active
@@ -277,6 +304,8 @@ static constexpr uint8_t DELTA_FLAG_PM10_CLAMPED     = 0x40;
 
 static_assert(sizeof(PktHeader)           ==  5, "PktHeader must be 5 bytes");
 static_assert(sizeof(AwakenPayload)       ==  6, "AwakenPayload must be 6 bytes");
+static_assert(sizeof(NetworkProfilePayload) == 32,
+              "NetworkProfilePayload must be 32 bytes");
 static_assert(sizeof(WindowMarkerPayload) == 11, "WindowMarkerPayload must be 11 bytes");
 static_assert(sizeof(FullStatePayload)    == 20, "FullStatePayload must be 20 bytes");
 static_assert(sizeof(StatusPayload)       == 21, "StatusPayload must be 21 bytes");
@@ -321,6 +350,8 @@ static constexpr size_t kFullStateLoRaSize =
 static constexpr size_t kMaxBundleLoRaSize =
     sizeof(PktHeader) + sizeof(FullStatePayload) + 1 +
     kBundleMaxDeltas * sizeof(DeltaPayload) + 1;                        // 195
+static constexpr size_t kNetworkProfileUartPayloadSize =
+    sizeof(PktHeader) + sizeof(NetworkProfilePayload);                  //  37
 
 // ---------- CRC-8/MAXIM (polynomial 0x31) ----------
 
@@ -334,6 +365,25 @@ inline uint8_t crc8(const uint8_t* data, size_t len) {
         }
     }
     return crc;
+}
+
+// ---------- encode: base -> Jetson NETWORK_PROFILE control payload ----------
+
+inline uint8_t encodeNetworkProfilePayload(
+    uint8_t node_id, uint8_t seq,
+    const NetworkProfilePayload& profile,
+    uint8_t* buf, size_t buf_size)
+{
+    if (buf_size < kNetworkProfileUartPayloadSize) return 0;
+    PktHeader hdr;
+    hdr.magic    = PKT_MAGIC;
+    hdr.pkt_type = PKT_NETWORK_PROFILE;
+    hdr.node_id  = node_id;
+    hdr.seq      = seq;
+    hdr.flags    = 0;
+    memcpy(buf, &hdr, sizeof(PktHeader));
+    memcpy(buf + sizeof(PktHeader), &profile, sizeof(NetworkProfilePayload));
+    return static_cast<uint8_t>(kNetworkProfileUartPayloadSize);
 }
 
 // ---------- encode: raw LoRa AWAKEN payload (6 bytes) ----------

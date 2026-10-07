@@ -3,7 +3,7 @@ name: documentation-index
 description: Table of contents and implementation-status ledger for documentation/.
 category: index
 status: current
-last_verified: 2026-10-06
+last_verified: 2026-10-07
 related_docs:
   - software-design
 ---
@@ -61,7 +61,6 @@ Scoped work awaiting implementation and/or acceptance. The previously parked bac
 | Document | Scope |
 |---|---|
 | [`Pending_Plans/MULTI_DAY_SESSION_AND_RESTART_RECOVERY.md`](Pending_Plans/MULTI_DAY_SESSION_AND_RESTART_RECOVERY.md) | Host implementation is complete; deployed-Jetson boot, power-cycle, USB-delay, and long-run acceptance remain |
-| [`Pending_Plans/MULTI_SF_NETWORK_PROFILES.md`](Pending_Plans/MULTI_SF_NETWORK_PROFILES.md) | Shared SF7/SF9/SF10/SF12 build profiles covering modem, TDMA, bundle, sensing, reliability, edge synchronization, and validation |
 
 ## Possible plans (deferred)
 
@@ -90,6 +89,7 @@ These are deliberately parked ideas, risks, and validation tasks. They are conci
 | [`Completed_Plans/JETSON_CLI_AND_COMMAND_SYSTEM.md`](Completed_Plans/JETSON_CLI_AND_COMMAND_SYSTEM.md) | Earlier CLI/command design (not every proposed command shipped) |
 | [`Completed_Plans/LINK_STATS_PACKET_PLAN.md`](Completed_Plans/LINK_STATS_PACKET_PLAN.md) | STATUS retransmit/failure counters |
 | [`Completed_Plans/MCU_DUTY_CYCLE_CHANGELOG.md`](Completed_Plans/MCU_DUTY_CYCLE_CHANGELOG.md) | Review of the initial RTC standby change |
+| [`Completed_Plans/MULTI_SF_NETWORK_PROFILES.md`](Completed_Plans/MULTI_SF_NETWORK_PROFILES.md) | Shared SF7/SF9/SF10/SF12 firmware, sniffer, and edge profile system; higher-SF hardware acceptance remains provisional |
 | [`Completed_Plans/NETWORK_RELIABILITY_NOTES.md`](Completed_Plans/NETWORK_RELIABILITY_NOTES.md) | Reliability investigation notes |
 | [`Completed_Plans/ORIENTATION_CALIBRATION_PLAN.md`](Completed_Plans/ORIENTATION_CALIBRATION_PLAN.md) | Orientation/calibration concept |
 | [`Completed_Plans/PERSISTENT_NODE_REGISTRY.md`](Completed_Plans/PERSISTENT_NODE_REGISTRY.md) | Jetson UID/node correlation persistence and patched AWAKEN forwarding |

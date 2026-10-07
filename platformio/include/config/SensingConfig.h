@@ -26,6 +26,7 @@
 //
 // Data only — no logic, no driver includes.
 
+#include "config/NetworkProfiles.h"
 #include "interfaces/ISensor.h"
 #include "power/DutyCycleController.h"
 #include "telemetry/BinaryPacket.h"
@@ -86,12 +87,17 @@ constexpr uint32_t kMinMcuStandbyMs = 250;
 // sleeping is better than burning the window's power budget waiting — the base
 // then falls back to BaseConfig::kAckSummaryNodeSilenceMs to notice the node is
 // gone without ever seeing its WINDOW_END.
-constexpr uint32_t kMaxTxDrainBeforeStandbyMs = 5000;
+constexpr uint32_t kMaxTxDrainBeforeStandbyMs =
+    NetworkProfiles::kActiveProfile.maxTxDrainBeforeStandbyMs;
 
 // Samples in one full PKT_BUNDLE: the FullState reference plus its deltas.
 // PacketHandler encodes a bundle every time this many samples have accumulated.
 constexpr uint32_t kSamplesPerBundle =
-    static_cast<uint32_t>(BinaryPacket::kBundleMaxDeltas) + 1u;   // 15
+    static_cast<uint32_t>(
+        NetworkProfiles::kActiveProfile.maxBundleDeltas) + 1u;
+static_assert(kSamplesPerBundle <=
+                  static_cast<uint32_t>(BinaryPacket::kBundleMaxDeltas) + 1u,
+              "operational bundle size exceeds the wire-format ceiling");
 
 // ---------------------------------------------------------------------------
 // Continuous profile
@@ -108,7 +114,8 @@ constexpr DutyCycleMode kContinuousMode =
 constexpr uint32_t kContinuousMinSleepMs = 0;
 constexpr uint32_t kContinuousMaxWakeMs = 0;
 constexpr uint32_t kContinuousActiveSampleMs = 0;
-constexpr uint32_t kContinuousSamplePeriodMs = 750;
+constexpr uint32_t kContinuousSamplePeriodMs =
+    NetworkProfiles::kActiveProfile.continuousSamplePeriodMs;
 constexpr uint32_t kContinuousWarmupMs = 10000;
 constexpr uint32_t kContinuousCyclePeriodMs = 0;
 constexpr uint32_t kContinuousMinStandbyMs = 0;
@@ -161,7 +168,8 @@ constexpr DutyCycleMode kTimedMode =
 
 constexpr uint32_t kTimedMinSleepMs = 0;
 constexpr uint32_t kTimedMaxWakeMs = 1000;
-constexpr uint32_t kTimedSamplePeriodMs = 1000;
+constexpr uint32_t kTimedSamplePeriodMs =
+    NetworkProfiles::kActiveProfile.timedSamplePeriodMs;
 constexpr uint32_t kTimedWarmupMs = 10000;
 
 // Whole bundles the active window is sized to produce. The window always runs
@@ -170,13 +178,15 @@ constexpr uint32_t kTimedWarmupMs = 10000;
 // so expressing the window as a whole number of bundles means the hold normally
 // has nothing to wait for and the overrun is zero.
 //
-// Deriving this from kSamplesPerBundle rather than writing 30000 by hand is
-// deliberate: a bare constant silently desynchronises the moment
-// BinaryPacket::kBundleMaxDeltas or kTimedSamplePeriodMs changes, and a
-// desynchronised window means every window ends on a runt bundle again.
+// The selected network profile supplies this value and the assertion below
+// keeps it synchronized with the operational bundle cap and sample period.
 constexpr uint32_t kTimedBundlesPerWindow = 2;
 constexpr uint32_t kTimedActiveSampleMs =
-    kTimedBundlesPerWindow * kSamplesPerBundle * kTimedSamplePeriodMs;  // 30000
+    NetworkProfiles::kActiveProfile.timedActiveSampleMs;
+static_assert(kTimedActiveSampleMs ==
+                  kTimedBundlesPerWindow * kSamplesPerBundle *
+                      kTimedSamplePeriodMs,
+              "profile timed window must contain exactly two bundles");
 
 // Ceiling on how far past kTimedActiveSampleMs the full-bundle hold may run.
 // Only reachable when the sample tick is being starved (a wedged sensor, a
@@ -185,7 +195,7 @@ constexpr uint32_t kTimedActiveSampleMs =
 // worth of samples is the natural bound — needing more than that means the tick
 // is not merely jittering.
 constexpr uint32_t kTimedActiveOverrunMaxMs =
-    kSamplesPerBundle * kTimedSamplePeriodMs;                          // 15000
+    kSamplesPerBundle * kTimedSamplePeriodMs;
 
 // Fixed wake-to-wake period. The standby is the remainder after warmup, the
 // active window (including any overrun) and the post-close TX drain have taken
@@ -194,11 +204,10 @@ constexpr uint32_t kTimedActiveOverrunMaxMs =
 // is what makes the base's return-time prediction (WindowMarkerPayload's
 // planned_sleep_ms) meaningful and keeps cycles comparable across a session.
 //
-// 10 s warmup + 30 s window + 35 s standby. The standby matches what shipped
-// before the full-bundle hold, so the power profile in POWER_MEASURMENTS.md
-// still applies; the window grew by 5 s (25 -> 30) to reach the second bundle
-// boundary.
-constexpr uint32_t kTimedCyclePeriodMs = 75000;
+// Each profile budgets a whole-bundle window and enough cycle time for sensor
+// warmup, bounded overrun, and a real standby interval.
+constexpr uint32_t kTimedCyclePeriodMs =
+    NetworkProfiles::kActiveProfile.timedCyclePeriodMs;
 
 // Floor on the derived standby, so an active window that overruns badly cannot
 // collapse the sleep to nothing (or below kMinMcuStandbyMs, where standby stops

@@ -1,10 +1,11 @@
 ---
 name: packet-reliability
-description: StrictLinkAck vs AppLayerAckSummary reliability modes, retry gating, ACK_SUMMARY, duty-cycled-node ack deferral, and the waitPacketSent() hang risk.
+description: App-layer ACK summaries, profile-scaled retry gating, duty-cycled-node ACK deferral, and fire-and-forget control recovery.
 category: architecture
 status: current
-last_verified: 2026-09-04
+last_verified: 2026-10-07
 source_refs:
+  - platformio/include/config/NetworkProfiles.h
   - platformio/include/config/NetworkConfig.h
   - platformio/include/config/BaseConfig.h
   - platformio/include/radio/TdmaConfig.h
@@ -22,7 +23,7 @@ related_docs:
 
 # Packet reliability
 
-SmartFires supports two telemetry reliability modes. Current node environments compile `AppLayerAckSummary` (mode 1); `StrictLinkAck` (mode 0) remains available for diagnostics and compatibility.
+Every selected deployment profile uses `AppLayerAckSummary`. The legacy `StrictLinkAck` path remains in the type/config surface for diagnostics and compatibility, but it is not selected by the SF7/SF9/SF10/SF12 profiles.
 
 ## Mode comparison
 
@@ -35,7 +36,7 @@ SmartFires supports two telemetry reliability modes. Current node environments c
 | Completion signal | Link ACK | Base `ACK_SUMMARY` |
 | Retransmission | RadioHead retry burst | Later node slot, ACK-paced |
 
-Both modes still wait for the local radio to finish transmitting with a bounded timeout. “Fire-and-forget” means no remote link acknowledgement, not asynchronous access to the SX1276.
+Both modes still wait for the local radio to finish transmitting with a bounded, actual-length timeout. “Fire-and-forget” means no remote link acknowledgement, not asynchronous access to the SX1276.
 
 ## Current app-layer path
 
@@ -56,51 +57,49 @@ Only `BUNDLE`, `STATUS`, and `FULL_STATE` enter the pending reliability window. 
 | TX queue depth | 8, drop oldest |
 | Pending window depth | 8 |
 | Maximum total attempts | 3 |
-| Maximum pending age | 30 s |
+| Maximum pending age | SF7 30 s; SF9 40 s; SF10 70 s; SF12 150 s |
 | Minimum retry gap | 2 s |
 | Fresh-traffic holdoff | 2 s |
-| Expected ACK interval | one frame = 4.5 s |
-| Retry wait | clamp(`2 * 4.5 s`, 4.5–10 s) = 9 s |
+| Expected ACK interval | one selected-profile frame: 4.5 / 6.5 / 11 / 25 s |
+| Retry wait | two frames: 9 / 13 / 22 / 50 s |
 
 When the pending window is full, the service evicts an eligible stale/retry entry according to its bounded policy rather than growing memory. Counters record queue drops, retry attempts, failures, and acknowledgements; lifetime retransmit/fail totals later ride in STATUS.
 
 Retransmission selection normally gets priority before fresh queue traffic, but only one retry may be attempted per TDMA slot. A queued `WINDOW_BEGIN` preempts that retry so the base first learns that a sleeping node is awake and can release its deferred acknowledgement. Fresh packets can follow if slot budget remains.
 
-The loop caps each update at three sends. A full bundle consumes a conservative 340 ms budget, so only two maximum bundles fit the 860 ms usable window even though smaller packets may reach the cap.
+The loop caps each update at three sends. Each candidate is admitted only if its calculated selected-modem airtime plus completion margin fits before the trailing guard. The operational maximum is 15 samples for SF7/SF9/SF10 and eight samples for SF12; the wire decoder ceiling remains 15.
 
 ## ACK summary meaning
 
 `ack_base_seq` acknowledges every sequence through that value in modulo-256 order. Bit `i` in the 16-bit `ack_mask` acknowledges `ack_base_seq + 1 + i`. The base coalesces unchanged state, paces summaries by at least 25 ms, and rotates across dirty nodes.
 
-The base uses blocking `sendToWait()` for `ACK_SUMMARY`; the node manually sends the corresponding RadioHead ACK. This is still a known slot-overrun risk because RadioHead may wait through four 250 ms attempts. A deferred hardening option is recorded in `Possible_Plans/BASE_SLOT_OVERRUN_FIX.md`.
+The base sends `ACK_SUMMARY` fire-and-forget. Its cumulative state is repeated while dirty, so loss delays acknowledgement but does not trigger a blocking RadioHead retry burst in slot 0.
 
 ## Duty-cycled acknowledgement deferral
 
-A Timed node announces sleep with `WINDOW_END`. The base retains dirty ACK state but stops attempting summaries while the node is known asleep. `WINDOW_BEGIN` re-enables delivery. If `WINDOW_END` is lost, silence for two frames (9 seconds with current geometry) activates the same deferral so the base does not repeatedly block on an unreachable receiver.
+A Timed node announces sleep with `WINDOW_END`. The base retains dirty ACK state but stops attempting summaries while the node is known asleep. `WINDOW_BEGIN` re-enables delivery. If `WINDOW_END` is lost, silence for two selected-profile frames activates the same deferral.
 
 Losing `WINDOW_BEGIN` is recoverable: the next retransmitted telemetry frame proves the node is awake and can provoke a fresh summary. Window markers themselves are never acknowledged or retransmitted.
 
 ## Control-packet ACK rules
 
-- Node `AWAKEN` uses `sendToWait()`; the base manually link-ACKs only this node-to-base type.
-- Direct assignment `TIME_SYNC` uses `sendToWait()`; the node manually link-ACKs direct sync.
+- Node `AWAKEN` is fire-and-forget and repeats at the profile cadence with UID/sequence-derived jitter until direct assignment arrives.
+- Direct assignment `TIME_SYNC` is fire-and-forget; a missed response leaves the node unassigned, so it asks again.
 - Periodic broadcast `TIME_SYNC` is fire-and-forget and cannot be link-ACKed.
-- `ACK_SUMMARY` uses `sendToWait()`; the node manually link-ACKs it.
+- `ACK_SUMMARY` is fire-and-forget and cumulative.
 - Base-to-node commands are fire-and-forget. Nodes do not link-ACK them; they return `CMD_ACK` at the application layer.
 - Normal `CMD_ACK` is queued for the node's slot and does not enter the telemetry pending window. Reset ACK is sent immediately without link ACK so it precedes state flush/reboot.
 
-Both base and node call radio receive with `autoAck=false`; all link ACK behavior is explicit by packet type.
+Both base and node call radio receive with `autoAck=false`. Scheduled deployment paths do not manually generate RadioHead link ACKs.
 
 ## Failure and recovery behavior
 
 - Before initial sync or after 22 minutes without fresh sync, TDMA/radio gating becomes permissive so a node cannot lock itself out of recovery.
-- On stale sync, a node also restores TX power to the 13 dBm DYNAMIC baseline.
+- On stale sync, a node restores TX power to 13 dBm and returns to the selected profile's default mode: DYNAMIC for SF7, STATIC for SF9/SF10/SF12.
 - A full queue drops the oldest queued item. A full pending window remains bounded and accounts for evictions/failures.
 - App-layer frames expire by age or attempts even if no summary arrives.
 - Base command sends retry only when the local radio refuses to accept the frame, not because the sleeping/remote node failed to link-ACK.
 
 ## Remaining risks
 
-RadioHead's historical unbounded `waitPacketSent()` path could hang if a TX-done interrupt edge was missed. The SmartFires driver wraps local send/ack completion with bounded waits and the firmware watchdog supplies a final recovery layer. The remaining design risk is time spent in remote-ACK `sendToWait()` on base `ACK_SUMMARY` and direct sync paths, not command delivery.
-
-The native test suite currently has unrelated known failures. Hardware validation must cover loss bursts, sequence wraparound, a sleeping Timed node, missing window markers, stale sync, and base slot boundaries.
+RadioHead's historical unbounded `waitPacketSent()` path could hang if a TX-done interrupt edge were missed. Deployment sends use bounded, actual-length completion waits and avoid scheduled `sendToWait()` transactions; the watchdog remains a final recovery layer. The higher-SF margins, retry timing, jittered simultaneous joins, loss bursts, sequence wraparound, sleeping Timed nodes, missing window markers, stale sync, and base slot boundaries still require hardware validation.

@@ -186,6 +186,11 @@ def create_app(
         """Current ingest session id, for display next to the clock in the top bar."""
         return live_state.session_info()
 
+    @app.get("/api/network_profile")
+    def network_profile() -> dict:
+        """Active base-announced or recovery-override network identity."""
+        return live_state.network_profile_snapshot()
+
     # ------------------------------------------------------------------
     # Data API
     # ------------------------------------------------------------------

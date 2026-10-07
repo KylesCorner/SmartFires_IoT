@@ -80,34 +80,10 @@ bool decodeHeader(const uint8_t *payload,
   return hdrOut.magic == BinaryPacket::PKT_MAGIC;
 }
 
-// Conservative slot-budget estimates to prevent crossing slot boundaries.
-// Values include airtime plus software/radio overhead margin. Named
-// constants live in config/NetworkConfig.h (single source, also used by its
-// slotWidthMs static_assert) rather than as magic numbers here.
+// Actual-length slot budget: selected-modem airtime (including RadioHead's
+// four-byte header) plus the profile's bounded completion/software margin.
 uint16_t estimateTxBudgetMs(const uint8_t *payload, uint8_t len) {
-  if (!payload || len < sizeof(BinaryPacket::PktHeader)) {
-    return NetworkConfig::kDefaultTxBudgetMs;
-  }
-
-  BinaryPacket::PktHeader hdr;
-  memcpy(&hdr, payload, sizeof(BinaryPacket::PktHeader));
-
-  if (hdr.magic != BinaryPacket::PKT_MAGIC) {
-    return NetworkConfig::kDefaultTxBudgetMs;
-  }
-
-  switch (hdr.pkt_type) {
-  case BinaryPacket::PKT_BUNDLE:
-    return NetworkConfig::kBundleTxBudgetMs;
-  case BinaryPacket::PKT_STATUS:
-    return NetworkConfig::kStatusTxBudgetMs;
-  case BinaryPacket::PKT_AWAKEN:
-    return NetworkConfig::kAwakenTxBudgetMs;
-  case BinaryPacket::PKT_FULL_STATE:
-    return NetworkConfig::kDefaultTxBudgetMs;
-  default:
-    return NetworkConfig::kDefaultTxBudgetMs;
-  }
+  return (!payload || len == 0) ? 0 : NetworkConfig::txBudgetMs(len);
 }
 
 } // namespace
@@ -206,7 +182,11 @@ bool TdmaRadioService::sendAwakenHandshake(const uint8_t *payload, uint8_t len) 
     return false;
   }
 
-  const bool ok = _driver.sendToWait(payload, len, _cfg.baseAddr);
+  // AWAKEN is an application request, not a link-ACK transaction. A node
+  // repeats it until the base's direct TIME_SYNC response arrives. Keeping it
+  // fire-and-forget prevents a RadioHead retry burst from crossing TDMA slots,
+  // which is mandatory at the longer-airtime profiles.
+  const bool ok = _driver.send(payload, len, _cfg.baseAddr);
   _radioAsleep = false;
 
   if (!ok) {
@@ -214,9 +194,9 @@ bool TdmaRadioService::sendAwakenHandshake(const uint8_t *payload, uint8_t len) 
   }
 
   LOG_INFO("radio",
-           "awaken_direct_send pkt=%s seq=%u len=%u link_ack=%s ok=%u",
+           "awaken_direct_send pkt=%s seq=%u len=%u link_ack=OFF ok=%u",
            pktTypeName(hdr.pkt_type), static_cast<unsigned int>(hdr.seq),
-           static_cast<unsigned int>(len), ok ? "OK" : "NO", ok ? 1 : 0);
+           static_cast<unsigned int>(len), ok ? 1 : 0);
 
   return ok;
 }
@@ -803,21 +783,16 @@ void TdmaRadioService::checkIncomingTimeSync() {
   while (_driver.available()) {
     ITdmaRadioDriver::ReceivedPacket packet;
 
-    // autoAck=false: letting RadioHead ack automatically routes every
+    // autoAck=false: all scheduled deployment traffic is application-level
+    // fire-and-forget. Letting RadioHead ack automatically routes every
     // unicast receipt (TIME_SYNC-direct, ACK_SUMMARY, CMD_CALIBRATE/RESET/
     // SET_TX_POWER) through RHReliableDatagram::acknowledge(), which calls the
     // no-timeout overload of waitPacketSent() — a missed DIO0 TX-done interrupt
     // there hangs the whole node with no recovery (confirmed in the field: see
     // documentation/Current_Architecture/PACKET_RELIABILITY.md). Two of those
-    // types still want an ack, since the base blocks on it via sendToWait()
-    // — so those branches below call _driver.acknowledge()
-    // itself once it's confirmed the packet is genuinely unicast and worth
-    // acking, using the bounded-wait implementation documented on
-    // ITdmaRadioDriver::acknowledge() (waits for its own ACK to finish
-    // transmitting, capped by NetworkConfig::kAckTxWaitMs, so it can't hang
-    // *or* get silently aborted by a sleep() call racing an in-flight send).
-    // This matches what SmartFiresBaseApp already does for PKT_AWAKEN on the
-    // base side.
+    // call through an ACK transmission in the base's slot. TIME_SYNC is
+    // repeated, ACK_SUMMARY is cumulative and repeated when needed, and
+    // commands use PKT_CMD_ACK from the node's own slot.
     if (!_driver.receive(packet, /*autoAck=*/false)) {
       LOG_WARN("radio", "receive_failed");
       return;
@@ -839,15 +814,6 @@ void TdmaRadioService::checkIncomingTimeSync() {
     BinaryPacket::AckSummaryPayload ack = {};
 
     if (isTimeSyncPacket(packet, sessionId, sessionMs, assignedNodeId)) {
-      // Only the direct, AWAKEN-triggered TIME_SYNC reply (SmartFiresBaseApp::
-      // sendDirectTimeSync(), unicast, sendToWait()) wants an ACK back. The
-      // periodic broadcast (RH_BROADCAST_ADDRESS, fire-and-forget) must never
-      // get one — every node on the channel would ack the same broadcast at
-      // once and collide with each other.
-      if (packet.to != ITdmaRadioDriver::kBroadcastAddress) {
-        _driver.acknowledge(packet.from, packet.id);
-      }
-
       if (assignedNodeId != 0 && !applyAssignedNodeId(assignedNodeId)) {
         LOG_WARN("radio", "sync_ignore node=%u reason=assignment_apply_failed",
                  static_cast<unsigned int>(assignedNodeId));
@@ -868,11 +834,6 @@ void TdmaRadioService::checkIncomingTimeSync() {
     }
 
     if (_cfg.enableAppReliability && isAckSummaryPacket(packet, ack)) {
-      // ACK_SUMMARY is always sent unicast (never broadcast), so no
-      // packet.to check is needed here unlike the TIME_SYNC branch above.
-      // SmartFiresBaseApp::sendAckSummary() blocks on this via sendToWait().
-      _driver.acknowledge(packet.from, packet.id);
-
       _ackSummaryCount++;
 
       LOG_INFO("radio",

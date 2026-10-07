@@ -15,6 +15,7 @@ setup(
     install_requires=[
         "pyserial>=3.5", "minimalmodbus>=2.1", "numpy>=1.24",
         "geomag>=0.9.2015", "fastapi>=0.110", "uvicorn>=0.29",
+        "websockets>=12.0",
     ],
     entry_points={
         "console_scripts": ["smartfires-edge=smartfires_edge.main:main"],

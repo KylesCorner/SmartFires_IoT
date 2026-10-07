@@ -138,7 +138,7 @@ bool SmartFiresNodeApp::begin() {
 
   // Broadcast AWAKEN immediately — sensors stay idle until TIME_SYNC arrives.
   sendAwakenHandshake();
-  _awakenLastSentMs = _clock.millis();
+  scheduleNextAwaken(_clock.millis());
 
   LOG_INFO("app", "waiting_for_time_sync awaken_interval_ms=%lu",
            static_cast<unsigned long>(kAwakenIntervalMs));
@@ -209,6 +209,9 @@ void SmartFiresNodeApp::update() {
   } else if (!hasFreshSync && _syncActive) {
     _syncActive = false;
     _awakenOnlyNotified = false;
+    // Nodes discover stale sync at nearly the same profile-derived deadline.
+    // Spread their first recovery request so a whole fleet does not collide.
+    scheduleNextAwaken(_clock.millis(), /*retryInterval=*/false);
 
     LOG_WARN("tdma", "time_sync_lost_or_stale resuming_awaken_retry=1");
 
@@ -231,9 +234,9 @@ void SmartFiresNodeApp::update() {
   if (!hasFreshSync) {
     const uint32_t now = _clock.millis();
 
-    if (now - _awakenLastSentMs >= kAwakenIntervalMs) {
+    if (static_cast<int32_t>(now - _awakenNextDueMs) >= 0) {
       sendAwakenHandshake();
-      _awakenLastSentMs = now;
+      scheduleNextAwaken(now);
 
       LOG_INFO("app", "waiting_for_time_sync awaken_retried=1");
     }
@@ -390,6 +393,24 @@ void SmartFiresNodeApp::sendAwakenHandshake() {
   }
 }
 
+uint32_t SmartFiresNodeApp::awakenJitterMs(uint8_t sequence) const {
+  // Deterministic per-board/per-attempt mixing: no RNG state is required and
+  // four nodes powered from the same source do not repeat AWAKEN in lockstep.
+  uint32_t mixed = _cfg.deviceUidHash ^
+                   (static_cast<uint32_t>(sequence) * 2654435761u);
+  mixed ^= mixed >> 16;
+  mixed *= 2246822519u;
+  mixed ^= mixed >> 13;
+  const uint32_t windowMs = kAwakenIntervalMs / 5u;  // bounded 0..20%
+  return windowMs == 0u ? 0u : mixed % (windowMs + 1u);
+}
+
+void SmartFiresNodeApp::scheduleNextAwaken(uint32_t nowMs,
+                                           bool retryInterval) {
+  _awakenNextDueMs = nowMs + (retryInterval ? kAwakenIntervalMs : 0u) +
+                     awakenJitterMs(_awakenSeq);
+}
+
 SensorSnapshot SmartFiresNodeApp::buildSnapshot() const {
   SensorSnapshot snap;
   snap.sessionTimeMs = _tdmaClock.sessionNowMs();
@@ -516,7 +537,7 @@ void SmartFiresNodeApp::handleIncomingCommands() {
       _packetHandler.reset();
       _syncActive = false;
       sendAwakenHandshake();
-      _awakenLastSentMs = _clock.millis();
+      scheduleNextAwaken(_clock.millis());
       continue;
     }
 
@@ -588,13 +609,14 @@ void SmartFiresNodeApp::revertTxPowerToBaseline(const char *reason) {
   }
 
   const int8_t applied = _radio.setTxPower(NetworkConfig::kMaxTxPowerDbm);
-  // The operator's STATIC pin is discarded along with the base's level. It is
-  // an override for bench and range work, not a safety state, and it is exactly
-  // as stale as anything else we were told before contact was lost. Keeping one
-  // fallback rule matters more than preserving an experiment's fidelity — the
-  // operator can re-pin it once the node is reachable again.
-  _txPowerMode = BinaryPacket::TX_POWER_MODE_DYNAMIC;
-  _packetHandler.setTxPowerState(applied, false);
+  // Restore the selected profile's baseline mode as well as its baseline
+  // power. Higher-SF acceptance profiles intentionally remain STATIC at
+  // 13 dBm so a stale-sync recovery cannot confound range measurements.
+  _txPowerMode = NetworkConfig::kDynamicTxPowerDefaultEnabled
+                     ? BinaryPacket::TX_POWER_MODE_DYNAMIC
+                     : BinaryPacket::TX_POWER_MODE_STATIC;
+  _packetHandler.setTxPowerState(
+      applied, _txPowerMode == BinaryPacket::TX_POWER_MODE_STATIC);
 
   LOG_WARN("radio",
            "tx_power_revert_baseline reason=%s previous_dbm=%d applied_dbm=%d "

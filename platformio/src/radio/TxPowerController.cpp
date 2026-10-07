@@ -233,8 +233,8 @@ void TxPowerController::onAwaken(uint8_t nodeId, uint32_t nowMs) {
   node->nodeId = id;
   node->heard = true;
   node->lastHeardMs = nowMs;
-  // Everything else returns to its constructed default: baseline power, DYNAMIC
-  // mode, no link-stat history. That is not a convenience — a rebooted node
+  // Everything else returns to its constructed profile default: baseline
+  // power/mode, no link-stat history. That is not a convenience — a rebooted node
   // restarts retx_total/fail_total at zero, so carrying the old totals over
   // would produce a wildly negative delta on the next STATUS. The mode reset is
   // deliberate too: an operator's STATIC pin does not survive the node

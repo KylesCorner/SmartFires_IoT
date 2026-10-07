@@ -3,7 +3,7 @@ name: power-measurements
 description: Hardware setup and per-environment procedure for isolated Feather M0 power measurements.
 category: reference
 status: current
-last_verified: 2026-09-04
+last_verified: 2026-10-07
 source_refs:
   - platformio/platformio.ini
 related_docs:
@@ -137,6 +137,8 @@ Provides the common source filter, libraries, and build flags for power measurem
 ### Notes
 
 `POWER_TEST_USE_SERIAL=1` keeps USB serial logging enabled before and during most tests. This is useful for confirming which test firmware is running, but USB serial itself contributes to board power. For ultra-low-power sleep tests, the firmware detaches USB before entering standby.
+
+Power-test environments do not consume the deployment `SMARTFIRES_NETWORK_PROFILE`; they use the SF7 config only as a compile-time fixture where shared sensing headers require one. Radio profile trials use the dedicated base/node/sniffer environments and require separate whole-system energy measurements.
 
 ---
 

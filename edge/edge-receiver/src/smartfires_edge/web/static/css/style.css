@@ -11,10 +11,14 @@ body {
 
 nav.topnav {
   display: flex;
+  align-items: center;
   gap: 1rem;
   padding: 0.75rem 1.5rem;
   background: #11151a;
   border-bottom: 1px solid #2a2f36;
+  position: relative;
+  overflow: visible;
+  z-index: 1000;
 }
 
 nav.topnav a {
@@ -29,12 +33,96 @@ nav.topnav a.active {
 }
 
 .nav-clock {
-  margin-left: auto;
   align-self: center;
   color: #aab4c0;
   font-size: 0.85rem;
   font-family: monospace;
   cursor: default;
+}
+
+.network-profile-control {
+  position: relative;
+  margin-left: auto;
+}
+
+.network-profile-badge {
+  border: 1px solid #3d5266;
+  border-radius: 999px;
+  padding: 0.28rem 0.65rem;
+  background: #1c2833;
+  color: #b9d6ea;
+  font: 700 0.78rem system-ui, sans-serif;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.network-profile-badge:hover,
+.network-profile-badge[aria-expanded="true"] {
+  background: #26394a;
+  color: #fff;
+}
+
+.network-profile-badge.unknown {
+  border-color: #555e68;
+  background: #252a30;
+  color: #aab4c0;
+}
+
+.network-profile-badge.mismatch {
+  border-color: #e8743a;
+  background: #4a291c;
+  color: #ffd1b8;
+  box-shadow: 0 0 0 2px rgba(232, 116, 58, 0.16);
+}
+
+.network-profile-badge.override {
+  border-color: #b88a35;
+  background: #3b311c;
+  color: #f2d696;
+}
+
+.network-profile-panel {
+  position: absolute;
+  top: calc(100% + 0.55rem);
+  right: 0;
+  width: min(26rem, calc(100vw - 3rem));
+  padding: 0.7rem 0.8rem;
+  border: 1px solid #3d4650;
+  border-radius: 7px;
+  background: #171c21;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  z-index: 1010;
+}
+
+.network-profile-panel[hidden] {
+  display: none;
+}
+
+.network-profile-detail {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.25rem 0;
+  border-bottom: 1px solid #252c33;
+  font-size: 0.75rem;
+}
+
+.network-profile-detail:last-child {
+  border-bottom: 0;
+}
+
+.network-profile-detail span {
+  color: #7f8b96;
+}
+
+.network-profile-detail strong {
+  color: #dce3e9;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.network-profile-detail.warning strong {
+  color: #ffad7d;
 }
 
 .conn-dot {

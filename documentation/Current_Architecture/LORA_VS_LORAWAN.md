@@ -3,9 +3,10 @@ name: lora-vs-lorawan
 description: Why SmartFires uses a custom RadioHead/TDMA stack instead of LoRaWAN, mesh capability, CAD, and the optimization/range levers available on the current radio.
 category: architecture
 status: current
-last_verified: 2026-09-04
+last_verified: 2026-10-07
 source_refs:
   - platformio/src/platform/RadioHeadTdmaDriver.cpp
+  - platformio/include/config/NetworkProfiles.h
   - platformio/include/config/NetworkConfig.h
 related_docs:
   - tdma-protocol
@@ -24,14 +25,16 @@ SmartFires uses raw LoRa modulation through RadioHead `RH_RF95`/`RHReliableDatag
 |---|---|
 | Radio | Feather M0 RFM95 / SX1276 family |
 | Carrier | 915 MHz |
-| Modem | RadioHead default `Bw125Cr45Sf128` profile unless the driver is changed |
+| Modem | Selected SF7/SF9/SF10 at 125 kHz or SF12 at 250 kHz; CR 4/5, 8-symbol preamble, explicit header, payload CRC |
 | Power | 13 dBm baseline, base-controlled 5–13 dBm per node |
 | Addressing | Base address 1; node IDs assigned from UID hashes |
-| Medium access | Five-slot TDMA, 900 ms per slot |
-| Reliability | App-layer cumulative ACK summaries for telemetry; selected RadioHead link ACKs for control |
+| Medium access | Five-slot TDMA; slot width/guards selected with the profile |
+| Reliability | App-layer cumulative ACK summaries and repeated application requests/responses; no scheduled deployment `sendToWait()` |
 | Security | No LoRaWAN join/encryption/authentication layer |
 
-RadioHead's “reliable datagram” class provides addressing, packet IDs, and optional ACK/retry primitives. SmartFires deliberately bypasses remote link ACK for steady telemetry and implements its own bounded retry window so one lost ACK cannot block sensing or consume an entire slot.
+RadioHead's “reliable datagram” class provides addressing and packet IDs, but scheduled deployment traffic uses its send path without requesting a remote ACK. SmartFires implements a bounded telemetry retry window, repeats `AWAKEN` until assignment, repeats periodic sync/ACK state, and uses `CMD_ACK` for commands so a remote link-ACK retry burst cannot consume an entire slot at high SF.
+
+The driver programs modem registers explicitly, including the profile bandwidth. It does not use RadioHead's SF12 canned shortcut because that preset selects 125 kHz and CR 4/8 rather than the SF12 profile's 250 kHz and CR 4/5. Low-data-rate optimization is enabled only for SF12.
 
 ## Why a custom link fits this prototype
 
@@ -57,7 +60,6 @@ TDMA separates synchronized steady telemetry by assigned slot, but the system is
 - unassigned nodes send `AWAKEN` outside normal slot ownership;
 - reset ACK is intentionally immediate;
 - stale/unsynchronized nodes use permissive recovery behavior;
-- a known blocking base send can overrun slot 0;
 - external 915 MHz emitters do not honor the schedule.
 
 The correct claim is deterministic scheduled access under fresh sync, not guaranteed zero collisions.
@@ -70,8 +72,10 @@ The network is a star: nodes talk to one base, and neither nodes nor base route 
 
 ## Range and energy levers
 
-The main levers are antenna quality/placement, line of sight, spreading factor, bandwidth, coding rate, transmit power, receiver time, payload size, retry behavior, and fleet geometry. They trade airtime, energy, latency, and robustness; changing modem settings requires matching every radio and recalculating packet airtime and slot budgets.
+The main levers are antenna quality/placement, line of sight, spreading factor, bandwidth, coding rate, transmit power, receiver time, payload size, retry behavior, and fleet geometry. They trade airtime, energy, latency, and robustness. SmartFires packages SF7, SF9, SF10, and SF12 as complete compile-time profiles so modem choice moves with safe TDMA, bundle, cadence, and reliability values. Every radio on one carrier must be rebuilt from the same selection.
 
-Dynamic TX power is already shipped: the base records SNR on every assigned-node frame, considers STATUS retry/failure deltas, and sends absolute 5–13 dBm commands. Operators can pin STATIC power or restore DYNAMIC control in the dashboard. Thresholds are not yet field-tuned, and the current ceiling intentionally remains the known 13 dBm baseline rather than the radio's maximum capability.
+The SF12 trial is intentionally a combined SF12/250 kHz operating point, not a spreading-factor-only comparison against the 125 kHz profiles. Doubling bandwidth roughly halves airtime but incurs about a 3 dB thermal-noise sensitivity penalty before implementation-specific effects; range conclusions must be labeled with the full modem tuple.
+
+Dynamic TX power is shipped: the base records SNR on every assigned-node frame, considers STATUS retry/failure deltas, and sends absolute 5–13 dBm commands. The demodulation-floor reference is profile-specific. SF7 starts in DYNAMIC mode; SF9/SF10/SF12 start STATIC at 13 dBm so range trials are not confounded by power changes. Thresholds remain provisional.
 
 Do not infer regional compliance from the 915 MHz carrier alone. Antenna gain, radiated power, dwell time/channel use, and operating jurisdiction all matter and must be checked for the actual deployment.

@@ -50,9 +50,9 @@ from smartfires_edge.packet import (
     decode_time_sync,
 )
 
-# TDMA geometry — must match platformio/include/radio/TdmaConfig.h defaults.
-# Not CLI-tunable: changing slot width/guard requires a firmware rebuild on
-# every node, at which point this constant should be updated too.
+# Legacy recovery geometry, used only until the base announces its active
+# profile. Normal operation consumes the base-authoritative geometry through
+# LiveState.
 SLOT_WIDTH_MS = 900
 GUARD_MS = 20
 
@@ -134,15 +134,21 @@ class _SyncAnchor:
         return self.session_time_ms + (t_ms - self.sniffer_t_ms)
 
 
-def _slot_timing(node_id: int, session_ms: int, num_slots: int) -> tuple[float, bool]:
+def _slot_timing(
+    node_id: int,
+    session_ms: int,
+    num_slots: int,
+    slot_width_ms: int = SLOT_WIDTH_MS,
+    guard_ms: int = GUARD_MS,
+) -> tuple[float, bool]:
     """Return (jitter_ms, guard_violation) for a packet from node_id arriving
     at session_ms, given the compile-time slot assignment slot=(node_id-1)%num_slots."""
-    frame_period_ms = num_slots * SLOT_WIDTH_MS
+    frame_period_ms = num_slots * slot_width_ms
     slot = (node_id - 1) % num_slots
-    slot_center_ms = slot * SLOT_WIDTH_MS + SLOT_WIDTH_MS / 2
+    slot_center_ms = slot * slot_width_ms + slot_width_ms / 2
     frame_phase_ms = session_ms % frame_period_ms
     jitter_ms = frame_phase_ms - slot_center_ms
-    guard_violation = abs(jitter_ms) > (SLOT_WIDTH_MS / 2 - GUARD_MS)
+    guard_violation = abs(jitter_ms) > (slot_width_ms / 2 - guard_ms)
     return jitter_ms, guard_violation
 
 
@@ -161,6 +167,8 @@ def _decode_rx_event(
     rx: dict,
     anchor: _SyncAnchor,
     num_slots: int,
+    slot_width_ms: int = SLOT_WIDTH_MS,
+    guard_ms: int = GUARD_MS,
 ) -> Optional[dict]:
     payload_hex = rx.get("payload_hex", "")
     try:
@@ -284,7 +292,9 @@ def _decode_rx_event(
         else:
             slot_node_id = node_id
         if slot_node_id is not None:
-            jitter_ms, guard_violation = _slot_timing(slot_node_id, session_ms, num_slots)
+            jitter_ms, guard_violation = _slot_timing(
+                slot_node_id, session_ms, num_slots, slot_width_ms, guard_ms
+            )
 
     event = {
         "wall_t": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
@@ -299,6 +309,8 @@ def _decode_rx_event(
         "guard_violation": guard_violation,
         "anchored": anchor.anchored,
         "num_slots": num_slots,
+        "slot_width_ms": slot_width_ms,
+        "guard_ms": guard_ms,
         "payload_hex": payload_hex,
         "rh_to": rh_to,
         "rh_from": rh_from,
@@ -347,11 +359,32 @@ def run_sniffer(
                     continue
 
                 if msg.get("event") != "rx":
+                    if msg.get("event") == "config" and msg.get("profile_id") is not None:
+                        sniffer_profile = {
+                            "profile_id": f"sf{int(msg['profile_id'])}",
+                            "spreading_factor": int(msg.get("spreading_factor", 0)),
+                            "bandwidth_hz": int(msg.get("bandwidth_hz", 0)),
+                            "coding_rate_denominator": int(
+                                msg.get("coding_rate_denominator", 0)
+                            ),
+                            "num_slots": int(msg.get("num_slots", cfg.num_slots)),
+                            "slot_width_ms": int(msg.get("slot_width_ms", SLOT_WIDTH_MS)),
+                            "guard_ms": int(msg.get("guard_ms", GUARD_MS)),
+                            "fingerprint": f"{int(msg.get('profile_fingerprint', 0)):08x}",
+                        }
+                        live_state.set_sniffer_network_profile(sniffer_profile)
                     if msg.get("event") in ("status", "error", "config"):
                         slog(f"[SNIFFER] {msg.get('message') or msg}")
                     continue
 
-                event = _decode_rx_event(msg, anchor, cfg.num_slots)
+                profile_state = live_state.network_profile_snapshot()
+                active_profile = profile_state.get("active") or {}
+                num_slots = int(active_profile.get("num_slots", cfg.num_slots))
+                slot_width_ms = int(active_profile.get("slot_width_ms", SLOT_WIDTH_MS))
+                guard_ms = int(active_profile.get("guard_ms", GUARD_MS))
+                event = _decode_rx_event(
+                    msg, anchor, num_slots, slot_width_ms, guard_ms
+                )
                 if event is None:
                     continue
 

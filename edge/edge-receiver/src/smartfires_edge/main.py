@@ -78,8 +78,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="N",
         help=(
-            "TDMA slot count for sniffer alignment — must match the NUM_SLOTS "
-            f"build flag on the deployed node Feathers (default: {DEFAULT_NUM_SLOTS})"
+            "Recovery fallback for sniffer alignment before a base profile "
+            f"announcement arrives (default: {DEFAULT_NUM_SLOTS})"
         ),
     )
 

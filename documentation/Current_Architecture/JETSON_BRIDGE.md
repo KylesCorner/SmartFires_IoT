@@ -3,7 +3,7 @@ name: jetson-bridge
 description: Frame format and routing between the base station Feather and the Jetson over USB CDC.
 category: architecture
 status: current
-last_verified: 2026-10-06
+last_verified: 2026-10-07
 source_refs:
   - platformio/include/telemetry/BinaryPacket.h
   - platformio/src/app/SmartFiresBaseApp.cpp
@@ -11,7 +11,13 @@ source_refs:
   - edge/edge-receiver/src/smartfires_edge/uart_receiver.py
   - edge/edge-receiver/src/smartfires_edge/ingest_service.py
   - edge/edge-receiver/src/smartfires_edge/live_state.py
+  - edge/edge-receiver/src/smartfires_edge/network_profile.py
+  - edge/edge-receiver/src/smartfires_edge/session_meta.py
+  - edge/edge-receiver/src/smartfires_edge/config.py
   - edge/edge-receiver/src/smartfires_edge/web/app.py
+  - edge/edge-receiver/src/smartfires_edge/web/static/js/api.js
+  - edge/edge-receiver/src/smartfires_edge/web/static/js/nav.js
+  - edge/edge-receiver/src/smartfires_edge/web/static/js/main_page.js
   - edge/edge-receiver/src/smartfires_edge/web_service.py
   - edge/smartfires-edge.service.in
 related_docs:
@@ -37,17 +43,16 @@ Jetson to base:
 [0xAA][0x55][data_len:u8][complete TIME_SYNC/command payload][crc8]
 ```
 
-The outer CRC-8/MAXIM covers `data_len` followed by every data byte. In the receive direction, `data_len` includes RSSI. The carried LoRa-format packet also has its own final CRC, except `PKT_DEBUG_LOG`, whose text relies on the outer USB CRC.
+The outer CRC-8/MAXIM covers `data_len` followed by every data byte. In the receive direction, `data_len` includes RSSI. Carried LoRa packets also have their own final CRC. Base-originated `PKT_DEBUG_LOG` and `PKT_NETWORK_PROFILE` control packets never cross LoRa and rely on the outer USB CRC.
 
 `FrameReceiver` scans for `AA 55`, validates the declared length, buffers exactly that many data bytes, checks the outer CRC, extracts RSSI, then dispatches by the inner packet type. A bad length or CRC resets the state machine to magic-byte search without yielding a packet.
 
 ## Base-to-Jetson traffic
 
-The base forwards received `AWAKEN`, `BUNDLE`, `FULL_STATE`, `STATUS`, window markers, and `CMD_ACK` frames with the LoRa RSSI attached. Structured firmware log lines are wrapped as `PKT_DEBUG_LOG` frames so plain debug text cannot corrupt the binary stream.
+The base forwards received `AWAKEN`, `BUNDLE`, `FULL_STATE`, `STATUS`, window markers, and `CMD_ACK` frames with the LoRa RSSI attached. Structured firmware log lines are wrapped as `PKT_DEBUG_LOG` frames so plain debug text cannot corrupt the binary stream. At startup and every five seconds, the base also emits a fixed-size schema-1 `PKT_NETWORK_PROFILE` announcement containing profile/SF identity, bandwidth, coding rate, TDMA geometry, operational bundle cap, Continuous/Timed cadence, STATUS cadence, and a fingerprint.
 
 Before forwarding, the base performs local control duties:
 
-- acknowledges `AWAKEN` at the RadioHead link layer;
 - assigns or restores the UID hash's node ID;
 - tracks telemetry sequence numbers and generates `ACK_SUMMARY`;
 - records packet SNR for dynamic TX-power decisions;
@@ -87,7 +92,11 @@ the same recording session; **New Session** requests graceful whole-process
 shutdown so the supervisor rebuilds every parser, queue, worker, cache, and
 session object.
 
-The base broadcasts its cached time every 50 seconds, using a local fallback if it has no Jetson authority. This shorter radio cadence is intentionally separate from the USB injection cadence.
+The base broadcasts its cached time at the selected 50/65/110/125-second SF7/SF9/SF10/SF12 cadence, using a local fallback if it has no Jetson authority. This radio cadence is intentionally separate from the USB injection cadence.
+
+Network profile state starts explicitly `unknown`. A valid base announcement normally becomes the active, authoritative profile and is atomically persisted under `network_profile` in `session.json`, including its source and first-observed UTC time. Once telemetry has been recorded under a known base profile, a conflicting announcement does not silently replace the active identity: the edge reports `mismatch`, retains the pinned profile, and records a rejected transition in profile history.
+
+`--network-profile-override PATH` or `ingest.network_profile_override` accepts a recovery-only JSON profile. The override remains active while the observed base profile remains visible; differing fields produce a mismatch rather than hiding the disagreement.
 
 ## Edge outputs
 
@@ -100,7 +109,10 @@ STATUS supplies GPS and battery validity, DMP heading/accuracy, lifetime retrans
 - `/api/new_session` acknowledges and coalesces a whole-application restart request; the service supervisor then launches a fresh process/session.
 - `/api/node_reset` sends a hard reset to a selected node.
 - `/api/tx_power` resolves set/increase/decrease and DYNAMIC/STATIC choices into an absolute power command, clamped to 5–13 dBm.
+- `/api/network_profile` returns the unknown/active/mismatch envelope, active source, base and override copies, mismatch fields, transition history, and sniffer identity when present.
 - `/api/command` currently only echoes `{status: queued}` and does not write serial bytes.
+
+The dashboard header persistently shows `SF · bandwidth · coding rate · source`, shows unknown before the first announcement, and highlights override or mismatch state. Main-page density expectations use the announced Continuous cadence; the sniffer visualization uses announced slot count, width, and guards.
 
 The CLI has `receive`, `summary`, `visualize`, and `web`; there is no separate command-sending CLI.
 

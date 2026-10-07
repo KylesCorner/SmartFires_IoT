@@ -172,6 +172,7 @@ private:
 
   static constexpr uint32_t kHealthLogPeriodMs = BaseConfig::kHealthLogPeriodMs;
   static constexpr uint32_t kPeriodicTimeSyncMs = BaseConfig::kPeriodicTimeSyncMs;
+  static constexpr uint32_t kNetworkProfileAnnounceMs = 5000;
 
   Config _cfg;
   IClock &_clock;
@@ -213,6 +214,7 @@ private:
   uint32_t _lastRxMs = 0;
   uint32_t _lastPeriodicTimeSyncMs = 0;
   uint32_t _lastAckSummaryFlushMs = 0;
+  uint32_t _lastNetworkProfileAnnounceMs = 0;
 
   // Set by a PKT_WINDOW_BEGIN so the ack deferred across that node's standby
   // goes out in the very next slot 0 rather than waiting on
@@ -229,6 +231,7 @@ private:
   uint32_t _jetsonSessionMsAtUpdate = 0;
   uint32_t _localMsAtJetsonUpdate = 0;
   uint8_t _ackSummarySeq = 0;
+  uint8_t _networkProfileSeq = 0;
   uint8_t _nextAckTrackerFlushIndex = 0;
   uint32_t _lastAckSummaryFlushSlotIndex = 0xFFFFFFFFu;
   NodeAssignment _nodeAssignments[kMaxAssignedNodes] = {};
@@ -256,6 +259,7 @@ private:
   bool sendAckSummary(uint8_t nodeId, uint8_t ackBaseSeq, uint16_t ackMask,
                       const char *reason, uint8_t triggerSeq);
   void maybeSendPeriodicTimeSync();
+  void maybeAnnounceNetworkProfile(bool force = false);
   BinaryPacket::TimeSyncPayload baseLocalTimeSyncPayload() const;
   void updateJetsonTimeSource(const BinaryPacket::TimeSyncPayload &ts);
   BinaryPacket::TimeSyncPayload currentTimeSyncPayload() const;
@@ -264,6 +268,7 @@ private:
   // funnels through here instead of transmitting immediately, so base
   // traffic can no longer land inside a real node's TX window.
   bool baseTxWindowOpen(uint32_t &slotIndexOut) const;
+  bool baseTxDeadlineAllows(uint8_t applicationLen) const;
   void maybeSendInBaseWindow();
   bool sendPendingDirectTimeSync();
   bool sendPendingCommand();

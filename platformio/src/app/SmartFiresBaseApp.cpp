@@ -1,11 +1,12 @@
 // ---
 // description: Implements SmartFiresBaseApp's LoRa RX dispatch, node/ACK tracking, Jetson USB-serial frame parsing, and reserved-slot-gated TX of TIME_SYNC/ACK_SUMMARY/commands.
 // role: implementation
-// docs: [jetson-bridge, packet-reliability]
+// docs: [jetson-bridge, packet-reliability, software-design]
 // ---
 #include "app/SmartFiresBaseApp.h"
 
 #include "calibration/CalibrationDebug.h"
+#include "config/NetworkConfig.h"
 #include "logging/DebugLogger.h"
 
 #include <Arduino.h>
@@ -179,6 +180,7 @@ bool SmartFiresBaseApp::begin() {
   _lastHealthLogMs = _clock.millis();
   _lastPeriodicTimeSyncMs = _lastHealthLogMs;
   _lastAckSummaryFlushMs = _lastHealthLogMs;
+  _lastNetworkProfileAnnounceMs = _lastHealthLogMs;
   _sessionId = 0x53460000UL |
                ((static_cast<uint32_t>(_cfg.baseAddr) & 0xFFu) << 8) |
                (static_cast<uint32_t>(_clock.millis()) & 0xFFu);
@@ -188,6 +190,7 @@ bool SmartFiresBaseApp::begin() {
            static_cast<unsigned long>(_cfg.uartBaud));
   LOG_INFO("base", "uart_configured_baud=%lu",
            static_cast<unsigned long>(_cfg.uartBaud));
+  maybeAnnounceNetworkProfile(/*force=*/true);
   return true;
 }
 
@@ -204,19 +207,70 @@ void SmartFiresBaseApp::update() {
 
   processIncomingLoRa();
   processIncomingJetsonUart();
+  maybeAnnounceNetworkProfile();
 
   // Time-driven half of the TX power loop: expiring commands whose CMD_ACK
   // never came, and probing nodes that have gone silent. Runs before
   // maybeSendInBaseWindow() so anything it queues can go out in this same
   // window rather than waiting a full frame period. It returns at most one
   // decision per tick, so it can never flood the shared command queue.
-  const TxPowerController::Decision timed = _txPower.update(_clock.millis());
-  if (timed.action == TxPowerController::Action::SetPower) {
-    sendTxPowerDecision(timed);
+  if (NetworkConfig::kDynamicTxPowerDefaultEnabled) {
+    const TxPowerController::Decision timed = _txPower.update(_clock.millis());
+    if (timed.action == TxPowerController::Action::SetPower) {
+      sendTxPowerDecision(timed);
+    }
   }
 
   maybeSendInBaseWindow();
   maybeLogHealth();
+}
+
+void SmartFiresBaseApp::maybeAnnounceNetworkProfile(bool force) {
+  const uint32_t now = _clock.millis();
+  if (!force && now - _lastNetworkProfileAnnounceMs <
+                    kNetworkProfileAnnounceMs) {
+    return;
+  }
+
+  const NetworkProfiles::NetworkProfile &profile = NetworkConfig::kProfile;
+  BinaryPacket::NetworkProfilePayload announced = {};
+  announced.schema_version = 1;
+  announced.profile_id = NetworkConfig::kProfileId;
+  announced.spreading_factor = profile.spreadingFactor;
+  announced.coding_rate_denominator = profile.codingRateDenominator;
+  announced.bandwidth_hz = profile.bandwidthHz;
+  announced.num_slots = profile.totalSlots;
+  announced.slot_width_ms = profile.slotWidthMs;
+  announced.guard_ms = static_cast<uint16_t>(profile.guardMs);
+  announced.max_bundle_deltas = profile.maxBundleDeltas;
+  announced.continuous_sample_period_ms = profile.continuousSamplePeriodMs;
+  announced.timed_sample_period_ms = profile.timedSamplePeriodMs;
+  announced.status_interval_ms = profile.statusIntervalMs;
+  announced.fingerprint = NetworkConfig::kProfileFingerprint;
+
+  uint8_t payload[BinaryPacket::kNetworkProfileUartPayloadSize] = {};
+  const uint8_t seq = _networkProfileSeq++;
+  const uint8_t payloadLen = BinaryPacket::encodeNetworkProfilePayload(
+      _cfg.baseAddr, seq, announced, payload, sizeof(payload));
+
+  uint8_t frame[2 + 1 + 1 + BinaryPacket::kNetworkProfileUartPayloadSize + 1] = {};
+  const size_t frameLen = payloadLen > 0
+                              ? BinaryPacket::encodeBaseFrame(
+                                    /*rssi=*/0, payload, payloadLen, frame,
+                                    sizeof(frame))
+                              : 0;
+  const size_t written = frameLen > 0 ? _jetsonUart.write(frame, frameLen) : 0;
+  _lastNetworkProfileAnnounceMs = now;
+
+  LOG_INFO("base",
+           "network_profile_announce id=sf%u fingerprint=0x%08lX seq=%u "
+           "bytes=%u written=%u result=%s",
+           static_cast<unsigned int>(announced.profile_id),
+           static_cast<unsigned long>(announced.fingerprint),
+           static_cast<unsigned int>(seq),
+           static_cast<unsigned int>(frameLen),
+           static_cast<unsigned int>(written),
+           frameLen > 0 && written == frameLen ? "OK" : "FAIL");
 }
 
 BinaryPacket::TimeSyncPayload SmartFiresBaseApp::baseLocalTimeSyncPayload() const {
@@ -229,6 +283,9 @@ BinaryPacket::TimeSyncPayload SmartFiresBaseApp::baseLocalTimeSyncPayload() cons
 void SmartFiresBaseApp::maybeSendPeriodicTimeSync() {
   const uint32_t now = _clock.millis();
   if (now - _lastPeriodicTimeSyncMs < kPeriodicTimeSyncMs) {
+    return;
+  }
+  if (!baseTxDeadlineAllows(BinaryPacket::kTimeSyncLoRaSize)) {
     return;
   }
 
@@ -277,15 +334,9 @@ void SmartFiresBaseApp::processIncomingLoRa() {
                              (memcpy(&hdr, pkt.data, sizeof(BinaryPacket::PktHeader)),
                               hdr.magic == BinaryPacket::PKT_MAGIC);
 
-    // AWAKEN is the only node->base packet type that's actually sent with
-    // sendToWait() (TdmaRadioService::sendAwakenHandshake) — the node blocks
-    // and retries on this link-layer ACK to know the base is alive. Every
-    // other node->base type (BUNDLE/STATUS/FULL_STATE) is sent fire-and-forget
-    // and relies on the app-layer ACK_SUMMARY instead, so acking them here
-    // would just be wasted airtime nobody waits for.
-    if (validHeader && hdr.pkt_type == BinaryPacket::PKT_AWAKEN) {
-      _radio.acknowledge(pkt.from, pkt.id);
-    }
+    // All scheduled deployment traffic is fire-and-forget at the RadioHead
+    // link layer. AWAKEN is retried until TIME_SYNC arrives; telemetry uses
+    // cumulative ACK_SUMMARY; commands use PKT_CMD_ACK in the node's slot.
 
     if (!validHeader) {
       _rawRxCount++;
@@ -442,7 +493,8 @@ void SmartFiresBaseApp::processIncomingLoRa() {
             status.tx_power_dbm,
             (status.flags & BinaryPacket::STATUS_TX_POWER_STATIC) != 0u,
             _clock.millis());
-        if (decision.action == TxPowerController::Action::SetPower) {
+        if (NetworkConfig::kDynamicTxPowerDefaultEnabled &&
+            decision.action == TxPowerController::Action::SetPower) {
           sendTxPowerDecision(decision);
         }
       }
@@ -532,7 +584,7 @@ bool SmartFiresBaseApp::sendDirectTimeSync(uint8_t radioAddr,
     return false;
   }
 
-  const bool ok = _radio.sendToWait(payload, len, radioAddr);
+  const bool ok = _radio.send(payload, len, radioAddr);
   _timeSyncTxCount += ok ? 1u : 0u;
   LOG_INFO(
       "base",
@@ -543,7 +595,7 @@ bool SmartFiresBaseApp::sendDirectTimeSync(uint8_t radioAddr,
       static_cast<unsigned long>(ts.session_id),
       static_cast<unsigned long>(ts.session_time_ms),
       reason ? reason : "unknown", static_cast<unsigned int>(triggerSeq),
-      _hasJetsonTime ? "jetson" : "base_local", ok ? "OK" : "NO",
+      _hasJetsonTime ? "jetson" : "base_local", "OFF",
       ok ? "OK" : "FAIL");
   return ok;
 }
@@ -844,6 +896,9 @@ bool SmartFiresBaseApp::sendPendingDirectTimeSync() {
     if (!assignment.inUse || !assignment.pendingDirectSync) {
       continue;
     }
+    if (!baseTxDeadlineAllows(BinaryPacket::kTimeSyncLoRaSize)) {
+      return false;
+    }
 
     const bool ok = sendDirectTimeSync(assignment.pendingRadioAddr, assignment.nodeId,
                                        "awaken", assignment.pendingTriggerSeq);
@@ -862,6 +917,9 @@ bool SmartFiresBaseApp::sendPendingCommand() {
     PendingCommand &cmd = _pendingCommands[i];
     if (!cmd.inUse) {
       continue;
+    }
+    if (!baseTxDeadlineAllows(cmd.len)) {
+      return false;
     }
 
     // Fire-and-forget, deliberately not sendToWait(). A link-ACKed command
@@ -996,6 +1054,9 @@ bool SmartFiresBaseApp::sendPendingAckSummary(uint32_t slotIndex) {
       tracker.dirty = false;
       continue;
     }
+    if (!baseTxDeadlineAllows(BinaryPacket::kAckSummaryLoRaSize)) {
+      return false;
+    }
 
     const bool ok = sendAckSummary(tracker.nodeId, tracker.ackBaseSeq,
                                    tracker.ackMask, "lora_rx_coalesced",
@@ -1041,6 +1102,25 @@ bool SmartFiresBaseApp::baseTxWindowOpen(uint32_t &slotIndexOut) const {
   return _baseTdmaClock.myTurn(slotIndexOut);
 }
 
+bool SmartFiresBaseApp::baseTxDeadlineAllows(uint8_t applicationLen) const {
+  const uint32_t positionMs = _baseTdmaClock.positionInSlotMs();
+  const uint32_t slotEndMs = NetworkConfig::kSlotWidthMs -
+                             NetworkConfig::kGuardMs;
+  const uint32_t remainingMs =
+      positionMs < slotEndMs ? slotEndMs - positionMs : 0u;
+  const uint16_t neededMs = NetworkConfig::txBudgetMs(applicationLen);
+  if (remainingMs >= neededMs) {
+    return true;
+  }
+  LOG_DEBUG("base",
+            "slot_defer len=%u remaining_ms=%lu needed_ms=%u profile=sf%u",
+            static_cast<unsigned int>(applicationLen),
+            static_cast<unsigned long>(remainingMs),
+            static_cast<unsigned int>(neededMs),
+            static_cast<unsigned int>(NetworkConfig::kProfileId));
+  return false;
+}
+
 bool SmartFiresBaseApp::sendAckSummary(uint8_t nodeId, uint8_t ackBaseSeq,
                                        uint16_t ackMask, const char *reason,
                                        uint8_t triggerSeq) {
@@ -1059,7 +1139,7 @@ bool SmartFiresBaseApp::sendAckSummary(uint8_t nodeId, uint8_t ackBaseSeq,
     return false;
   }
 
-  const bool ok = _radio.sendToWait(payload, len, nodeId);
+  const bool ok = _radio.send(payload, len, nodeId);
   _ackTxCount += ok ? 1u : 0u;
   LOG_INFO(
       "base",
@@ -1067,7 +1147,7 @@ bool SmartFiresBaseApp::sendAckSummary(uint8_t nodeId, uint8_t ackBaseSeq,
       static_cast<unsigned int>(seq), static_cast<unsigned int>(nodeId),
       static_cast<unsigned int>(ackBaseSeq), static_cast<unsigned int>(ackMask),
       reason ? reason : "unknown", static_cast<unsigned int>(triggerSeq),
-      ok ? "OK" : "NO", ok ? "OK" : "FAIL");
+      "OFF", ok ? "OK" : "FAIL");
   return ok;
 }
 

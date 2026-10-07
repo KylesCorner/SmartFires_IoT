@@ -74,7 +74,8 @@ constexpr uint32_t kTdmaGuardMs = NetworkConfig::kGeometry.guardMs;
 // documentation/Completed_Plans/TUNABLE_PARAMETER_ARCHITECTURE_PLAN.md
 // Appendix A, Open Decision 3, for whether this should remain a documented
 // failsafe or be removed once Jetson-driven sync is proven reliable.
-constexpr uint32_t kPeriodicTimeSyncMs = 50000;
+constexpr uint32_t kPeriodicTimeSyncMs =
+    NetworkProfiles::kActiveProfile.periodicTimeSyncMs;
 
 constexpr uint32_t kHealthLogPeriodMs = 5000;
 
@@ -101,12 +102,10 @@ constexpr uint8_t kMaxAckTrackedNodes = 16;
 // per-node tables can never disagree about how many nodes the base can follow.
 constexpr uint8_t kMaxTxPowerTrackedNodes = kMaxAckTrackedNodes;
 
-// SNR, in tenths of a dB, at which the modem stops being able to demodulate.
-// -7.5 dB is the SX1276's figure for SF7, which is what every node runs today
-// (RadioHead's implicit Bw125Cr45Sf128 default — see LORA_VS_LORAWAN.md). This
-// is the reference point link margin is measured against; it must change if the
-// spreading factor ever becomes configurable, since the floor is SF-dependent.
-constexpr int16_t kSnrDemodFloorDbX10 = -75;
+// Profile-specific SNR, in tenths of a dB, at which the modem stops being able
+// to demodulate. This is the reference point for link-margin calculations.
+constexpr int16_t kSnrDemodFloorDbX10 =
+    NetworkProfiles::kActiveProfile.snrDemodFloorDbX10;
 
 // Link margin the loop aims to leave above the demod floor, in tenths of a dB.
 // A single target rather than the separate floor/headroom threshold pair the
@@ -132,22 +131,21 @@ static_assert(kSnrDeadBandDbX10 > static_cast<int16_t>(kTxPowerStepDbm) * 10,
 //
 // This — not STATUS arrival — is what paces the loop, and it is the reason the
 // plan's "what do we do about the debug env" question does not need answering.
-// STATUS interval is a build flag. All current node environments select 15 s,
-// while PacketHandler's unconfigured fallback remains 15 min. Pacing this loop
-// with its own clock keeps threshold behavior stable if a future build chooses
-// a different STATUS cadence: STATUS only triggers consideration, and retx/fail
-// deltas are measured across this fixed window.
+// STATUS cadence comes from the selected network profile. Pacing this loop with
+// its own clock keeps threshold behavior stable across profiles: STATUS only
+// triggers consideration, and retx/fail deltas are measured across this fixed
+// window.
 constexpr uint32_t kTxPowerMinDecisionIntervalMs = 60000;  // 60 s
 
 // How long to wait for the CMD_ACK confirming a power change before giving up
 // and re-arming the decision.
 //
-// Must exceed the Timed duty-cycle period (SensingConfig::kTimedCyclePeriodMs,
-// 75 s): a command queued while the node is in MCU standby physically cannot be
-// delivered until its next PKT_WINDOW_BEGIN. Sized off a frame period instead —
-// the obvious-looking choice — the base would time out and re-arm on every node
-// that was merely asleep.
-constexpr uint32_t kCmdAckTimeoutMs = 120000;  // 120 s
+// Must exceed the selected profile's Timed duty-cycle period: a command queued
+// while the node is in MCU standby physically cannot be delivered until its
+// next PKT_WINDOW_BEGIN. The SF12 profile therefore uses a longer bound than
+// the faster profiles.
+constexpr uint32_t kCmdAckTimeoutMs =
+    NetworkProfiles::kActiveProfile.commandAckTimeoutMs;
 
 // Silence after which a node's TX power is treated as unknown and it is probed
 // back to baseline. This is the uplink-dead case: the base has stopped hearing

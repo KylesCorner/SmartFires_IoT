@@ -21,6 +21,7 @@ from smartfires_edge.packet import (
     PKT_CMD_ACK,
     PKT_DEBUG_LOG,
     PKT_FULL_STATE,
+    PKT_NETWORK_PROFILE,
     PKT_STATUS,
     PKT_WINDOW_BEGIN,
     PKT_WINDOW_END,
@@ -282,7 +283,10 @@ def run_receive(
         port=cfg.port,
         baud=cfg.baud,
         data_dir=session_dir,
+        network_profile_override=cfg.network_profile_override,
     )
+    if live_state is not None:
+        live_state.set_network_profile_snapshot(session_meta.network_profile_snapshot())
 
     anemometer: AnemometerPoller | None = None
     if cfg.anemometer.enabled:
@@ -404,6 +408,39 @@ def run_receive(
                                 "raw": debug_text,
                             }
                             live_state.push_base_debug(record)
+                        continue
+
+                    # Base-originated profile identity is a USB control packet,
+                    # not LoRa telemetry.  SessionMetaLogger owns the no-silent-
+                    # replacement policy and publishes the same state to disk
+                    # and the web API.
+                    if pkt_type == PKT_NETWORK_PROFILE:
+                        profile = event.get("network_profile")
+                        if profile is None:
+                            log_fn(
+                                "[EDGE][NETWORK-PROFILE] rejected invalid announcement",
+                                None,
+                                kind="error",
+                            )
+                            continue
+                        result = session_meta.on_network_profile(profile)
+                        snapshot = result["snapshot"]
+                        if live_state is not None:
+                            live_state.set_network_profile_snapshot(snapshot)
+                        active = snapshot.get("active") or {}
+                        log_fn(
+                            "[EDGE][NETWORK-PROFILE] "
+                            f"state={snapshot['state']} source={snapshot['source']} "
+                            f"profile={active.get('profile_id')} "
+                            f"fingerprint={active.get('fingerprint')}"
+                            + (
+                                f" mismatches={','.join(snapshot['mismatches'])}"
+                                if snapshot.get("mismatches")
+                                else ""
+                            ),
+                            None,
+                            kind="error" if snapshot["state"] == "mismatch" else "other",
+                        )
                         continue
 
                     log_fn(
@@ -565,7 +602,8 @@ def run_receive(
                         ) if sync_state["next_seq"] == 0 else None
 
                     status = event.get("status")
-                    if status:
+                    if status and session_meta.telemetry_allowed():
+                        session_meta.mark_telemetry_recorded()
                         uid_hash = session_manager.get_uid_hash_for_node(int(status.get("node_id")))
                         heading = session_manager.on_status(
                             node_id=int(status.get("node_id")),
@@ -632,6 +670,15 @@ def run_receive(
                             int(status_row["node_id"]) if status_row["node_id"] is not None else None,
                             kind="status",
                         )
+                    elif status:
+                        log_fn(
+                            "[EDGE][NETWORK-PROFILE] status blocked until profile "
+                            "transition starts a new session or returns to the pinned profile",
+                            int(status.get("node_id"))
+                            if status.get("node_id") is not None
+                            else None,
+                            kind="error",
+                        )
 
                     cmd_ack = event.get("cmd_ack")
                     if cmd_ack:
@@ -661,7 +708,17 @@ def run_receive(
                             int(cmd_ack_row["node_id"]) if cmd_ack_row["node_id"] is not None else None,
                         )
 
-                    for pkt in event.get("packets", []):
+                    packets = event.get("packets", [])
+                    if packets and not session_meta.telemetry_allowed():
+                        log_fn(
+                            "[EDGE][NETWORK-PROFILE] telemetry bundle blocked until profile "
+                            "transition starts a new session or returns to the pinned profile",
+                            int(hdr_node) if hdr_node is not None else None,
+                            kind="error",
+                        )
+                        packets = []
+                    for pkt in packets:
+                        session_meta.mark_telemetry_recorded()
                         pkt["packet_type"] = "telemetry"
                         pkt["gps_valid"] = ""
                         pkt["battery_valid"] = ""

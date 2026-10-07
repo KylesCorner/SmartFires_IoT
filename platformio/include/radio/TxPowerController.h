@@ -74,8 +74,8 @@ public:
   // CMD_ACK for a previously-sent power change. Clears the in-flight gate.
   void onCmdAck(uint8_t nodeId, uint32_t nowMs);
 
-  // Node re-announced itself, so it rebooted and is back at the static
-  // baseline in DYNAMIC mode. Drops every accumulated statistic: retx/fail
+  // Node re-announced itself, so it rebooted at the selected profile's
+  // baseline power/mode. Drops every accumulated statistic: retx/fail
   // counters restart at zero on the node, so differencing across a reboot
   // would produce a garbage (usually hugely negative) delta.
   void onAwaken(uint8_t nodeId, uint32_t nowMs);
@@ -110,7 +110,9 @@ private:
   struct Node {
     bool inUse = false;
     uint8_t nodeId = 0;
-    uint8_t mode = BinaryPacket::TX_POWER_MODE_DYNAMIC;
+    uint8_t mode = NetworkConfig::kDynamicTxPowerDefaultEnabled
+                       ? BinaryPacket::TX_POWER_MODE_DYNAMIC
+                       : BinaryPacket::TX_POWER_MODE_STATIC;
 
     // Last level believed applied. Seeded from the static baseline and
     // corrected by every STATUS, which is ground truth.

@@ -3,7 +3,7 @@ name: flashing
 description: PlatformIO flash, monitor, and build commands for every Feather M0 environment, plus upload troubleshooting.
 category: reference
 status: current
-last_verified: 2026-09-04
+last_verified: 2026-10-07
 source_refs:
   - platformio/platformio.ini
 related_docs:
@@ -27,7 +27,7 @@ Use `pio`, `platformio`, or `~/.platformio/penv/bin/pio` according to the local 
 | Environment | Use |
 |---|---|
 | `feather_m0_lora_base` | Base station connected to the Jetson over native USB |
-| `feather_m0_lora_node` | Production SensorTriggered node |
+| `feather_m0_lora_node` | Production Continuous node |
 | `feather_m0_lora_node_debug` | Default Timed node with structured/log-to-file monitor filters |
 | `feather_m0_lora_node_timed` | Explicit Timed node |
 | `feather_m0_lora_node_hybrid` | Hybrid node |
@@ -36,7 +36,7 @@ Use `pio`, `platformio`, or `~/.platformio/penv/bin/pio` according to the local 
 
 Ten `feather_m0_power_*` environments isolate MCU run/standby, I2C idle, radio standby/RX, SHT31, IMU, GPS, SPS30, and wind power. List them in `platformio.ini` before choosing one. There is no current dummy-node or sensor-probe target.
 
-All current node targets use app-layer ACK summaries and a 15-second STATUS interval. Production differs from debug primarily by its duty-cycle mode; debug STATUS is not faster than production.
+All deployment profiles use app-layer ACK summaries. STATUS cadence, sample cadence, TDMA geometry, operational bundle cap, and modem settings come from the shared SF profile. Production differs from debug primarily by duty-cycle mode: Continuous versus Timed.
 
 ## Build and upload
 
@@ -68,14 +68,37 @@ The base's native USB port carries binary Jetson frames and structured logs, so 
 
 ## Network-wide changes
 
-`NUM_SLOTS` is shared through the `[network]` section. After changing it:
+`SMARTFIRES_NETWORK_PROFILE` is defined once in the `[network]` section and must be `7`, `9`, `10`, or `12`. `NUM_SLOTS=5` is a tripwire matching every shipped profile. After changing the profile selector:
 
 1. rebuild and reflash the base;
 2. rebuild and reflash every node;
-3. update edge `DEFAULT_NUM_SLOTS` or the dashboard `--num-slots` argument;
-4. recheck retry timing and bandwidth constraints.
+3. rebuild and reflash the passive sniffer;
+4. start a new recording session before collecting telemetry;
+5. verify the dashboard reports the selected SF from the base and no sniffer/override mismatch.
 
-Mixing different slot counts is unsafe because frame periods disagree and base assignment capacity changes.
+Mixing profiles is unsupported: modem settings and frame periods disagree, so mismatched radios may not hear one another and timing analysis becomes invalid.
+
+## SF12 trial: build-only staging
+
+First edit the shared selector in `platformio.ini`:
+
+```ini
+[network]
+build_flags =
+  -DNUM_SLOTS=5
+  -DSMARTFIRES_NETWORK_PROFILE=12
+```
+
+Then build the matching role artifacts without uploading or opening a monitor:
+
+```bash
+pio run -e feather_m0_lora_base
+pio run -e feather_m0_lora_node
+pio run -e feather_m0_lora_node_timed
+pio run -e feather_m0_lora_sniffer
+```
+
+These commands only compile. Review each startup/profile identity during the later controlled flash trial and confirm it reports `SF12 · 250 kHz · 4/5`; keep SF12 at its default STATIC 13 dBm, and do not mix the artifacts with SF7/SF9/SF10 firmware. The five-second slot, 100 ms guards, 4-second sampling, eight-sample bundle, and other SF12 values remain provisional until hardware acceptance.
 
 ## Upload troubleshooting
 

@@ -3,10 +3,12 @@ name: bandwidth-scaling
 description: Airtime math and node-count scaling table for the current TDMA/bundle scheme.
 category: architecture
 status: current
-last_verified: 2026-09-04
+last_verified: 2026-10-07
 source_refs:
   - platformio/include/telemetry/BinaryPacket.h
+  - platformio/include/config/NetworkProfiles.h
   - platformio/include/config/NetworkConfig.h
+  - platformio/include/radio/LoRaAirtime.h
   - platformio/src/radio/TdmaRadioService.cpp
 related_docs:
   - tdma-protocol
@@ -15,64 +17,42 @@ related_docs:
 
 # Bandwidth and scaling
 
-## Current inputs
+## Selected-profile inputs
 
-| Parameter | Value |
-|---|---:|
-| Slots | `NUM_SLOTS=5`: base + four node slots |
-| Slot width / usable window | 900 ms / 860 ms |
-| Bundle | 15 samples, maximum 195 bytes |
-| Conservative bundle TX budget | 340 ms |
-| SensorTriggered/Continuous sample period | 750 ms |
-| Timed sample period | 1,000 ms |
-| Timed window | 30 samples = two full bundles per 75 s cycle |
+`SMARTFIRES_NETWORK_PROFILE` selects the complete SF7, SF9, SF10, or SF12 operating set. Every set retains five slots (base plus four nodes), 915 MHz, CR 4/5, an eight-symbol preamble, explicit headers, payload CRC, and the 13 dBm ceiling. SF7/SF9/SF10 use 125 kHz bandwidth; SF12 uses 250 kHz.
 
-The maximum bundle is `PktHeader(5) + FullState(20) + count(1) + 14 * Delta(12) + CRC(1) = 195 bytes`. The code permits at most three sends per update, but the 860 ms usable slot can fit only two full-bundle budgets (`2 * 340 = 680 ms`; a third would require 1,020 ms). Small packets can still reach the three-send cap across repeated calls while the slot stays open.
+| Profile | Slot / guards | Frame | Operational bundle | Max BUNDLE airtime | Completion margin | Continuous / Timed sample | STATUS |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| SF7 | 900 / 20 ms | 4.5 s | 14 deltas / 15 samples / 195 B | 318 ms | 22 ms | 750 / 1,000 ms | 15 s |
+| SF9 | 1,300 / 30 ms | 6.5 s | 14 / 15 / 195 B | 1,005 ms | 50 ms | 750 / 1,000 ms | 30 s |
+| SF10 | 2,200 / 50 ms | 11 s | 14 / 15 / 195 B | 1,805 ms | 50 ms | 1,000 / 1,000 ms | 120 s |
+| SF12 | 5,000 / 100 ms | 25 s | 7 / 8 / 111 B | 2,216 ms | 100 ms | 4,000 / 4,000 ms | 300 s |
 
-## Production rate versus service rate
+The wire decoder still accepts up to 14 deltas and 195 application bytes for every profile. The smaller SF12 value is an operating transmit cap, not a second packet format.
 
-At a 750 ms sample period, a continuously active node produces:
+## Airtime and admission
 
-```text
-1 / (0.75 s * 15 samples) = 0.0889 bundles/s
-```
-
-A node gets one slot per frame. Using the conservative two-full-bundle limit:
+`LoRaAirtime` calculates time-on-air from the actual application length, adding RadioHead's four-byte header and the selected modem tuple. Before a node or base starts a scheduled send, it requires:
 
 ```text
-service = 2 / (NUM_SLOTS * 0.9 s)
+remaining guarded slot time >= calculated airtime + profile completion margin
 ```
 
-For the shipped five-slot geometry, service is `0.444 bundles/s`, five times the continuously active production rate. The offered-load ratio is `0.0889 / 0.444 = 0.20` per node slot. Because each node has its own slot, adding nodes lengthens every node's frame rather than sharing one service queue.
+The same length-aware budget bounds local `waitPacketSent()`. This replaces the former packet-type estimates and prevents a legal wire-size packet from being assumed schedulable merely because it decodes. Compile-time profile checks also require the operational maximum bundle plus its margin and both guards to fit.
 
-| Real nodes | `NUM_SLOTS` | Frame | Full-bundle service per node | 750 ms production/service |
-|---:|---:|---:|---:|---:|
-| 1 | 2 | 1.8 s | 1.111/s | 0.08 |
-| 4 (current capacity) | 5 | 4.5 s | 0.444/s | 0.20 |
-| 6 | 7 | 6.3 s | 0.317/s | 0.28 |
-| 9 | 10 | 9.0 s | 0.222/s | 0.40 |
+## Offered load
 
-This table is a queue-pressure bound, not a deployment recommendation. The current retry-wait static assertion prevents `NUM_SLOTS=6` or greater until retry timing is retuned, so those rows are scaling illustrations only.
+For four continuously active nodes, the provisional first-send aggregate BUNDLE/STATUS airtime is approximately 13.2% at SF7, 39.0% at SF9, 49.6% at SF10, and 28.9% at SF12. These figures exclude retries, join traffic, window markers, commands, base traffic, interference, and implementation jitter. They are sizing inputs, not measured capacity or a regulatory claim.
 
-## Airtime occupancy
+SF12 retains the conservative eight-sample, four-second trial cadence even though 250 kHz cuts its modeled airtime roughly in half. Its maximum operational BUNDLE leaves about 2,584 ms of raw space inside the 4.8-second guarded window before the 100 ms completion margin. This is deliberate first-trial headroom; the higher-SF timing values still require hardware characterization before tightening geometry or increasing offered load.
 
-Using the project's recorded maximum-bundle airtime of about 317.7 ms, a continuously active 750 ms node occupies approximately:
+## Scaling constraints
 
-```text
-0.0889 bundles/s * 0.3177 s = 2.82% raw uplink airtime
-```
+- `NUM_SLOTS=5` is a compile-time tripwire and must match the selected profile's five-slot geometry.
+- Base assignment capacity remains `NUM_SLOTS - 1`; changing fleet geometry requires a new internally consistent profile, not a lone slot-count edit.
+- Queue and pending reliability depths remain eight. Average airtime headroom does not prevent burst pressure.
+- All scheduled deployment traffic is fire-and-forget at the RadioHead link layer; `ACK_SUMMARY`, repeated sync/join behavior, and `CMD_ACK` provide application recovery.
+- Every base, node, and sniffer on one carrier must use the same profile. Mixed profiles are unsupported.
+- Range, interference, antennas, energy, timing margin, and regional channel-use constraints require physical validation.
 
-Four continuously active nodes would therefore use about 11.3% for first-transmission full bundles. A Timed node averages two bundles per 75 seconds, or roughly 0.85% raw uplink airtime per node (3.4% for four nodes).
-
-These figures exclude STATUS, window markers, `AWAKEN`, time sync, acknowledgement summaries, command traffic, retransmissions, link-layer ACKs on selected control paths, and packet headers below maximum bundle size. They are useful first-order estimates, not legal duty-cycle calculations or RF bench measurements.
-
-## Scaling constraints beyond airtime
-
-- `NUM_SLOTS` must match on the base and all nodes; update edge `DEFAULT_NUM_SLOTS` for sniffer alignment.
-- `NetworkConfig::kRetryWaitMinMs` must cover a full frame. Its 4,500 ms value exactly matches the current five-slot frame, so adding a sixth slot trips a compile-time assertion.
-- Base node-assignment capacity derives from `NUM_SLOTS - 1`.
-- Queue depth and pending reliability depth are both eight. Bursty sensor-triggered operation and retries can consume them even when average airtime looks comfortable.
-- Blocking base `ACK_SUMMARY` and direct `TIME_SYNC` paths can overrun slot 0; pure uplink math does not capture that known risk.
-- Radio range, interference, antenna placement, spreading factor, and regulatory constraints must be validated independently.
-
-Recalculate this page whenever slot width/count, bundle layout, sample cadence, radio modem settings, or TX-budget estimates change.
+Recalculate and revalidate all four definitions whenever modem settings, slot geometry, packet layout, bundle cap, or cadence changes.

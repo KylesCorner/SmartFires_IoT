@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from smartfires_edge.packet_loss import PacketLossTracker
+from smartfires_edge.network_profile import unknown_profile_state
 
 
 class LiveState:
@@ -56,6 +57,8 @@ class LiveState:
         self._session_start: float | None = None
         self._session_dir_lock = threading.Lock()
         self._session_log_dir: Path | None = None
+        self._network_profile = unknown_profile_state()
+        self._sniffer_network_profile: dict[str, Any] | None = None
 
     def set_session(self, session_id: int, session_start: float) -> None:
         """Called by the ingest thread on startup and on each new-session reset."""
@@ -71,6 +74,37 @@ class LiveState:
             "session_id": f"0x{session_id:08X}" if session_id is not None else None,
             "session_start": session_start,
         }
+
+    def set_network_profile_snapshot(self, snapshot: dict[str, Any]) -> None:
+        import copy
+
+        with self._lock:
+            self._network_profile = copy.deepcopy(snapshot)
+
+    def network_profile_snapshot(self) -> dict[str, Any]:
+        import copy
+
+        with self._lock:
+            snapshot = copy.deepcopy(self._network_profile)
+            sniffer = copy.deepcopy(self._sniffer_network_profile)
+        if sniffer is not None:
+            snapshot["sniffer"] = sniffer
+            active = snapshot.get("active") or {}
+            active_fp = str(active.get("fingerprint", "")).lower().removeprefix("0x")
+            sniffer_fp = str(sniffer.get("fingerprint", "")).lower().removeprefix("0x")
+            if active_fp and sniffer_fp and active_fp != sniffer_fp:
+                mismatches = list(snapshot.get("mismatches") or [])
+                if "sniffer.fingerprint" not in mismatches:
+                    mismatches.append("sniffer.fingerprint")
+                snapshot["mismatches"] = mismatches
+                snapshot["state"] = "mismatch"
+        return snapshot
+
+    def set_sniffer_network_profile(self, profile: dict[str, Any]) -> None:
+        import copy
+
+        with self._lock:
+            self._sniffer_network_profile = copy.deepcopy(profile)
 
     def set_link_connected(self, connected: bool, error: str | None = None) -> None:
         """Called by the ingest thread when the base station serial link opens/drops."""

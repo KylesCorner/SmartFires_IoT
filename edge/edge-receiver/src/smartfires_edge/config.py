@@ -118,6 +118,10 @@ class IngestConfig:
     sync_interval_s: int = DEFAULT_SYNC_INTERVAL_S
     fsync_every_row: bool = False
     raw_log: bool = False
+    # Explicit recovery-only profile identity.  Normal operation learns this
+    # from the base's PKT_NETWORK_PROFILE announcement.  When present, the API
+    # retains both values and reports a mismatch instead of hiding divergence.
+    network_profile_override: dict[str, Any] | None = None
     anemometer: AnemometerConfig = field(default_factory=AnemometerConfig)
     sniffer: SnifferConfig = field(default_factory=SnifferConfig)
 
@@ -173,6 +177,16 @@ class EdgeConfig:
                 cfg.ingest.fsync_every_row = True
             if getattr(args, "raw_log", None):
                 cfg.ingest.raw_log = True
+            if getattr(args, "network_profile_override", None) is not None:
+                with open(args.network_profile_override, encoding="utf-8") as f:
+                    override_data = json.load(f)
+                # Accept either a bare profile object or the same named wrapper
+                # used by exported metadata/config tooling.
+                if "network_profile" in override_data:
+                    override_data = override_data["network_profile"]
+                if "active" in override_data:
+                    override_data = override_data["active"]
+                cfg.ingest.network_profile_override = dict(override_data)
             if getattr(args, "anemometer_port", None) is not None:
                 cfg.ingest.anemometer.port = args.anemometer_port
             if getattr(args, "anemometer_baud", None) is not None:
@@ -223,7 +237,8 @@ def _apply_json_config(cfg: EdgeConfig, path: Path) -> None:
             "metrics_interval_s": 10,
             "sync_interval_s": 600,
             "fsync_every_row": false,
-            "raw_log": false
+            "raw_log": false,
+            "network_profile_override": null
           },
           "anemometer": {
             "port": null,
@@ -264,6 +279,9 @@ def _apply_json_config(cfg: EdgeConfig, path: Path) -> None:
         cfg.ingest.fsync_every_row = bool(ingest["fsync_every_row"])
     if "raw_log" in ingest:
         cfg.ingest.raw_log = bool(ingest["raw_log"])
+    if "network_profile_override" in ingest:
+        value = ingest["network_profile_override"]
+        cfg.ingest.network_profile_override = dict(value) if value is not None else None
 
     anemometer = data.get("anemometer", {})
     if "port" in anemometer:
@@ -356,6 +374,16 @@ def add_common_ingest_args(parser: Any) -> None:
         const=True,
         default=None,
         help="Write raw UART frames to a .jsonl log file (default: off)",
+    )
+    parser.add_argument(
+        "--network-profile-override",
+        type=Path,
+        default=None,
+        metavar="PATH",
+        help=(
+            "Recovery-only JSON profile override. The base announcement remains "
+            "visible and disagreement is reported as a mismatch."
+        ),
     )
     parser.add_argument(
         "--config",

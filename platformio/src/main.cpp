@@ -49,6 +49,23 @@ void setup() {
   Watchdog.reset();
 
   LOG_INFO("boot", "SmartFires base station starting");
+  LOG_INFO("profile",
+           "id=sf%u fingerprint=0x%08lX sf=%u bw_hz=%lu cr=4/%u "
+           "slots=%u slot_ms=%lu guard_ms=%lu bundle_deltas=%u "
+           "continuous_sample_ms=%lu timed_sample_ms=%lu status_ms=%lu",
+           static_cast<unsigned int>(NetworkConfig::kProfileId),
+           static_cast<unsigned long>(NetworkConfig::kProfileFingerprint),
+           static_cast<unsigned int>(NetworkConfig::kSpreadingFactor),
+           static_cast<unsigned long>(NetworkConfig::kBandwidthHz),
+           static_cast<unsigned int>(NetworkConfig::kCodingRateDenominator),
+           static_cast<unsigned int>(NetworkConfig::kNumSlots),
+           static_cast<unsigned long>(NetworkConfig::kSlotWidthMs),
+           static_cast<unsigned long>(NetworkConfig::kGuardMs),
+           static_cast<unsigned int>(NetworkConfig::kMaxBundleDeltas),
+           static_cast<unsigned long>(
+               NetworkConfig::kProfile.continuousSamplePeriodMs),
+           static_cast<unsigned long>(NetworkConfig::kProfile.timedSamplePeriodMs),
+           static_cast<unsigned long>(NetworkConfig::kStatusIntervalMs));
   if (!baseApp.begin()) {
     LOG_ERROR("boot", "SmartFires base app begin failed");
     // Not petted: the WDT is left to expire and reboot the board rather
@@ -294,7 +311,7 @@ const uint32_t nodeUidHash = BoardIdentity::hash32();
 const uint8_t initialRadioAddr = makeInitialRadioAddr(nodeUidHash);
 
 PacketHandler::Config packetHandlerCfg = PacketHandler::Config::make(
-    kUnassignedNodeId, BinaryPacket::kBundleMaxDeltas,
+    kUnassignedNodeId, NetworkConfig::kMaxBundleDeltas,
     NetworkConfig::kStatusIntervalMs);
 PacketHandler packetHandler(packetHandlerCfg);
 
@@ -400,6 +417,21 @@ void setup() {
   Watchdog.reset();
 
   LOG_INFO("boot", "SmartFires node starting");
+  LOG_INFO("profile",
+           "id=sf%u fingerprint=0x%08lX sf=%u bw_hz=%lu cr=4/%u "
+           "slots=%u slot_ms=%lu guard_ms=%lu bundle_deltas=%u "
+           "sample_ms=%lu status_ms=%lu",
+           static_cast<unsigned int>(NetworkConfig::kProfileId),
+           static_cast<unsigned long>(NetworkConfig::kProfileFingerprint),
+           static_cast<unsigned int>(NetworkConfig::kSpreadingFactor),
+           static_cast<unsigned long>(NetworkConfig::kBandwidthHz),
+           static_cast<unsigned int>(NetworkConfig::kCodingRateDenominator),
+           static_cast<unsigned int>(NetworkConfig::kNumSlots),
+           static_cast<unsigned long>(NetworkConfig::kSlotWidthMs),
+           static_cast<unsigned long>(NetworkConfig::kGuardMs),
+           static_cast<unsigned int>(NetworkConfig::kMaxBundleDeltas),
+           static_cast<unsigned long>(SensingConfig::DutyCycle::kActiveSamplePeriodMs),
+           static_cast<unsigned long>(NetworkConfig::kStatusIntervalMs));
   LOG_INFO("boot", "node_id=%u", initialRadioAddr);
 
   gps.reset();

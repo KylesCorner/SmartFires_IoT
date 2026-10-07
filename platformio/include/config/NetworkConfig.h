@@ -1,7 +1,7 @@
 // ---
 // description: TDMA slot geometry, LoRa radio link, link-layer ACK, and app-layer reliability constants — the single source of truth for the network domain, including the node TdmaConfig profile builder.
 // role: config
-// docs: [bandwidth-scaling, lora-vs-lorawan, packet-reliability, tdma-protocol, tunable-parameters]
+// docs: [bandwidth-scaling, lora-vs-lorawan, packet-reliability, software-design, tdma-protocol, tunable-parameters]
 // ---
 #pragma once
 
@@ -25,6 +25,7 @@
 //     SmartFiresBaseApp::Config::baseCfg() used to (it hardcoded its own
 //     copy of these three values, disconnected from the node's build flag).
 
+#include "config/NetworkProfiles.h"
 #include "radio/TdmaConfig.h"
 #include "telemetry/BinaryPacket.h"
 
@@ -34,26 +35,15 @@
 // ---------------------------------------------------------------------------
 // Build-flag resolution
 // ---------------------------------------------------------------------------
-// NUM_SLOTS and SMARTFIRES_TDMA_RELIABILITY_MODE are set per-environment in
-// platformio.ini (all network environments). This is the one place that reads
-// the raw -D flags and turns them into typed values — main.cpp no longer
-// repeats these #ifndef guards itself.
-//
-// SMARTFIRES_STATUS_INTERVAL_MS lives here rather than in SensingConfig.h
-// because it directly drives offered radio load (see Appendix A, table A,
-// and Compatibility Rule 5), which makes it a Network-domain concern even
-// though it's read by PacketHandler.
+// NUM_SLOTS remains as a fleet-size tripwire in PlatformIO. The selected
+// profile owns the actual value, and a mismatch is rejected below.
 
 #ifndef NUM_SLOTS
-#define NUM_SLOTS 4
+#if defined(SMARTFIRES_NATIVE_TEST)
+#define NUM_SLOTS 5
+#else
+#error "NUM_SLOTS must match the selected network profile"
 #endif
-
-#ifndef SMARTFIRES_TDMA_RELIABILITY_MODE
-#define SMARTFIRES_TDMA_RELIABILITY_MODE 0
-#endif
-
-#ifndef SMARTFIRES_STATUS_INTERVAL_MS
-#define SMARTFIRES_STATUS_INTERVAL_MS (15UL * 60UL * 1000UL)
 #endif
 
 namespace NetworkConfig {
@@ -67,10 +57,16 @@ struct Geometry {
   uint32_t syncStaleMs;
 };
 
-constexpr uint8_t kNumSlots = NUM_SLOTS;
-constexpr uint32_t kSlotWidthMs = 900;
-constexpr uint32_t kGuardMs = 20;
-constexpr uint32_t kSyncStaleMs = 1320000;  // 22 min
+constexpr const NetworkProfiles::NetworkProfile &kProfile =
+    NetworkProfiles::kActiveProfile;
+constexpr uint8_t kProfileId = static_cast<uint8_t>(kProfile.id);
+constexpr uint32_t kProfileFingerprint =
+    NetworkProfiles::kActiveProfileFingerprint;
+
+constexpr uint8_t kNumSlots = kProfile.totalSlots;
+constexpr uint32_t kSlotWidthMs = kProfile.slotWidthMs;
+constexpr uint32_t kGuardMs = kProfile.guardMs;
+constexpr uint32_t kSyncStaleMs = kProfile.syncStaleMs;
 
 constexpr Geometry kGeometry{kNumSlots, kSlotWidthMs, kGuardMs, kSyncStaleMs};
 
@@ -90,17 +86,21 @@ constexpr uint32_t kFramePeriodMs =
 // service time -- field-observed ACK_SUMMARY retries on the base were the
 // signal that some nonzero margin is required; tune upward if retries
 // persist, downward once actual wake latency is measured.
-constexpr uint32_t kRxWakeAheadMs = 150;
+constexpr uint32_t kRxWakeAheadMs = kProfile.rxWakeAheadMs;
 
 // --- Per-slot TX budgets -----------------------------------------------------
-// Conservative slot-budget estimates used by TdmaRadioService::drainTxQueue()
-// to avoid crossing into the next node's slot. Named here (rather than left
-// as magic numbers inside TdmaRadioService.cpp's estimateTxBudgetMs()) so the
-// slot-width invariant below is checkable at compile time.
-constexpr uint16_t kBundleTxBudgetMs = 340;
-constexpr uint16_t kStatusTxBudgetMs = 120;
-constexpr uint16_t kAwakenTxBudgetMs = 90;
-constexpr uint16_t kDefaultTxBudgetMs = 140;  // unknown / FULL_STATE payloads
+// Actual-length airtime plus one profile-specific completion/software margin.
+// The input is the SmartFires application length; LoRaAirtime adds RadioHead's
+// four-byte header before applying the selected modem tuple.
+constexpr uint16_t txBudgetMs(uint16_t applicationBytes) {
+  return static_cast<uint16_t>(
+      NetworkProfiles::applicationAirtimeMs(kProfile, applicationBytes) +
+      kProfile.txCompletionMarginMs);
+}
+
+constexpr uint16_t kBundleTxBudgetMs =
+    txBudgetMs(kProfile.maxOperationalApplicationBytes);
+constexpr uint16_t kAckTxWaitMs = txBudgetMs(1u);
 
 // --- Radio link (RadioHeadTdmaDriver) ---------------------------------------
 constexpr uint8_t kBaseAddr = 0x01;
@@ -109,6 +109,21 @@ constexpr uint8_t kRadioIntPin = 3;
 constexpr uint8_t kRadioRstPin = 4;
 constexpr float kRadioFrequencyMhz = 915.0f;
 constexpr int8_t kRadioTxPowerDbm = 13;
+constexpr uint8_t kSpreadingFactor = kProfile.spreadingFactor;
+constexpr uint32_t kBandwidthHz = kProfile.bandwidthHz;
+constexpr uint8_t kCodingRateDenominator = kProfile.codingRateDenominator;
+constexpr uint8_t kPreambleSymbols = kProfile.preambleSymbols;
+constexpr bool kExplicitHeader = kProfile.explicitHeader;
+constexpr bool kPayloadCrc = kProfile.payloadCrc;
+constexpr bool kLowDataRateOptimization =
+    kProfile.lowDataRateOptimization;
+constexpr uint8_t kMaxBundleDeltas = kProfile.maxBundleDeltas;
+constexpr uint16_t kMaxOperationalApplicationBytes =
+    kProfile.maxOperationalApplicationBytes;
+// Preserve the field-proven SF7 behavior. Higher-SF profiles begin acceptance
+// at the fixed 13 dBm baseline so dynamic power does not confound range data;
+// re-enable them deliberately after profile-specific threshold validation.
+constexpr bool kDynamicTxPowerDefaultEnabled = (kProfileId == 7u);
 
 // Bounds a node clamps an incoming PKT_CMD_SET_TX_POWER to before applying it.
 // The base station is the decision-maker for dynamic TX power
@@ -139,31 +154,16 @@ static_assert(kMinTxPowerDbm <= kMaxTxPowerDbm,
 constexpr uint8_t kLinkRetries = 3;
 constexpr uint16_t kLinkAckTimeoutMs = 250;
 
-// Bound on how long acknowledge() waits for its own ACK transmission to
-// physically finish sending (RHGenericDriver::waitPacketSent(timeout)) —
-// distinct from kLinkAckTimeoutMs above, which bounds a different wait (the
-// base waiting to *receive* a reply ACK). Our ACK payload (1-byte body +
-// RadioHead header, ~5-6 bytes on air) is smaller than the current 12-byte AWAKEN
-// payload, so this reuses kAwakenTxBudgetMs's conservative margin rather
-// than introducing an untested new number. Not bench-verified — flag for
-// tuning once real hardware timing is measured, same as rxWakeAheadMs was.
-constexpr uint16_t kAckTxWaitMs = kAwakenTxBudgetMs;
-
-// Bound on how long RadioHeadTdmaDriver::send() waits for its own telemetry
-// transmission to physically finish sending. Unlike acknowledge()'s payload,
-// send() carries anything up to a full BUNDLE (kBundleTxBudgetMs's 195-byte
-// case), so it reuses that largest, already-conservative budget rather than
-// branching on payload size — waiting a bit longer than strictly necessary
-// for a small STATUS/TIME_SYNC payload is harmless (only the timed-out path
-// costs anything), whereas under-timing a BUNDLE would defeat the point.
-// Not bench-verified — same caveat as kAckTxWaitMs above.
+// Backward-compatible maximum bound; the driver now calculates its bounded
+// wait from each packet's actual length through txBudgetMs().
 constexpr uint16_t kSendTxWaitMs = kBundleTxBudgetMs;
 
 // --- TX queue / app-layer reliability (operating values shipped today) -----
 constexpr uint8_t kQueueDepth = 8;
 constexpr uint8_t kReliabilityWindowDepth = 8;
-constexpr uint8_t kReliabilityMaxAttempts = 3;
-constexpr uint32_t kReliabilityMaxAgeMs = 30000;
+constexpr uint8_t kReliabilityMaxAttempts =
+    kProfile.reliabilityMaxAttempts;
+constexpr uint32_t kReliabilityMaxAgeMs = kProfile.reliabilityMaxAgeMs;
 constexpr uint32_t kReliabilityMinRetryGapMs = 2000;
 constexpr uint32_t kReliabilityFreshTrafficHoldoffMs = 2000;
 
@@ -174,7 +174,9 @@ constexpr uint8_t kQueueCapacityHardCap = 8;
 constexpr uint8_t kReliabilityWindowHardCap = 8;
 
 constexpr TdmaReliabilityMode kReliabilityMode =
-    tdmaReliabilityModeFromValue(SMARTFIRES_TDMA_RELIABILITY_MODE);
+    kProfile.useAppAckSummary
+        ? TdmaReliabilityMode::AppLayerAckSummary
+        : TdmaReliabilityMode::StrictLinkAck;
 
 // --- ACK-paced retry gate (APP_ACK_SUMMARY mode) ----------------------------
 // See documentation/Completed_Plans/TUNABLE_PARAMETER_ARCHITECTURE_PLAN.md
@@ -192,17 +194,17 @@ constexpr TdmaReliabilityMode kReliabilityMode =
 // provoke a spurious retransmit.
 constexpr uint32_t kExpectedAckIntervalMs = kFramePeriodMs;
 constexpr uint16_t kRetryWaitMultiplierPermille = 2000;  // 2.0x
-constexpr uint32_t kRetryWaitMinMs = 4500;
-constexpr uint32_t kRetryWaitMaxMs = 10000;
+constexpr uint32_t kRetryWaitMinMs = kProfile.retryWaitMs;
+constexpr uint32_t kRetryWaitMaxMs = kProfile.retryWaitMs;
 constexpr bool kRequireAckSummaryBeforeFirstRetry = false;
 
 // --- Node packet cadence ------------------------------------------------------
-constexpr uint32_t kStatusIntervalMs = SMARTFIRES_STATUS_INTERVAL_MS;
+constexpr uint32_t kStatusIntervalMs = kProfile.statusIntervalMs;
 
 // --- Boot handshake ----------------------------------------------------------
 // SmartFiresNodeApp re-broadcasts PKT_AWAKEN at this interval until the
 // first TIME_SYNC is received; sensors are withheld until then.
-constexpr uint32_t kAwakenIntervalMs = 5000;
+constexpr uint32_t kAwakenIntervalMs = kProfile.awakenIntervalMs;
 
 // --- Telemetry TX gate -------------------------------------------------------
 // Set false to suppress bundle encoding and transmission (STATUS still flows).
@@ -218,8 +220,24 @@ constexpr bool kEnableTelemetryTx = true;
 // maximum bundles in the usable 860 ms span. This assertion conservatively
 // covers the alternative StrictLinkAck mode.
 // 340 (bundle TX) + 250 (ACK timeout) + 2×20 (guard) = 630 ms < 900 ms ✓
-static_assert(kSlotWidthMs > kBundleTxBudgetMs + kLinkAckTimeoutMs + 2 * kGuardMs,
-              "slotWidthMs too small for worst-case bundle TX + ACK + guard");
+static_assert(NUM_SLOTS == kNumSlots,
+              "NUM_SLOTS must match the selected network profile");
+static_assert(kMaxBundleDeltas <= BinaryPacket::kBundleMaxDeltas,
+              "operational bundle cap exceeds the wire-format ceiling");
+static_assert(NetworkProfiles::kBundleFixedBytes ==
+                  sizeof(BinaryPacket::PktHeader) +
+                      sizeof(BinaryPacket::FullStatePayload) + 2u,
+              "profile bundle-size model drifted from the wire format");
+static_assert(NetworkProfiles::kBundleBytesPerDelta ==
+                  sizeof(BinaryPacket::DeltaPayload),
+              "profile delta-size model drifted from the wire format");
+static_assert(kMaxOperationalApplicationBytes <=
+                  BinaryPacket::kMaxBundleLoRaSize,
+              "operational bundle size exceeds the wire-format ceiling");
+static_assert(kReliabilityMode != TdmaReliabilityMode::StrictLinkAck ||
+                  kSlotWidthMs > kBundleTxBudgetMs + kLinkAckTimeoutMs +
+                                     2 * kGuardMs,
+              "slot too small for strict-link-ACK bundle transaction");
 static_assert(kRetryWaitMinMs <= kRetryWaitMaxMs,
               "retryWaitMinMs must not exceed retryWaitMaxMs");
 // The retry-wait floor has to cover at least one full frame rotation, or a
@@ -242,10 +260,9 @@ static_assert(TdmaConfig::MaxPayloadLen >= BinaryPacket::kMaxBundleLoRaSize,
 // Profile builder
 // ---------------------------------------------------------------------------
 
-// Fully-populated TdmaConfig for every node build (node, node_debug — they
-// differ only in SMARTFIRES_STATUS_INTERVAL_MS, which PacketHandler reads
-// separately). nodeId is always unassigned (0) at construction; the base
-// assigns the real value from uid_hash once TIME_SYNC is exchanged.
+// Fully-populated TdmaConfig for every node build. nodeId is always unassigned
+// (0) at construction; the base assigns the real value from uid_hash once
+// TIME_SYNC is exchanged.
 inline TdmaConfig nodeTdmaProfile() {
   TdmaConfig cfg;
   cfg.nodeId = 0;

@@ -115,7 +115,85 @@ const Api = {
   async session() {
     return (await fetch("/api/session")).json();
   },
+  async networkProfile() {
+    const response = await fetch("/api/network_profile", { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    return normalizeNetworkProfileResponse(await response.json());
+  },
 };
+
+// Keep the browser tolerant during staged edge/firmware rollouts. The
+// canonical API envelope is {state, source, active, base, override,
+// mismatches}; aliases below accept early profile-announcement builds without
+// embedding a second SF timing table in JavaScript.
+function normalizeNetworkProfile(profile) {
+  if (!profile || typeof profile !== "object") return null;
+
+  const numberOrNull = (...values) => {
+    const value = values.find((candidate) => candidate !== undefined && candidate !== null && candidate !== "");
+    if (value === undefined) return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  };
+  const explicitBandwidthHz = numberOrNull(profile.bandwidth_hz);
+  const genericBandwidth = numberOrNull(profile.bandwidth);
+  const bandwidthKhz = numberOrNull(profile.bandwidth_khz);
+  const spreadingFactor = numberOrNull(profile.spreading_factor, profile.sf, profile.lora_sf);
+  const profileId = profile.profile_id ?? profile.id ?? profile.name ??
+    (spreadingFactor !== null ? `sf${spreadingFactor}` : null);
+
+  return {
+    ...profile,
+    profile_id: profileId,
+    spreading_factor: spreadingFactor,
+    bandwidth_hz: explicitBandwidthHz ??
+      (bandwidthKhz !== null ? bandwidthKhz * 1000 : null) ??
+      (genericBandwidth !== null ? (genericBandwidth <= 1000 ? genericBandwidth * 1000 : genericBandwidth) : null),
+    coding_rate: profile.coding_rate ?? profile.cr ?? null,
+    coding_rate_denominator: numberOrNull(profile.coding_rate_denominator, profile.cr_denominator),
+    num_slots: numberOrNull(profile.num_slots, profile.slot_count),
+    slot_width_ms: numberOrNull(profile.slot_width_ms, profile.tdma_slot_width_ms),
+    guard_ms: numberOrNull(profile.guard_ms, profile.slot_guard_ms, profile.tdma_guard_ms),
+    max_bundle_deltas: numberOrNull(profile.max_bundle_deltas, profile.operational_bundle_deltas),
+    continuous_sample_period_ms: numberOrNull(
+      profile.continuous_sample_period_ms,
+      profile.sample_period_ms,
+      profile.continuous_sample_ms
+    ),
+    timed_sample_period_ms: numberOrNull(profile.timed_sample_period_ms, profile.timed_sample_ms),
+    status_interval_ms: numberOrNull(profile.status_interval_ms),
+    fingerprint: profile.fingerprint ?? profile.profile_fingerprint ?? null,
+  };
+}
+
+function normalizeNetworkProfileResponse(payload) {
+  const envelope = payload && typeof payload === "object" ? payload : {};
+  const looksFlat = envelope.profile_id !== undefined || envelope.spreading_factor !== undefined || envelope.sf !== undefined;
+  const active = normalizeNetworkProfile(
+    envelope.active ?? envelope.profile ?? envelope.network_profile ?? (looksFlat ? envelope : null)
+  );
+  const base = normalizeNetworkProfile(envelope.base ?? envelope.base_profile);
+  const override = normalizeNetworkProfile(envelope.override ?? envelope.override_profile);
+  const mismatches = Array.isArray(envelope.mismatches)
+    ? envelope.mismatches
+    : envelope.mismatch
+      ? [envelope.mismatch]
+      : [];
+  let state = envelope.state ?? (mismatches.length ? "mismatch" : active ? "active" : "unknown");
+  if (state === "known") state = "active";
+
+  return {
+    state,
+    source: envelope.source ?? active?.source ?? null,
+    active,
+    base,
+    override,
+    mismatches,
+    history: Array.isArray(envelope.history) ? envelope.history : [],
+  };
+}
 
 function fmt(value) {
   return value === null || value === undefined || value === "" ? "—" : value;

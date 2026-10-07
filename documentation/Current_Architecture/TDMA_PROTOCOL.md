@@ -3,10 +3,12 @@ name: tdma-protocol
 description: Slot geometry, session clock, boot handshake, and TX budget for the TDMA radio layer.
 category: architecture
 status: current
-last_verified: 2026-09-04
+last_verified: 2026-10-07
 source_refs:
   - platformio/include/radio/TdmaConfig.h
+  - platformio/include/config/NetworkProfiles.h
   - platformio/include/config/NetworkConfig.h
+  - platformio/include/radio/LoRaAirtime.h
   - platformio/src/radio/TdmaClock.cpp
   - platformio/src/radio/TdmaRadioService.cpp
   - platformio/include/radio/ITdmaRadioDriver.h
@@ -22,32 +24,27 @@ related_docs:
 
 SmartFires divides one 915 MHz raw-LoRa channel into fixed, repeating time slots. TDMA governs steady-state traffic; joining and selected reset/recovery packets have explicit out-of-band behavior.
 
-## Current geometry
+## Selected geometry
 
-| Setting | Value |
-|---|---:|
-| `NUM_SLOTS` | 5 |
-| Slot width | 900 ms |
-| Frame period | 4,500 ms |
-| Guard | 20 ms at each slot edge |
-| Usable TX window | 860 ms |
-| Base slot | slot 0, address/node ID 1 |
-| Assignable node slots | four, node IDs beginning at 2 |
-| Sync-stale timeout | 1,320,000 ms (22 min) |
-| Node RX wake-ahead for slot 0 | 150 ms |
+All four profiles use five slots: slot 0 belongs to base address/node ID 1 and four node slots begin at ID 2. The remaining timing moves with `SMARTFIRES_NETWORK_PROFILE`:
 
-For session time `t`, the nominal slot is `(t / 900) % 5`. `TdmaClock::myTurn()` applies the leading and trailing guards, so a node may start transmission only while the position is at least 20 ms and before 880 ms.
+| Profile | Slot width | Guard at each edge | Usable window | Frame | RX wake-ahead |
+|---|---:|---:|---:|---:|---:|
+| SF7 | 900 ms | 20 ms | 860 ms | 4.5 s | 150 ms |
+| SF9 | 1,300 ms | 30 ms | 1,240 ms | 6.5 s | 200 ms |
+| SF10 | 2,200 ms | 50 ms | 2,100 ms | 11 s | 250 ms |
+| SF12 | 5,000 ms | 100 ms | 4,800 ms | 25 s | 300 ms |
 
-The base and every node consume the same `NetworkConfig::kGeometry`. A `NUM_SLOTS` mismatch changes frame length and is not recoverable at runtime: the base's slot can drift across node slots, and the assignment table may be too small.
+For session time `t`, the nominal slot is `(t / slot_width_ms) % 5`. `TdmaClock::myTurn()` applies the selected guards. Base and node consume the same `NetworkConfig::kGeometry`; `NUM_SLOTS=5` remains a build-time tripwire and compilation fails if it disagrees with the selected profile.
 
 ## Join before TDMA
 
 A node cannot know its slot before it has an assigned ID. Joining therefore occurs outside normal slot gating:
 
 1. The node hashes the SAMD21 UID and uses a temporary radio address.
-2. It sends `AWAKEN(uid_hash, reset_cause, hang_zone)` every 5 seconds with link-layer acknowledgement.
-3. The base acknowledges the frame, finds or creates the persistent assignment, and queues a direct `TIME_SYNC` addressed to the temporary radio address.
-4. The sync header carries the assigned node ID. The node link-ACKs the direct response, applies session time, changes its radio address, and begins sensing/TDMA.
+2. It sends fire-and-forget `AWAKEN(uid_hash, reset_cause, hang_zone)` at the selected 5/7/12/27-second interval plus bounded UID/sequence-derived jitter.
+3. The base finds or creates the persistent assignment and queues a fire-and-forget direct `TIME_SYNC` to the temporary radio address.
+4. The sync header carries the assigned node ID. The node applies session time, changes its radio address, and begins sensing/TDMA. If the response is lost, the node remains unassigned and asks again.
 
 The current `AWAKEN` is 12 bytes; the decoder still accepts the old 9-byte header/payload layout. Slot 0 is never assigned to a sensor node.
 
@@ -55,7 +52,7 @@ The current `AWAKEN` is 12 bytes; the decoder still accepts the old 9-byte heade
 
 Packets use session-relative milliseconds rather than wall-clock time. The Jetson starts a random session ID and maps session time to UTC when ingesting. Its default USB TIME_SYNC interval is 600 seconds.
 
-The base maintains a clock continuously. It caches Jetson time when available, otherwise falls back to its local session, and broadcasts a fire-and-forget `TIME_SYNC` every 50 seconds. Nodes update their session clock on valid direct or broadcast sync.
+The base maintains a clock continuously. It caches Jetson time when available, otherwise falls back to its local session, and broadcasts fire-and-forget `TIME_SYNC` every 50/65/110/125 seconds for SF7/SF9/SF10/SF12. Nodes update their session clock on valid direct or broadcast sync.
 
 Before the first sync and after 22 minutes without refresh, node transmit and receive gates become permissive. This costs power/channel discipline but ensures a stale node can hear recovery sync and rejoin.
 
@@ -65,26 +62,17 @@ Node slots carry BUNDLE, STATUS, FULL_STATE, queued `CMD_ACK`, window markers, a
 
 Slot 0 carries direct assignment sync, base-to-node commands, `ACK_SUMMARY`, and periodic broadcast sync, in that priority order. The base attempts one pending category per `update()` call, and subsequent loop iterations within the same slot may send more.
 
-Commands are fire-and-forget and acknowledged later by `CMD_ACK`. `ACK_SUMMARY` and direct sync still use blocking `sendToWait()` and can exceed slot 0 in their worst case; the possible fix is deferred, so collision isolation is not absolute.
+Commands are fire-and-forget and acknowledged later by `CMD_ACK`. Direct sync and `ACK_SUMMARY` are also fire-and-forget. Every scheduled base send passes the same remaining-slot deadline check used by node traffic.
 
 ## TX budget
 
-Before each queued send, the node estimates a conservative time budget:
+TX admission is based on actual application length, the selected modem tuple, RadioHead's four-byte header, and a profile completion/software margin (22 ms at SF7; 50/50/100 ms at SF9/SF10/SF12). A scheduled send starts only when that total fits before the trailing guard. The same value bounds local TX completion.
 
-| Packet class | Budget |
-|---|---:|
-| Maximum BUNDLE | 340 ms |
-| STATUS | 120 ms |
-| AWAKEN | 90 ms |
-| Other/FULL_STATE | 140 ms |
-
-The service will not start a packet if the estimate would cross the 880 ms trailing boundary. It caps each call at three sends and only one retransmission per slot. With maximum bundles, the budget allows two, not three, inside the 860 ms usable window.
-
-In StrictLinkAck mode the compile-time slot invariant conservatively budgets one maximum bundle, a 250 ms ACK timeout, and two guards: `340 + 250 + 40 = 630 ms < 900 ms`. Current telemetry mode does not use that remote ACK wait.
+The loop still caps each update at three sends and one retransmission per slot. Compile-time checks prove the selected operational maximum bundle fits, but the SF9/SF10/SF12 margins remain provisional until measured on hardware.
 
 ## Node receiver gating
 
-In current app-layer reliability mode, steady node uplinks do not need to listen for immediate ACKs. The SX1276 receiver sleeps outside the base window and starts waking 150 ms before slot 0. That margin is distinct from clock-drift guards: it covers radio wake latency and main-loop jitter from blocking sensor reads.
+Steady node uplinks do not need to listen for immediate link ACKs. The SX1276 receiver sleeps outside the base window and starts waking by the profile's 150/200/250/300 ms wake-ahead. That margin is distinct from clock-drift guards: it covers radio wake latency and main-loop jitter from blocking sensor reads.
 
 The receiver remains available continuously while unsynchronized/stale and while the application must drain its final Timed-window queue. Direct commands can only be received in the base's slot; their response is scheduled in the node's slot, except reset ACK as documented in the reliability reference.
 
@@ -96,12 +84,12 @@ Markers are deliberately fire-and-forget. Their state is advisory and recoverabl
 
 ## Scaling rule
 
-To support `N` real nodes, set `NUM_SLOTS=N+1`, rebuild/reflash every base and node, and match the edge sniffer setting. Then recalculate:
+The shipped profiles are five-slot definitions. Supporting a different fleet size requires adding or revising a complete profile, rebuilding/reflashing the base, every node, and the sniffer, and then recalculating:
 
 - frame period and per-node service rate;
-- ACK/retry intervals (the current 4,500 ms retry floor blocks six or more slots at compile time);
+- ACK/retry intervals and pending age;
 - base assignment capacity;
-- receiver wake and slot-overrun behavior;
+- receiver wake, guarded admission, and completion margin;
 - regulatory/channel-airtime limits.
 
 See `BANDWIDTH_SCALING.md` for the current calculation and `PACKET_RELIABILITY.md` for ACK pacing.

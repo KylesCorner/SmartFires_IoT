@@ -7,6 +7,8 @@
 #include <RH_RF95.h>
 #include <SPI.h>
 
+#include "config/NetworkProfiles.h"
+
 // Adafruit Feather M0 with built-in RFM95 LoRa radio.
 #define RFM95_CS 8
 #define RFM95_INT 3
@@ -130,9 +132,15 @@ void setup() {
   // header.
   rf95.setPromiscuous(true);
 
-  // Keep this matched to the real network if your main firmware changes it.
-  // Example:
-  // rf95.setModemConfig(RH_RF95::Bw125Cr45Sf128);
+  const NetworkProfiles::NetworkProfile &profile =
+      NetworkProfiles::kActiveProfile;
+  const RH_RF95::ModemConfig modem = {
+      NetworkProfiles::sx127xModemConfig1(profile),
+      static_cast<uint8_t>((profile.spreadingFactor << 4) |
+                           (profile.payloadCrc ? 0x04u : 0x00u)),
+      static_cast<uint8_t>(profile.lowDataRateOptimization ? 0x08u : 0x00u)};
+  rf95.setModemRegisters(&modem);
+  rf95.setPreambleLength(profile.preambleSymbols);
 
   Serial.print("{\"event\":\"config\",\"t_ms\":");
   Serial.print(millis());
@@ -140,6 +148,22 @@ void setup() {
   Serial.print(SNIFFER_RF95_FREQ_MHZ, 3);
   Serial.print(",\"max_packet_len\":");
   Serial.print(SNIFFER_MAX_PACKET_LEN);
+  Serial.print(",\"profile_id\":");
+  Serial.print(static_cast<unsigned int>(profile.id));
+  Serial.print(",\"profile_fingerprint\":");
+  Serial.print(NetworkProfiles::kActiveProfileFingerprint);
+  Serial.print(",\"spreading_factor\":");
+  Serial.print(profile.spreadingFactor);
+  Serial.print(",\"bandwidth_hz\":");
+  Serial.print(profile.bandwidthHz);
+  Serial.print(",\"coding_rate_denominator\":");
+  Serial.print(profile.codingRateDenominator);
+  Serial.print(",\"num_slots\":");
+  Serial.print(profile.totalSlots);
+  Serial.print(",\"slot_width_ms\":");
+  Serial.print(profile.slotWidthMs);
+  Serial.print(",\"guard_ms\":");
+  Serial.print(profile.guardMs);
   Serial.println("}");
 
   emitStatus("Listening");

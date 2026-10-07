@@ -45,7 +45,8 @@ public:
   void update();
 
   bool sendAwakenHandshake(const uint8_t *payload, uint8_t len);
-  bool sendImmediate(const uint8_t *payload, uint8_t len, bool requireLinkAck = true);
+  bool sendImmediate(const uint8_t *payload, uint8_t len,
+                     bool requireLinkAck = false);
   bool enqueueTelemetry(const uint8_t *payload, uint8_t len);
   void flushTelemetryBuffers(const char *reason = "manual");
   bool takePendingCommand(ReceivedCommand &out);
