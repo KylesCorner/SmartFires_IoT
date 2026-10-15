@@ -201,6 +201,7 @@ const sniffer = {
   numSlots: null,
   slotWidthMs: null,
   guardMs: null,
+  radioProfile: null,
   profileKnown: false,
   ws: null,
   notConfigured: false,
@@ -247,7 +248,33 @@ function applyNetworkProfile(status) {
   sniffer.guardMs = Number.isFinite(profile?.guard_ms) && profile.guard_ms >= 0
     ? profile.guard_ms
     : null;
+  sniffer.radioProfile = profile ?? null;
   rebuildLaneOrder();
+}
+
+// Browser-side compatibility fallback for an edge process that was already
+// running when airtime-aware static assets were installed. New backend events
+// carry airtime_ms directly; this mirrors LoRaAirtime.h until that process is
+// next restarted and also lets buffered pre-upgrade events render to scale.
+function estimatedAirtimeMs(ev) {
+  if (Number.isFinite(ev.airtime_ms)) return Math.max(0, ev.airtime_ms);
+  const profile = sniffer.radioProfile;
+  if (!profile || !ev.payload_hex) return 0;
+  const sf = Number(profile.spreading_factor);
+  const bandwidthHz = Number(profile.bandwidth_hz);
+  const codingRateDenominator = Number(profile.coding_rate_denominator);
+  if (!Number.isFinite(sf) || !Number.isFinite(bandwidthHz) || !Number.isFinite(codingRateDenominator)) return 0;
+
+  const applicationBytes = ev.payload_hex.length / 2;
+  const radioBytes = applicationBytes + 4;
+  const symbolUs = Math.ceil((2 ** sf) * 1_000_000 / bandwidthHz);
+  const lowDataRateOptimize = symbolUs > 16_000;
+  const numerator = 8 * radioBytes - 4 * sf + 28 + 16;
+  const denominator = 4 * (sf - (lowDataRateOptimize ? 2 : 0));
+  const codedBlocks = numerator > 0 ? Math.ceil(numerator / denominator) : 0;
+  const payloadSymbols = 8 + codedBlocks * codingRateDenominator;
+  const totalQuarterSymbols = 8 * 4 + 17 + payloadSymbols * 4;
+  return Math.ceil(Math.ceil(totalQuarterSymbols * symbolUs / 4) / 1_000);
 }
 
 window.addEventListener("smartfires:network-profile", (event) => {
@@ -410,24 +437,37 @@ function draw() {
     ctx.stroke();
   });
 
-  // Events.
+  // Events. The firmware timestamps RxDone, so each packet occupies the span
+  // ending at wall_t and extending backward by its calculated LoRa airtime.
   sniffer.hitRects = [];
   for (const ev of sniffer.events) {
     const wallMs = ev._wallMs;
-    if (wallMs < viewEndMs - windowMs || wallMs > viewEndMs) continue;
-    const x = xForWallMs(widthCss, viewEndMs, windowMs, wallMs);
+    const airtimeMs = estimatedAirtimeMs(ev);
+    const startWallMs = wallMs - airtimeMs;
+    if (wallMs < viewEndMs - windowMs || startWallMs > viewEndMs) continue;
+    const xEnd = xForWallMs(widthCss, viewEndMs, windowMs, wallMs);
+    const xStart = xForWallMs(widthCss, viewEndMs, windowMs, startWallMs);
+    const packetWidth = Math.max(1, xEnd - xStart);
+    const xCenter = xStart + packetWidth / 2;
     const color = PKT_COLORS[ev.pkt_type] ?? UNKNOWN_COLOR;
     const isSelected = ev._id === sniffer.selectedId;
 
     if (ev.pkt_type === "TIME_SYNC") {
-      ctx.strokeStyle = color;
-      ctx.lineWidth = isSelected ? 3 : 1.5;
-      ctx.beginPath();
-      ctx.moveTo(x, HEADER_HEIGHT);
-      ctx.lineTo(x, lanesBottom);
-      ctx.stroke();
+      ctx.fillStyle = color;
+      ctx.globalAlpha = 0.35;
+      ctx.fillRect(xStart, HEADER_HEIGHT, packetWidth, lanesBottom - HEADER_HEIGHT);
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = isSelected ? "#ffd166" : color;
+      ctx.lineWidth = isSelected ? 2 : 1;
+      ctx.strokeRect(xStart, HEADER_HEIGHT, packetWidth, lanesBottom - HEADER_HEIGHT);
       ctx.lineWidth = 1;
-      sniffer.hitRects.push({ x0: x - 4, y0: HEADER_HEIGHT, x1: x + 4, y1: lanesBottom, ev });
+      sniffer.hitRects.push({
+        x0: Math.min(xStart, xEnd - 2),
+        y0: HEADER_HEIGHT,
+        x1: Math.max(xEnd, xStart + 2),
+        y1: lanesBottom,
+        ev,
+      });
       continue;
     }
 
@@ -442,13 +482,13 @@ function draw() {
     if (ev.guard_violation) {
       ctx.strokeStyle = "#ffffff";
       ctx.lineWidth = 1.5;
-      ctx.strokeRect(x - 3, y, 7, 16);
+      ctx.strokeRect(xStart, y, packetWidth, 16);
     }
-    ctx.fillRect(x - 3, y, 7, 16);
+    ctx.fillRect(xStart, y, packetWidth, 16);
     if (ev.rh_is_retry) {
       ctx.fillStyle = RESEND_DOT_COLOR;
       ctx.beginPath();
-      ctx.arc(x, y - 4, 2.5, 0, Math.PI * 2);
+      ctx.arc(xCenter, y - 4, 2.5, 0, Math.PI * 2);
       ctx.fill();
     }
     // A RETX frame replays the original's window bits, so its markers describe
@@ -457,25 +497,25 @@ function draw() {
     if (ev.retx) {
       ctx.fillStyle = RETX_DOT_COLOR;
       ctx.beginPath();
-      ctx.arc(x, y + 20, 2.5, 0, Math.PI * 2);
+      ctx.arc(xCenter, y + 20, 2.5, 0, Math.PI * 2);
       ctx.fill();
     } else if (ev.window_first || ev.window_last) {
       ctx.strokeStyle = WINDOW_MARK_COLOR;
       ctx.lineWidth = 2;
       if (ev.window_first) {
         ctx.beginPath();
-        ctx.moveTo(x - 6, y - 3);
-        ctx.lineTo(x - 9, y - 3);
-        ctx.lineTo(x - 9, y + 19);
-        ctx.lineTo(x - 6, y + 19);
+        ctx.moveTo(xStart - 2, y - 3);
+        ctx.lineTo(xStart - 5, y - 3);
+        ctx.lineTo(xStart - 5, y + 19);
+        ctx.lineTo(xStart - 2, y + 19);
         ctx.stroke();
       }
       if (ev.window_last) {
         ctx.beginPath();
-        ctx.moveTo(x + 7, y - 3);
-        ctx.lineTo(x + 10, y - 3);
-        ctx.lineTo(x + 10, y + 19);
-        ctx.lineTo(x + 7, y + 19);
+        ctx.moveTo(xEnd + 2, y - 3);
+        ctx.lineTo(xEnd + 5, y - 3);
+        ctx.lineTo(xEnd + 5, y + 19);
+        ctx.lineTo(xEnd + 2, y + 19);
         ctx.stroke();
       }
       ctx.lineWidth = 1;
@@ -483,10 +523,16 @@ function draw() {
     if (isSelected) {
       ctx.strokeStyle = "#ffd166";
       ctx.lineWidth = 2;
-      ctx.strokeRect(x - 4, y - 1, 9, 18);
+      ctx.strokeRect(xStart - 1, y - 1, packetWidth + 2, 18);
       ctx.lineWidth = 1;
     }
-    sniffer.hitRects.push({ x0: x - 3, y0: y, x1: x + 4, y1: y + 16, ev });
+    sniffer.hitRects.push({
+      x0: Math.min(xStart, xEnd - 2),
+      y0: y,
+      x1: Math.max(xEnd, xStart + 2),
+      y1: y + 16,
+      ev,
+    });
   }
 
   // Expected-transmitter label row: who should be transmitting in each slot
@@ -750,7 +796,12 @@ const DETAIL_FIELDS = [
   ],
   ["Wall time", (ev) => formatTimestamp(ev.wall_t, "iso", { milliseconds: true }), false],
   ["Sniffer t (ms)", (ev) => ev.sniffer_t_ms, false],
-  ["Payload length", (ev) => (ev.payload_hex ? ev.payload_hex.length / 2 : 0), false],
+  ["Time on air", (ev) => {
+    const airtimeMs = estimatedAirtimeMs(ev);
+    return airtimeMs ? `${airtimeMs} ms` : "—";
+  }, false],
+  ["Application bytes", (ev) => ev.application_bytes ?? (ev.payload_hex ? ev.payload_hex.length / 2 : 0), false],
+  ["Radio bytes", (ev) => ev.radio_bytes, false],
   ["Payload (hex)", (ev) => fmtPayloadHex(ev.payload_hex), false],
 ];
 

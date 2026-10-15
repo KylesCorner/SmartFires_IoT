@@ -15,7 +15,7 @@ from smartfires_edge.packet import (
     decode_network_profile,
 )
 from smartfires_edge.session_meta import SessionMetaLogger
-from smartfires_edge.sniffer_service import _slot_timing
+from smartfires_edge.sniffer_service import _SyncAnchor, _lora_airtime_ms, _slot_timing
 from smartfires_edge.uart_receiver import FrameReceiver
 from smartfires_edge.live_state import LiveState
 from smartfires_edge.web.app import create_app
@@ -62,6 +62,34 @@ def _profile_raw(sf=12, fingerprint=0x1234ABCD, num_slots=5):
 
 
 class NetworkProfileTests(unittest.TestCase):
+    def test_sniffer_airtime_matches_firmware_golden_values(self):
+        sf12 = _profile()
+        expected = {
+            12: 660,  # AWAKEN
+            14: 660,  # TIME_SYNC
+            10: 578,  # ACK_SUMMARY
+            17: 742,  # WINDOW marker
+            27: 906,  # STATUS
+            8: 578,   # CMD_RESET
+            9: 578,   # CMD_SET_TX_POWER
+        }
+        for application_bytes, airtime_ms in expected.items():
+            self.assertEqual(
+                _lora_airtime_ms(application_bytes, sf12),
+                airtime_ms,
+            )
+
+    def test_time_sync_anchor_maps_receive_end_after_airtime(self):
+        anchor = _SyncAnchor()
+        anchor.apply(
+            t_ms=10_660,
+            session_id=123,
+            session_time_ms=5_000,
+            airtime_ms=660,
+        )
+        self.assertEqual(anchor.session_ms_for(10_660), 5_660)
+        self.assertEqual(anchor.session_ms_for(11_000), 6_000)
+
     def test_binary_profile_decodes_through_existing_outer_frame(self):
         raw = _profile_raw()
         decoded = decode_network_profile(raw)

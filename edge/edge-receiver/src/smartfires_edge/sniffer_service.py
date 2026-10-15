@@ -9,6 +9,7 @@ plays for the base-station UART link.
 """
 
 import json
+import math
 import struct
 import sys
 import threading
@@ -119,11 +120,23 @@ class _SyncAnchor:
     def anchored(self) -> bool:
         return self.sniffer_t_ms is not None
 
-    def apply(self, t_ms: int, session_id: int, session_time_ms: int) -> bool:
+    def apply(
+        self,
+        t_ms: int,
+        session_id: int,
+        session_time_ms: int,
+        airtime_ms: int = 0,
+    ) -> bool:
         """Update the anchor. Returns True if this is a new session (caller
-        should reset per-node sniffer stats)."""
+        should reset per-node sniffer stats).
+
+        The sniffer firmware records ``t_ms`` after RxDone, while TIME_SYNC's
+        session timestamp is captured immediately before transmission. Anchor
+        those two clocks at the estimated packet start, not its receive end;
+        otherwise every grid line is shifted right by one TIME_SYNC airtime.
+        """
         session_changed = self.session_id is not None and self.session_id != session_id
-        self.sniffer_t_ms = t_ms
+        self.sniffer_t_ms = max(0, t_ms - airtime_ms)
         self.session_time_ms = session_time_ms
         self.session_id = session_id
         return session_changed
@@ -132,6 +145,51 @@ class _SyncAnchor:
         if not self.anchored:
             return None
         return self.session_time_ms + (t_ms - self.sniffer_t_ms)
+
+
+def _lora_airtime_ms(application_bytes: int, profile: dict | None) -> int | None:
+    """Return LoRa time on air for one RadioHead application payload.
+
+    This mirrors ``platformio/include/radio/LoRaAirtime.h``. The sniffer's
+    ``payload_hex`` excludes RadioHead's four addressing bytes, so they are
+    added here before applying the Semtech explicit-header formula.
+    """
+    if not profile or application_bytes < 0:
+        return None
+    try:
+        spreading_factor = int(profile["spreading_factor"])
+        bandwidth_hz = int(profile["bandwidth_hz"])
+        coding_rate_denominator = int(profile["coding_rate_denominator"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if (
+        not 6 <= spreading_factor <= 12
+        or bandwidth_hz <= 0
+        or not 5 <= coding_rate_denominator <= 8
+    ):
+        return None
+
+    preamble_symbols = int(profile.get("preamble_symbols", 8))
+    explicit_header = bool(profile.get("explicit_header", True))
+    payload_crc = bool(profile.get("payload_crc", True))
+    symbol_us = math.ceil((1 << spreading_factor) * 1_000_000 / bandwidth_hz)
+    low_data_rate_optimize = profile.get("low_data_rate_optimization")
+    if low_data_rate_optimize is None:
+        low_data_rate_optimize = symbol_us > 16_000
+
+    radio_bytes = application_bytes + 4
+    numerator = (
+        8 * radio_bytes
+        - 4 * spreading_factor
+        + 28
+        + (16 if payload_crc else 0)
+        - (0 if explicit_header else 20)
+    )
+    denominator = 4 * (spreading_factor - (2 if low_data_rate_optimize else 0))
+    coded_blocks = math.ceil(numerator / denominator) if numerator > 0 else 0
+    payload_symbols = 8 + coded_blocks * coding_rate_denominator
+    total_quarter_symbols = preamble_symbols * 4 + 17 + payload_symbols * 4
+    return math.ceil(math.ceil(total_quarter_symbols * symbol_us / 4) / 1_000)
 
 
 def _slot_timing(
@@ -169,6 +227,7 @@ def _decode_rx_event(
     num_slots: int,
     slot_width_ms: int = SLOT_WIDTH_MS,
     guard_ms: int = GUARD_MS,
+    radio_profile: dict | None = None,
 ) -> Optional[dict]:
     payload_hex = rx.get("payload_hex", "")
     try:
@@ -180,6 +239,7 @@ def _decode_rx_event(
     rssi = rx.get("rssi")
     snr = rx.get("snr")
     t_ms = int(rx.get("t_ms", 0))
+    airtime_ms = _lora_airtime_ms(len(raw), radio_profile)
 
     node_id = hdr_node_id
     seq = hdr_seq
@@ -189,7 +249,12 @@ def _decode_rx_event(
     if pkt_type == PKT_TIME_SYNC:
         ts = decode_time_sync(raw, rssi)
         if ts is not None:
-            session_changed = anchor.apply(t_ms, ts["session_id"], ts["session_time_ms"])
+            session_changed = anchor.apply(
+                t_ms,
+                ts["session_id"],
+                ts["session_time_ms"],
+                airtime_ms or 0,
+            )
             extra["session_id"] = ts["session_id"]
     elif pkt_type == PKT_AWAKEN:
         dec = decode_awaken(raw, rssi)
@@ -281,7 +346,10 @@ def _decode_rx_event(
         if attributed_addr is not None:
             rh_owner_node_id = 0 if attributed_addr == _RH_BASE_ADDRESS else attributed_addr
 
-    session_ms = anchor.session_ms_for(t_ms) if pkt_type != PKT_TIME_SYNC else anchor.session_time_ms
+    # Event timestamps consistently represent receive end. For TIME_SYNC the
+    # payload carries transmit-start session time, so project through its own
+    # airtime just like every later packet.
+    session_ms = anchor.session_ms_for(t_ms)
     jitter_ms = None
     guard_violation = None
     if session_ms is not None and pkt_type != PKT_TIME_SYNC:
@@ -311,6 +379,9 @@ def _decode_rx_event(
         "num_slots": num_slots,
         "slot_width_ms": slot_width_ms,
         "guard_ms": guard_ms,
+        "airtime_ms": airtime_ms,
+        "application_bytes": len(raw),
+        "radio_bytes": len(raw) + 4,
         "payload_hex": payload_hex,
         "rh_to": rh_to,
         "rh_from": rh_from,
@@ -345,6 +416,7 @@ def run_sniffer(
         log_fn(msg, node_id, source="sniffer", kind=kind)
 
     anchor = _SyncAnchor()
+    sniffer_profile: dict | None = None
     slog(f"[SNIFFER] Listening on {cfg.port} @ {cfg.baud}, num_slots={cfg.num_slots}")
 
     try:
@@ -383,7 +455,12 @@ def run_sniffer(
                 slot_width_ms = int(active_profile.get("slot_width_ms", SLOT_WIDTH_MS))
                 guard_ms = int(active_profile.get("guard_ms", GUARD_MS))
                 event = _decode_rx_event(
-                    msg, anchor, num_slots, slot_width_ms, guard_ms
+                    msg,
+                    anchor,
+                    num_slots,
+                    slot_width_ms,
+                    guard_ms,
+                    active_profile or sniffer_profile,
                 )
                 if event is None:
                     continue
