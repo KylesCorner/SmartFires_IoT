@@ -14,12 +14,13 @@ def _profile_selector():
 
 
 selector = _profile_selector()
-if selector not in (7, 9, 10, 12):
+if selector not in (7, 9, 10, 12, 120):
     raise RuntimeError(
-        "SMARTFIRES_NETWORK_PROFILE must be explicitly set to 7, 9, 10, or 12"
+        "SMARTFIRES_NETWORK_PROFILE must be explicitly set to 7, 9, 10, 12, or 120"
     )
 
+profile_name = "SF12 range test" if selector == 120 else f"SF{selector}"
 print("=" * 68)
-print(f" SmartFires fleet network profile: SF{selector}")
+print(f" SmartFires fleet network profile: {profile_name}")
 print(" Build and flash the matching base, every node, and the sniffer together.")
 print("=" * 68)

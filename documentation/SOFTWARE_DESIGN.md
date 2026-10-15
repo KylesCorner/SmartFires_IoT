@@ -3,7 +3,7 @@ name: software-design
 description: Master system architecture — hardware topology, firmware/edge module layout, wire protocol.
 category: architecture
 status: current
-last_verified: 2026-10-07
+last_verified: 2026-10-15
 source_refs:
   - platformio/platformio.ini
   - platformio/include/config/NetworkProfiles.h
@@ -75,21 +75,21 @@ The base is more than an opaque bridge. It parses headers, handles `AWAKEN`, ass
 
 The base is address/node ID 1 and owns TDMA slot 0. A new node starts unassigned, derives a temporary identity from the SAMD21 UID, and repeatedly sends fire-and-forget `AWAKEN` at a selected-profile cadence with bounded jitter. The base maps the UID hash to a session-local runtime node ID beginning at 2 and replies with fire-and-forget direct `TIME_SYNC`; the node adopts that ID and begins normal sensing. If the response is lost the node asks again. The base reuses the mapping while it remains running, but assignment order can change after a base reset.
 
-`SMARTFIRES_NETWORK_PROFILE` selects an internally consistent SF7, SF9, SF10, or SF12 build for every network Feather. All current profiles use `NUM_SLOTS=5`: one base slot plus four assignable node slots. Changing the selector requires rebuilding the base, every node, and the passive sniffer; mixed profiles are unsupported.
+`SMARTFIRES_NETWORK_PROFILE` selects an internally consistent SF7, SF9, SF10, or SF12 build for every network Feather. Selector `120` chooses the three-slot SF12 range-test variant: one base slot plus two assignable node slots. Standard profiles use `NUM_SLOTS=5`. Changing either selector/slot pair requires rebuilding the base, every node, and the passive sniffer; mixed profiles are unsupported.
 
-The Jetson creates a session ID and supplies session-relative time every 600 seconds by default. The base caches that authority and broadcasts `TIME_SYNC` every 50/65/110/125 seconds for SF7/SF9/SF10/SF12. If the Jetson has not supplied time, the base uses a local session clock. Nodes regard sync as stale after 22 minutes and return to permissive recovery behavior.
+The Jetson creates a session ID and supplies session-relative time every 600 seconds by default. The base caches that authority and broadcasts `TIME_SYNC` every 50/65/110/125 seconds for SF7/SF9/SF10/SF12. If the Jetson has not supplied time, the base uses a local session clock. Nodes regard sync as stale after 22 minutes and then return to permissive recovery behavior.
 
 ## Sensing and duty cycling
 
-The active production target, `feather_m0_lora_node`, uses Continuous mode after a 10-second warmup. Its sample cadence is 750 ms at SF7/SF9, 1 second at SF10, and 4 seconds at SF12.
+The active production target, `feather_m0_lora_node`, uses Continuous mode after a 10-second warmup. Its sample cadence is 750 ms at SF7/SF9, 1 second at SF10, 4 seconds at SF12, and 60 seconds for selector `120`. The range-test variant schedules STATUS independently every 15 seconds and completes an eight-sample sensor BUNDLE about every eight minutes.
 
-`feather_m0_lora_node_debug` (the default build) and `feather_m0_lora_node_timed` use Timed mode. SF7/SF9/SF10 collect 30 samples at one second as two 15-sample bundles; SF12 collects 16 samples at four seconds as two eight-sample bundles. Their wake-to-wake cycles are 75/80/90/150 seconds. `node_hybrid` remains available; SensorTriggered is still a compiled controller mode but is not the production target.
+`feather_m0_lora_node_debug` (the default build) and `feather_m0_lora_node_timed` use Timed mode. SF7/SF9/SF10 collect 30 samples at one second as two 15-sample bundles; SF12 collects 16 samples at four seconds as two eight-sample bundles. Their wake-to-wake cycles are 75/80/90/150 seconds. Selector `120` retains the standard SF12 Timed behavior; its slower sensing is Continuous-only. `node_hybrid` remains available; SensorTriggered is still a compiled controller mode but is not the production target.
 
 Timed cycles send `WINDOW_BEGIN` and `WINDOW_END`. The end marker carries the planned standby and sample count so the base can defer downlink acknowledgements while that node is asleep.
 
 ## Radio and reliability
 
-The deployed link uses raw LoRa at 915 MHz with RadioHead, nominally 13 dBm. SF7/SF9/SF10 explicitly program 125 kHz and SF12 programs 250 kHz; every profile uses CR 4/5, an eight-symbol preamble, explicit headers, payload CRC, and its selected SF. SF12 also enables low-data-rate optimization. Slot width, guards, receive wake-ahead, cadence, and reliability timers move with the profile.
+The deployed link uses raw LoRa at 915 MHz with RadioHead and a 20 dBm boot/baseline power. SF7/SF9/SF10 explicitly program 125 kHz and SF12 programs 250 kHz; every profile uses CR 4/5, an eight-symbol preamble, explicit headers, payload CRC, and its selected SF. SF12 also enables low-data-rate optimization. Slot width, guards, receive wake-ahead, cadence, and reliability timers move with the profile.
 
 Current node targets use app-layer reliability. Telemetry goes over the RadioHead link without waiting for a remote link ACK. The node keeps up to eight pending telemetry frames, while the base sends cumulative `ACK_SUMMARY` bitmaps. A pending frame expires after 30/40/70/150 seconds or three total attempts. Scheduled `AWAKEN`, direct assignment sync, `ACK_SUMMARY`, time sync, and commands are fire-and-forget; repeated application state or `CMD_ACK` supplies recovery. Actual-length airtime admission prevents base and node scheduled sends from starting too near the trailing guard.
 
@@ -113,7 +113,7 @@ Every current LoRa packet begins with a five-byte header (`magic`, `type`, `node
 | `DEBUG_LOG` | base -> Jetson only | variable | Structured `@SFDBG` text in the USB envelope |
 | `NETWORK_PROFILE` | base -> Jetson only | 37-byte header + control payload | Selected radio/TDMA/cadence identity and fingerprint |
 
-STATUS cadence is profile-derived: 15/30/120/300 seconds for SF7/SF9/SF10/SF12. Packet definitions must be changed in lockstep in C++ and `smartfires_edge/packet.py`.
+STATUS cadence is profile-derived: 15/30/120/300 seconds for SF7/SF9/SF10/SF12, or 15 seconds for selector `120`. STATUS scheduling is independent of BUNDLE sampling while a node is awake, and a due STATUS refreshes GPS before its snapshot is encoded. Packet definitions must be changed in lockstep in C++ and `smartfires_edge/packet.py`.
 
 ## Base-to-Jetson bridge
 
@@ -150,7 +150,7 @@ The dashboard's node-reset and TX-power endpoints are functional. `/api/command`
 - Hard node reset sends a nonblocking `CMD_ACK`, waits briefly, and calls `NVIC_SystemReset()`.
 - A reset addressed to node 0 applies to the base. The Jetson uses that path when opening a fresh ingest session.
 - Calibration commands are decoded and acknowledged but do not start a separate routine; DMP fusion self-calibrates.
-- The base-owned TX-power controller uses profile-specific SNR floor plus STATUS retry/failure deltas. Operators can switch a node between DYNAMIC and STATIC or select an absolute 5–13 dBm level through `/api/tx_power`. SF7 defaults DYNAMIC; higher-SF profiles default STATIC 13 dBm for acceptance testing. Thresholds still need field tuning.
+- The base-owned TX-power controller uses profile-specific SNR floor plus STATUS retry/failure deltas. Operators can switch a node between DYNAMIC and STATIC or select an absolute 5–20 dBm level through `/api/tx_power`. SF7 defaults DYNAMIC; higher-SF profiles default STATIC 20 dBm for acceptance testing. Thresholds still need field tuning.
 
 ## Build environments and validation state
 

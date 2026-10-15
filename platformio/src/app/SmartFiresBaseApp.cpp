@@ -176,6 +176,9 @@ bool SmartFiresBaseApp::begin() {
     return false;
   }
 
+  LOG_INFO("base", "radio_ready tx_power_dbm=%d",
+           static_cast<int>(_radio.txPowerDbm()));
+
   _initialized = true;
   _lastHealthLogMs = _clock.millis();
   _lastPeriodicTimeSyncMs = _lastHealthLogMs;

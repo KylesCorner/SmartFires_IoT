@@ -27,7 +27,7 @@ Jetson Orin Nano running `smartfires-edge`
 
 Each remote unit uses one Feather; there is no ESP32-to-Feather UART split. `Serial1` on a node is used by the SPS30. The base-to-Jetson link uses native USB CDC, not `Serial1`.
 
-The fleet-wide radio/timing selection is defined once in `platformio/platformio.ini`: `SMARTFIRES_NETWORK_PROFILE=7` by default, with supported values 7, 9, 10, and 12. All profiles use `NUM_SLOTS=5`; slot 0 belongs to the base, so this supports four assigned node IDs. Nodes boot from an identity derived from the SAMD21 UID, broadcast jittered `AWAKEN`, and receive a runtime node ID from the base. Real assigned IDs therefore start at 2; address 1 is the base.
+The fleet-wide radio/timing selection is defined once in `platformio/platformio.ini`: `SMARTFIRES_NETWORK_PROFILE=120` by default, with supported values 7, 9, 10, 12, and 120. Selector 120 is the active three-slot SF12 range-test variant (`NUM_SLOTS=3`): slot 0 belongs to the base and two node IDs are assignable. The standard profiles use five slots. Nodes boot from an identity derived from the SAMD21 UID, broadcast jittered `AWAKEN`, and receive a runtime node ID from the base. Real assigned IDs therefore start at 2; address 1 is the base.
 
 ## Authority and documentation
 
@@ -51,14 +51,14 @@ When changing behavior:
 
 ## Current runtime facts
 
-- LoRa: 915 MHz, base address/node ID 1, nominal TX power 13 dBm. SF7/SF9/SF10 use 125 kHz; SF12 uses 250 kHz; all use CR 4/5.
+- LoRa: 915 MHz, base address/node ID 1, boot/baseline TX power 20 dBm. SF7/SF9/SF10 use 125 kHz; SF12 uses 250 kHz; all use CR 4/5.
 - The default SF7 TDMA geometry is 900 ms slots, 20 ms guards, and 150 ms RX wake-ahead. SF9/SF10/SF12 select progressively longer geometry from `NetworkProfiles.h`; all retain a 22-minute stale-sync timeout.
 - Reliability: node builds use app-layer `ACK_SUMMARY`, an eight-packet pending window, at most three attempts, and 30-second maximum pending age. Steady telemetry is fire-and-forget at the RadioHead link layer; selected control paths still use link ACKs.
 - Packet sizes include the embedded CRC: `AWAKEN` 12 bytes (legacy 9 accepted), `TIME_SYNC` 14, `ACK_SUMMARY` 10, `WINDOW_BEGIN/END` 17, `STATUS` 27, `CMD_CALIBRATE/RESET` 8, `CMD_SET_TX_POWER` 9, `CMD_ACK` 12, and `BUNDLE` up to 195.
-- STATUS cadence is profile-derived: 15/30/120/300 seconds for SF7/SF9/SF10/SF12.
+- STATUS cadence is profile-derived: 15/30/120/300 seconds for SF7/SF9/SF10/SF12, or 15 seconds for selector 120's SF12 range-test variant. STATUS scheduling is independent of BUNDLE sampling, and a due STATUS actively refreshes GPS before encoding.
 - The production node uses Continuous duty cycling. `node_debug` and `node_timed` use Timed duty cycling; `node_hybrid` remains a legacy development option. Timed windows always contain two operational bundles: 30 samples at SF7/9/10 and 16 samples at SF12.
 - `CMD_RESET` is implemented end-to-end, including `node_id=0` base reset and the dashboard `/api/node_reset` endpoint. `CMD_CALIBRATE` is intentionally log-and-ACK because the DMP self-calibrates. The generic `/api/command` route is still an echo stub.
-- Per-node TX power control is shipped. The base uses received SNR and STATUS retry/failure counters, while `/api/tx_power` supplies dynamic/static operator control. Thresholds are still untuned; the node clamps commands to 5–13 dBm.
+- Per-node TX power control is shipped. The base uses received SNR and STATUS retry/failure counters, while `/api/tx_power` supplies dynamic/static operator control. Thresholds are still untuned; the node clamps commands to 5–20 dBm.
 - The Jetson CLI subcommands are `receive`, `summary`, `visualize`, and `web`; the web default is port 8080. The stable base device is `/dev/smartfires-base`.
 - Scheduled deployment traffic is fire-and-forget at the RadioHead link layer; assignment/reliability/commands recover through repeated `AWAKEN`/`TIME_SYNC`, cumulative `ACK_SUMMARY`, and `CMD_ACK`. The native PlatformIO suite still has known unrelated failures described in `Possible_Plans/NATIVE_TEST_REPAIR.md`.
 

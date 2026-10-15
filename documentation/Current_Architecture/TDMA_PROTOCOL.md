@@ -3,7 +3,7 @@ name: tdma-protocol
 description: Slot geometry, session clock, boot handshake, and TX budget for the TDMA radio layer.
 category: architecture
 status: current
-last_verified: 2026-10-07
+last_verified: 2026-10-15
 source_refs:
   - platformio/include/radio/TdmaConfig.h
   - platformio/include/config/NetworkProfiles.h
@@ -26,7 +26,7 @@ SmartFires divides one 915 MHz raw-LoRa channel into fixed, repeating time slots
 
 ## Selected geometry
 
-All four profiles use five slots: slot 0 belongs to base address/node ID 1 and four node slots begin at ID 2. The remaining timing moves with `SMARTFIRES_NETWORK_PROFILE`:
+Standard profiles use five slots: slot 0 belongs to base address/node ID 1 and four node slots begin at ID 2. Selector `120` is the two-node range-test variant, with three total slots and a 15-second frame:
 
 | Profile | Slot width | Guard at each edge | Usable window | Frame | RX wake-ahead |
 |---|---:|---:|---:|---:|---:|
@@ -34,8 +34,9 @@ All four profiles use five slots: slot 0 belongs to base address/node ID 1 and f
 | SF9 | 1,300 ms | 30 ms | 1,240 ms | 6.5 s | 200 ms |
 | SF10 | 2,200 ms | 50 ms | 2,100 ms | 11 s | 250 ms |
 | SF12 | 5,000 ms | 100 ms | 4,800 ms | 25 s | 300 ms |
+| SF12 range (`120`) | 5,000 ms | 100 ms | 4,800 ms | 15 s | 300 ms |
 
-For session time `t`, the nominal slot is `(t / slot_width_ms) % 5`. `TdmaClock::myTurn()` applies the selected guards. Base and node consume the same `NetworkConfig::kGeometry`; `NUM_SLOTS=5` remains a build-time tripwire and compilation fails if it disagrees with the selected profile.
+For session time `t`, the nominal slot is `(t / slot_width_ms) % num_slots`. `TdmaClock::myTurn()` applies the selected guards. Base and node consume the same `NetworkConfig::kGeometry`; `NUM_SLOTS` remains a build-time tripwire and compilation fails if it disagrees with the selected profile (`3` for selector `120`, otherwise `5`).
 
 ## Join before TDMA
 
@@ -54,7 +55,7 @@ Packets use session-relative milliseconds rather than wall-clock time. The Jetso
 
 The base maintains a clock continuously. It caches Jetson time when available, otherwise falls back to its local session, and broadcasts fire-and-forget `TIME_SYNC` every 50/65/110/125 seconds for SF7/SF9/SF10/SF12. Nodes update their session clock on valid direct or broadcast sync.
 
-Before the first sync and after 22 minutes without refresh, node transmit and receive gates become permissive. This costs power/channel discipline but ensures a stale node can hear recovery sync and rejoin.
+Before the first sync, and after 22 minutes without refresh, node transmit and receive gates become permissive. Permissive recovery costs power/channel discipline but ensures a stale node can hear sync and rejoin.
 
 ## Slot traffic
 
@@ -84,7 +85,7 @@ Markers are deliberately fire-and-forget. Their state is advisory and recoverabl
 
 ## Scaling rule
 
-The shipped profiles are five-slot definitions. Supporting a different fleet size requires adding or revising a complete profile, rebuilding/reflashing the base, every node, and the sniffer, and then recalculating:
+The standard profiles are five-slot definitions and selector `120` is a three-slot range-test definition. Supporting another fleet size requires adding or revising a complete profile, rebuilding/reflashing the base, every node, and the sniffer, and then recalculating:
 
 - frame period and per-node service rate;
 - ACK/retry intervals and pending age;

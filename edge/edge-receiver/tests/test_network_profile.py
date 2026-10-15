@@ -21,14 +21,14 @@ from smartfires_edge.live_state import LiveState
 from smartfires_edge.web.app import create_app
 
 
-def _profile(sf=12, fingerprint="1234abcd"):
+def _profile(sf=12, fingerprint="1234abcd", num_slots=5):
     return {
         "profile_id": f"sf{sf}",
         "spreading_factor": sf,
         "bandwidth_hz": 250_000 if sf == 12 else 125_000,
         "coding_rate": "4/5",
         "coding_rate_denominator": 5,
-        "num_slots": 5,
+        "num_slots": num_slots,
         "slot_width_ms": 5_000 if sf == 12 else 900,
         "guard_ms": 100 if sf == 12 else 20,
         "max_bundle_deltas": 7 if sf == 12 else 14,
@@ -39,9 +39,9 @@ def _profile(sf=12, fingerprint="1234abcd"):
     }
 
 
-def _profile_raw(sf=12, fingerprint=0x1234ABCD):
+def _profile_raw(sf=12, fingerprint=0x1234ABCD, num_slots=5):
     header = struct.pack(HEADER_FMT, PKT_MAGIC, PKT_NETWORK_PROFILE, 1, 9, 0)
-    profile = _profile(sf, f"{fingerprint:08x}")
+    profile = _profile(sf, f"{fingerprint:08x}", num_slots)
     payload = struct.pack(
         NETWORK_PROFILE_PAYLOAD_FMT,
         1,
@@ -79,6 +79,10 @@ class NetworkProfileTests(unittest.TestCase):
         self.assertIsNotNone(event)
         self.assertEqual(event["pkt_type"], PKT_NETWORK_PROFILE)
         self.assertEqual(event["network_profile"], _profile())
+
+    def test_three_slot_range_profile_decodes(self):
+        decoded = decode_network_profile(_profile_raw(num_slots=3))
+        self.assertEqual(decoded, _profile(num_slots=3))
 
     def test_decoder_rejects_unknown_schema_and_inconsistent_sf(self):
         bad_schema = bytearray(_profile_raw())

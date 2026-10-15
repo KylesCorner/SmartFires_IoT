@@ -3,7 +3,7 @@ name: tunable-parameters
 description: Every tunable constant in the system — TDMA, sensing/duty-cycle, power, Jetson.
 category: architecture
 status: current
-last_verified: 2026-10-07
+last_verified: 2026-10-15
 source_refs:
   - platformio/platformio.ini
   - platformio/include/config/NetworkProfiles.h
@@ -26,8 +26,8 @@ This is the operating-value index. Firmware defaults live in `platformio/include
 
 | Flag | Active value | Meaning |
 |---|---:|---|
-| `SMARTFIRES_NETWORK_PROFILE` | 7 | Selects complete SF7/SF9/SF10/SF12 network values; shared by every LoRa role |
-| `NUM_SLOTS` | 5 | Tripwire that must match the selected profile |
+| `SMARTFIRES_NETWORK_PROFILE` | 120 | Selects complete SF7/SF9/SF10/SF12 values; `120` selects the SF12 range-test cadence; shared by every LoRa role |
+| `NUM_SLOTS` | 3 | Tripwire matching active selector `120`; standard profiles require 5 |
 | `SMARTFIRES_DUTY_CYCLE_MODE` | 0 production, 2 debug/timed, 3 hybrid | 0 Continuous, 1 SensorTriggered, 2 Timed, 3 Hybrid |
 
 Deployable radio builds reject a missing or unsupported network selector. Native and power-test builds use SF7 only as a fixture. Change the one selector, then rebuild the base, every node role, and the sniffer; mixed profiles are unsupported.
@@ -50,7 +50,9 @@ Deployable radio builds reject a missing or unsupported network selector. Native
 | SNR demod floor | -7.5 dB | -12.5 dB | -15 dB | -20 dB |
 | Command ACK timeout | 120 s | 120 s | 120 s | 180 s |
 
-Every profile also fixes five slots, a 22-minute sync-stale timeout, app-layer ACK summaries, and three total telemetry attempts.
+Every profile also fixes app-layer ACK summaries, three total telemetry attempts, and a 22-minute sync-stale timeout. Standard profiles use five slots; selector `120` uses three.
+
+Selector `120` reuses the SF12 modem, slot width/guards, BUNDLE, retry, AWAKEN, TIME_SYNC, Timed-mode, and command timing values. It uses three slots for a 15-second frame, changes Continuous sampling to 60 seconds, and schedules STATUS independently every 15 seconds. With eight samples per BUNDLE, Continuous sensor-data packets are produced about every eight minutes. Each due STATUS refreshes GPS before encoding; the other sensors remain on the slower BUNDLE cadence.
 
 ### Shared radio and queue values
 
@@ -58,9 +60,9 @@ Every profile also fixes five slots, a 22-minute sync-stale timeout, app-layer A
 |---|---:|---|
 | `kBaseAddr` | 1 | Base radio address/node ID |
 | `kRadioFrequencyMhz` | 915.0 | Raw LoRa carrier |
-| `kRadioTxPowerDbm` | 13 dBm | Boot/baseline power |
+| `kRadioTxPowerDbm` | 20 dBm | Fleet-wide boot/baseline power; base uses PA_BOOST maximum |
 | Modem tuple | SF7/SF9/SF10: 125 kHz; SF12: 250 kHz; all CR 4/5, preamble 8, explicit header, payload CRC | SF12 alone enables low-data-rate optimization |
-| `kMinTxPowerDbm` / `kMaxTxPowerDbm` | 5 / 13 dBm | Node clamp for control commands |
+| `kMinTxPowerDbm` / `kMaxTxPowerDbm` | 5 / 20 dBm | Node clamp for control commands |
 | `kLinkRetries` | 3 | RadioHead retries after first attempt |
 | `kLinkAckTimeoutMs` | 250 ms | Remote ACK wait |
 | TX completion | actual packet airtime + profile margin | Used for admission and bounded local wait |
@@ -140,7 +142,7 @@ Battery ADC uses 3.3 V reference, 10-bit maximum 1023, and a 2.0 divider ratio. 
 | Silence timeout | 300 s |
 | Maximum silence probes | 3 |
 
-These are shipped starting values, not bench-characterized thresholds. The controller steps down only with excess margin and jumps upward for recovery. SF7 defaults to DYNAMIC; SF9/SF10/SF12 default STATIC at 13 dBm for acceptance trials. A stale-sync node restores the profile default.
+These are shipped starting values, not bench-characterized thresholds. The controller steps down only with excess margin and jumps upward for recovery. SF7 defaults to DYNAMIC; SF9/SF10/SF12 default STATIC at 20 dBm for acceptance trials. A stale-sync node restores the profile default.
 
 ## Edge receiver defaults
 

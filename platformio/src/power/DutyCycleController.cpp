@@ -181,6 +181,18 @@ bool DutyCycleController::waitingForFirstFix() const {
   return !_firstFixAcquired;
 }
 
+bool DutyCycleController::refreshFirstFixSensor() {
+  if (!_firstFixSensor.ready()) {
+    return false;
+  }
+
+  const bool refreshed = _firstFixSensor.sample();
+  if (refreshed) {
+    updateFirstFixState();
+  }
+  return refreshed;
+}
+
 void DutyCycleController::markTelemetrySent() {
   if (_phase != DutyCyclePhase::ActiveSampling || !_freshSampleReady) {
     return;

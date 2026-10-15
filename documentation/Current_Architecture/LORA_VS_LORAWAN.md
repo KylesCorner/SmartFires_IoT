@@ -3,7 +3,7 @@ name: lora-vs-lorawan
 description: Why SmartFires uses a custom RadioHead/TDMA stack instead of LoRaWAN, mesh capability, CAD, and the optimization/range levers available on the current radio.
 category: architecture
 status: current
-last_verified: 2026-10-07
+last_verified: 2026-10-15
 source_refs:
   - platformio/src/platform/RadioHeadTdmaDriver.cpp
   - platformio/include/config/NetworkProfiles.h
@@ -26,7 +26,7 @@ SmartFires uses raw LoRa modulation through RadioHead `RH_RF95`/`RHReliableDatag
 | Radio | Feather M0 RFM95 / SX1276 family |
 | Carrier | 915 MHz |
 | Modem | Selected SF7/SF9/SF10 at 125 kHz or SF12 at 250 kHz; CR 4/5, 8-symbol preamble, explicit header, payload CRC |
-| Power | 13 dBm baseline, base-controlled 5–13 dBm per node |
+| Power | 20 dBm baseline, base-controlled 5–20 dBm per node |
 | Addressing | Base address 1; node IDs assigned from UID hashes |
 | Medium access | Five-slot TDMA; slot width/guards selected with the profile |
 | Reliability | App-layer cumulative ACK summaries and repeated application requests/responses; no scheduled deployment `sendToWait()` |
@@ -72,10 +72,10 @@ The network is a star: nodes talk to one base, and neither nodes nor base route 
 
 ## Range and energy levers
 
-The main levers are antenna quality/placement, line of sight, spreading factor, bandwidth, coding rate, transmit power, receiver time, payload size, retry behavior, and fleet geometry. They trade airtime, energy, latency, and robustness. SmartFires packages SF7, SF9, SF10, and SF12 as complete compile-time profiles so modem choice moves with safe TDMA, bundle, cadence, and reliability values. Every radio on one carrier must be rebuilt from the same selection.
+The main levers are antenna quality/placement, line of sight, spreading factor, bandwidth, coding rate, transmit power, receiver time, payload size, retry behavior, and fleet geometry. They trade airtime, energy, latency, and robustness. SmartFires packages SF7, SF9, SF10, and SF12 as complete compile-time profiles so modem choice moves with safe TDMA, bundle, cadence, and reliability values. Selector `120` is a three-slot SF12 range-test variant with 15-second STATUS and one-minute sampling. Every radio on one carrier must be rebuilt from the same selection.
 
 The SF12 trial is intentionally a combined SF12/250 kHz operating point, not a spreading-factor-only comparison against the 125 kHz profiles. Doubling bandwidth roughly halves airtime but incurs about a 3 dB thermal-noise sensitivity penalty before implementation-specific effects; range conclusions must be labeled with the full modem tuple.
 
-Dynamic TX power is shipped: the base records SNR on every assigned-node frame, considers STATUS retry/failure deltas, and sends absolute 5–13 dBm commands. The demodulation-floor reference is profile-specific. SF7 starts in DYNAMIC mode; SF9/SF10/SF12 start STATIC at 13 dBm so range trials are not confounded by power changes. Thresholds remain provisional.
+Dynamic TX power is shipped: the base records SNR on every assigned-node frame, considers STATUS retry/failure deltas, and sends absolute 5–20 dBm commands. The demodulation-floor reference is profile-specific. SF7 starts in DYNAMIC mode; SF9/SF10/SF12 start STATIC at 20 dBm so range trials are not confounded by power changes. Thresholds remain provisional.
 
 Do not infer regional compliance from the 915 MHz carrier alone. Antenna gain, radiated power, dwell time/channel use, and operating jurisdiction all matter and must be checked for the actual deployment.

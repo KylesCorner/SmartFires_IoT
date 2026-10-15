@@ -28,7 +28,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 # UI convenience so the operator sees a sensible value echoed back — the node
 # clamps again on receipt regardless, and the node's clamp is the real one.
 TX_POWER_MIN_DBM = 5
-TX_POWER_MAX_DBM = 13
+TX_POWER_MAX_DBM = 20
 # Mirrors BaseConfig::kTxPowerStepDbm, so a dashboard nudge moves by the same
 # increment the base's own control loop uses.
 TX_POWER_STEP_DBM = 2

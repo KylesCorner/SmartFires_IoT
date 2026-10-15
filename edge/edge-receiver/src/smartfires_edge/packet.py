@@ -743,7 +743,7 @@ def decode_network_profile(raw_payload: bytes) -> Optional[dict]:
     if (
         bandwidth_hz != expected_bandwidth_hz
         or coding_rate_denominator != 5
-        or num_slots != 5
+        or num_slots not in (3, 5)
         or slot_width_ms <= 2 * guard_ms
         or guard_ms <= 0
         or not 0 < max_bundle_deltas <= BUNDLE_MAX_DELTAS

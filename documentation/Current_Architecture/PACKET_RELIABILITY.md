@@ -3,7 +3,7 @@ name: packet-reliability
 description: App-layer ACK summaries, profile-scaled retry gating, duty-cycled-node ACK deferral, and fire-and-forget control recovery.
 category: architecture
 status: current
-last_verified: 2026-10-07
+last_verified: 2026-10-15
 source_refs:
   - platformio/include/config/NetworkProfiles.h
   - platformio/include/config/NetworkConfig.h
@@ -23,7 +23,7 @@ related_docs:
 
 # Packet reliability
 
-Every selected deployment profile uses `AppLayerAckSummary`. The legacy `StrictLinkAck` path remains in the type/config surface for diagnostics and compatibility, but it is not selected by the SF7/SF9/SF10/SF12 profiles.
+Every selected deployment profile uses `AppLayerAckSummary`. The legacy `StrictLinkAck` path remains in the type/config surface for diagnostics and compatibility, but it is not selected by the SF7/SF9/SF10/SF12 profiles or selector `120`'s SF12 range-test variant.
 
 ## Mode comparison
 
@@ -63,6 +63,8 @@ Only `BUNDLE`, `STATUS`, and `FULL_STATE` enter the pending reliability window. 
 | Expected ACK interval | one selected-profile frame: 4.5 / 6.5 / 11 / 25 s |
 | Retry wait | two frames: 9 / 13 / 22 / 50 s |
 
+The SF12 range-test variant retains SF12's 50-second retry wait and 150-second maximum pending age. Its three-slot frame is 15 seconds; independently scheduled 15-second STATUS plus approximately eight-minute BUNDLE cadence fits within the runtime's per-slot multi-send allowance.
+
 When the pending window is full, the service evicts an eligible stale/retry entry according to its bounded policy rather than growing memory. Counters record queue drops, retry attempts, failures, and acknowledgements; lifetime retransmit/fail totals later ride in STATUS.
 
 Retransmission selection normally gets priority before fresh queue traffic, but only one retry may be attempted per TDMA slot. A queued `WINDOW_BEGIN` preempts that retry so the base first learns that a sleeping node is awake and can release its deferred acknowledgement. Fresh packets can follow if slot budget remains.
@@ -95,7 +97,7 @@ Both base and node call radio receive with `autoAck=false`. Scheduled deployment
 ## Failure and recovery behavior
 
 - Before initial sync or after 22 minutes without fresh sync, TDMA/radio gating becomes permissive so a node cannot lock itself out of recovery.
-- On stale sync, a node restores TX power to 13 dBm and returns to the selected profile's default mode: DYNAMIC for SF7, STATIC for SF9/SF10/SF12.
+- On stale sync, a node restores TX power to 20 dBm and returns to the selected profile's default mode: DYNAMIC for SF7, STATIC for SF9/SF10/SF12.
 - A full queue drops the oldest queued item. A full pending window remains bounded and accounts for evictions/failures.
 - App-layer frames expire by age or attempts even if no summary arrives.
 - Base command sends retry only when the local radio refuses to accept the frame, not because the sleeping/remote node failed to link-ACK.

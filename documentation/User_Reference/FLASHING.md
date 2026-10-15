@@ -3,7 +3,7 @@ name: flashing
 description: PlatformIO flash, monitor, and build commands for every Feather M0 environment, plus upload troubleshooting.
 category: reference
 status: current
-last_verified: 2026-10-07
+last_verified: 2026-10-15
 source_refs:
   - platformio/platformio.ini
 related_docs:
@@ -68,7 +68,7 @@ The base's native USB port carries binary Jetson frames and structured logs, so 
 
 ## Network-wide changes
 
-`SMARTFIRES_NETWORK_PROFILE` is defined once in the `[network]` section and must be `7`, `9`, `10`, or `12`. `NUM_SLOTS=5` is a tripwire matching every shipped profile. After changing the profile selector:
+`SMARTFIRES_NETWORK_PROFILE` is defined once in the `[network]` section and must be `7`, `9`, `10`, `12`, or `120`. Selector `120` is the two-node SF12 range-test variant: three slots, 15-second STATUS, one-minute sensing, and approximately eight-minute BUNDLE generation in Continuous mode. `NUM_SLOTS` is a matching tripwire: use `3` with selector `120` and `5` with standard profiles. After changing the profile selector:
 
 1. rebuild and reflash the base;
 2. rebuild and reflash every node;
@@ -85,9 +85,11 @@ First edit the shared selector in `platformio.ini`:
 ```ini
 [network]
 build_flags =
-  -DNUM_SLOTS=5
-  -DSMARTFIRES_NETWORK_PROFILE=12
+  -DNUM_SLOTS=3
+  -DSMARTFIRES_NETWORK_PROFILE=120
 ```
+
+Use selector `12` with `NUM_SLOTS=5` to restore the standard SF12 geometry/cadence. Use the Continuous `feather_m0_lora_node` target for the range test; selector `120` retains the standard SF12 timing in Timed builds.
 
 Then build the matching role artifacts without uploading or opening a monitor:
 
@@ -98,7 +100,7 @@ pio run -e feather_m0_lora_node_timed
 pio run -e feather_m0_lora_sniffer
 ```
 
-These commands only compile. Review each startup/profile identity during the later controlled flash trial and confirm it reports `SF12 · 250 kHz · 4/5`; keep SF12 at its default STATIC 13 dBm, and do not mix the artifacts with SF7/SF9/SF10 firmware. The five-second slot, 100 ms guards, 4-second sampling, eight-sample bundle, and other SF12 values remain provisional until hardware acceptance.
+These commands only compile. Review each startup/profile identity during the later controlled flash trial and confirm it reports `SF12 · 250 kHz · 4/5`, three slots, and a 15-second frame; keep SF12 in STATIC mode for the trial, and do not mix selector `120` artifacts with any other profile build. The five-second slot, 100 ms guards, 15-second STATUS, 60-second sampling, eight-sample bundle, and other range-test values remain provisional until hardware acceptance.
 
 ## Upload troubleshooting
 

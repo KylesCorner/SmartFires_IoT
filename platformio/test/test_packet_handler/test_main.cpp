@@ -349,6 +349,23 @@ void test_reset_clears_a_partial_bundle(void) {
   TEST_ASSERT_FALSE(ph.flushWindow());
 }
 
+void test_status_can_run_independently_of_bundle_sampling(void) {
+  PacketHandler ph(PacketHandler::Config::make(2, kMaxDeltas, 15000));
+  uint8_t status[BinaryPacket::kStatusLoRaSize] = {};
+
+  TEST_ASSERT_TRUE(ph.statusDue(1000));
+  ph.updateStatus(makeSnap(1000, kAllFlags, 5.0f, 25.0f));
+  TEST_ASSERT_TRUE(ph.statusPacketReady());
+  TEST_ASSERT_FALSE(ph.statusDue(16000));
+  TEST_ASSERT_EQUAL_UINT8(BinaryPacket::kStatusLoRaSize,
+                          ph.takeStatusPacket(status, sizeof(status)));
+
+  TEST_ASSERT_FALSE(ph.statusDue(15999));
+  TEST_ASSERT_TRUE(ph.statusDue(16000));
+  ph.updateStatus(makeSnap(16000, kAllFlags, 5.0f, 25.0f));
+  TEST_ASSERT_TRUE(ph.statusPacketReady());
+}
+
 void runPacketHandlerTests(void) {
   UNITY_BEGIN();
 
@@ -366,6 +383,7 @@ void runPacketHandlerTests(void) {
   RUN_TEST(test_flush_force_encodes_a_runt_when_the_hold_gave_up);
   RUN_TEST(test_flush_keeps_a_completed_untaken_bundle_intact);
   RUN_TEST(test_reset_clears_a_partial_bundle);
+  RUN_TEST(test_status_can_run_independently_of_bundle_sampling);
 
   UNITY_END();
 }

@@ -18,7 +18,7 @@ The project also has isolated `feather_m0_power_*` environments for MCU, I2C, ra
 
 ## Network model
 
-`SMARTFIRES_NETWORK_PROFILE` is shared by the base, all node targets, and the sniffer. Supported values are 7, 9, 10, and 12; the default is 7. It selects explicit modem registers, five-slot geometry, operational bundle size, sensing/STATUS cadence, reliability timers, and duty timing together. Slot 0 is the base; the remaining four slots are assignable to nodes. Nodes start unassigned, broadcast jittered `AWAKEN` with a SAMD21 UID hash, then adopt the node ID returned by the base in direct `TIME_SYNC`.
+`SMARTFIRES_NETWORK_PROFILE` is shared by the base, all node targets, and the sniffer. Supported values are 7, 9, 10, 12, and 120; the active default is 120. It selects explicit modem registers, slot geometry, operational bundle size, sensing/STATUS cadence, reliability timers, and duty timing together. Selector 120 is the SF12 range-test variant with three slots (base plus two nodes), 15-second STATUS, and one-minute sensing; standard profiles use five slots. Nodes start unassigned, broadcast jittered `AWAKEN` with a SAMD21 UID hash, then adopt the node ID returned by the base in direct `TIME_SYNC`.
 
 Changing the selector requires rebuilding and reflashing every network Feather in one maintenance operation. The base announces the active profile to the edge/dashboard; mixed profiles on one carrier are unsupported.
 

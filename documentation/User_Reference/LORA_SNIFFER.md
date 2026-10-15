@@ -3,7 +3,7 @@ name: lora-sniffer
 description: Flashing and operating the passive LoRa sniffer with the Jetson dashboard.
 category: reference
 status: current
-last_verified: 2026-10-07
+last_verified: 2026-10-15
 source_refs:
   - platformio/platformio.ini
   - platformio/src/main_lora_sniffer.cpp
@@ -16,7 +16,7 @@ related_docs:
 
 # LoRa sniffer
 
-The `feather_m0_lora_sniffer` target passively receives SmartFires LoRa traffic and writes one NDJSON record per event over native USB at 115200 baud. It compiles the same `SMARTFIRES_NETWORK_PROFILE` as the base and nodes, explicitly applies that modem tuple, and announces its profile ID/fingerprint and TDMA geometry in the startup `config` event. It does not join, transmit, assign nodes, or replace the base.
+The `feather_m0_lora_sniffer` target passively receives SmartFires LoRa traffic and writes one NDJSON record per event over native USB at 115200 baud. It compiles the same `SMARTFIRES_NETWORK_PROFILE` as the base and nodes, including selector `120` for the SF12 range test, explicitly applies that modem tuple, and announces its profile ID/fingerprint and TDMA geometry in the startup `config` event. It does not join, transmit, assign nodes, or replace the base.
 
 ## Flash and inspect
 
@@ -40,7 +40,6 @@ smartfires-edge web \
   --port /dev/smartfires-base \
   --sniffer-port /dev/smartfires-sniffer \
   --sniffer-baud 115200 \
-  --num-slots 5 \
   --http-port 8080
 ```
 
@@ -51,7 +50,7 @@ taking down core base-station ingest. During a graceful **New Session** restart,
 the worker observes the shared shutdown event, releases its serial handle, and
 is recreated with a fresh timing anchor in the replacement process.
 
-The dashboard normally takes slot count, width, and guards from the base-announced profile. `--num-slots` remains a pre-announcement/legacy fallback. The sniffer's own fingerprint is compared with the active base/override profile; disagreement appears as a profile mismatch and its timing statistics should not be trusted until the fleet is rebuilt consistently.
+The dashboard takes slot count, width, and guards from the base-announced profile; no slot-count argument is normally required. The Timeline pre-creates one lane for the base and every configured node slot, and Slot Activity includes silent slots instead of deriving the layout only from packets already heard. `--num-slots` remains a pre-announcement/legacy fallback. The sniffer's own fingerprint is compared with the active base/override profile; disagreement appears as a profile mismatch and its timing statistics should not be trusted until the fleet is rebuilt consistently.
 
 ## Expected limitations
 

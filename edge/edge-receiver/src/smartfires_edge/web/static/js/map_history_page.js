@@ -351,7 +351,7 @@ function wireTxPowerButtons() {
     let dbm;
 
     if (action === "set") {
-      const raw = prompt(`Set node ${nodeId} TX power (dBm, 5–13):`);
+      const raw = prompt(`Set node ${nodeId} TX power (dBm, 5–20):`);
       if (raw === null) return;
       dbm = Number(raw);
       if (!Number.isFinite(dbm)) {

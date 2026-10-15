@@ -194,6 +194,7 @@ function initAudio() {
 
 const sniffer = {
   events: [],            // buffered events within MAX_RETAIN_MS
+  observedNodeIds: new Set(), // packet node_ids, including unexpected ones
   laneOf: new Map(),     // node_id -> lane index
   laneOrder: [],         // node_ids in lane order
   lastAnchor: null,      // {wallMs, sessionMs}
@@ -211,6 +212,32 @@ const sniffer = {
   pausedViewEndMs: null, // set when paused; the timestamp at the canvas's right edge
 };
 
+// Build lanes from the authoritative profile, not just from traffic already
+// heard. Slot 0 is displayed as the Base Station (wire/dashboard node_id 0),
+// and slots 1..N-1 map to assigned node IDs 2..N. Unexpected observed IDs are
+// retained after the configured lanes so profile mismatches remain visible.
+function rebuildLaneOrder() {
+  const configured = [];
+  if (sniffer.numSlots) {
+    configured.push(0);
+    for (let slot = 1; slot < sniffer.numSlots; slot++) {
+      configured.push(slot + 1);
+    }
+  }
+
+  const configuredSet = new Set(configured);
+  const unexpected = [...sniffer.observedNodeIds]
+    .filter((nodeId) => !configuredSet.has(nodeId))
+    .sort((a, b) => a - b);
+  sniffer.laneOrder = sniffer.numSlots
+    ? [...configured, ...unexpected]
+    : [...sniffer.observedNodeIds].sort((a, b) => a - b);
+  sniffer.laneOf.clear();
+  sniffer.laneOrder.forEach((id, idx) => sniffer.laneOf.set(id, idx));
+
+  if (document.getElementById("sniffer-timeline")) resizeCanvas();
+}
+
 function applyNetworkProfile(status) {
   const profile = status?.active;
   const positiveNumber = (value) => Number.isFinite(value) && value > 0 ? value : null;
@@ -220,6 +247,7 @@ function applyNetworkProfile(status) {
   sniffer.guardMs = Number.isFinite(profile?.guard_ms) && profile.guard_ms >= 0
     ? profile.guard_ms
     : null;
+  rebuildLaneOrder();
 }
 
 window.addEventListener("smartfires:network-profile", (event) => {
@@ -246,12 +274,10 @@ function laneLabel(nodeId) {
 }
 
 function laneIndexFor(nodeId) {
-  if (sniffer.laneOf.has(nodeId)) return sniffer.laneOf.get(nodeId);
-  sniffer.laneOrder.push(nodeId);
-  sniffer.laneOrder.sort((a, b) => a - b);
-  sniffer.laneOf.clear();
-  sniffer.laneOrder.forEach((id, idx) => sniffer.laneOf.set(id, idx));
-  resizeCanvas();
+  if (!sniffer.laneOf.has(nodeId)) {
+    sniffer.observedNodeIds.add(nodeId);
+    rebuildLaneOrder();
+  }
   return sniffer.laneOf.get(nodeId);
 }
 
@@ -510,6 +536,11 @@ function onSnifferEvent(ev) {
   sniffer.events.push(ev);
   pruneEvents();
   playPacketSound(ev);
+
+  if (ev.node_id != null && ev.pkt_type !== "TIME_SYNC") {
+    sniffer.observedNodeIds.add(ev.node_id);
+    if (!sniffer.laneOf.has(ev.node_id)) rebuildLaneOrder();
+  }
 
   if (ev.pkt_type === "TIME_SYNC" && ev.session_ms != null) {
     sniffer.lastAnchor = { wallMs: ev._wallMs, sessionMs: ev.session_ms };
@@ -873,25 +904,26 @@ function refreshActivityTable() {
   if (!sniffer.numSlots) return;
 
   const groups = new Map(); // "frame:slot" -> aggregate
+  const makeGroup = (frame, slot) => ({
+    frame,
+    slot,
+    expected: expectedNodeForSlot(slot),
+    nodes: new Set(),
+    packets: 0,
+    rssiSum: 0,
+    rssiCount: 0,
+    jitterMin: null,
+    jitterMax: null,
+    guardViolations: 0,
+    wrongSlot: 0,
+  });
   for (const ev of sniffer.events) {
     const info = slotInfoFor(ev);
     if (!info) continue;
     const key = `${info.frame}:${info.slot}`;
     let g = groups.get(key);
     if (!g) {
-      g = {
-        frame: info.frame,
-        slot: info.slot,
-        expected: info.expected,
-        nodes: new Set(),
-        packets: 0,
-        rssiSum: 0,
-        rssiCount: 0,
-        jitterMin: null,
-        jitterMax: null,
-        guardViolations: 0,
-        wrongSlot: 0,
-      };
+      g = makeGroup(info.frame, info.slot);
       groups.set(key, g);
     }
     g.packets++;
@@ -913,6 +945,16 @@ function refreshActivityTable() {
     .slice(0, MAX_ACTIVITY_FRAMES);
   const frameSet = new Set(frames);
 
+  // Represent every configured slot in every displayed frame, including
+  // silent slots. Without these rows a three-slot and five-slot network could
+  // look identical whenever only one node happened to transmit.
+  for (const frame of frames) {
+    for (let slot = 0; slot < sniffer.numSlots; slot++) {
+      const key = `${frame}:${slot}`;
+      if (!groups.has(key)) groups.set(key, makeGroup(frame, slot));
+    }
+  }
+
   const rows = [...groups.values()]
     .filter((g) => frameSet.has(g.frame))
     .sort((a, b) => b.frame - a.frame || a.slot - b.slot);
@@ -920,7 +962,7 @@ function refreshActivityTable() {
   for (const g of rows) {
     const tr = document.createElement("tr");
     if (g.wrongSlot > 0) tr.classList.add("sniffer-row-warn");
-    const seenFrom = [...g.nodes].sort((a, b) => a - b).map((n) => (n === 0 ? "Base" : n)).join(", ");
+    const seenFrom = [...g.nodes].sort((a, b) => a - b).map((n) => (n === 0 ? "Base" : n)).join(", ") || "—";
     const avgRssi = g.rssiCount ? (g.rssiSum / g.rssiCount).toFixed(1) : "—";
     const jitterRange = g.jitterMin != null ? `${g.jitterMin.toFixed(1)} … ${g.jitterMax.toFixed(1)}` : "—";
     tr.innerHTML = `

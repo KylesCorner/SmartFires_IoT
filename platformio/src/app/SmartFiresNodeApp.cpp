@@ -297,6 +297,10 @@ void SmartFiresNodeApp::update() {
     }
   }
 
+  // STATUS has its own cadence. This is intentionally outside
+  // telemetryReady() so a range-test heartbeat can be faster than sensing.
+  updateStatusTelemetry();
+
   if (_duty.telemetryReady()) {
     const SensorSnapshot snap = buildSnapshot();
 
@@ -323,16 +327,7 @@ void SmartFiresNodeApp::update() {
               _packetHandler.bundleReady() ? 1 : 0,
               bundleReadyFromPush ? 1 : 0);
 
-    if (_packetHandler.statusPacketReady()) {
-      uint8_t buf[BinaryPacket::kStatusLoRaSize];
-      const uint8_t len = _packetHandler.takeStatusPacket(buf, sizeof(buf));
-
-      if (len > 0) {
-        enqueueTelemetryPayload(buf, len);
-      } else {
-        LOG_WARN("packet", "status_ready_but_take_returned_zero");
-      }
-    }
+    enqueueReadyStatus();
 
     if (_packetHandler.bundleReady()) {
       if (!_cfg.enableTelemetryTx) {
@@ -349,6 +344,46 @@ void SmartFiresNodeApp::update() {
     _duty.markTelemetrySent();
 
     LOG_DEBUG("app", "telemetry_marked_sent");
+  }
+}
+
+void SmartFiresNodeApp::updateStatusTelemetry() {
+  if (_duty.sleeping()) {
+    return;
+  }
+
+  const uint32_t sessionTimeMs = _tdmaClock.sessionNowMs();
+  if (!_packetHandler.statusDue(sessionTimeMs)) {
+    return;
+  }
+
+  // GPS position is part of STATUS and is critical during range tests. Refresh
+  // it independently instead of repeating a reading from the slower BUNDLE
+  // sensor cadence. If the normal duty tick just sampled it, ready() is false
+  // for its short per-sensor floor and the fresh cached reading is reused.
+  (void)_duty.refreshFirstFixSensor();
+
+  const SensorSnapshot snap = buildSnapshot();
+  _packetHandler.setLinkStats(_radio.retransmitCount(),
+                              _radio.failedSendCount());
+  _packetHandler.setTxPowerState(
+      _radio.txPowerDbm(),
+      _txPowerMode == BinaryPacket::TX_POWER_MODE_STATIC);
+  _packetHandler.updateStatus(snap);
+  enqueueReadyStatus();
+}
+
+void SmartFiresNodeApp::enqueueReadyStatus() {
+  if (!_packetHandler.statusPacketReady()) {
+    return;
+  }
+
+  uint8_t buf[BinaryPacket::kStatusLoRaSize];
+  const uint8_t len = _packetHandler.takeStatusPacket(buf, sizeof(buf));
+  if (len > 0) {
+    enqueueTelemetryPayload(buf, len);
+  } else {
+    LOG_WARN("packet", "status_ready_but_take_returned_zero");
   }
 }
 
@@ -611,7 +646,7 @@ void SmartFiresNodeApp::revertTxPowerToBaseline(const char *reason) {
   const int8_t applied = _radio.setTxPower(NetworkConfig::kMaxTxPowerDbm);
   // Restore the selected profile's baseline mode as well as its baseline
   // power. Higher-SF acceptance profiles intentionally remain STATIC at
-  // 13 dBm so a stale-sync recovery cannot confound range measurements.
+  // 20 dBm so a stale-sync recovery cannot confound range measurements.
   _txPowerMode = NetworkConfig::kDynamicTxPowerDefaultEnabled
                      ? BinaryPacket::TX_POWER_MODE_DYNAMIC
                      : BinaryPacket::TX_POWER_MODE_STATIC;

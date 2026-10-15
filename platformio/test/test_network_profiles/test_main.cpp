@@ -14,6 +14,24 @@ void test_all_profiles_are_valid() {
   TEST_ASSERT_TRUE(NetworkProfiles::isValid(NetworkProfiles::kSf9));
   TEST_ASSERT_TRUE(NetworkProfiles::isValid(NetworkProfiles::kSf10));
   TEST_ASSERT_TRUE(NetworkProfiles::isValid(NetworkProfiles::kSf12));
+  TEST_ASSERT_TRUE(NetworkProfiles::isValid(NetworkProfiles::kSf12RangeTest));
+}
+
+void test_sf12_range_test_cadence() {
+  const NetworkProfiles::NetworkProfile &profile =
+      NetworkProfiles::profileForSelector(120);
+  TEST_ASSERT_EQUAL_UINT8(12, profile.spreadingFactor);
+  TEST_ASSERT_EQUAL_UINT8(3, profile.totalSlots);
+  TEST_ASSERT_EQUAL_UINT32(15000, NetworkProfiles::framePeriodMs(profile));
+  TEST_ASSERT_EQUAL_UINT32(60000, profile.continuousSamplePeriodMs);
+  TEST_ASSERT_EQUAL_UINT32(4000, profile.timedSamplePeriodMs);
+  TEST_ASSERT_EQUAL_UINT32(15000, profile.statusIntervalMs);
+  TEST_ASSERT_EQUAL_UINT32(8, NetworkProfiles::samplesPerBundle(profile));
+  TEST_ASSERT_EQUAL_UINT32(480000,
+                           NetworkProfiles::samplesPerBundle(profile) *
+                               profile.continuousSamplePeriodMs);
+  TEST_ASSERT_TRUE(NetworkProfiles::fingerprint(profile) !=
+                   NetworkProfiles::fingerprint(NetworkProfiles::kSf12));
 }
 
 void test_max_bundle_airtime_golden_cases() {
@@ -104,6 +122,12 @@ void test_offered_load_keeps_control_headroom() {
       NetworkProfiles::offeredLoadPermille(NetworkProfiles::kSf10) <= 900);
   TEST_ASSERT_TRUE(
       NetworkProfiles::offeredLoadPermille(NetworkProfiles::kSf12) <= 900);
+  TEST_ASSERT_EQUAL_UINT32(
+      1032,
+      NetworkProfiles::offeredLoadPermille(NetworkProfiles::kSf12RangeTest));
+  TEST_ASSERT_TRUE(
+      NetworkProfiles::offeredLoadPermille(NetworkProfiles::kSf12RangeTest) <=
+      1800);
 }
 
 void test_network_profile_announcement_serialization() {
@@ -141,6 +165,7 @@ void test_network_profile_announcement_serialization() {
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_all_profiles_are_valid);
+  RUN_TEST(test_sf12_range_test_cadence);
   RUN_TEST(test_max_bundle_airtime_golden_cases);
   RUN_TEST(test_packet_class_airtime_golden_cases);
   RUN_TEST(test_wire_ceiling_and_operating_cap_are_separate);

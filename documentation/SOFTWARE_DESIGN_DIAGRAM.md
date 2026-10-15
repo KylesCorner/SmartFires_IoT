@@ -3,7 +3,7 @@ name: software-design-diagram
 description: Diagram-form companion to SOFTWARE_DESIGN.md — system, control-flow, and packet diagrams.
 category: architecture
 status: current
-last_verified: 2026-10-07
+last_verified: 2026-10-15
 source_refs:
   - platformio/platformio.ini
 related_docs:
@@ -16,7 +16,7 @@ related_docs:
 
 ```mermaid
 flowchart LR
-    Profile[SMARTFIRES_NETWORK_PROFILE\nSF7 / SF9 / SF10 / SF12]
+    Profile[SMARTFIRES_NETWORK_PROFILE\nSF7 / SF9 / SF10 / SF12 / SF12 range]
     subgraph Node[Feather M0 sensor node]
         Sensors[SHT31 / wind / GPS / SPS30 / ICM-20948]
         Duty[DutyCycleController]
@@ -84,7 +84,7 @@ stateDiagram-v2
     Warmup --> Active: WINDOW_BEGIN
 ```
 
-Timed profile periods are 75/80/90/150 seconds for SF7/SF9/SF10/SF12. The active window is two complete operational bundles: 30 samples at the shorter profiles and 16 samples at SF12. Profile-scaled overrun and final-drain limits protect the cycle when work runs late.
+Timed profile periods are 75/80/90/150 seconds for SF7/SF9/SF10/SF12. Selector `120`'s three-slot SF12 range-test variant retains the standard SF12 150-second Timed period and independently schedules 15-second STATUS while awake. Every Timed active window contains two complete operational bundles. Profile-scaled overrun and final-drain limits protect the cycle when work runs late.
 
 ## Command paths
 

@@ -162,6 +162,16 @@ uint8_t PacketHandler::takeBundle(uint8_t *buf, size_t bufSize) {
 
 // --- STATUS ---
 
+bool PacketHandler::statusDue(uint32_t sessionTimeMs) const {
+    return !_statusReady &&
+           (!_statusEverSent ||
+            sessionTimeMs - _lastStatusMs >= _cfg.statusIntervalMs);
+}
+
+void PacketHandler::updateStatus(const SensorSnapshot &snap) {
+    tryEncodeStatus(snap);
+}
+
 bool PacketHandler::statusPacketReady() const {
     return _statusReady;
 }
@@ -238,11 +248,7 @@ void PacketHandler::resetBundleState() {
 }
 
 void PacketHandler::tryEncodeStatus(const SensorSnapshot &snap) {
-    const bool intervalElapsed =
-        !_statusEverSent ||
-        (snap.sessionTimeMs - _lastStatusMs >= _cfg.statusIntervalMs);
-
-    if (!intervalElapsed) return;
+    if (!statusDue(snap.sessionTimeMs)) return;
 
     BinaryPacket::StatusPayload sp = {};
     uint8_t flags = 0;

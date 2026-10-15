@@ -85,7 +85,7 @@ def normalize_network_profile(profile: dict[str, Any]) -> dict[str, Any]:
     if (
         result["bandwidth_hz"] != expected_bandwidth_hz
         or denominator != 5
-        or result["num_slots"] != 5
+        or result["num_slots"] not in (3, 5)
         or result["guard_ms"] <= 0
         or result["slot_width_ms"] <= 2 * result["guard_ms"]
         or not 0 < result["max_bundle_deltas"] <= 14

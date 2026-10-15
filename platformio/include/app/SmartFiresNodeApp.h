@@ -88,7 +88,7 @@ private:
     // so it can be reported in STATUS and so the stale-sync revert can log what
     // it discarded. Defaults to DYNAMIC on every boot — nothing persists it,
     // deliberately (see revertTxPowerToBaseline). SF7 defaults DYNAMIC;
-    // higher-SF acceptance profiles default STATIC at the 13 dBm baseline.
+    // higher-SF acceptance profiles default STATIC at the 20 dBm baseline.
     uint8_t _txPowerMode = NetworkConfig::kDynamicTxPowerDefaultEnabled
                                ? BinaryPacket::TX_POWER_MODE_DYNAMIC
                                : BinaryPacket::TX_POWER_MODE_STATIC;
@@ -139,6 +139,8 @@ private:
     bool maybeEnterTimedMcuSleep();
     bool radioMustStayAwakeToDrain() const;
     bool enqueueTelemetryPayload(const uint8_t *buf, uint8_t len);
+    void updateStatusTelemetry();
+    void enqueueReadyStatus();
     bool takeAndEnqueueBundle();
     void updateWindowMarkers();
     bool sendWindowMarker(uint8_t pktType, uint32_t plannedSleepMs,

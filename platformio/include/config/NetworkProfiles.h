@@ -21,43 +21,50 @@ enum class ProfileId : uint8_t {
 // Data only. Board pins, wire-format ceilings, sensor electrical limits, and
 // calibration values deliberately remain in their existing domain headers.
 struct NetworkProfile {
+  // Radio/modem identity. `id` is the over-air profile identity; multiple
+  // build selectors may intentionally share it when they use the same modem.
   ProfileId id;
+  uint8_t spreadingFactor;          // LoRa SF (7, 9, 10, or 12).
+  uint32_t bandwidthHz;             // LoRa bandwidth in Hz.
+  uint8_t codingRateDenominator;    // LoRa 4/N denominator; currently 5.
+  uint8_t preambleSymbols;          // LoRa preamble length in symbols.
+  bool explicitHeader;              // true = explicit LoRa header mode.
+  bool payloadCrc;                  // true = SX127x payload CRC enabled.
+  bool lowDataRateOptimization;     // SX127x low-data-rate optimization bit.
+  int16_t snrDemodFloorDbX10;       // Demodulation floor, dB times ten.
 
-  uint8_t spreadingFactor;
-  uint32_t bandwidthHz;
-  uint8_t codingRateDenominator;
-  uint8_t preambleSymbols;
-  bool explicitHeader;
-  bool payloadCrc;
-  bool lowDataRateOptimization;
-  int16_t snrDemodFloorDbX10;
+  // TDMA geometry and clock recovery.
+  uint8_t totalSlots;               // Base slot plus all node slots.
+  uint32_t slotWidthMs;             // Width of each TDMA slot.
+  uint32_t guardMs;                 // Quiet time at both slot edges.
+  uint32_t syncStaleMs;             // Age at which TIME_SYNC is stale.
+  uint32_t rxWakeAheadMs;           // Radio wake lead before base slot 0.
 
-  uint8_t totalSlots;
-  uint32_t slotWidthMs;
-  uint32_t guardMs;
-  uint32_t syncStaleMs;
-  uint32_t rxWakeAheadMs;
+  // BUNDLE sizing and transmit admission.
+  uint8_t maxBundleDeltas;          // Samples per BUNDLE minus one.
+  uint16_t maxOperationalApplicationBytes;  // 27 + 12 * maxBundleDeltas.
+  uint16_t maxBundleAirtimeMs;      // Derived maximum BUNDLE airtime.
+  uint16_t txCompletionMarginMs;    // Software/driver completion allowance.
 
-  uint8_t maxBundleDeltas;
-  uint16_t maxOperationalApplicationBytes;
-  uint16_t maxBundleAirtimeMs;
-  uint16_t txCompletionMarginMs;
+  // Sensing and STATUS cadence. The node application schedules STATUS
+  // independently; push() retains a compatibility check for simpler callers.
+  uint32_t continuousSamplePeriodMs;  // Continuous-mode sensing interval.
+  uint32_t timedSamplePeriodMs;       // Timed-mode active sensing interval.
+  uint32_t statusIntervalMs;          // Minimum interval between STATUS packets.
 
-  uint32_t continuousSamplePeriodMs;
-  uint32_t timedSamplePeriodMs;
-  uint32_t statusIntervalMs;
+  // Application reliability, discovery, synchronization, and commands.
+  bool useAppAckSummary;             // Enable cumulative application ACKs.
+  uint8_t reliabilityMaxAttempts;    // Initial send plus retries.
+  uint32_t retryWaitMs;              // Minimum age before retransmission.
+  uint32_t reliabilityMaxAgeMs;      // Drop pending telemetry after this age.
+  uint32_t awakenIntervalMs;         // Unassigned-node AWAKEN cadence.
+  uint32_t periodicTimeSyncMs;       // Base TIME_SYNC broadcast cadence.
+  uint32_t commandAckTimeoutMs;      // Base wait for node command ACK.
 
-  bool useAppAckSummary;
-  uint8_t reliabilityMaxAttempts;
-  uint32_t retryWaitMs;
-  uint32_t reliabilityMaxAgeMs;
-  uint32_t awakenIntervalMs;
-  uint32_t periodicTimeSyncMs;
-  uint32_t commandAckTimeoutMs;
-
-  uint32_t maxTxDrainBeforeStandbyMs;
-  uint32_t timedActiveSampleMs;
-  uint32_t timedCyclePeriodMs;
+  // Timed duty-cycle geometry.
+  uint32_t maxTxDrainBeforeStandbyMs;  // Final queue-drain allowance.
+  uint32_t timedActiveSampleMs;        // Sensor-active portion of a cycle.
+  uint32_t timedCyclePeriodMs;         // Complete wake-to-wake period.
 };
 
 constexpr uint8_t kWireBundleMaxDeltas = 14;
@@ -120,9 +127,12 @@ constexpr bool requiresLowDataRateOptimization(
              profile.bandwidthHz) > 16000u;
 }
 
-// Conservative queue-service model: one frame may be serviced per node slot.
-// Count generated BUNDLE and STATUS frames against that opportunity and round
-// each contribution upward. Profiles reserve at least 10% for retries/control.
+// Conservative fresh-traffic queue-service model. The runtime permits up to
+// three sends in a slot and at most one retransmission, leaving two possible
+// fresh sends. Count generated BUNDLE and STATUS frames against the node's
+// once-per-frame slot and reserve at least 10% of those two fresh-send
+// opportunities for bursts/control. A value of 1000 means one fresh frame per
+// node slot on average.
 constexpr uint32_t offeredLoadPermille(const NetworkProfile &profile) {
   return LoRaAirtime::ceilDiv(framePeriodMs(profile) * 1000u,
                              samplesPerBundle(profile) *
@@ -248,7 +258,8 @@ constexpr bool isValid(const NetworkProfile &profile) {
          profile.payloadCrc &&
          profile.lowDataRateOptimization ==
              requiresLowDataRateOptimization(profile) &&
-         profile.snrDemodFloorDbX10 < 0 && profile.totalSlots == 5u &&
+         profile.snrDemodFloorDbX10 < 0 &&
+         (profile.totalSlots == 3u || profile.totalSlots == 5u) &&
          profile.guardMs * 2u < profile.slotWidthMs &&
          profile.maxBundleDeltas <= kWireBundleMaxDeltas &&
          profile.maxOperationalApplicationBytes ==
@@ -260,7 +271,7 @@ constexpr bool isValid(const NetworkProfile &profile) {
              profile.slotWidthMs &&
          profile.continuousSamplePeriodMs > 0u &&
          profile.timedSamplePeriodMs > 0u && profile.statusIntervalMs > 0u &&
-         offeredLoadPermille(profile) <= 900u &&
+         offeredLoadPermille(profile) <= 1800u &&
          profile.useAppAckSummary && profile.reliabilityMaxAttempts >= 2u &&
          profile.retryWaitMs >= framePeriodMs(profile) &&
          profile.reliabilityMaxAgeMs >=
@@ -312,35 +323,70 @@ constexpr NetworkProfile kSf12{
     true, 3, 50000, 150000, 27000, 125000, 180000,
     30000, 64000, 150000};
 
+// SF12 field range-test profile (select with SMARTFIRES_NETWORK_PROFILE=120).
+//
+// Copy/edit template -- keep the rows in this exact order:
+//   { identity + modem,
+//     TDMA geometry + sync,
+//     BUNDLE sizing + TX timing,
+//     Continuous sample, Timed sample, STATUS interval,
+//     reliability + AWAKEN/TIME_SYNC/command timing,
+//     final TX drain, Timed active window, Timed cycle }
+//
+// STATUS scheduling is independent of sensor BUNDLE sampling. The three-slot
+// geometry gives each of the two nodes a transmit opportunity every 15 seconds,
+// matching the STATUS heartbeat, while eight one-minute samples per BUNDLE
+// keeps sensor-data traffic roughly eight minutes apart. Timed mode retains
+// standard SF12 sensing/duty timing; use the Continuous node environment for
+// the intended range test.
+constexpr NetworkProfile kSf12RangeTest{
+    // id, SF, bandwidth, CR denominator, preamble, explicit, CRC, LDO,
+    // SNR floor x10
+    ProfileId::Sf12, 12, 250000, 5, 8, true, true, true, -200,
+    // slots, slot width, guard, stale sync, RX wake-ahead
+    3, 5000, 100, 1320000, 300,
+    // max deltas, max app bytes, max BUNDLE airtime, TX completion margin
+    7, 111, 2216, 100,
+    // Continuous sample, Timed sample, STATUS interval
+    60000, 4000, 15000,
+    // ACK summary, attempts, retry wait, max age, AWAKEN, TIME_SYNC,
+    // command ACK
+    true, 3, 50000, 150000, 27000, 125000, 180000,
+    // final TX drain, Timed active window, Timed cycle
+    30000, 64000, 150000};
+
 static_assert(isValid(kSf7), "invalid SF7 network profile");
 static_assert(isValid(kSf9), "invalid SF9 network profile");
 static_assert(isValid(kSf10), "invalid SF10 network profile");
 static_assert(isValid(kSf12), "invalid SF12 network profile");
+static_assert(isValid(kSf12RangeTest), "invalid SF12 range-test profile");
 
 constexpr const NetworkProfile &profileForSelector(uint8_t selector) {
   return selector == 7u ? kSf7
        : selector == 9u ? kSf9
        : selector == 10u ? kSf10
-                         : kSf12;
+       : selector == 120u ? kSf12RangeTest
+                          : kSf12;
 }
 
 }  // namespace NetworkProfiles
 
 // A deployed radio build must make the selection explicitly. Native tests and
 // non-network power-test firmware use SF7 only as an active-config fixture;
-// neither is a deployable radio role, and all four named definitions above
+// neither is a deployable radio role, and all named definitions above
 // remain available to native tests.
 #if !defined(SMARTFIRES_NETWORK_PROFILE)
 #if defined(SMARTFIRES_NATIVE_TEST) || defined(POWER_TEST)
 #define SMARTFIRES_NETWORK_PROFILE 7
 #else
-#error "SMARTFIRES_NETWORK_PROFILE must be 7, 9, 10, or 12"
+#error "SMARTFIRES_NETWORK_PROFILE must be 7, 9, 10, 12, or 120"
 #endif
 #endif
 
 #if SMARTFIRES_NETWORK_PROFILE != 7 && SMARTFIRES_NETWORK_PROFILE != 9 && \
-    SMARTFIRES_NETWORK_PROFILE != 10 && SMARTFIRES_NETWORK_PROFILE != 12
-#error "Unsupported SMARTFIRES_NETWORK_PROFILE; expected 7, 9, 10, or 12"
+    SMARTFIRES_NETWORK_PROFILE != 10 && SMARTFIRES_NETWORK_PROFILE != 12 && \
+    SMARTFIRES_NETWORK_PROFILE != 120
+#error "Unsupported SMARTFIRES_NETWORK_PROFILE; expected 7, 9, 10, 12, or 120"
 #endif
 
 namespace NetworkProfiles {

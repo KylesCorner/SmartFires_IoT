@@ -108,7 +108,7 @@ constexpr uint8_t kRadioCsPin = 8;
 constexpr uint8_t kRadioIntPin = 3;
 constexpr uint8_t kRadioRstPin = 4;
 constexpr float kRadioFrequencyMhz = 915.0f;
-constexpr int8_t kRadioTxPowerDbm = 13;
+constexpr int8_t kRadioTxPowerDbm = 20;
 constexpr uint8_t kSpreadingFactor = kProfile.spreadingFactor;
 constexpr uint32_t kBandwidthHz = kProfile.bandwidthHz;
 constexpr uint8_t kCodingRateDenominator = kProfile.codingRateDenominator;
@@ -121,7 +121,7 @@ constexpr uint8_t kMaxBundleDeltas = kProfile.maxBundleDeltas;
 constexpr uint16_t kMaxOperationalApplicationBytes =
     kProfile.maxOperationalApplicationBytes;
 // Preserve the field-proven SF7 behavior. Higher-SF profiles begin acceptance
-// at the fixed 13 dBm baseline so dynamic power does not confound range data;
+// at the fixed 20 dBm baseline so dynamic power does not confound range data;
 // re-enable them deliberately after profile-specific threshold validation.
 constexpr bool kDynamicTxPowerDefaultEnabled = (kProfileId == 7u);
 
@@ -132,15 +132,13 @@ constexpr bool kDynamicTxPowerDefaultEnabled = (kProfileId == 7u);
 // or a base running mismatched firmware, must not be able to push the radio
 // somewhere the hardware cannot go.
 //
-// Ceiling is kRadioTxPowerDbm, deliberately *not* the SX1276's +23 dBm maximum:
-// this feature only ever walks a node down from the known-working, field-
+// Ceiling is kRadioTxPowerDbm. RadioHead's PA_BOOST path caps requests at
+// 20 dBm; this feature only ever walks a node down from the known-working, field-
 // validated baseline and back up to it. Raising the baseline itself is a manual
 // change, not something a control loop gets to do.
 //
-// Floor is +5 dBm, the bottom of RadioHead's PA_BOOST range — begin() calls
-// setTxPower(..., useRFO=false), and RH_RF95 silently clamps anything under 5
-// on that path, so a lower value here would just be a lie about what the radio
-// is doing.
+// Floor is the deployment's conservative +5 dBm control limit. RadioHead can
+// program PA_BOOST lower, but that wider range has not been adopted here.
 constexpr int8_t kMinTxPowerDbm = 5;
 constexpr int8_t kMaxTxPowerDbm = kRadioTxPowerDbm;
 static_assert(kMinTxPowerDbm <= kMaxTxPowerDbm,
@@ -189,9 +187,8 @@ constexpr TdmaReliabilityMode kReliabilityMode =
 // former literal 4000 keeps the node's retry-wait gate honest as the network
 // grows: at NUM_SLOTS=4 the two happened to be close (3600 vs 4000), but at
 // NUM_SLOTS=5 a literal 4000 would have the node assuming acks arrive faster
-// than the base can physically send them, shrinking the retry margin from
-// 2.2 ack intervals to 1.8 and making a single lost ack much likelier to
-// provoke a spurious retransmit.
+// than the base can physically send them. Profile-derived geometry also keeps
+// this correct for the three-slot range-test fleet.
 constexpr uint32_t kExpectedAckIntervalMs = kFramePeriodMs;
 constexpr uint16_t kRetryWaitMultiplierPermille = 2000;  // 2.0x
 constexpr uint32_t kRetryWaitMinMs = kProfile.retryWaitMs;

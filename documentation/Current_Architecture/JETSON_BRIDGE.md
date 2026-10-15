@@ -3,7 +3,7 @@ name: jetson-bridge
 description: Frame format and routing between the base station Feather and the Jetson over USB CDC.
 category: architecture
 status: current
-last_verified: 2026-10-07
+last_verified: 2026-10-15
 source_refs:
   - platformio/include/telemetry/BinaryPacket.h
   - platformio/src/app/SmartFiresBaseApp.cpp
@@ -94,7 +94,7 @@ session object.
 
 The base broadcasts its cached time at the selected 50/65/110/125-second SF7/SF9/SF10/SF12 cadence, using a local fallback if it has no Jetson authority. This radio cadence is intentionally separate from the USB injection cadence.
 
-Network profile state starts explicitly `unknown`. A valid base announcement normally becomes the active, authoritative profile and is atomically persisted under `network_profile` in `session.json`, including its source and first-observed UTC time. Once telemetry has been recorded under a known base profile, a conflicting announcement does not silently replace the active identity: the edge reports `mismatch`, retains the pinned profile, and records a rejected transition in profile history.
+Network profile state starts explicitly `unknown`. A valid base announcement normally becomes the active, authoritative profile and is atomically persisted under `network_profile` in `session.json`, including its source and first-observed UTC time. The decoder accepts the standard five-slot geometry and selector `120`'s three-slot range-test geometry. Once telemetry has been recorded under a known base profile, a conflicting announcement does not silently replace the active identity: the edge reports `mismatch`, retains the pinned profile, and records a rejected transition in profile history.
 
 `--network-profile-override PATH` or `ingest.network_profile_override` accepts a recovery-only JSON profile. The override remains active while the observed base profile remains visible; differing fields produce a mismatch rather than hiding the disagreement.
 
@@ -108,7 +108,7 @@ STATUS supplies GPS and battery validity, DMP heading/accuracy, lifetime retrans
 
 - `/api/new_session` acknowledges and coalesces a whole-application restart request; the service supervisor then launches a fresh process/session.
 - `/api/node_reset` sends a hard reset to a selected node.
-- `/api/tx_power` resolves set/increase/decrease and DYNAMIC/STATIC choices into an absolute power command, clamped to 5–13 dBm.
+- `/api/tx_power` resolves set/increase/decrease and DYNAMIC/STATIC choices into an absolute power command, clamped to 5–20 dBm.
 - `/api/network_profile` returns the unknown/active/mismatch envelope, active source, base and override copies, mismatch fields, transition history, and sniffer identity when present.
 - `GET /api/system_update` reports whether a systemd-managed web update is available and its current state. Confirmed `POST /api/system_update` requests the fixed rootless `dashboard-update` workflow; no branch or shell text is accepted from the browser. It fast-forwards the configured branch, reinstalls the edge package, and only then requests a graceful process restart.
 - `/api/command` currently only echoes `{status: queued}` and does not write serial bytes.

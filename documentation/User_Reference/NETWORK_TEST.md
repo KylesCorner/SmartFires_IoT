@@ -3,7 +3,7 @@ name: network-test
 description: End-to-end LoRa-to-base-to-Jetson integration test procedure using current sensor-node firmware.
 category: reference
 status: current
-last_verified: 2026-10-07
+last_verified: 2026-10-15
 source_refs:
   - platformio/platformio.ini
 related_docs:
@@ -33,7 +33,7 @@ pio run -e feather_m0_lora_base --target upload
 pio run -e feather_m0_lora_node_debug --target upload
 ```
 
-Use `feather_m0_lora_node` instead when validating the production Continuous mode. Confirm the base, every node, and the optional sniffer were built with the same `SMARTFIRES_NETWORK_PROFILE`; matching `NUM_SLOTS=5` alone is not sufficient.
+Use `feather_m0_lora_node` instead when validating the production Continuous mode. Confirm the base, every node, and the optional sniffer were built with the same `SMARTFIRES_NETWORK_PROFILE` and matching `NUM_SLOTS`; selector `120` requires 3 while standard profiles require 5.
 
 If using a sniffer:
 
@@ -82,7 +82,7 @@ At SF7, `node_debug` has a nominal 75-second cycle:
 - `WINDOW_END`, final TX drain, then roughly 35 seconds standby;
 - `WINDOW_BEGIN` on the next wake.
 
-SF9/SF10 retain the 30-sample window with 80/90-second cycles. SF12 uses 16 samples as two eight-sample bundles over a 64-second active window and a 150-second cycle. STATUS cadence is 15/30/120/300 seconds, frame length is 4.5/6.5/11/25 seconds, and the app-layer retry gate is 9/13/22/50 seconds for SF7/SF9/SF10/SF12.
+SF9/SF10 retain the 30-sample window with 80/90-second cycles. SF12 uses 16 samples as two eight-sample bundles over a 64-second active window and a 150-second cycle. STATUS cadence is 15/30/120/300 seconds, frame length is 4.5/6.5/11/25 seconds, and the app-layer retry gate is 9/13/22/50 seconds for SF7/SF9/SF10/SF12. Selector `120` uses a 15-second three-slot frame, independently emits STATUS every 15 seconds, samples every minute, and completes a Continuous sensor BUNDLE about every eight minutes.
 
 ## Validate
 
@@ -96,7 +96,7 @@ Check all of the following:
 - STATUS shows GPS/battery validity, heading if valid, retry/fail totals, and TX power.
 - Packet-loss counters stabilize rather than growing continuously.
 - Timed window begin/end state changes match node wake/sleep behavior.
-- Sniffer slot assignment and guard-jitter views match `NUM_SLOTS=5` if enabled.
+- Sniffer slot assignment and guard-jitter views match the selected `NUM_SLOTS` (3 for selector `120`, otherwise 5) if enabled.
 - Sniffer slot width and guards match the selected profile if enabled.
 - `session.json` records the full `network_profile` object and source beside the session data.
 
@@ -104,7 +104,7 @@ Check all of the following:
 
 From the dashboard:
 
-1. Pin a node to a safe STATIC power and confirm a later STATUS reports the applied 5–13 dBm value and static mode.
+1. Pin a node to a safe STATIC power and confirm a later STATUS reports the applied 5–20 dBm value and static mode.
 2. Return it to DYNAMIC and confirm STATUS updates.
 3. Use the node reset control. A hard reset should yield a `CMD_ACK` if received, a new `AWAKEN`, reset-cause diagnostics, reassignment, and resumed telemetry.
 4. Start a new session and confirm the base soft-reset/time-sync handshake completes.
@@ -123,4 +123,4 @@ Calibration is not an end-to-end operator test: the generic `/api/command` route
 | Sniffer timing looks wrong | confirm base/sniffer fingerprints match; remember RSSI is local to sniffer |
 | Reset command appears lost | command is LoRa fire-and-forget; inspect `CMD_ACK`, reboot AWAKEN, and STATUS |
 
-For the SF12 trial, begin at STATIC 13 dBm and record maximum-BUNDLE timing, slot/guard violations, join time, delivery ratio, latency, retries/failures, watchdog resets, and queue behavior before drawing range conclusions. The SF9/SF10/SF12 timing margins are provisional until measured, and a successful one-node test does not replace the planned four-node soak. Record whether every failure is reproducible on hardware.
+For the SF12 trial, begin at STATIC 20 dBm and record maximum-BUNDLE timing, slot/guard violations, join time, delivery ratio, latency, retries/failures, watchdog resets, and queue behavior before drawing range conclusions. The SF9/SF10/SF12 timing margins are provisional until measured, and a successful one-node test does not replace the planned fleet soak. Record whether every failure is reproducible on hardware.

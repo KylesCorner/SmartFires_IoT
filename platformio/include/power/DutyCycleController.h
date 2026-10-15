@@ -139,6 +139,11 @@ public:
   // changed by this state.
   bool waitingForFirstFix() const;
 
+  // Refresh the designated GPS/first-fix sensor outside the BUNDLE cadence.
+  // Used by STATUS so its position is current even when other sensors sample
+  // infrequently. Returns true only when a new reading was acquired.
+  bool refreshFirstFixSensor();
+
   // --- Full-bundle active window ---
   void setActiveWindowHold(bool hold);
 

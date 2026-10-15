@@ -251,7 +251,7 @@ static constexpr uint8_t TX_POWER_MODE_STATIC  = 0x01;
 // whether to command at all, so any desync (base reboot, lost CMD_ACK, a node
 // reset the base never saw) is always recoverable by sending an absolute
 // baseline. A relative "step by N" variant would break that: a base that
-// rebooted believing a node was at 13 dBm when it was really at 7 would issue
+// rebooted believing a node was at 20 dBm when it was really at 7 would issue
 // "step down" and drive it up. Do not add one.
 struct __attribute__((packed)) CmdSetTxPowerPayload {
     uint8_t node_id;

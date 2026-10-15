@@ -3,7 +3,7 @@ name: duty-cycling
 description: DutyCycleController's wake/sample/sleep state machine and its config/trigger sensor.
 category: architecture
 status: current
-last_verified: 2026-10-07
+last_verified: 2026-10-15
 source_refs:
   - platformio/platformio.ini
   - platformio/include/config/NetworkProfiles.h
@@ -26,6 +26,8 @@ related_docs:
 | SensorTriggered | SHT31 threshold after minimum sleep | Fixed 750 ms | 10 s | 30 s | Minimum 3 s sleep |
 | Timed | RTC deadline | SF7/9/10 1 s; SF12 4 s | 10 s | SF7/9/10 30 s; SF12 64 s | 75/80/90/150 s wake-to-wake, minimum 5 s standby |
 | Hybrid | Trigger or timer | Fixed 750 ms | 10 s | 30 s | 5 min + warmup + active; minimum 5 s standby |
+
+Selector `120`, the three-slot SF12 range-test variant, uses a 60-second sample period in Continuous mode. It retains the standard SF12 Timed cadence and 64/150-second active/cycle timing; the intended range-test target is the Continuous production node.
 
 Build selection is `SMARTFIRES_DUTY_CYCLE_MODE`: 0 Continuous, 1 SensorTriggered, 2 Timed, 3 Hybrid. The deployment target `feather_m0_lora_node` is Continuous; `node_debug` and `node_timed` are Timed; `node_hybrid` remains available. `SMARTFIRES_NETWORK_PROFILE` supplies the Continuous/Timed cadence, operational bundle size, final-drain, and Timed-cycle values for SF7/SF9/SF10/SF12. SensorTriggered and Hybrid retain fixed legacy cadence and are not supported deployment combinations for higher-SF trials.
 
@@ -85,6 +87,6 @@ The controller's 10-second warmup covers the slowest normal sensor wake. GPS als
 
 ## Sample errors and telemetry
 
-All controller modes set `failOnSampleError=false`. A failed sensor sample does not abort the entire controller cycle; validity is represented by snapshot flags and downstream packet fields. STATUS emission is handled by `PacketHandler`, not by the controller; its selected interval is 15/30/120/300 seconds.
+All controller modes set `failOnSampleError=false`. A failed sensor sample does not abort the entire controller cycle; validity is represented by snapshot flags and downstream packet fields. STATUS emission is handled by `PacketHandler`, not by the controller; its selected interval is 15/30/120/300 seconds, or 15 seconds for selector `120`. The application schedules STATUS independently from BUNDLE sampling while the node is awake and refreshes the designated GPS/first-fix sensor before encoding each due STATUS.
 
 Changing a profile requires checking bundle alignment, warmup-heavy sensors, radio drain time, RTC standby, watchdog behavior, and the base's sleep-aware ACK deferral together.

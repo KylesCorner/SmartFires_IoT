@@ -19,10 +19,11 @@
 //   with takeBundle(), then accumulation continues into the next bundle.
 //
 // STATUS path:
-//   A PKT_STATUS (GPS + battery) is emitted immediately on the first push(), then
-//   every kStatusIntervalMs thereafter (keyed off snap.sessionTimeMs). Retrieve
-//   with takeStatusPacket(). Call resetStatusTimer() when a new session_id arrives
-//   from TIME_SYNC to force an immediate re-send.
+//   statusDue() lets the application schedule STATUS independently of the
+//   sensor/BUNDLE cadence. Pass a current snapshot to updateStatus() when due,
+//   then retrieve it with takeStatusPacket(). push() also performs the same
+//   check for compatibility. Call resetStatusTimer() when a new session_id
+//   arrives from TIME_SYNC to force an immediate re-send.
 //
 // Output is raw LoRa payload bytes — pass directly to
 // TdmaRadioService::enqueueTelemetry().
@@ -56,7 +57,7 @@ public:
 
     // Add one sensor reading.
     // Returns true if a complete bundle is now ready (check bundleReady()).
-    // Also sets statusPacketReady() on first push and every configured status interval after.
+    // Also updates STATUS when due for callers that do not schedule it separately.
     bool push(const SensorSnapshot &snap);
 
     // --- bundle ---
@@ -86,10 +87,12 @@ public:
     bool flushWindow();
 
     // --- STATUS (GPS + battery, interval from Config::statusIntervalMs) ---
+    bool    statusDue(uint32_t sessionTimeMs) const;
+    void    updateStatus(const SensorSnapshot &snap);
     bool    statusPacketReady() const;
     uint8_t takeStatusPacket(uint8_t *buf, size_t bufSize);
 
-    // Force STATUS to be sent on the next push (call on new session_id from TIME_SYNC).
+    // Force STATUS on the next scheduled update or push after a new TIME_SYNC session.
     void resetStatusTimer();
     void setNodeId(uint8_t nodeId);
     void setBundleEncodingEnabled(bool enabled);
