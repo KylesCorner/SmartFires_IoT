@@ -25,11 +25,8 @@ EXEMPT = {
     DOCS_DIR / "DOC_FRONTMATTER.md",
     DOCS_DIR / "CODE_FRONTMATTER.md",
 }
-VALID_CATEGORIES = {
-    "architecture", "reference", "plan-pending", "plan-possible",
-    "plan-completed", "index",
-}
-VALID_STATUSES = {"current", "draft", "deferred", "historical", "superseded"}
+VALID_CATEGORIES = {"architecture", "reference", "index"}
+VALID_STATUSES = {"current"}
 
 
 def expected_category(md_path: Path) -> str | None:
@@ -39,18 +36,12 @@ def expected_category(md_path: Path) -> str | None:
         return "index"
     if rel in {Path("SOFTWARE_DESIGN.md"), Path("SOFTWARE_DESIGN_DIAGRAM.md")}:
         return "architecture"
-    if rel == Path("POWER_MEASURMENTS.md"):
+    if rel == Path("POWER_MEASUREMENTS.md"):
         return "reference"
     if rel.parts[0] == "Current_Architecture":
         return "architecture"
     if rel.parts[0] == "User_Reference":
         return "reference"
-    if rel.parts[0] == "Possible_Plans":
-        return "plan-possible"
-    if rel.parts[0] == "Pending_Plans":
-        return "plan-pending"
-    if rel.parts[0] in {"Completed_Plans", "Project_Progress"}:
-        return "plan-completed"
     # Every documentation file belongs to one of the documented schema
     # locations.  Returning a sentinel lets the caller report an actionable
     # path/category error instead of silently accepting a new directory.
@@ -146,27 +137,15 @@ def main() -> int:
             problems.append(
                 f"{rel} ({name}): status '{status}' is not one of {sorted(VALID_STATUSES)}"
             )
-        if category == "plan-pending" and status != "draft":
-            problems.append(f"{rel} ({name}): pending plans must use status 'draft'")
-        if category == "plan-possible" and status != "deferred":
-            problems.append(f"{rel} ({name}): possible plans must use status 'deferred'")
-        if category == "plan-completed" and status not in {"historical", "superseded"}:
-            problems.append(
-                f"{rel} ({name}): completed/history docs must be historical or superseded"
-            )
-        if category in {"architecture", "reference", "index"} and not last_verified_raw:
+        if not last_verified_raw:
             problems.append(
                 f"{rel} ({name}): category '{category}' requires last_verified"
             )
         if category == "architecture" and not source_refs:
             problems.append(f"{rel} ({name}): architecture docs require source_refs")
-        if category in {"plan-pending", "plan-possible", "plan-completed", "index"} and source_refs:
+        if category == "index" and source_refs:
             problems.append(
-                f"{rel} ({name}): plans/history must not declare source_refs"
-            )
-        if category in {"plan-pending", "plan-possible"} and last_verified_raw:
-            problems.append(
-                f"{rel} ({name}): pending/possible plans must not declare last_verified"
+                f"{rel} ({name}): the documentation index must not declare source_refs"
             )
 
         if not source_refs:
@@ -202,7 +181,7 @@ def main() -> int:
                     f"doc last_verified {last_verified} — review for drift"
                 )
 
-    # Slugs are the foreign keys used by related_docs and superseded_by. Check
+    # Slugs are the foreign keys used by related_docs. Check
     # them after the per-file pass so forward references are valid.
     name_paths: dict[str, list[Path]] = {}
     for md_path, fm in records:
@@ -230,14 +209,6 @@ def main() -> int:
                 problems.append(
                     f"{rel} ({name}): related_docs target '{target}' does not exist"
                 )
-
-        superseded_by = fm.get("superseded_by")
-        if superseded_by in {None, "null", "None", "~"}:
-            continue
-        if not isinstance(superseded_by, str) or superseded_by not in known_names:
-            problems.append(
-                f"{rel} ({name}): superseded_by target '{superseded_by}' does not exist"
-            )
 
     print(f"Checked {checked} doc(s) with frontmatter under {DOCS_DIR.relative_to(REPO_ROOT)}/")
     if not problems:

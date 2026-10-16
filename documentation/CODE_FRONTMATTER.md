@@ -9,7 +9,7 @@ be hand-maintained claims sitting next to the code they describe, with no way to
 they drift, which is exactly the failure mode `DOC_FRONTMATTER.md` exists to fix elsewhere.
 
 Currently scoped to `platformio/include/` and `platformio/src/` (the C++ firmware). Not yet
-applied to the edge-receiver Python package, `util/` scripts, or web dashboard assets.
+applied to the edge-receiver Python package, `tools/` scripts, or web dashboard assets.
 
 ## Format
 

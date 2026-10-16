@@ -62,8 +62,8 @@ DEFAULT_WEB_HTTP_PORT: int = 8080
 DEFAULT_SNIFFER_PORT: str | None = None  # None = sniffer disabled
 DEFAULT_SNIFFER_BAUD: int = 115200
 # Must match the NUM_SLOTS build flag baked into the deployed node Feathers
-# (see platformio.ini's [network] section and the root AGENTS.md "must match"
-# note). Wrong here does not break ingest — only the sniffer's slot alignment,
+# (see platformio.ini's [network] section and TUNABLE_PARAMETERS.md). Wrong here
+# does not break ingest — only the sniffer's slot alignment,
 # which silently misattributes every jitter figure and guard violation.
 DEFAULT_NUM_SLOTS: int = 5
 

@@ -71,8 +71,8 @@ constexpr uint32_t kTdmaGuardMs = NetworkConfig::kGeometry.guardMs;
 // base-originated sync at this cadence instead of drifting all the way to
 // syncStaleMs (22 min) and falling back to unconditional TX. The two are
 // not meant to be equal. See
-// documentation/Completed_Plans/TUNABLE_PARAMETER_ARCHITECTURE_PLAN.md
-// Appendix A, Open Decision 3, for whether this should remain a documented
+// documentation/Current_Architecture/TUNABLE_PARAMETERS.md for the current
+// values and whether this should remain a documented
 // failsafe or be removed once Jetson-driven sync is proven reliable.
 constexpr uint32_t kPeriodicTimeSyncMs =
     NetworkProfiles::kActiveProfile.periodicTimeSyncMs;
@@ -92,7 +92,7 @@ constexpr uint8_t kFirstNodeId = 0x02;
 constexpr uint8_t kMaxAckTrackedNodes = 16;
 
 // --- Dynamic TX power control loop (TxPowerController) ----------------------
-// See documentation/Completed_Plans/DYNAMIC_TX_POWER.md. The base is the only
+// See documentation/Current_Architecture/TUNABLE_PARAMETERS.md. The base is the only
 // decision-maker; the node applies absolute levels and reports what it applied.
 // None of these are bench-characterized yet — they are starting values chosen
 // to be conservative, and the loop's own debug log is the instrument for tuning

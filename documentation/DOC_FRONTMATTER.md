@@ -22,14 +22,13 @@ name: tdma-protocol                  # required — stable slug, see naming rule
 description: One-line summary.      # required
 category: architecture               # required — see categories below
 status: current                      # required — see statuses below
-last_verified: 2026-06-23             # required for architecture/reference/index; omit for plans
+last_verified: 2026-06-23             # required for architecture/reference/index
 source_refs:                         # required non-empty list for architecture; optional for
-  - platformio/include/radio/TdmaConfig.h   # reference; omitted for plans/index
+  - platformio/include/radio/TdmaConfig.h   # reference; omitted for the index
   - platformio/src/radio/TdmaRadioService.cpp
 related_docs:                        # optional — list of other docs' `name` slugs
   - packet-reliability
-superseded_by: null                  # optional — only on plan-completed docs; the architecture
----                                  # doc's `name` slug that now covers this area, if any
+---
 ```
 
 ### `name` — slug naming rule
@@ -44,22 +43,17 @@ reference them without a path.
 | category | directory | meaning |
 |---|---|---|
 | `architecture` | `Current_Architecture/`, `SOFTWARE_DESIGN.md`, `SOFTWARE_DESIGN_DIAGRAM.md` | Must match code now. `source_refs` required. |
-| `reference` | `User_Reference/`, `POWER_MEASURMENTS.md` | Practical how-to or measurement reference. `source_refs` optional (only if it names specific build files/scripts). |
-| `plan-pending` | `Pending_Plans/` | Scoped proposal awaiting implementation; use `status: draft`. No `source_refs` or `last_verified`. |
-| `plan-possible` | `Possible_Plans/` | Concise restart note for deliberately deferred work. No `source_refs` or `last_verified`. |
-| `plan-completed` | `Completed_Plans/`, `Project_Progress/` | Historical design record; code is authoritative, not this doc. No `last_verified` requirement. Use `superseded_by` if a `Current_Architecture` doc now fully covers what this plan describes. |
+| `reference` | `User_Reference/`, `POWER_MEASUREMENTS.md` | Practical how-to or measurement reference. `source_refs` optional (only if it names specific build files/scripts). |
 | `index` | `documentation/README.md` | Doc table of contents. `last_verified` meaningful (the list itself can go stale), no `source_refs`. |
 
 ### `status`
 
-`current` (architecture/reference/index docs believed accurate) · `draft` (pending plans) · `deferred` (possible plans) ·
-`historical` (completed plans — accurate as a record of intent, not of current code) ·
-`superseded` (anything, of any category, known to be replaced/wrong but not yet deleted or
-rewritten — a deliberate "don't trust this" flag, distinct from simply being old).
+`current` means an architecture, reference, or index document is believed to
+match the implementation. Superseded design notes and planning records are kept
+outside the source repository rather than mixed with current documentation.
 
-`check_doc_freshness.py` recognizes `plan-pending` / `draft`, validates each
-documentation directory's category, and enforces the no-`source_refs` rule for
-plans/history and the index.
+`check_doc_freshness.py` validates each documentation directory's category and
+enforces the no-`source_refs` rule for the index.
 
 ### `source_refs`
 

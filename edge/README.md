@@ -34,7 +34,7 @@ the configured mount. The unit checks the mount before starting, so it cannot
 silently create a same-named directory on the root filesystem. Inspect failures
 with `journalctl -u smartfires-edge.service -b`.
 
-Keep the base symlink supplied by `util/udev/99-smartfires.rules`; do not replace
+Keep the base symlink supplied by `tools/udev/99-smartfires.rules`; do not replace
 it with a guessed `/dev/ttyACM*` path. Delayed USB enumeration is handled by the
 application's reconnect loop. The optional sniffer and anemometer are not
 required for core ingest and should be added as command-line options only when

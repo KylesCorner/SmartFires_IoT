@@ -1,116 +1,61 @@
 ---
 name: documentation-index
-description: Table of contents and implementation-status ledger for documentation/.
+description: Index of current SmartFires architecture and operator documentation.
 category: index
 status: current
-last_verified: 2026-10-07
+last_verified: 2026-10-16
 related_docs:
   - software-design
 ---
 
 # SmartFires IoT documentation
 
-Current architecture and reference docs were consolidated against the source tree on 2026-09-04. Use this index to distinguish shipped behavior from proposals and historical design records.
+This directory documents the system that is currently implemented. Shipped
+code and `platformio/platformio.ini` remain authoritative when documentation
+and implementation disagree.
 
-## Reading order
-
-1. [`../AGENTS.md`](../AGENTS.md) for repository guardrails and agent-facing invariants.
-2. [`SOFTWARE_DESIGN.md`](SOFTWARE_DESIGN.md) for the end-to-end system.
-3. The relevant `Current_Architecture/` deep dive.
-4. A `User_Reference/` guide for operational work.
-5. Pending plans for upcoming work; possible/completed plans for deferred work or design history.
-
-If a statement conflicts, shipped code/config wins over current docs; current docs win over plans. Files under `Completed_Plans/` and `Project_Progress/` are intentionally historical and may contain values that were correct only at that stage.
-
-## Current architecture
+## Architecture
 
 | Document | Covers |
 |---|---|
-| [`SOFTWARE_DESIGN.md`](SOFTWARE_DESIGN.md) | Hardware topology, firmware and edge responsibilities, packet table, command/reset behavior, build state |
-| [`SOFTWARE_DESIGN_DIAGRAM.md`](SOFTWARE_DESIGN_DIAGRAM.md) | System, join, Timed-cycle, command, and framing diagrams |
-| [`Current_Architecture/TUNABLE_PARAMETERS.md`](Current_Architecture/TUNABLE_PARAMETERS.md) | TDMA, reliability, sensing, power, base, and edge operating values |
-| [`Current_Architecture/TDMA_PROTOCOL.md`](Current_Architecture/TDMA_PROTOCOL.md) | Slot geometry, assignment, clocks, TX budgets, RX gating, window markers |
-| [`Current_Architecture/PACKET_RELIABILITY.md`](Current_Architecture/PACKET_RELIABILITY.md) | Link-ACK versus app-ACK modes, pending window, retry/ACK rules, sleeping nodes |
-| [`Current_Architecture/DUTY_CYCLING.md`](Current_Architecture/DUTY_CYCLING.md) | Continuous, SensorTriggered, Timed, and Hybrid state/timing behavior |
-| [`Current_Architecture/JETSON_BRIDGE.md`](Current_Architecture/JETSON_BRIDGE.md) | Native-USB framing, ingest, session startup, command and web routes |
-| [`Current_Architecture/BANDWIDTH_SCALING.md`](Current_Architecture/BANDWIDTH_SCALING.md) | Bundle production, slot service, airtime estimates, scaling constraints |
-| [`Current_Architecture/LORA_VS_LORAWAN.md`](Current_Architecture/LORA_VS_LORAWAN.md) | Raw-LoRa stack, LoRaWAN tradeoffs, collision scope, CAD, mesh, range levers |
+| [`SOFTWARE_DESIGN.md`](SOFTWARE_DESIGN.md) | End-to-end hardware, firmware, edge-service, packet, and command architecture |
+| [`SOFTWARE_DESIGN_DIAGRAM.md`](SOFTWARE_DESIGN_DIAGRAM.md) | System, join, duty-cycle, command, and framing diagrams |
+| [`Current_Architecture/TUNABLE_PARAMETERS.md`](Current_Architecture/TUNABLE_PARAMETERS.md) | Active TDMA, reliability, sensing, power, base, and edge values |
+| [`Current_Architecture/TDMA_PROTOCOL.md`](Current_Architecture/TDMA_PROTOCOL.md) | Slot geometry, assignment, clocks, transmit budgets, and window markers |
+| [`Current_Architecture/PACKET_RELIABILITY.md`](Current_Architecture/PACKET_RELIABILITY.md) | Link acknowledgements, application summaries, retries, and sleeping nodes |
+| [`Current_Architecture/DUTY_CYCLING.md`](Current_Architecture/DUTY_CYCLING.md) | Continuous, SensorTriggered, Timed, and Hybrid behavior |
+| [`Current_Architecture/JETSON_BRIDGE.md`](Current_Architecture/JETSON_BRIDGE.md) | USB framing, ingest, session lifecycle, API, and dashboard behavior |
+| [`Current_Architecture/BANDWIDTH_SCALING.md`](Current_Architecture/BANDWIDTH_SCALING.md) | Bundle production, airtime, slot service, and scaling constraints |
+| [`Current_Architecture/LORA_VS_LORAWAN.md`](Current_Architecture/LORA_VS_LORAWAN.md) | Raw-LoRa design choices and deployment tradeoffs |
 
-## User references
+## Operator references
 
 | Document | Covers |
 |---|---|
-| [`User_Reference/FLASHING.md`](User_Reference/FLASHING.md) | Active PlatformIO targets, build/upload/monitor commands, troubleshooting |
-| [`User_Reference/DEBUG_FILTER.md`](User_Reference/DEBUG_FILTER.md) | `@SFDBG` format and `SFDBG_*` monitor filters |
-| [`User_Reference/JETSON_CHEATSHEET.md`](User_Reference/JETSON_CHEATSHEET.md) | Edge install/run commands, udev links, service/data operations |
-| [`User_Reference/NETWORK_TEST.md`](User_Reference/NETWORK_TEST.md) | Current real-hardware LoRa -> base -> Jetson integration test |
-| [`User_Reference/LORA_SNIFFER.md`](User_Reference/LORA_SNIFFER.md) | Passive sniffer firmware and dashboard integration |
-| [`User_Reference/SMARTFIRES_MANAGER.md`](User_Reference/SMARTFIRES_MANAGER.md) | Jetson update/service/gateway-flashing manager |
-| [`POWER_MEASURMENTS.md`](POWER_MEASURMENTS.md) | Isolated power-test environments and measurement setup |
+| [`User_Reference/FLASHING.md`](User_Reference/FLASHING.md) | Firmware targets, upload commands, and troubleshooting |
+| [`User_Reference/DEBUG_FILTER.md`](User_Reference/DEBUG_FILTER.md) | Structured `@SFDBG` log format and monitor filters |
+| [`User_Reference/JETSON_CHEATSHEET.md`](User_Reference/JETSON_CHEATSHEET.md) | Edge installation, udev links, services, and data operations |
+| [`User_Reference/NETWORK_TEST.md`](User_Reference/NETWORK_TEST.md) | Hardware LoRa-to-Jetson integration test |
+| [`User_Reference/LORA_SNIFFER.md`](User_Reference/LORA_SNIFFER.md) | Passive-sniffer firmware and dashboard integration |
+| [`User_Reference/SMARTFIRES_MANAGER.md`](User_Reference/SMARTFIRES_MANAGER.md) | Jetson update, service, and gateway-flashing manager |
+| [`POWER_MEASUREMENTS.md`](POWER_MEASUREMENTS.md) | Isolated power-test environments and measurement setup |
 
-## Design tools
+## Design tool
 
-| Tool | Purpose |
-|---|---|
-| [`Tools/lora_tdma_calculator.html`](Tools/lora_tdma_calculator.html) | Interactive LoRa airtime, effective-bandwidth, TDMA-capacity, node-count, and energy calculator with SF comparison presets |
-
-## Pending plans
-
-Scoped work awaiting implementation and/or acceptance. The previously parked backlog remains in `Possible_Plans/`.
-
-| Document | Scope |
-|---|---|
-| [`Pending_Plans/MULTI_DAY_SESSION_AND_RESTART_RECOVERY.md`](Pending_Plans/MULTI_DAY_SESSION_AND_RESTART_RECOVERY.md) | Host implementation is complete; deployed-Jetson boot, power-cycle, USB-delay, and long-run acceptance remain |
-
-## Possible plans (deferred)
-
-These are deliberately parked ideas, risks, and validation tasks. They are concise restart notes, not an active delivery backlog.
-
-| Document | Current state at 2026-09-04 |
-|---|---|
-| [`Possible_Plans/BASE_SLOT_OVERRUN_FIX.md`](Possible_Plans/BASE_SLOT_OVERRUN_FIX.md) | Remove the two remaining blocking base sends and add deadline-safe slot-0 gating |
-| [`Possible_Plans/NATIVE_TEST_REPAIR.md`](Possible_Plans/NATIVE_TEST_REPAIR.md) | Repair stale config tests, review duty-controller failures, and remove the conflicting Arduino shim |
-| [`Possible_Plans/STANDBY_WATCHDOG_COVERAGE.md`](Possible_Plans/STANDBY_WATCHDOG_COVERAGE.md) | Decide whether and how to cover Timed MCU standby with the watchdog |
-| [`Possible_Plans/RESET_REASON_DIAGNOSTICS.md`](Possible_Plans/RESET_REASON_DIAGNOSTICS.md) | Hardware-validate the shipped reset-cause and hang-zone diagnostics |
-| [`Possible_Plans/GPS_DISCIPLINED_CLOCK.md`](Possible_Plans/GPS_DISCIPLINED_CLOCK.md) | Optionally discipline the shipped RTC timebase from node GPS PPS |
-| [`Possible_Plans/JETSON_SENSOR_EXPANSION.md`](Possible_Plans/JETSON_SENSOR_EXPANSION.md) | Optional direct Jetson temperature/humidity, particulate, GPS, and IMU sensors |
-
-## Completed plans (historical)
-
-| Document | Historical subject |
-|---|---|
-| [`Completed_Plans/BINARY_PACKET_PIPELINE.md`](Completed_Plans/BINARY_PACKET_PIPELINE.md) | Text-to-binary packet pipeline |
-| [`Completed_Plans/BUNDLE_TIMESTAMP_FIX.md`](Completed_Plans/BUNDLE_TIMESTAMP_FIX.md) | Bundle timestamp correction |
-| [`Completed_Plans/BOARD_REFACTOR_PLAN.md`](Completed_Plans/BOARD_REFACTOR_PLAN.md) | Firmware directory/class refactor |
-| [`Completed_Plans/DEPLOYMENT_SCHEDULE.md`](Completed_Plans/DEPLOYMENT_SCHEDULE.md) | Heading/CLI deployment phases |
-| [`Completed_Plans/DMP_CLEANUP_PLAN.md`](Completed_Plans/DMP_CLEANUP_PLAN.md) | ICM-20948 DMP heading design |
-| [`Completed_Plans/DYNAMIC_TX_POWER.md`](Completed_Plans/DYNAMIC_TX_POWER.md) | Base-owned per-node TX-power controller and dashboard controls |
-| [`Completed_Plans/EDGE_REFACTOR_WEB_DASHBOARD.md`](Completed_Plans/EDGE_REFACTOR_WEB_DASHBOARD.md) | Edge package/dashboard refactor |
-| [`Completed_Plans/JETSON_CLI_AND_COMMAND_SYSTEM.md`](Completed_Plans/JETSON_CLI_AND_COMMAND_SYSTEM.md) | Earlier CLI/command design (not every proposed command shipped) |
-| [`Completed_Plans/LINK_STATS_PACKET_PLAN.md`](Completed_Plans/LINK_STATS_PACKET_PLAN.md) | STATUS retransmit/failure counters |
-| [`Completed_Plans/MCU_DUTY_CYCLE_CHANGELOG.md`](Completed_Plans/MCU_DUTY_CYCLE_CHANGELOG.md) | Review of the initial RTC standby change |
-| [`Completed_Plans/MULTI_SF_NETWORK_PROFILES.md`](Completed_Plans/MULTI_SF_NETWORK_PROFILES.md) | Shared SF7/SF9/SF10/SF12 firmware, sniffer, and edge profile system; higher-SF hardware acceptance remains provisional |
-| [`Completed_Plans/NETWORK_RELIABILITY_NOTES.md`](Completed_Plans/NETWORK_RELIABILITY_NOTES.md) | Reliability investigation notes |
-| [`Completed_Plans/ORIENTATION_CALIBRATION_PLAN.md`](Completed_Plans/ORIENTATION_CALIBRATION_PLAN.md) | Orientation/calibration concept |
-| [`Completed_Plans/PERSISTENT_NODE_REGISTRY.md`](Completed_Plans/PERSISTENT_NODE_REGISTRY.md) | Jetson UID/node correlation persistence and patched AWAKEN forwarding |
-| [`Completed_Plans/PHASE_PROGRESS.md`](Completed_Plans/PHASE_PROGRESS.md) | Staged reliability rollout |
-| [`Completed_Plans/RADIO_RX_GATING.md`](Completed_Plans/RADIO_RX_GATING.md) | Node SX1276 receive-window gating |
-| [`Completed_Plans/RESET_SYSTEM.md`](Completed_Plans/RESET_SYSTEM.md) | Base/node reset coordination |
-| [`Completed_Plans/RTC_SUBSECOND_SLEEP.md`](Completed_Plans/RTC_SUBSECOND_SLEEP.md) | SAMD21 COUNT32 standby clock |
-| [`Completed_Plans/TDMA_BUNDLE_SIZING.md`](Completed_Plans/TDMA_BUNDLE_SIZING.md) | Early airtime and bundle sizing |
-| [`Completed_Plans/TDMA_SNIFFER_VISUALIZATION.md`](Completed_Plans/TDMA_SNIFFER_VISUALIZATION.md) | Sniffer timing dashboard |
-| [`Completed_Plans/TELEMETRY_REWORK_PLAN.md`](Completed_Plans/TELEMETRY_REWORK_PLAN.md) | Original telemetry rework |
-| [`Completed_Plans/TUNABLE_PARAMETER_ARCHITECTURE_PLAN.md`](Completed_Plans/TUNABLE_PARAMETER_ARCHITECTURE_PLAN.md) | Config-header consolidation |
-| [`Completed_Plans/WATCHDOG_TIMER.md`](Completed_Plans/WATCHDOG_TIMER.md) | Node/base watchdog rollout |
-| [`Completed_Plans/WINDOW_MARKER_PACKETS.md`](Completed_Plans/WINDOW_MARKER_PACKETS.md) | Dedicated Timed-window markers |
-
-[`Project_Progress/Network_System_Design.md`](Project_Progress/Network_System_Design.md) is a historical narrative spanning several of these stages.
+[`../tools/lora_tdma_calculator.html`](../tools/lora_tdma_calculator.html) is a
+standalone calculator for LoRa airtime, effective bandwidth, TDMA capacity,
+node count, and estimated energy use.
 
 ## Documentation maintenance
 
-- [`DOC_FRONTMATTER.md`](DOC_FRONTMATTER.md) defines documentation metadata and `source_refs`.
-- [`CODE_FRONTMATTER.md`](CODE_FRONTMATTER.md) defines reciprocal firmware file headers.
-- `python3 documentation/check_doc_freshness.py` checks missing metadata, source paths, and stale verification dates.
-- `python3 documentation/check_code_headers.py` checks C++ headers and doc/source backlink symmetry.
+- [`DOC_FRONTMATTER.md`](DOC_FRONTMATTER.md) defines document metadata and
+  source references.
+- [`CODE_FRONTMATTER.md`](CODE_FRONTMATTER.md) defines reciprocal firmware
+  source headers.
+- `python3 documentation/check_doc_freshness.py` checks document metadata,
+  source paths, and verification dates.
+- `python3 documentation/check_code_headers.py` checks C++ metadata and
+  document/source backlinks.
 
-Run both checks after changing current documentation or firmware. A green metadata check proves structural consistency, not the truth of prose; review claims against code before changing `last_verified`.
+These checks establish structural consistency; claims still require review
+against the implementation.

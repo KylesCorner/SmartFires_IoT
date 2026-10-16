@@ -5,7 +5,7 @@ category: reference
 status: current
 last_verified: 2026-10-07
 source_refs:
-  - util/udev/99-smartfires.rules
+  - tools/udev/99-smartfires.rules
   - edge/edge-receiver/src/smartfires_edge/main.py
   - edge/smartfires-edge.service.in
   - edge/install-smartfires-service.sh
@@ -72,7 +72,7 @@ The base and sniffer Feathers have the same USB VID/PID, so `/dev/ttyACM*` order
 udevadm info -a -n /dev/ttyACM0 | grep '{serial}'
 ```
 
-Install one rule per board in `/etc/udev/rules.d/99-smartfires.rules` (the repo template is `util/udev/99-smartfires.rules`):
+Install one rule per board in `/etc/udev/rules.d/99-smartfires.rules` (the repo template is `tools/udev/99-smartfires.rules`):
 
 ```text
 SUBSYSTEM=="tty", ATTRS{serial}=="<base-serial>", SYMLINK+="smartfires-base"
@@ -141,7 +141,7 @@ rsync -avz --progress \
   smartfires@10.8.184.94:/mnt/nvme_drive/data/ ./data/
 ```
 
-Adjust the host as needed; `util/rsync_from_jetson.sh` contains the saved project variant.
+Pass the destination and, optionally, a different source to `tools/rsync_from_jetson.sh`.
 
 ## Networking and diagnostics
 

@@ -1,5 +1,5 @@
 // Tripwire test for the config/ consolidation (see
-// documentation/Completed_Plans/TUNABLE_PARAMETER_ARCHITECTURE_PLAN.md).
+// documentation/Current_Architecture/TUNABLE_PARAMETERS.md).
 //
 // This does not re-verify the static_asserts already enforced at compile
 // time in NetworkConfig.h (those fail the build directly if violated). It

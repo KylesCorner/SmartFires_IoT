@@ -3,7 +3,7 @@ name: packet-reliability
 description: App-layer ACK summaries, profile-scaled retry gating, duty-cycled-node ACK deferral, and fire-and-forget control recovery.
 category: architecture
 status: current
-last_verified: 2026-10-15
+last_verified: 2026-10-16
 source_refs:
   - platformio/include/config/NetworkProfiles.h
   - platformio/include/config/NetworkConfig.h
@@ -16,8 +16,6 @@ source_refs:
 related_docs:
   - tdma-protocol
   - tunable-parameters
-  - radio-rx-gating
-  - watchdog-timer
   - duty-cycling
 ---
 
@@ -88,6 +86,7 @@ Losing `WINDOW_BEGIN` is recoverable: the next retransmitted telemetry frame pro
 - Node `AWAKEN` is fire-and-forget and repeats at the profile cadence with UID/sequence-derived jitter until direct assignment arrives.
 - Direct assignment `TIME_SYNC` is fire-and-forget; a missed response leaves the node unassigned, so it asks again.
 - Periodic broadcast `TIME_SYNC` is fire-and-forget and cannot be link-ACKed.
+- A dashboard-requested time update asks the base for one fresh broadcast in its next slot-0 window; that broadcast uses the same fire-and-forget path.
 - `ACK_SUMMARY` is fire-and-forget and cumulative.
 - Base-to-node commands are fire-and-forget. Nodes do not link-ACK them; they return `CMD_ACK` at the application layer.
 - Normal `CMD_ACK` is queued for the node's slot and does not enter the telemetry pending window. Reset ACK is sent immediately without link ACK so it precedes state flush/reboot.

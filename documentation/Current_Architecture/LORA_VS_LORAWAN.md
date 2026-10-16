@@ -12,7 +12,6 @@ related_docs:
   - tdma-protocol
   - packet-reliability
   - tunable-parameters
-  - dynamic-tx-power
 ---
 
 # LoRa versus LoRaWAN

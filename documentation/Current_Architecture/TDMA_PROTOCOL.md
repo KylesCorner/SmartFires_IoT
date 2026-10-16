@@ -17,7 +17,6 @@ related_docs:
   - packet-reliability
   - bandwidth-scaling
   - tunable-parameters
-  - radio-rx-gating
 ---
 
 # TDMA protocol

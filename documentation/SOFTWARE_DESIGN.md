@@ -3,7 +3,7 @@ name: software-design
 description: Master system architecture — hardware topology, firmware/edge module layout, wire protocol.
 category: architecture
 status: current
-last_verified: 2026-10-15
+last_verified: 2026-10-16
 source_refs:
   - platformio/platformio.ini
   - platformio/include/config/NetworkProfiles.h
@@ -23,7 +23,7 @@ related_docs:
 
 ## Scope and authority
 
-This document describes the system that the current source tree builds. `platformio/platformio.ini`, firmware config headers, `BinaryPacket.h`, and the Python edge package remain authoritative for exact values. Possible plans preserve deferred ideas; completed plans preserve design history.
+This document describes the system that the current source tree builds. `platformio/platformio.ini`, firmware config headers, `BinaryPacket.h`, and the Python edge package remain authoritative for exact values.
 
 ## System topology
 
@@ -77,7 +77,7 @@ The base is address/node ID 1 and owns TDMA slot 0. A new node starts unassigned
 
 `SMARTFIRES_NETWORK_PROFILE` selects an internally consistent SF7, SF9, SF10, or SF12 build for every network Feather. Selector `120` chooses the three-slot SF12 range-test variant: one base slot plus two assignable node slots. Standard profiles use `NUM_SLOTS=5`. Changing either selector/slot pair requires rebuilding the base, every node, and the passive sniffer; mixed profiles are unsupported.
 
-The Jetson creates a session ID and supplies session-relative time every 600 seconds by default. The base caches that authority and broadcasts `TIME_SYNC` every 50/65/110/125 seconds for SF7/SF9/SF10/SF12. If the Jetson has not supplied time, the base uses a local session clock. Nodes regard sync as stale after 22 minutes and then return to permissive recovery behavior.
+The Jetson creates a session ID and supplies session-relative time every 600 seconds by default. The base caches that authority and broadcasts `TIME_SYNC` every 50/65/110/125 seconds for SF7/SF9/SF10/SF12. The dashboard can flag an immediate update, which the base broadcasts once in its next slot-0 window. If the Jetson has not supplied time, the base uses a local session clock. Nodes regard sync as stale after 22 minutes and then return to permissive recovery behavior.
 
 ## Sensing and duty cycling
 
@@ -156,4 +156,4 @@ The dashboard's node-reset and TX-power endpoints are functional. `/api/command`
 
 Network targets are `feather_m0_lora_base`, `feather_m0_lora_node`, `feather_m0_lora_node_debug`, `feather_m0_lora_node_timed`, `feather_m0_lora_node_hybrid`, and `feather_m0_lora_sniffer`. Isolated `feather_m0_power_*` targets cover power measurements. Removed dummy-node and sensor-probe targets are not valid commands.
 
-`native` contains host Unity tests, including all four profile definitions and airtime invariants. The broader suite has known unrelated failures documented in `Possible_Plans/NATIVE_TEST_REPAIR.md`. Higher-SF modem timing, guards, delivery, energy, and range remain provisional until bench and field acceptance; no firmware build alone establishes hardware validity.
+`native` contains host Unity tests, including all four profile definitions and airtime invariants. The broader suite's known failures are summarized in [`../platformio/test/README`](../platformio/test/README). Higher-SF modem timing, guards, delivery, energy, and range remain provisional until bench and field acceptance; no firmware build alone establishes hardware validity.

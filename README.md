@@ -1,42 +1,89 @@
 # SmartFires IoT
 
-SmartFires is a wildfire telemetry system built from Feather M0 RFM95 sensor nodes, a Feather M0 LoRa base station, and a Jetson Orin Nano edge receiver.
+SmartFires is an edge-based wildfire telemetry platform for prescribed-burn
+monitoring. Distributed Feather M0 RFM95 nodes collect environmental and motion
+data, transmit compact binary packets over a custom 915 MHz LoRa/TDMA network,
+and stream through a Feather base station to a Jetson Orin Nano. The Jetson
+records each session and serves a live, offline-capable dashboard.
 
-Remote nodes sample SHT31, wind, PA1010D GPS, SPS30, and ICM-20948 sensors. They transmit compact binary bundles over a custom 915 MHz TDMA network. The base assigns node IDs, manages acknowledgements and TX power, and bridges packets over native USB CDC. The Jetson decodes packets, records telemetry, maintains live state, and serves the dashboard.
+[![SmartFires research poster](assets/poster/SmartFires_poster_preview.png)](assets/poster/SmartFires_poster.pdf)
 
-## Start here
+Click the poster preview to open the full-resolution 48 × 36 inch PDF.
 
-- [`AGENTS.md`](AGENTS.md) — canonical repository guidance and current invariants
-- [`documentation/README.md`](documentation/README.md) — documentation index and implementation-status ledger
-- [`documentation/SOFTWARE_DESIGN.md`](documentation/SOFTWARE_DESIGN.md) — current end-to-end architecture
-- [`platformio/README.md`](platformio/README.md) — firmware targets and workflow
-- [`edge/edge-receiver/README.md`](edge/edge-receiver/README.md) — Jetson installation and commands
+## System overview
+
+```text
+Feather M0 sensor nodes
+  SHT31 · wind · PA1010D GPS · SPS30 · ICM-20948
+                         │
+                         │  LoRa 915 MHz · binary packets · TDMA
+                         ▼
+Feather M0 RFM95 base station
+                         │
+                         │  USB CDC · 115200 baud
+                         ▼
+Jetson Orin Nano
+  Python ingest · durable session files · FastAPI dashboard
+```
+
+The firmware provides runtime node assignment, profile-based TDMA scheduling,
+application-layer retransmission, duty cycling, watchdog recovery, reset
+coordination, and adaptive node transmit power. The edge service decodes the
+wire protocol, correlates persistent node identities, records telemetry, and
+exposes live maps, charts, logs, and radio diagnostics.
 
 ## Repository layout
 
-```text
-platformio/            embedded firmware and native Unity tests
-edge/                  Jetson receiver, dashboard, and service helper
-documentation/         current architecture, user guides, and plan history
-util/                  analysis, plotting, sniffer, and deployment utilities
-wind_test_bench/       separate wind-sensor bench project
-```
+| Path | Purpose |
+|---|---|
+| [`platformio/`](platformio/) | Feather node, base-station, sniffer, and power-test firmware plus native Unity tests |
+| [`edge/`](edge/) | Installable Jetson receiver, web dashboard, systemd unit, and deployment helpers |
+| [`documentation/`](documentation/) | Current architecture and operator documentation |
+| [`tools/`](tools/) | Reusable diagnostics, plotting, synchronization, and deployment utilities |
+| [`wind_test_bench/`](wind_test_bench/) | Standalone wind-sensor bench firmware |
+| [`assets/poster/`](assets/poster/) | Final project poster and GitHub preview |
 
-## Current status
+Raw field recordings, generated plots, screenshots, poster working files, and
+historical planning notes are intentionally kept outside the Git repository.
 
-The node/base binary pipeline, runtime node assignment, TDMA scheduling, app-layer reliability, duty cycling, watchdog recovery, reset coordination, RX power gating, DMP heading, window markers, Jetson-side persistent UID correlation, ingest, and web dashboard are implemented.
+## Documentation
 
-Deferred possibilities are parked in [`documentation/README.md`](documentation/README.md); they are not an active backlog. The two important caveats are that base `ACK_SUMMARY` and direct `TIME_SYNC` still have blocking link-ACK paths that can overrun slot 0, and the native PlatformIO suite has known failures.
+- [Software design](documentation/SOFTWARE_DESIGN.md)
+- [Architecture diagrams](documentation/SOFTWARE_DESIGN_DIAGRAM.md)
+- [TDMA protocol](documentation/Current_Architecture/TDMA_PROTOCOL.md)
+- [Packet reliability](documentation/Current_Architecture/PACKET_RELIABILITY.md)
+- [Jetson bridge and dashboard](documentation/Current_Architecture/JETSON_BRIDGE.md)
+- [Firmware workflow](platformio/README.md)
+- [Edge receiver setup](edge/edge-receiver/README.md)
+- [Complete documentation index](documentation/README.md)
 
-## Commands
+## Quick start
 
-Install the edge receiver from the repository root:
+Install and run the Jetson service from the repository root:
 
 ```bash
 python3 -m pip install --use-pep517 -e edge/edge-receiver
 smartfires-edge web --port /dev/smartfires-base --http-port 8080
 ```
 
-Firmware command examples are in [`platformio/commands.txt`](platformio/commands.txt). Run them from `platformio/`; uploading and monitoring require the intended Feather to be connected.
+Firmware targets and build commands are documented in
+[`platformio/README.md`](platformio/README.md). Hardware upload and serial
+monitor commands require the intended Feather board to be connected.
 
-No license file is currently present. Add one before redistributing the repository outside the project team.
+## Validation
+
+Safe host-side checks include:
+
+```bash
+python3 documentation/check_doc_freshness.py
+python3 documentation/check_code_headers.py
+python3 -m compileall -q edge/edge-receiver/src
+```
+
+The native firmware test suite and its currently known failures are documented
+in [`platformio/test/README`](platformio/test/README).
+
+## License
+
+No license file is currently present. Add one before redistributing the project
+outside the team.

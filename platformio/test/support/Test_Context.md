@@ -1,6 +1,6 @@
 # SmartFires native-test context
 
-This file is a concise maintainer reference for tests under `platformio/test/`. Current production behavior is documented in `documentation/Current_Architecture/`; known test debt is tracked in `documentation/Possible_Plans/NATIVE_TEST_REPAIR.md`.
+This file is a concise maintainer reference for tests under `platformio/test/`. Current production behavior is documented in `documentation/Current_Architecture/`; known test debt is summarized below.
 
 ## Rules
 
@@ -91,7 +91,7 @@ Keep setup/teardown local to the suite. Include `<cstdio>`/`<stdio.h>` if a fake
 
 ## Current known failures
 
-As of the documentation audit, do not expect the full environment to pass. `Possible_Plans/NATIVE_TEST_REPAIR.md` records the deferred repair groups:
+As of the documentation audit, do not expect the full environment to pass. The known repair groups are:
 
 - `test_config` references removed duty-cycle factories;
 - six duty-controller expectations no longer match the current implementation;

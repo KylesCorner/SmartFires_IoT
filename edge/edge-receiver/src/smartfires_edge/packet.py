@@ -32,14 +32,14 @@ PKT_DEBUG_LOG = 0x14
 # Base -> one node. The base station owns the dynamic TX power decision; the
 # Jetson only encodes these for manual/bench use and passively decodes them for
 # monitoring. It is not a participant in the control loop — see
-# documentation/Completed_Plans/DYNAMIC_TX_POWER.md.
+# documentation/Current_Architecture/TUNABLE_PARAMETERS.md.
 PKT_CMD_SET_TX_POWER = 0x15
 # Base -> Jetson only, never sent over LoRa.  This fixed binary announcement
 # lets the edge learn the complete build profile without maintaining a second
 # hardcoded SF table.  Like PKT_DEBUG_LOG it relies on the outer USB frame CRC.
 PKT_NETWORK_PROFILE = 0x16
 
-# sensor_flags bits (SensorSnapshot.h / AGENTS.md): which sensors had a valid
+# sensor_flags bits (SensorSnapshot.h / BinaryPacket.h): which sensors had a valid
 # reading this sample. When a bit is clear the corresponding fields carry a
 # node-side hold-last-good substitute (or, pre-fix firmware, a -1.0 placeholder)
 # — either way they are not real measurements and are nulled on decode.
@@ -301,7 +301,7 @@ def encode_cmd_set_tx_power_frame(
     """Encode a CMD_SET_TX_POWER UART frame for base-station forwarding.
 
     The base station is the decision-maker for dynamic TX power
-    (documentation/Completed_Plans/DYNAMIC_TX_POWER.md). This frame is the
+    (documentation/Current_Architecture/TUNABLE_PARAMETERS.md). This frame is the
     operator override on top of that: sending mode=STATIC pins a node at a
     level and takes it out of the loop, mode=DYNAMIC hands it back.
 
