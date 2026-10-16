@@ -42,6 +42,12 @@ nav.topnav {
   opacity: 0.55;
 }
 
+.system-version {
+  color: #8f9aa7;
+  font: 0.72rem ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: nowrap;
+}
+
 nav.topnav a {
   color: #aab4c0;
   text-decoration: none;

@@ -1,5 +1,6 @@
 import os
 import queue
+import subprocess
 import threading
 from pathlib import Path
 
@@ -11,6 +12,23 @@ from smartfires_edge.ingest_service import run_receive
 from smartfires_edge.live_state import LiveState
 from smartfires_edge.sniffer_service import run_sniffer
 from smartfires_edge.web.app import create_app
+
+
+def _current_git_commit(repo_root: Path) -> str | None:
+    """Return the commit backing the active checkout, if it is available."""
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+            text=True,
+            capture_output=True,
+            timeout=2,
+            check=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+    commit = completed.stdout.strip()
+    return commit if commit else None
 
 
 def run_web(cfg: EdgeConfig) -> int:
@@ -74,6 +92,7 @@ def run_web(cfg: EdgeConfig) -> int:
         )
         sniffer_thread.start()
 
+    repo_root = Path.cwd()
     app = create_app(
         live_state=live_state,
         data_dir=cfg.ingest.data_dir,
@@ -91,10 +110,11 @@ def run_web(cfg: EdgeConfig) -> int:
         # clean process exit is guaranteed to launch the newly installed
         # package again. Direct development launches remain read-only.
         system_update_command=(
-            Path.cwd() / "edge" / "smartfires-manager.sh"
+            repo_root / "edge" / "smartfires-manager.sh"
             if os.environ.get("INVOCATION_ID")
             else None
         ),
+        current_commit=_current_git_commit(repo_root),
     )
     config = uvicorn.Config(
         app,

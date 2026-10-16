@@ -13,6 +13,7 @@ let _sessionEl = null;
 let _networkProfileButton = null;
 let _networkProfilePanel = null;
 let _systemUpdateButton = null;
+let _systemVersion = null;
 let _systemUpdateRequestId = null;
 let _systemUpdateFailureShown = null;
 let _clockOffsetMs = 0; // Jetson epoch_s*1000 - Date.now(), resynced periodically
@@ -147,6 +148,7 @@ function renderNav(activePath) {
   // Updating is intentionally a home-page operation beside New Session, not
   // a global navigation control. Other pages do not poll the update endpoint.
   _systemUpdateButton = document.getElementById("system-update-btn");
+  _systemVersion = document.getElementById("system-version");
   if (_systemUpdateButton) {
     _systemUpdateButton.title = "Checking whether system-managed updates are available";
     _systemUpdateButton.addEventListener("click", _requestSystemUpdate);
@@ -157,6 +159,15 @@ function renderNav(activePath) {
 
 function _renderSystemUpdateStatus(status) {
   if (!_systemUpdateButton) return;
+  const commit = typeof status?.current_commit === "string"
+    ? status.current_commit.trim()
+    : "";
+  if (_systemVersion) {
+    _systemVersion.textContent = commit ? `version ${commit.slice(0, 12)}` : "version unknown";
+    _systemVersion.title = commit
+      ? `Current SmartFires Git commit: ${commit}`
+      : "Current SmartFires Git commit is unavailable";
+  }
   const enabled = Boolean(status?.enabled);
   const busy = status?.state === "updating" || status?.state === "restarting";
   _systemUpdateButton.disabled = !enabled || busy;

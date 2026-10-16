@@ -3,7 +3,7 @@ name: jetson-bridge
 description: Frame format and routing between the base station Feather and the Jetson over USB CDC.
 category: architecture
 status: current
-last_verified: 2026-10-15
+last_verified: 2026-10-16
 source_refs:
   - platformio/include/telemetry/BinaryPacket.h
   - platformio/src/app/SmartFiresBaseApp.cpp
@@ -110,7 +110,7 @@ STATUS supplies GPS and battery validity, DMP heading/accuracy, lifetime retrans
 - `/api/node_reset` sends a hard reset to a selected node.
 - `/api/tx_power` resolves set/increase/decrease and DYNAMIC/STATIC choices into an absolute power command, clamped to 5–20 dBm.
 - `/api/network_profile` returns the unknown/active/mismatch envelope, active source, base and override copies, mismatch fields, transition history, and sniffer identity when present.
-- `GET /api/system_update` reports whether a systemd-managed web update is available and its current state. Confirmed `POST /api/system_update` requests the fixed rootless `dashboard-update` workflow; no branch or shell text is accepted from the browser. It fast-forwards the configured branch, reinstalls the edge package, and only then requests a graceful process restart.
+- `GET /api/system_update` reports whether a systemd-managed web update is available, its current state, and the Git commit backing the active checkout. The main dashboard displays that commit beside **Update Jetson**. Confirmed `POST /api/system_update` requests the fixed rootless `dashboard-update` workflow; no branch or shell text is accepted from the browser. It fast-forwards the configured branch, reinstalls the edge package, and only then requests a graceful process restart.
 - `/api/command` currently only echoes `{status: queued}` and does not write serial bytes.
 
 The dashboard header persistently shows `SF · bandwidth · coding rate · source`, shows unknown before the first announcement, and highlights override or mismatch state. It also exposes an **Update Jetson** button when running under systemd. The button requires browser confirmation, disables while an update is active, and shows failures; a successful restart is observed through the normal session-change reload. Time-series chart axes show local `HH:MM:SS` with the ISO calendar date on a second line; tooltips and status text retain the full timezone-qualified timestamp. Main-page density expectations use the announced Continuous cadence; the sniffer visualization uses announced slot count, width, and guards.

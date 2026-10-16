@@ -1,5 +1,6 @@
 import asyncio
 import csv
+import subprocess
 import tempfile
 import threading
 import time
@@ -18,7 +19,7 @@ from smartfires_edge.live_state import LiveState
 from smartfires_edge.telemetry_cache import SessionTelemetryCache, _ts_ms
 from smartfires_edge.uart_receiver import iter_packets
 from smartfires_edge.web.app import SystemUpdatePayload, create_app
-from smartfires_edge.web_service import run_web
+from smartfires_edge.web_service import _current_git_commit, run_web
 
 
 class _FakeSessionManager:
@@ -48,6 +49,30 @@ class _SilentSerial:
 
 
 class RestartRecoveryTests(unittest.TestCase):
+    def test_current_git_commit_reads_active_checkout(self):
+        completed = mock.Mock(stdout="0123456789abcdef\n")
+        with mock.patch(
+            "smartfires_edge.web_service.subprocess.run", return_value=completed
+        ) as run:
+            self.assertEqual(
+                _current_git_commit(Path("/srv/smartfires")),
+                "0123456789abcdef",
+            )
+        run.assert_called_once_with(
+            ["git", "-C", "/srv/smartfires", "rev-parse", "HEAD"],
+            text=True,
+            capture_output=True,
+            timeout=2,
+            check=True,
+        )
+
+    def test_current_git_commit_is_optional(self):
+        with mock.patch(
+            "smartfires_edge.web_service.subprocess.run",
+            side_effect=subprocess.CalledProcessError(128, "git"),
+        ):
+            self.assertIsNone(_current_git_commit(Path("/not/a/repository")))
+
     def test_dashboard_websockets_exit_when_restart_is_requested(self):
         class FakeWebSocket:
             def __init__(self):
@@ -184,6 +209,7 @@ class RestartRecoveryTests(unittest.TestCase):
                 reset_event=stop,
                 tile_cache_dir=Path(td) / "tiles",
                 system_update_command=Path("/usr/bin/true"),
+                current_commit="0123456789abcdef0123456789abcdef01234567",
             )
             status_endpoint = next(
                 route.endpoint for route in app.routes
@@ -195,7 +221,12 @@ class RestartRecoveryTests(unittest.TestCase):
                 if getattr(route, "path", None) == "/api/system_update"
                 and "POST" in getattr(route, "methods", set())
             )
-            self.assertTrue(status_endpoint()["enabled"])
+            initial_status = status_endpoint()
+            self.assertTrue(initial_status["enabled"])
+            self.assertEqual(
+                initial_status["current_commit"],
+                "0123456789abcdef0123456789abcdef01234567",
+            )
 
             with self.assertRaises(HTTPException) as bad_confirmation:
                 update_endpoint(SystemUpdatePayload(confirmation="yes"), BackgroundTasks())

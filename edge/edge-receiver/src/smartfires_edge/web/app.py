@@ -89,6 +89,7 @@ def create_app(
     tile_cache_dir: Optional[Path] = None,
     sniffer_enabled: bool = False,
     system_update_command: Optional[Path] = None,
+    current_commit: Optional[str] = None,
 ) -> FastAPI:
     app = FastAPI(title="SmartFires Dashboard")
     store = base_station_store or BaseStationStore()
@@ -111,6 +112,7 @@ def create_app(
     )
     system_update_state: dict = {
         "enabled": system_update_enabled,
+        "current_commit": current_commit,
         "state": "idle",
         "request_id": None,
         "started_at": None,
