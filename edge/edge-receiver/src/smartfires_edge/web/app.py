@@ -86,6 +86,7 @@ def create_app(
     reset_event: Optional[threading.Event] = None,
     node_reset_queue: "Optional[queue.Queue[int]]" = None,
     tx_power_queue: "Optional[queue.Queue[dict]]" = None,
+    time_sync_queue: "Optional[queue.Queue[str]]" = None,
     tile_cache_dir: Optional[Path] = None,
     sniffer_enabled: bool = False,
     system_update_command: Optional[Path] = None,
@@ -443,6 +444,13 @@ def create_app(
             raise HTTPException(status_code=501, detail="Node reset not available")
         node_reset_queue.put(payload.node_id)
         return {"status": "reset_requested", "node_id": payload.node_id}
+
+    @app.post("/api/time_sync", status_code=202)
+    def send_time_sync() -> dict:
+        if time_sync_queue is None:
+            raise HTTPException(status_code=501, detail="Manual time sync not available")
+        time_sync_queue.put("dashboard")
+        return {"status": "time_sync_requested"}
 
     @app.post("/api/tx_power")
     def set_tx_power(payload: TxPowerPayload) -> dict:

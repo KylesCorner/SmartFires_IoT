@@ -65,7 +65,7 @@ The Jetson is therefore not in the timing-critical ACK or join loop.
 
 | Packet | Behavior at the base |
 |---|---|
-| `TIME_SYNC` | Cache session authority; do not immediately relay it. Periodic base broadcasts use the latest cached value. |
+| `TIME_SYNC` | Cache session authority. Routine injections are not immediately relayed; a dashboard-request flag queues one broadcast in the next slot-0 window. Periodic base broadcasts use the latest cached value. |
 | `CMD_RESET`, node 0 | Reset base state locally: hard or soft according to `reset_type`. |
 | `CMD_RESET`, node 2+ | Queue a fire-and-forget LoRa command for the target. |
 | `CMD_CALIBRATE` | Queue a fire-and-forget LoRa command; node logs and ACKs. |
@@ -93,6 +93,9 @@ shutdown so the supervisor rebuilds every parser, queue, worker, cache, and
 session object.
 
 The base broadcasts its cached time at the selected 50/65/110/125-second SF7/SF9/SF10/SF12 cadence, using a local fallback if it has no Jetson authority. This radio cadence is intentionally separate from the USB injection cadence.
+The main dashboard's **Send Time Sync** button is the deliberate exception: it
+queues a flagged UART update, and compatible base firmware broadcasts that
+fresh session time once in its next slot-0 window.
 
 Network profile state starts explicitly `unknown`. A valid base announcement normally becomes the active, authoritative profile and is atomically persisted under `network_profile` in `session.json`, including its source and first-observed UTC time. The decoder accepts the standard five-slot geometry and selector `120`'s three-slot range-test geometry. Once telemetry has been recorded under a known base profile, a conflicting announcement does not silently replace the active identity: the edge reports `mismatch`, retains the pinned profile, and records a rejected transition in profile history.
 
@@ -107,6 +110,7 @@ STATUS supplies GPS and battery validity, DMP heading/accuracy, lifetime retrans
 ## Web control surface
 
 - `/api/new_session` acknowledges and coalesces a whole-application restart request; the service supervisor then launches a fresh process/session.
+- `POST /api/time_sync` queues one manual time update whose UART flag asks the base to broadcast it in the next slot-0 window.
 - `/api/node_reset` sends a hard reset to a selected node.
 - `/api/tx_power` resolves set/increase/decrease and DYNAMIC/STATIC choices into an absolute power command, clamped to 5–20 dBm.
 - `/api/network_profile` returns the unknown/active/mismatch envelope, active source, base and override copies, mismatch fields, transition history, and sniffer identity when present.

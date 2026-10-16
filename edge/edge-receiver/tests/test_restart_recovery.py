@@ -1,5 +1,6 @@
 import asyncio
 import csv
+import queue
 import subprocess
 import tempfile
 import threading
@@ -16,6 +17,7 @@ from smartfires_edge.config import EdgeConfig, IngestConfig
 from smartfires_edge.csv_logger import CSV_COLUMNS
 from smartfires_edge.ingest_service import _create_session_dir, run_receive
 from smartfires_edge.live_state import LiveState
+from smartfires_edge.packet import PKT_FLAG_TIME_SYNC_BROADCAST
 from smartfires_edge.telemetry_cache import SessionTelemetryCache, _ts_ms
 from smartfires_edge.uart_receiver import iter_packets
 from smartfires_edge.web.app import SystemUpdatePayload, create_app
@@ -123,6 +125,7 @@ class RestartRecoveryTests(unittest.TestCase):
         serial_obj = _SilentSerial()
         opened = threading.Event()
         stop = threading.Event()
+        sync_requests: queue.Queue[str] = queue.Queue()
         result = []
 
         def silent_packets(_port, _baud, session_start, stop_event, on_open):
@@ -142,16 +145,45 @@ class RestartRecoveryTests(unittest.TestCase):
                 port="fake-base", data_dir=Path(td), nodes=[2], sync_interval_s=3600
             )
             worker = threading.Thread(
-                target=lambda: result.append(run_receive(cfg, stop_event=stop)),
+                target=lambda: result.append(
+                    run_receive(
+                        cfg,
+                        time_sync_queue=sync_requests,
+                        stop_event=stop,
+                    )
+                ),
                 daemon=True,
             )
             worker.start()
             self.assertTrue(opened.wait(2), "serial bootstrap did not finish")
             self.assertEqual(len(serial_obj.writes), 2, "expected reset then TIME_SYNC")
+            sync_requests.put("dashboard")
+            deadline = time.monotonic() + 2
+            while len(serial_obj.writes) < 3 and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertEqual(len(serial_obj.writes), 3, "manual TIME_SYNC was not sent")
+            self.assertEqual(serial_obj.writes[-1][7], PKT_FLAG_TIME_SYNC_BROADCAST)
             stop.set()
             worker.join(2)
             self.assertFalse(worker.is_alive())
             self.assertEqual(result, [0])
+
+    def test_manual_time_sync_endpoint_queues_request(self):
+        with tempfile.TemporaryDirectory() as td:
+            requests: queue.Queue[str] = queue.Queue()
+            app = create_app(
+                LiveState([2]),
+                Path(td),
+                tile_cache_dir=Path(td) / "tiles",
+                time_sync_queue=requests,
+            )
+            endpoint = next(
+                route.endpoint
+                for route in app.routes
+                if getattr(route, "path", None) == "/api/time_sync"
+            )
+            self.assertEqual(endpoint(), {"status": "time_sync_requested"})
+            self.assertEqual(requests.get_nowait(), "dashboard")
 
     def test_uart_iterator_stops_while_port_is_silent(self):
         serial_obj = _SilentSerial()

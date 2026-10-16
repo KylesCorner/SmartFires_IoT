@@ -67,6 +67,7 @@ HEADER_SIZE = struct.calcsize(HEADER_FMT)   # 5
 # produced, but the ingest layer now derives them from those frames
 # (see ingest_service.py's window tracking) instead of reading them off a bundle.
 PKT_FLAG_RETX = 0x04
+PKT_FLAG_TIME_SYNC_BROADCAST = 0x08
 
 # Legacy pre-flags header (4 bytes, no flags byte). Only still recognised on
 # AWAKEN — see decode_awaken().
@@ -228,9 +229,15 @@ def crc8(data: bytes) -> int:
     return crc
 
 
-def encode_time_sync_frame(session_id: int, session_time_ms: int, seq: int = 0) -> bytes:
+def encode_time_sync_frame(
+    session_id: int,
+    session_time_ms: int,
+    seq: int = 0,
+    request_broadcast: bool = False,
+) -> bytes:
     """Encode a TIME_SYNC UART frame from Jetson to the base Feather."""
-    hdr = struct.pack(HEADER_FMT, PKT_MAGIC, PKT_TIME_SYNC, 0, seq & 0xFF, 0)
+    flags = PKT_FLAG_TIME_SYNC_BROADCAST if request_broadcast else 0
+    hdr = struct.pack(HEADER_FMT, PKT_MAGIC, PKT_TIME_SYNC, 0, seq & 0xFF, flags)
     ts = struct.pack(
         TIME_SYNC_PAYLOAD_FMT,
         session_id & 0xFFFFFFFF,

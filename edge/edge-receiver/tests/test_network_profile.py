@@ -11,8 +11,10 @@ from smartfires_edge.packet import (
     NETWORK_PROFILE_PAYLOAD_FMT,
     PKT_MAGIC,
     PKT_NETWORK_PROFILE,
+    PKT_FLAG_TIME_SYNC_BROADCAST,
     crc8,
     decode_network_profile,
+    encode_time_sync_frame,
 )
 from smartfires_edge.session_meta import SessionMetaLogger
 from smartfires_edge.sniffer_service import _SyncAnchor, _lora_airtime_ms, _slot_timing
@@ -62,6 +64,18 @@ def _profile_raw(sf=12, fingerprint=0x1234ABCD, num_slots=5):
 
 
 class NetworkProfileTests(unittest.TestCase):
+    def test_manual_time_sync_frame_requests_base_broadcast(self):
+        routine = encode_time_sync_frame(0x12345678, 9000, seq=4)
+        manual = encode_time_sync_frame(
+            0x12345678, 9000, seq=4, request_broadcast=True
+        )
+
+        # Outer UART bytes occupy offsets 0..2; PktHeader::flags is byte 4 of
+        # the embedded payload.
+        self.assertEqual(routine[7], 0)
+        self.assertEqual(manual[7], PKT_FLAG_TIME_SYNC_BROADCAST)
+        self.assertNotEqual(routine, manual)
+
     def test_sniffer_airtime_matches_firmware_golden_values(self):
         sf12 = _profile()
         expected = {

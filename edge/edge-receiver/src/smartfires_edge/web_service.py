@@ -50,6 +50,7 @@ def run_web(cfg: EdgeConfig) -> int:
     ingest_failed = threading.Event()
     node_reset_queue: queue.Queue[int] = queue.Queue()
     tx_power_queue: queue.Queue[dict] = queue.Queue()
+    time_sync_queue: queue.Queue[str] = queue.Queue()
 
     def ingest_runner() -> None:
         rc = run_receive(
@@ -60,6 +61,7 @@ def run_web(cfg: EdgeConfig) -> int:
             stop_event=reset_event,
             node_reset_queue=node_reset_queue,
             tx_power_queue=tx_power_queue,
+            time_sync_queue=time_sync_queue,
         )
         # A required worker that exits unexpectedly must take the process down
         # rather than leaving an apparently healthy dashboard with stale data.
@@ -100,6 +102,7 @@ def run_web(cfg: EdgeConfig) -> int:
         reset_event=reset_event,
         node_reset_queue=node_reset_queue,
         tx_power_queue=tx_power_queue,
+        time_sync_queue=time_sync_queue,
         # Namespaced by tile source: switching providers (as happened when we
         # moved off raw OSM tiles to CARTO Voyager) must not silently mix old
         # and new tiles under the same path — bump this name on any future

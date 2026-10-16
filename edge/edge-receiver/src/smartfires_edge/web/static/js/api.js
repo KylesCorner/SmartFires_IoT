@@ -90,6 +90,17 @@ const Api = {
       })
     ).json();
   },
+  async sendTimeSync() {
+    const response = await fetch("/api/time_sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.detail || `HTTP ${response.status}`);
+    }
+    return response.json();
+  },
   // action: "set" | "increase" | "decrease" | "dynamic" | "static".
   // increase/decrease are resolved to an absolute dBm server-side from the
   // node's last reported power — the wire protocol has no relative form.

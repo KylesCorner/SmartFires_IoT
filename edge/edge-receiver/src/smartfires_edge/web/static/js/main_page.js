@@ -639,6 +639,26 @@ function wireNewSessionButton() {
   });
 }
 
+function wireTimeSyncButton() {
+  const btn = document.getElementById("time-sync-btn");
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    btn.textContent = "Queuing…";
+    try {
+      await Api.sendTimeSync();
+      btn.textContent = "Time Sync Queued";
+    } catch (e) {
+      btn.textContent = "Send Time Sync";
+      alert("Failed to request a time sync: " + (e.message || e));
+    } finally {
+      window.setTimeout(() => {
+        btn.disabled = false;
+        btn.textContent = "Send Time Sync";
+      }, 1500);
+    }
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
@@ -651,6 +671,7 @@ async function init() {
   initChart();
   initMap();
   wireBaseStationForm();
+  wireTimeSyncButton();
   wireNewSessionButton();
   document.getElementById("chart-play-toggle").addEventListener("click", togglePlay);
   document.getElementById("chart-step-back").addEventListener("click", () => stepView(-1));

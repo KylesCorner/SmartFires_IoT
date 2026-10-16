@@ -48,6 +48,27 @@ nav.topnav {
   white-space: nowrap;
 }
 
+.time-sync-btn {
+  border: 1px solid #31708f;
+  border-radius: 4px;
+  padding: 0.28rem 0.65rem;
+  background: #18384a;
+  color: #b9e6ff;
+  font: 700 0.78rem system-ui, sans-serif;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.time-sync-btn:hover:not(:disabled) {
+  background: #245a75;
+  color: #fff;
+}
+
+.time-sync-btn:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 nav.topnav a {
   color: #aab4c0;
   text-decoration: none;

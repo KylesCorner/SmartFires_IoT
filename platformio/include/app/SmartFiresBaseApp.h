@@ -213,6 +213,7 @@ private:
   uint32_t _radioReceiveFailCount = 0;
   uint32_t _lastRxMs = 0;
   uint32_t _lastPeriodicTimeSyncMs = 0;
+  bool _manualTimeSyncPending = false;
   uint32_t _lastAckSummaryFlushMs = 0;
   uint32_t _lastNetworkProfileAnnounceMs = 0;
 

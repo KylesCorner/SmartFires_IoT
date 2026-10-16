@@ -285,7 +285,8 @@ BinaryPacket::TimeSyncPayload SmartFiresBaseApp::baseLocalTimeSyncPayload() cons
 
 void SmartFiresBaseApp::maybeSendPeriodicTimeSync() {
   const uint32_t now = _clock.millis();
-  if (now - _lastPeriodicTimeSyncMs < kPeriodicTimeSyncMs) {
+  const bool manual = _manualTimeSyncPending;
+  if (!manual && now - _lastPeriodicTimeSyncMs < kPeriodicTimeSyncMs) {
     return;
   }
   if (!baseTxDeadlineAllows(BinaryPacket::kTimeSyncLoRaSize)) {
@@ -298,8 +299,9 @@ void SmartFiresBaseApp::maybeSendPeriodicTimeSync() {
   const uint8_t len =
       BinaryPacket::encodeTimeSyncPayload(0, seq, ts, payload, sizeof(payload));
   if (len == 0) {
-    LOG_ERROR("base", "tx_time_sync_periodic_encode_failed seq=%u",
-              static_cast<unsigned int>(seq));
+    LOG_ERROR("base", "tx_time_sync_encode_failed seq=%u trigger=%s",
+              static_cast<unsigned int>(seq), manual ? "dashboard" : "periodic");
+    _manualTimeSyncPending = false;
     _lastPeriodicTimeSyncMs = now;
     return;
   }
@@ -310,12 +312,14 @@ void SmartFiresBaseApp::maybeSendPeriodicTimeSync() {
   }
 
   LOG_INFO("base",
-           "tx_time_sync_periodic seq=%u source=%s session_ms=%lu to=%u result=%s",
-           static_cast<unsigned int>(seq), _hasJetsonTime ? "jetson" : "base_local",
+           "tx_time_sync seq=%u trigger=%s source=%s session_ms=%lu to=%u result=%s",
+           static_cast<unsigned int>(seq), manual ? "dashboard" : "periodic",
+           _hasJetsonTime ? "jetson" : "base_local",
            static_cast<unsigned long>(ts.session_time_ms),
            static_cast<unsigned int>(_cfg.timeSyncBroadcastAddr),
            ok ? "OK" : "FAIL");
 
+  _manualTimeSyncPending = false;
   _lastPeriodicTimeSyncMs = now;
 }
 
@@ -1245,10 +1249,17 @@ bool SmartFiresBaseApp::handleJetsonCommandPayload(const uint8_t *payload, uint8
 
     updateJetsonTimeSource(ts);
 
+    const bool requestBroadcast =
+        (hdr.flags & BinaryPacket::PKT_FLAG_TIME_SYNC_BROADCAST) != 0;
+    if (requestBroadcast) {
+      _manualTimeSyncPending = true;
+    }
+
     LOG_INFO("base",
-             "rx_time_sync_uart seq=%u source=jetson session_ms=%lu action=cache_only_not_forwarded",
+             "rx_time_sync_uart seq=%u source=jetson session_ms=%lu action=%s",
              static_cast<unsigned int>(hdr.seq),
-             static_cast<unsigned long>(ts.session_time_ms));
+             static_cast<unsigned long>(ts.session_time_ms),
+             requestBroadcast ? "queue_broadcast" : "cache_only_not_forwarded");
     return true;
   }
 

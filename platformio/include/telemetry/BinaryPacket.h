@@ -108,6 +108,9 @@ struct __attribute__((packed)) PktHeader {
 // the ack. The bit values stay reserved so a stale node's frames can never be
 // misread as carrying some later meaning.
 static constexpr uint8_t PKT_FLAG_RETX          = 0x04;
+// UART TIME_SYNC only: ask the base to broadcast the freshly cached time in
+// its next slot-0 window. Nodes never set or interpret this control bit.
+static constexpr uint8_t PKT_FLAG_TIME_SYNC_BROADCAST = 0x08;
 static constexpr uint8_t PKT_FLAG_RESERVED_0x01 = 0x01;  // was WINDOW_FIRST
 static constexpr uint8_t PKT_FLAG_RESERVED_0x02 = 0x02;  // was WINDOW_LAST
 

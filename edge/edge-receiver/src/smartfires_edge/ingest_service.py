@@ -103,13 +103,19 @@ def _send_time_sync(
     log_fn: Callable[[str, int | None], None],
     trigger_node: int | None = None,
     trigger_seq: int | None = None,
+    request_broadcast: bool = False,
 ) -> bool:
     session_id = session_ctx["session_id"]
     session_start = session_ctx["session_start"]
     session_ms = int((time.time() - session_start) * 1000) & 0xFFFFFFFF
     with write_lock:
         seq = int(sync_state.setdefault("next_seq", 0)) & 0xFF
-        frame = encode_time_sync_frame(session_id, session_ms, seq)
+        frame = encode_time_sync_frame(
+            session_id,
+            session_ms,
+            seq,
+            request_broadcast=request_broadcast,
+        )
         try:
             ser.write(frame)
         except serial.SerialException as exc:
@@ -125,6 +131,8 @@ def _send_time_sync(
         msg += f" trigger_node={trigger_node}"
     if trigger_seq is not None:
         msg += f" trigger_seq={trigger_seq}"
+    if request_broadcast:
+        msg += " request_broadcast=1"
     log_fn(msg, None)
     return True
 
@@ -199,19 +207,40 @@ def _time_sync_sender(
     interval_s: int,
     log_fn: Callable[[str, int | None], None],
     stop_event: threading.Event,
+    request_queue: "queue.Queue[str] | None" = None,
 ) -> None:
     # stop_event is per-connection: when the serial link drops and the ingest
     # loop reconnects, it gets a fresh `ser` and must stop this thread rather
     # than let it keep writing to the now-dead handle forever in the background.
-    while not stop_event.wait(interval_s):
-        _send_time_sync(
-            ser=ser,
-            write_lock=write_lock,
-            sync_state=sync_state,
-            session_ctx=session_ctx,
-            reason="periodic",
-            log_fn=log_fn,
-        )
+    next_periodic = time.monotonic() + interval_s
+    while not stop_event.wait(0.1):
+        if request_queue is not None:
+            try:
+                reason = request_queue.get_nowait()
+            except queue.Empty:
+                pass
+            else:
+                _send_time_sync(
+                    ser=ser,
+                    write_lock=write_lock,
+                    sync_state=sync_state,
+                    session_ctx=session_ctx,
+                    reason=reason,
+                    log_fn=log_fn,
+                    request_broadcast=True,
+                )
+
+        now = time.monotonic()
+        if now >= next_periodic:
+            _send_time_sync(
+                ser=ser,
+                write_lock=write_lock,
+                sync_state=sync_state,
+                session_ctx=session_ctx,
+                reason="periodic",
+                log_fn=log_fn,
+            )
+            next_periodic = now + interval_s
 
 
 def run_receive(
@@ -221,6 +250,7 @@ def run_receive(
     reset_event: threading.Event | None = None,
     tx_power_queue: "queue.Queue[dict] | None" = None,
     node_reset_queue: "queue.Queue[int] | None" = None,
+    time_sync_queue: "queue.Queue[str] | None" = None,
     stop_event: threading.Event | None = None,
 ) -> int:
     """Run the UART ingest loop.
@@ -241,6 +271,9 @@ def run_receive(
         node_reset_queue: Optional queue of node_ids, populated by the web API's
                            per-node "Reset" button. Drained once per loop tick —
                            each entry triggers a hard CMD_RESET to that node.
+        time_sync_queue: Optional queue populated by the dashboard's manual
+                         time-sync button. The sender thread marks each request
+                         for one base broadcast in the next slot-zero window.
     """
     if log_fn is None:
         log_fn = lambda msg, node_id=None, source="ingest", kind="other": print(msg)  # noqa: E731
@@ -364,6 +397,7 @@ def run_receive(
                         args=(
                             ser, write_lock, sync_state, session_ctx,
                             cfg.sync_interval_s, log_fn, sync_stop_event,
+                            time_sync_queue,
                         ),
                         daemon=True,
                     )
