@@ -48,6 +48,41 @@ class _SilentSerial:
 
 
 class RestartRecoveryTests(unittest.TestCase):
+    def test_dashboard_websockets_exit_when_restart_is_requested(self):
+        class FakeWebSocket:
+            def __init__(self):
+                self.accepted = False
+
+            async def accept(self):
+                self.accepted = True
+
+            async def send_text(self, _payload):
+                raise AssertionError("restart-ready websocket should not send")
+
+        with tempfile.TemporaryDirectory() as td:
+            stop = threading.Event()
+            stop.set()
+            app = create_app(
+                LiveState([2]),
+                Path(td),
+                reset_event=stop,
+                tile_cache_dir=Path(td) / "tiles",
+                sniffer_enabled=True,
+            )
+
+            async def exercise_websockets():
+                for path in ("/ws/log", "/ws/base-debug", "/ws/sniffer"):
+                    endpoint = next(
+                        route.endpoint
+                        for route in app.routes
+                        if getattr(route, "path", None) == path
+                    )
+                    ws = FakeWebSocket()
+                    await asyncio.wait_for(endpoint(ws), timeout=0.25)
+                    self.assertTrue(ws.accepted)
+
+            asyncio.run(exercise_websockets())
+
     def test_session_directories_never_reuse_second_resolution_name(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -228,6 +263,12 @@ class RestartRecoveryTests(unittest.TestCase):
             self.assertEqual(status_endpoint()["state"], "failed")
 
     def test_required_ingest_exit_takes_down_web_process(self):
+        uvicorn_config = {}
+
+        def fake_config(*args, **kwargs):
+            uvicorn_config.update(kwargs)
+            return object()
+
         class FakeServer:
             def __init__(self, _config):
                 self.should_exit = False
@@ -242,12 +283,13 @@ class RestartRecoveryTests(unittest.TestCase):
         ), mock.patch(
             "smartfires_edge.web_service.create_app", return_value=object()
         ), mock.patch(
-            "smartfires_edge.web_service.uvicorn.Config", return_value=object()
+            "smartfires_edge.web_service.uvicorn.Config", side_effect=fake_config
         ), mock.patch(
             "smartfires_edge.web_service.uvicorn.Server", FakeServer
         ):
             cfg = EdgeConfig(ingest=IngestConfig(data_dir=Path(td)))
             self.assertEqual(run_web(cfg), 1)
+            self.assertEqual(uvicorn_config["timeout_graceful_shutdown"], 5.0)
 
     def test_link_connection_and_readiness_are_distinct(self):
         state = LiveState([2])

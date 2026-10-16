@@ -127,6 +127,10 @@ The CLI has `receive`, `summary`, `visualize`, and `web`; there is no separate c
 - The repository-owned `edge/smartfires-edge.service.in` launches the `web`
   entrypoint, requires the configured data mount before recording, and retries
   both failure and intentional graceful application exits with bounded backoff.
+  Dashboard WebSocket loops observe the shared restart event and exit within
+  50 ms. Uvicorn also gives all active HTTP/WebSocket tasks at most five
+  seconds to shut down, then cancels any connection that did not cooperate;
+  together these bound dashboard-triggered New Session and update restarts.
   Stable `/dev/smartfires-base` udev naming is required; optional USB workers do
   not gate core ingest. See the Jetson cheatsheet for rendering/installing the
   unit and for the equivalent manual supervisor.

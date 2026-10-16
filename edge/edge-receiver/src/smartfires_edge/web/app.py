@@ -504,7 +504,7 @@ def create_app(
         await ws.accept()
         idx = 0
         try:
-            while True:
+            while reset_event is None or not reset_event.is_set():
                 entries, idx = live_state.drain_log(idx)
                 for entry in entries:
                     await ws.send_text(json.dumps(entry))
@@ -517,7 +517,7 @@ def create_app(
         await ws.accept()
         idx = 0
         try:
-            while True:
+            while reset_event is None or not reset_event.is_set():
                 entries, idx = live_state.drain_base_debug(idx)
                 for entry in entries:
                     await ws.send_text(json.dumps(entry))
@@ -534,7 +534,7 @@ def create_app(
             return
         idx = 0
         try:
-            while True:
+            while reset_event is None or not reset_event.is_set():
                 entries, idx = live_state.drain_sniffer(idx)
                 for entry in entries:
                     await ws.send_text(json.dumps(entry))

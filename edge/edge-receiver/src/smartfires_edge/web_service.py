@@ -97,7 +97,18 @@ def run_web(cfg: EdgeConfig) -> int:
         ),
     )
     config = uvicorn.Config(
-        app, host=cfg.web_host, port=cfg.web_http_port, log_level="info"
+        app,
+        host=cfg.web_host,
+        port=cfg.web_http_port,
+        log_level="info",
+        # Idle dashboard WebSockets spend most of their lifetime waiting in
+        # application loops and may not observe the browser disconnect while
+        # Uvicorn is shutting down. Without a deadline, New Session and the
+        # dashboard updater can remain forever at "Waiting for background
+        # tasks to complete", preventing systemd from launching the next
+        # process. After this bounded grace period Uvicorn cancels those idle
+        # connection tasks and the normal worker joins below can finish.
+        timeout_graceful_shutdown=5.0,
     )
     server = uvicorn.Server(config)
 
